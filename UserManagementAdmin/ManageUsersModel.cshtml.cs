@@ -68,16 +68,15 @@ namespace BCES.Pages.Admin
 
         private List<UserView> GetUsersFromDatabase()
         {
-            return _db.Users
-                .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-                .Select(u => new UserView
-                {
-                    UserId = u.UserId,
-                    UserName = u.UserName,
-                    RoleName = u.UserRoles.FirstOrDefault().Role.RoleName
-                })
-                .ToList();
+            return (from u in _db.Users
+                    join ur in _db.UserRoles on u.UserId equals ur.UserId
+                    join r in _db.Roles on ur.RoleId equals r.RoleId
+                    select new UserView
+                    {
+                        UserId = u.UserId,
+                        UserName = u.UserName,
+                        RoleName = r.RoleName
+                    }).ToList();
         }
 
         private int GetRoleIdByName(string roleName)
