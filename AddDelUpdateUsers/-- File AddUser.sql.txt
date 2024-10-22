@@ -1,0 +1,50 @@
+-- File: AddUser.sql
+
+CREATE PROCEDURE BCES.AddUser
+    @UserName NVARCHAR(100),
+    @RoleId INT
+AS
+BEGIN
+    -- Declare a variable to hold the new UserId
+    DECLARE @NewUserId INT;
+
+    BEGIN TRY
+        -- Start a transaction to ensure data integrity
+        BEGIN TRANSACTION;
+
+        -- Insert the new user into the Users table
+        INSERT INTO BCES.Users (UserName)
+        VALUES (@UserName);
+
+        -- Get the newly generated UserId
+        SET @NewUserId = SCOPE_IDENTITY();
+
+        -- Insert the user-role relationship into the UserRoles table
+        INSERT INTO BCES.UserRoles (UserId, RoleId)
+        VALUES (@NewUserId, @RoleId);
+
+        -- Commit the transaction
+        COMMIT TRANSACTION;
+
+        -- Return the newly created UserId
+        SELECT @NewUserId AS NewUserId;
+    END TRY
+    BEGIN CATCH
+        -- Rollback the transaction in case of an error
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        -- Raise an error with the details of the exception
+        DECLARE @ErrorMessage NVARCHAR(4000);
+        DECLARE @ErrorSeverity INT;
+        DECLARE @ErrorState INT;
+
+        SELECT 
+            @ErrorMessage = ERROR_MESSAGE(),
+            @ErrorSeverity = ERROR_SEVERITY(),
+            @ErrorState = ERROR_STATE();
+
+        RAISERROR (@ErrorMessage, @ErrorSeverity, @ErrorState);
+    END CATCH
+END;
+GO
