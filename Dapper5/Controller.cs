@@ -1,135 +1,142 @@
 using Microsoft.AspNetCore.Mvc;
-using Dapper;
-using System;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Collections.Generic;
 using BCES.Models.Admin;
+using Dapper;
+using System.Data;
 
 namespace BCES.Controllers.Admin
 {
     [Route("Admin/[controller]")]
     public class UserManagementController : Controller
     {
-        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
 
-        // Constructor to inject DapperContext
-        public UserManagementController(DapperContext dapper)
+        // Constructor injecting the database connection
+        public UserManagementController(IDbConnection dbConnection)
         {
-            _db = dapper;
+            _dbConnection = dbConnection;
         }
 
-        #region Index Action
-
-        // Index action to return the main view and load roles
-        [HttpGet]
-        public IActionResult Index()
+        #region Read Users
+        [HttpGet("ReadUsers")]
+        public IActionResult ReadUsers()
         {
             try
             {
-                // Retrieve all roles to populate dropdown
-                string roleSql = "SELECT RoleId, RoleName FROM Roles";
-                var roles = _db.Connection.Query<RoleModel>(roleSql).ToList();
-                
-                // Store roles in ViewData for the dropdown control
-                ViewData["Roles"] = roles;
+                // SQL query to retrieve user details and roles
+                var users = _dbConnection.Query<UserViewModel>(@"
+                    SELECT u.UserId, u.UserName, r.RoleId, r.RoleName
+                    FROM UserModel u
+                    LEFT JOIN UserRoleModel ur ON u.UserId = ur.UserId
+                    LEFT JOIN RoleModel r ON ur.RoleId = r.RoleId");
 
-                return View(); // Return the main grid view
-            }
-            catch (Exception ex)
-            {
-                // Log the exception if necessary
-                return BadRequest("Error loading roles.");
-            }
-        }
-
-        #endregion
-
-        #region CRUD Operations
-
-        [HttpGet("GetUsers")]
-        public IActionResult GetUsers()
-        {
-            try
-            {
-                // Query to get users along with their roles
-                string sql = @"SELECT u.UserId, u.UserName, r.RoleId, r.RoleName
-                               FROM Users u
-                               LEFT JOIN Roles r ON u.RoleId = r.RoleId";
-                
-                var users = _db.Connection.Query<UserViewModel, RoleModel, UserViewModel>(
-                    sql,
-                    (user, role) =>
-                    {
-                        user.RoleModel = role;
-                        return user;
-                    },
-                    splitOn: "RoleId"
-                ).ToList();
-                
                 return Json(users);
             }
             catch (Exception ex)
             {
-                // Log the exception if needed
-                return BadRequest("Error fetching users.");
+                // Return a 500 error with the exception message
+                return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
+        #endregion
 
-        [HttpPost("AddUser")]
-        public IActionResult AddUser([FromBody] UserViewModel user)
+        #region Create User
+        [HttpPost("CreateUser")]
+        public IActionResult CreateUser([FromBody] UserViewModel user)
         {
+            if (user == null)
+                return BadRequest("User data is null.");
+
             try
             {
-                // SQL to insert a new user and return the new UserId
-                string sql = @"INSERT INTO Users (UserName, RoleId) VALUES (@UserName, @RoleId);
-                               SELECT CAST(SCOPE_IDENTITY() as int);";
+                // Insert new user and get the generated UserId
+                var query = "INSERT INTO UserModel (UserName) VALUES (@UserName); SELECT CAST(SCOPE_IDENTITY() as int)";
+                var userId = _dbConnection.ExecuteScalar<int>(query, new { user.UserName });
 
-                // Execute the query and set the UserId
-                user.UserId = _db.Connection.ExecuteScalar<int>(sql, new { user.UserName, user.RoleModel.RoleId });
+                // Insert role association if RoleModel is provided
+                if (user.RoleModel != null)
+                {
+                    _dbConnection.Execute("INSERT INTO UserRoleModel (UserId, RoleId) VALUES (@UserId, @RoleId)",
+                        new { UserId = userId, RoleId = user.RoleModel.RoleId });
+                }
+
                 return Json(user);
             }
             catch (Exception ex)
             {
-                // Log the exception
-                return BadRequest("Error adding user.");
+                return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
+        #endregion
 
+        #region Update User
         [HttpPost("UpdateUser")]
         public IActionResult UpdateUser([FromBody] UserViewModel user)
         {
+            if (user == null)
+                return BadRequest("User data is null.");
+
             try
             {
-                // SQL to update user details
-                string sql = @"UPDATE Users SET UserName = @UserName, RoleId = @RoleId WHERE UserId = @UserId";
-                _db.Connection.Execute(sql, new { user.UserName, user.RoleModel.RoleId, user.UserId });
+                // Update user information
+                var query = "UPDATE UserModel SET UserName = @UserName WHERE UserId = @UserId";
+                _dbConnection.Execute(query, user);
+
+                // Update or insert role association based on existence
+                if (user.RoleModel != null)
+                {
+                    var roleQuery = @"
+                        IF EXISTS (SELECT 1 FROM UserRoleModel WHERE UserId = @UserId)
+                            UPDATE UserRoleModel SET RoleId = @RoleId WHERE UserId = @UserId
+                        ELSE
+                            INSERT INTO UserRoleModel (UserId, RoleId) VALUES (@UserId, @RoleId)";
+                    _dbConnection.Execute(roleQuery, new { UserId = user.UserId, RoleId = user.RoleModel.RoleId });
+                }
+
                 return Json(user);
             }
             catch (Exception ex)
             {
-                // Log the exception
-                return BadRequest("Error updating user.");
+                return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
+        #endregion
 
+        #region Delete User
         [HttpPost("DeleteUser")]
         public IActionResult DeleteUser(int id)
         {
             try
             {
-                // SQL to delete a user by UserId
-                string sql = @"DELETE FROM Users WHERE UserId = @UserId";
-                _db.Connection.Execute(sql, new { UserId = id });
-                return Ok();
+                // Delete role association and user
+                _dbConnection.Execute("DELETE FROM UserRoleModel WHERE UserId = @UserId", new { UserId = id });
+                _dbConnection.Execute("DELETE FROM UserModel WHERE UserId = @UserId", new { UserId = id });
+
+                return Json(new { success = true });
             }
             catch (Exception ex)
             {
-                // Log the exception
-                return BadRequest("Error deleting user.");
+                return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
+        #endregion
 
+        #region Get Roles for Dropdown
+        [HttpGet("GetRoles")]
+        public IActionResult GetRoles()
+        {
+            try
+            {
+                // Retrieve the list of roles for the dropdown
+                var roles = _dbConnection.Query<RoleModel>("SELECT RoleId, RoleName FROM RoleModel").ToList();
+                ViewData["Roles"] = roles; // Stores roles in ViewData for use in the dropdown
+
+                return Json(roles);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
         #endregion
     }
 }
