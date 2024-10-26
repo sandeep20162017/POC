@@ -28,7 +28,7 @@ namespace BCES.Admin
             try
             {
                 var userViews = await GetUserViews(); // Fetch user views
-                return Json(userViews.ToDataSourceResult<UserViewModel, DataSourceResult>(request)); // Return for Telerik Grid
+                return Json(userViews.ToDataSourceResult(request)); // Return for Telerik Grid
             }
             catch (Exception ex)
             {
@@ -55,7 +55,7 @@ namespace BCES.Admin
                     userViewModel.UserId = userId;
                 }
 
-                return Json(userViewModels.ToDataSourceResult<UserViewModel, DataSourceResult>(request, ModelState));
+                return Json(userViewModels.ToDataSourceResult(request, ModelState));
             }
             catch (Exception ex)
             {
@@ -87,7 +87,7 @@ namespace BCES.Admin
                     await UpdateUserAsync(userViewModel.UserId, userViewModel.UserName, userViewModel.RoleModel.RoleId);
                 }
 
-                return Json(userViewModels.ToDataSourceResult<UserViewModel, DataSourceResult>(request, ModelState));
+                return Json(userViewModels.ToDataSourceResult(request, ModelState));
             }
             catch (Exception ex)
             {
@@ -110,7 +110,7 @@ namespace BCES.Admin
                     await DeleteUserAsync(userViewModel.UserId);
                 }
 
-                return Json(userViewModels.ToDataSourceResult<UserViewModel, DataSourceResult>(request, ModelState));
+                return Json(userViewModels.ToDataSourceResult(request, ModelState));
             }
             catch (Exception ex)
             {
