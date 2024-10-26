@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Dapper;
-using System.Data;
-using System.Data.SqlClient;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Collections.Generic;
 using BCES.Models.Admin;
 
 namespace BCES.Controllers.Admin
@@ -9,12 +11,39 @@ namespace BCES.Controllers.Admin
     [Route("Admin/[controller]")]
     public class UserManagementController : Controller
     {
-        private readonly IDbConnection _db;
+        private readonly DapperContext _db;
 
-        public UserManagementController(IDbConnection db)
+        // Constructor to inject DapperContext
+        public UserManagementController(DapperContext dapper)
         {
-            _db = db;
+            _db = dapper;
         }
+
+        #region Index Action
+
+        // Index action to return the main view and load roles
+        [HttpGet]
+        public IActionResult Index()
+        {
+            try
+            {
+                // Retrieve all roles to populate dropdown
+                string roleSql = "SELECT RoleId, RoleName FROM Roles";
+                var roles = _db.Connection.Query<RoleModel>(roleSql).ToList();
+                
+                // Store roles in ViewData for the dropdown control
+                ViewData["Roles"] = roles;
+
+                return View(); // Return the main grid view
+            }
+            catch (Exception ex)
+            {
+                // Log the exception if necessary
+                return BadRequest("Error loading roles.");
+            }
+        }
+
+        #endregion
 
         #region CRUD Operations
 
@@ -23,10 +52,12 @@ namespace BCES.Controllers.Admin
         {
             try
             {
-                var sql = @"SELECT u.UserId, u.UserName, r.RoleId, r.RoleName
-                            FROM Users u
-                            LEFT JOIN Roles r ON u.RoleId = r.RoleId";
-                var users = _db.Query<UserViewModel, RoleModel, UserViewModel>(
+                // Query to get users along with their roles
+                string sql = @"SELECT u.UserId, u.UserName, r.RoleId, r.RoleName
+                               FROM Users u
+                               LEFT JOIN Roles r ON u.RoleId = r.RoleId";
+                
+                var users = _db.Connection.Query<UserViewModel, RoleModel, UserViewModel>(
                     sql,
                     (user, role) =>
                     {
@@ -34,12 +65,13 @@ namespace BCES.Controllers.Admin
                         return user;
                     },
                     splitOn: "RoleId"
-                );
+                ).ToList();
+                
                 return Json(users);
             }
             catch (Exception ex)
             {
-                // Log exception
+                // Log the exception if needed
                 return BadRequest("Error fetching users.");
             }
         }
@@ -49,13 +81,17 @@ namespace BCES.Controllers.Admin
         {
             try
             {
-                var sql = @"INSERT INTO Users (UserName, RoleId) VALUES (@UserName, @RoleId);
-                            SELECT CAST(SCOPE_IDENTITY() as int);";
-                user.UserId = _db.ExecuteScalar<int>(sql, new { user.UserName, user.RoleModel.RoleId });
+                // SQL to insert a new user and return the new UserId
+                string sql = @"INSERT INTO Users (UserName, RoleId) VALUES (@UserName, @RoleId);
+                               SELECT CAST(SCOPE_IDENTITY() as int);";
+
+                // Execute the query and set the UserId
+                user.UserId = _db.Connection.ExecuteScalar<int>(sql, new { user.UserName, user.RoleModel.RoleId });
                 return Json(user);
             }
             catch (Exception ex)
             {
+                // Log the exception
                 return BadRequest("Error adding user.");
             }
         }
@@ -65,12 +101,14 @@ namespace BCES.Controllers.Admin
         {
             try
             {
-                var sql = @"UPDATE Users SET UserName = @UserName, RoleId = @RoleId WHERE UserId = @UserId";
-                _db.Execute(sql, new { user.UserName, user.RoleModel.RoleId, user.UserId });
+                // SQL to update user details
+                string sql = @"UPDATE Users SET UserName = @UserName, RoleId = @RoleId WHERE UserId = @UserId";
+                _db.Connection.Execute(sql, new { user.UserName, user.RoleModel.RoleId, user.UserId });
                 return Json(user);
             }
             catch (Exception ex)
             {
+                // Log the exception
                 return BadRequest("Error updating user.");
             }
         }
@@ -80,12 +118,14 @@ namespace BCES.Controllers.Admin
         {
             try
             {
-                var sql = @"DELETE FROM Users WHERE UserId = @UserId";
-                _db.Execute(sql, new { UserId = id });
+                // SQL to delete a user by UserId
+                string sql = @"DELETE FROM Users WHERE UserId = @UserId";
+                _db.Connection.Execute(sql, new { UserId = id });
                 return Ok();
             }
             catch (Exception ex)
             {
+                // Log the exception
                 return BadRequest("Error deleting user.");
             }
         }
