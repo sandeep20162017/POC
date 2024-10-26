@@ -1,153 +1,33 @@
-using Dapper;
 using Microsoft.AspNetCore.Mvc;
-using System;
-using System.Collections.Generic;
+using Dapper;
 using System.Data;
-using System.Linq;
-using System.Threading.Tasks;
-using Telerik.DataSource;
-using Telerik.DataSource.Extensions;
+using System.Data.SqlClient;
+using BCES.Models.Admin;
 
-namespace BCES.Admin
+namespace BCES.Controllers.Admin
 {
-    public class UserManagementGridController : Controller
+    [Route("Admin/[controller]")]
+    public class UserManagementController : Controller
     {
-        private readonly DapperContext _db;
+        private readonly IDbConnection _db;
 
-        // Constructor to inject Dapper context
-        public UserManagementGridController(DapperContext dapper)
+        public UserManagementController(IDbConnection db)
         {
-            _db = dapper; // Initialize the Dapper context
+            _db = db;
         }
 
-        /// <summary>
-        /// Retrieves user views for Telerik Grid.
-        /// </summary>
-        public async Task<IActionResult> UserViewRead(DataSourceRequest request)
+        #region CRUD Operations
+
+        [HttpGet("GetUsers")]
+        public IActionResult GetUsers()
         {
             try
             {
-                var userViews = await GetUserViews(); // Fetch user views
-                return Json(userViews.ToDataSourceResult(request)); // Return for Telerik Grid
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, "An error occurred while fetching data.");
-            }
-        }
-
-        /// <summary>
-        /// Adds a new user and assigns a role.
-        /// </summary>
-        [HttpPost]
-        public async Task<IActionResult> UserViewAdd(DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<UserViewModel> userViewModels)
-        {
-            try
-            {
-                var userViewModel = userViewModels.FirstOrDefault();
-                if (userViewModel != null)
-                {
-                    // Ensure RoleModel is initialized
-                    userViewModel.RoleModel = userViewModel.RoleModel ?? new RoleModel();
-
-                    // Insert new user and role
-                    var userId = await AddUserAsync(userViewModel.UserName, userViewModel.RoleModel.RoleId);
-                    userViewModel.UserId = userId;
-                }
-
-                return Json(userViewModels.ToDataSourceResult(request, ModelState));
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, "An error occurred while adding the user.");
-            }
-        }
-
-        /// <summary>
-        /// Updates an existing user and their role.
-        /// </summary>
-        [HttpPost]
-        public async Task<IActionResult> UserViewUpdate(DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<UserViewModel> userViewModels)
-        {
-            try
-            {
-                if (userViewModels == null)
-                {
-                    // Log or debug the issue
-                    return BadRequest("No data received for update.");
-                }
-
-                var userViewModel = userViewModels.FirstOrDefault();
-                if (userViewModel != null)
-                {
-                    // Ensure RoleModel is initialized
-                    userViewModel.RoleModel = userViewModel.RoleModel ?? new RoleModel();
-
-                    // Update user and role association
-                    await UpdateUserAsync(userViewModel.UserId, userViewModel.UserName, userViewModel.RoleModel.RoleId);
-                }
-
-                return Json(userViewModels.ToDataSourceResult(request, ModelState));
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, "An error occurred while updating the user.");
-            }
-        }
-
-        /// <summary>
-        /// Deletes an existing user and their role association.
-        /// </summary>
-        [HttpPost]
-        public async Task<IActionResult> UserViewDelete(DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<UserViewModel> userViewModels)
-        {
-            try
-            {
-                var userViewModel = userViewModels.FirstOrDefault();
-                if (userViewModel != null)
-                {
-                    // Delete user and role association
-                    await DeleteUserAsync(userViewModel.UserId);
-                }
-
-                return Json(userViewModels.ToDataSourceResult(request, ModelState));
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, "An error occurred while deleting the user.");
-            }
-        }
-
-        // Helper method to render view and pass roles to RoleName dropdown
-        public async Task<IActionResult> Index()
-        {
-            try
-            {
-                var roles = await GetRolesAsync();
-                ViewData["Roles"] = roles; // Pass roles to the view
-                return View();
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, "An error occurred while fetching roles.");
-            }
-        }
-
-        // Private methods to interact with database using Dapper
-
-        // Fetch user views with roles
-        private async Task<IEnumerable<UserViewModel>> GetUserViews()
-        {
-            var query = @"
-                SELECT u.UserId, u.UserName, r.RoleId, r.RoleName
-                FROM BCES.Users u
-                INNER JOIN BCES.UserRoles ur ON ur.UserId = u.UserId
-                INNER JOIN BCES.Roles r ON r.RoleId = ur.RoleId";
-
-            using (var connection = _db.CreateConnection())
-            {
-                var userViews = await connection.QueryAsync<UserViewModel, RoleModel, UserViewModel>(
-                    query,
+                var sql = @"SELECT u.UserId, u.UserName, r.RoleId, r.RoleName
+                            FROM Users u
+                            LEFT JOIN Roles r ON u.RoleId = r.RoleId";
+                var users = _db.Query<UserViewModel, RoleModel, UserViewModel>(
+                    sql,
                     (user, role) =>
                     {
                         user.RoleModel = role;
@@ -155,70 +35,61 @@ namespace BCES.Admin
                     },
                     splitOn: "RoleId"
                 );
-                return userViews.ToList();
+                return Json(users);
             }
-        }
-
-        // Fetch available roles from the database
-        private async Task<IEnumerable<RoleModel>> GetRolesAsync()
-        {
-            var query = "SELECT RoleId, RoleName FROM BCES.Roles";
-            using (var connection = _db.CreateConnection())
+            catch (Exception ex)
             {
-                return await connection.QueryAsync<RoleModel>(query);
+                // Log exception
+                return BadRequest("Error fetching users.");
             }
         }
 
-        // Insert a new user and associate with a role
-        private async Task<int> AddUserAsync(string userName, int roleId)
+        [HttpPost("AddUser")]
+        public IActionResult AddUser([FromBody] UserViewModel user)
         {
-            var insertUserQuery = "INSERT INTO BCES.Users (UserName) VALUES (@UserName); SELECT CAST(SCOPE_IDENTITY() as int);";
-            var insertUserRoleQuery = "INSERT INTO BCES.UserRoles (UserId, RoleId) VALUES (@UserId, @RoleId);";
-
-            using (var connection = _db.CreateConnection())
+            try
             {
-                using (var transaction = connection.BeginTransaction())
-                {
-                    var newUserId = await connection.ExecuteScalarAsync<int>(insertUserQuery, new { UserName = userName }, transaction);
-                    await connection.ExecuteAsync(insertUserRoleQuery, new { UserId = newUserId, RoleId = roleId }, transaction);
-                    transaction.Commit();
-                    return newUserId;
-                }
+                var sql = @"INSERT INTO Users (UserName, RoleId) VALUES (@UserName, @RoleId);
+                            SELECT CAST(SCOPE_IDENTITY() as int);";
+                user.UserId = _db.ExecuteScalar<int>(sql, new { user.UserName, user.RoleModel.RoleId });
+                return Json(user);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest("Error adding user.");
             }
         }
 
-        // Update existing user and their role
-        private async Task UpdateUserAsync(int userId, string userName, int roleId)
+        [HttpPost("UpdateUser")]
+        public IActionResult UpdateUser([FromBody] UserViewModel user)
         {
-            var updateUserQuery = "UPDATE BCES.Users SET UserName = @UserName WHERE UserId = @UserId;";
-            var updateUserRoleQuery = "UPDATE BCES.UserRoles SET RoleId = @RoleId WHERE UserId = @UserId;";
-
-            using (var connection = _db.CreateConnection())
+            try
             {
-                using (var transaction = connection.BeginTransaction())
-                {
-                    await connection.ExecuteAsync(updateUserQuery, new { UserName = userName, UserId = userId }, transaction);
-                    await connection.ExecuteAsync(updateUserRoleQuery, new { RoleId = roleId, UserId = userId }, transaction);
-                    transaction.Commit();
-                }
+                var sql = @"UPDATE Users SET UserName = @UserName, RoleId = @RoleId WHERE UserId = @UserId";
+                _db.Execute(sql, new { user.UserName, user.RoleModel.RoleId, user.UserId });
+                return Json(user);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest("Error updating user.");
             }
         }
 
-        // Delete user and associated role
-        private async Task DeleteUserAsync(int userId)
+        [HttpPost("DeleteUser")]
+        public IActionResult DeleteUser(int id)
         {
-            var deleteUserRoleQuery = "DELETE FROM BCES.UserRoles WHERE UserId = @UserId;";
-            var deleteUserQuery = "DELETE FROM BCES.Users WHERE UserId = @UserId;";
-
-            using (var connection = _db.CreateConnection())
+            try
             {
-                using (var transaction = connection.BeginTransaction())
-                {
-                    await connection.ExecuteAsync(deleteUserRoleQuery, new { UserId = userId }, transaction);
-                    await connection.ExecuteAsync(deleteUserQuery, new { UserId = userId }, transaction);
-                    transaction.Commit();
-                }
+                var sql = @"DELETE FROM Users WHERE UserId = @UserId";
+                _db.Execute(sql, new { UserId = id });
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return BadRequest("Error deleting user.");
             }
         }
+
+        #endregion
     }
 }
