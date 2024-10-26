@@ -23,7 +23,7 @@ namespace BCES.Admin
         /// <summary>
         /// Retrieves user views for Telerik Grid.
         /// </summary>
-        public async Task<IActionResult> UserViewRead([DataSourceRequest] DataSourceRequest request)
+        public async Task<IActionResult> UserViewRead(DataSourceRequest request)
         {
             try
             {
@@ -40,7 +40,7 @@ namespace BCES.Admin
         /// Adds a new user and assigns a role.
         /// </summary>
         [HttpPost]
-        public async Task<IActionResult> UserViewAdd([DataSourceRequest] DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<UserViewModel> userViewModels)
+        public async Task<IActionResult> UserViewAdd(DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<UserViewModel> userViewModels)
         {
             try
             {
@@ -67,7 +67,7 @@ namespace BCES.Admin
         /// Updates an existing user and their role.
         /// </summary>
         [HttpPost]
-        public async Task<IActionResult> UserViewUpdate([DataSourceRequest] DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<UserViewModel> userViewModels)
+        public async Task<IActionResult> UserViewUpdate(DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<UserViewModel> userViewModels)
         {
             try
             {
@@ -99,7 +99,7 @@ namespace BCES.Admin
         /// Deletes an existing user and their role association.
         /// </summary>
         [HttpPost]
-        public async Task<IActionResult> UserViewDelete([DataSourceRequest] DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<UserViewModel> userViewModels)
+        public async Task<IActionResult> UserViewDelete(DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<UserViewModel> userViewModels)
         {
             try
             {
