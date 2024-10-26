@@ -21,14 +21,14 @@ namespace BCES.Admin
         }
 
         /// <summary>
-        /// Retrieves user views for Kendo Grid.
+        /// Retrieves user views for Telerik Grid.
         /// </summary>
         public async Task<IActionResult> UserViewRead([DataSourceRequest] DataSourceRequest request)
         {
             try
             {
                 var userViews = await GetUserViews(); // Fetch user views
-                return Json(userViews.ToDataSourceResult(request)); // Return for Kendo Grid
+                return Json(userViews.ToDataSourceResult(request)); // Return for Telerik Grid
             }
             catch (Exception ex)
             {
