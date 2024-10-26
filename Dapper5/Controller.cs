@@ -210,4 +210,15 @@ namespace BCES.Admin
             var deleteUserRoleQuery = "DELETE FROM BCES.UserRoles WHERE UserId = @UserId;";
             var deleteUserQuery = "DELETE FROM BCES.Users WHERE UserId = @UserId;";
 
-            using (var connection = _db.
+            using (var connection = _db.CreateConnection())
+            {
+                using (var transaction = connection.BeginTransaction())
+                {
+                    await connection.ExecuteAsync(deleteUserRoleQuery, new { UserId = userId }, transaction);
+                    await connection.ExecuteAsync(deleteUserQuery, new { UserId = userId }, transaction);
+                    transaction.Commit();
+                }
+            }
+        }
+    }
+}
