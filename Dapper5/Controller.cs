@@ -11,11 +11,13 @@ namespace BCES.Controllers.Admin
     [Route("Admin/[controller]")]
     public class UserManagementGridController : Controller
     {
+        private readonly DapperContext _db;
         private readonly IDbConnection _dbConnection;
 
-        public UserManagementGridController(IDbConnection dbConnection)
+        public UserManagementGridController(DapperContext dapper)
         {
-            _dbConnection = dbConnection;
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
         }
 
         #region Read Users
@@ -67,11 +69,14 @@ namespace BCES.Controllers.Admin
 
             try
             {
+                // Ensure RoleModel is initialized
+                user.RoleModel ??= new RoleModel();
+
                 // Insert user into Users table and retrieve UserId
                 var insertUserSql = "INSERT INTO BCES.Users (UserName) VALUES (@UserName); SELECT CAST(SCOPE_IDENTITY() as int)";
                 var userId = _dbConnection.ExecuteScalar<int>(insertUserSql, new { user.UserName });
 
-                // Insert role association in UserRoles table if RoleModel exists
+                // Insert role association in UserRoles table if RoleModel exists and RoleId is valid
                 if (user.RoleModel?.RoleId > 0)
                 {
                     var insertRoleSql = "INSERT INTO BCES.UserRoles (UserId, RoleId) VALUES (@UserId, @RoleId)";
@@ -98,6 +103,9 @@ namespace BCES.Controllers.Admin
 
             try
             {
+                // Ensure RoleModel is initialized
+                user.RoleModel ??= new RoleModel();
+
                 // Update user in Users table
                 var updateUserSql = "UPDATE BCES.Users SET UserName = @UserName WHERE UserId = @UserId";
                 _dbConnection.Execute(updateUserSql, new { user.UserName, user.UserId });
