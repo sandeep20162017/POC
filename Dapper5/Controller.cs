@@ -6,12 +6,11 @@ using System.Data;
 namespace BCES.Controllers.Admin
 {
     [Route("Admin/[controller]")]
-    public class UserManagementController : Controller
+    public class UserManagementGridController : Controller
     {
         private readonly IDbConnection _dbConnection;
 
-        // Constructor injecting the database connection
-        public UserManagementController(IDbConnection dbConnection)
+        public UserManagementGridController(IDbConnection dbConnection)
         {
             _dbConnection = dbConnection;
         }
@@ -22,18 +21,35 @@ namespace BCES.Controllers.Admin
         {
             try
             {
-                // SQL query to retrieve user details and roles
-                var users = _dbConnection.Query<UserViewModel>(@"
+                // SQL query to fetch users and their roles from UserView
+                var sql = @"
                     SELECT u.UserId, u.UserName, r.RoleId, r.RoleName
-                    FROM UserModel u
-                    LEFT JOIN UserRoleModel ur ON u.UserId = ur.UserId
-                    LEFT JOIN RoleModel r ON ur.RoleId = r.RoleId");
+                    FROM BCES.Users u
+                    LEFT JOIN BCES.UserRoles ur ON u.UserId = ur.UserId
+                    LEFT JOIN BCES.Roles r ON ur.RoleId = r.RoleId";
 
-                return Json(users);
+                // Fetch users with roles and map to UserViewModel with nested RoleModel
+                var userDictionary = new Dictionary<int, UserViewModel>();
+
+                var users = _dbConnection.Query<UserViewModel, RoleModel, UserViewModel>(
+                    sql,
+                    (user, role) =>
+                    {
+                        if (!userDictionary.TryGetValue(user.UserId, out var userEntry))
+                        {
+                            userEntry = user;
+                            userEntry.RoleModel = role; // Assign RoleModel to the user
+                            userDictionary.Add(userEntry.UserId, userEntry);
+                        }
+                        return userEntry;
+                    },
+                    splitOn: "RoleId"
+                );
+
+                return Json(userDictionary.Values);
             }
             catch (Exception ex)
             {
-                // Return a 500 error with the exception message
                 return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
@@ -48,15 +64,15 @@ namespace BCES.Controllers.Admin
 
             try
             {
-                // Insert new user and get the generated UserId
-                var query = "INSERT INTO UserModel (UserName) VALUES (@UserName); SELECT CAST(SCOPE_IDENTITY() as int)";
-                var userId = _dbConnection.ExecuteScalar<int>(query, new { user.UserName });
+                // Insert user into Users table and retrieve UserId
+                var insertUserSql = "INSERT INTO BCES.Users (UserName) VALUES (@UserName); SELECT CAST(SCOPE_IDENTITY() as int)";
+                var userId = _dbConnection.ExecuteScalar<int>(insertUserSql, new { user.UserName });
 
-                // Insert role association if RoleModel is provided
-                if (user.RoleModel != null)
+                // Insert role association in UserRoles table if RoleModel exists
+                if (user.RoleModel?.RoleId > 0)
                 {
-                    _dbConnection.Execute("INSERT INTO UserRoleModel (UserId, RoleId) VALUES (@UserId, @RoleId)",
-                        new { UserId = userId, RoleId = user.RoleModel.RoleId });
+                    var insertRoleSql = "INSERT INTO BCES.UserRoles (UserId, RoleId) VALUES (@UserId, @RoleId)";
+                    _dbConnection.Execute(insertRoleSql, new { UserId = userId, RoleId = user.RoleModel.RoleId });
                 }
 
                 return Json(user);
@@ -77,18 +93,18 @@ namespace BCES.Controllers.Admin
 
             try
             {
-                // Update user information
-                var query = "UPDATE UserModel SET UserName = @UserName WHERE UserId = @UserId";
-                _dbConnection.Execute(query, user);
+                // Update user in Users table
+                var updateUserSql = "UPDATE BCES.Users SET UserName = @UserName WHERE UserId = @UserId";
+                _dbConnection.Execute(updateUserSql, new { user.UserName, user.UserId });
 
-                // Update or insert role association based on existence
-                if (user.RoleModel != null)
+                // Update or insert role association in UserRoles table
+                if (user.RoleModel?.RoleId > 0)
                 {
                     var roleQuery = @"
-                        IF EXISTS (SELECT 1 FROM UserRoleModel WHERE UserId = @UserId)
-                            UPDATE UserRoleModel SET RoleId = @RoleId WHERE UserId = @UserId
+                        IF EXISTS (SELECT 1 FROM BCES.UserRoles WHERE UserId = @UserId)
+                            UPDATE BCES.UserRoles SET RoleId = @RoleId WHERE UserId = @UserId
                         ELSE
-                            INSERT INTO UserRoleModel (UserId, RoleId) VALUES (@UserId, @RoleId)";
+                            INSERT INTO BCES.UserRoles (UserId, RoleId) VALUES (@UserId, @RoleId)";
                     _dbConnection.Execute(roleQuery, new { UserId = user.UserId, RoleId = user.RoleModel.RoleId });
                 }
 
@@ -107,9 +123,11 @@ namespace BCES.Controllers.Admin
         {
             try
             {
-                // Delete role association and user
-                _dbConnection.Execute("DELETE FROM UserRoleModel WHERE UserId = @UserId", new { UserId = id });
-                _dbConnection.Execute("DELETE FROM UserModel WHERE UserId = @UserId", new { UserId = id });
+                // Remove role associations from UserRoles
+                _dbConnection.Execute("DELETE FROM BCES.UserRoles WHERE UserId = @UserId", new { UserId = id });
+
+                // Delete user from Users table
+                _dbConnection.Execute("DELETE FROM BCES.Users WHERE UserId = @UserId", new { UserId = id });
 
                 return Json(new { success = true });
             }
@@ -126,10 +144,8 @@ namespace BCES.Controllers.Admin
         {
             try
             {
-                // Retrieve the list of roles for the dropdown
-                var roles = _dbConnection.Query<RoleModel>("SELECT RoleId, RoleName FROM RoleModel").ToList();
-                ViewData["Roles"] = roles; // Stores roles in ViewData for use in the dropdown
-
+                // SQL query to fetch all roles
+                var roles = _dbConnection.Query<RoleModel>("SELECT RoleId, RoleName FROM BCES.Roles").ToList();
                 return Json(roles);
             }
             catch (Exception ex)
