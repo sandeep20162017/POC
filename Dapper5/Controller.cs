@@ -4,6 +4,7 @@ using Dapper;
 using System.Data;
 using System.Collections.Generic;
 using System.Linq;
+using System;
 
 namespace BCES.Controllers.Admin
 {
@@ -46,9 +47,9 @@ namespace BCES.Controllers.Admin
                         return userEntry;
                     },
                     splitOn: "RoleId"
-                );
+                ).Distinct().ToList(); // Ensure distinct users are returned
 
-                return Json(userDictionary.Values);
+                return Json(new { Data = users }); // Return data in a format that Kendo Grid expects
             }
             catch (Exception ex)
             {
@@ -79,7 +80,7 @@ namespace BCES.Controllers.Admin
 
                 // Return the user with the newly generated UserId
                 user.UserId = userId;
-                return Json(user);
+                return Json(new { Data = user }); // Return data in a format that Kendo Grid expects
             }
             catch (Exception ex)
             {
@@ -112,7 +113,7 @@ namespace BCES.Controllers.Admin
                     _dbConnection.Execute(roleQuery, new { UserId = user.UserId, RoleId = user.RoleModel.RoleId });
                 }
 
-                return Json(user);
+                return Json(new { Data = user }); // Return data in a format that Kendo Grid expects
             }
             catch (Exception ex)
             {
@@ -123,7 +124,7 @@ namespace BCES.Controllers.Admin
 
         #region Delete User
         [HttpPost("DeleteUser")]
-        public IActionResult DeleteUser(int id)
+        public IActionResult DeleteUser([FromBody] int id)
         {
             try
             {
