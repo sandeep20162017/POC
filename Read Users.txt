@@ -1,0 +1,39 @@
+#region Read Users
+[HttpGet("ReadUsers")]
+public IActionResult ReadUsers()
+{
+    try
+    {
+        // SQL query to fetch users and their roles from UserView
+        var sql = @"
+            SELECT u.UserId, u.UserName, r.RoleId, r.RoleName
+            FROM BCES.Users u
+            LEFT JOIN BCES.UserRoles ur ON u.UserId = ur.UserId
+            LEFT JOIN BCES.Roles r ON ur.RoleId = r.RoleId";
+
+        // Fetch users with roles and map to UserViewModel with nested RoleModel
+        var userDictionary = new Dictionary<int, UserViewModel>();
+
+        var users = _dbConnection.Query<UserViewModel, RoleModel, UserViewModel>(
+            sql,
+            (user, role) =>
+            {
+                if (!userDictionary.TryGetValue(user.UserId, out var userEntry))
+                {
+                    userEntry = user;
+                    userEntry.RoleModel = role; // Assign RoleModel to the user
+                    userDictionary.Add(userEntry.UserId, userEntry);
+                }
+                return userEntry;
+            },
+            splitOn: "RoleId"
+        ).Distinct().ToList(); // Ensure distinct users are returned
+
+        return Json(new { Data = users }); // Return data in a format that Kendo Grid expects
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, $"Internal server error: {ex.Message}");
+    }
+}
+#endregion
