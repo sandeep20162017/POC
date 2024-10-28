@@ -1,6 +1,7 @@
 public class UserViewModel
 {
-    public string UserId { get; set; }
+    public int UserId { get; set; }
     public string UserName { get; set; }
-    public RoleModel RoleModel { get; set; } = new RoleModel(); // Initialize to avoid null reference errors
+    public int RoleId { get; set; }    // Used for dropdown selection
+    public string RoleName { get; set; } // For displaying the role name
 }

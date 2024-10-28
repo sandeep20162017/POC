@@ -7,7 +7,6 @@ using System.Linq;
 using System.Threading.Tasks;
 using Telerik.DataSource;
 using Telerik.DataSource.Extensions;
-using BCES.Models.Admin;
 
 namespace BCES.Controllers.Admin
 {
@@ -24,8 +23,8 @@ namespace BCES.Controllers.Admin
         {
             try
             {
-                var userViews = await GetUserViews();
-                return Json(userViews.ToDataSourceResult(request));
+                var users = await GetUsersWithRoles();
+                return Json(users.ToDataSourceResult(request));
             }
             catch (Exception ex)
             {
@@ -38,13 +37,13 @@ namespace BCES.Controllers.Admin
         {
             try
             {
-                if (user.RoleModel == null || user.RoleModel.RoleId <= 0)
+                if (user.RoleId <= 0)
                 {
-                    ModelState.AddModelError("RoleModel", "Please select a valid role.");
+                    ModelState.AddModelError("RoleId", "Please select a valid role.");
                     return Json(new[] { user }.ToDataSourceResult(request, ModelState));
                 }
 
-                var userId = await AddUserAsync(user.UserName, user.RoleModel.RoleId);
+                var userId = await AddUserAsync(user.UserName, user.RoleId);
                 user.UserId = userId;
 
                 return Json(new[] { user }.ToDataSourceResult(request, ModelState));
@@ -60,12 +59,10 @@ namespace BCES.Controllers.Admin
         {
             try
             {
-                var userViewModel = userViewModels.FirstOrDefault();
-                if (userViewModel != null)
+                var user = userViewModels.FirstOrDefault();
+                if (user != null && user.RoleId > 0)
                 {
-                    userViewModel.RoleModel = userViewModel.RoleModel ?? new RoleModel();
-
-                    await UpdateUserAsync(userViewModel.UserId, userViewModel.UserName, userViewModel.RoleModel.RoleId);
+                    await UpdateUserAsync(user.UserId, user.UserName, user.RoleId);
                 }
 
                 return Json(userViewModels.ToDataSourceResult(request, ModelState));
@@ -81,10 +78,10 @@ namespace BCES.Controllers.Admin
         {
             try
             {
-                var userViewModel = userViewModels.FirstOrDefault();
-                if (userViewModel != null)
+                var user = userViewModels.FirstOrDefault();
+                if (user != null)
                 {
-                    await DeleteUserAsync(userViewModel.UserId);
+                    await DeleteUserAsync(user.UserId);
                 }
 
                 return Json(userViewModels.ToDataSourceResult(request, ModelState));
@@ -95,64 +92,45 @@ namespace BCES.Controllers.Admin
             }
         }
 
-        private async Task<IEnumerable<UserViewModel>> GetUserViews()
+        private async Task<IEnumerable<UserViewModel>> GetUsersWithRoles()
         {
             var query = @"
-                SELECT u.UserId, u.UserName, r.RoleId, r.RoleName
-                FROM BCES.Users u
-                INNER JOIN BCES.UserRoles ur ON ur.UserId = u.UserId
-                INNER JOIN BCES.Roles r ON r.RoleId = ur.RoleId";
+                SELECT u.UserId, u.UserName, u.RoleId, r.RoleName
+                FROM Users u
+                LEFT JOIN Roles r ON u.RoleId = r.RoleId";
 
-            var userViews = await _dbConnection.QueryAsync<UserViewModel, RoleModel, UserViewModel>(
-                query,
-                (user, role) =>
-                {
-                    user.RoleModel = role;
-                    return user;
-                },
-                splitOn: "RoleId"
-            );
-            return userViews.ToList();
+            return await _dbConnection.QueryAsync<UserViewModel>(query);
         }
 
         private async Task<int> AddUserAsync(string userName, int roleId)
         {
-            var insertUserQuery = "INSERT INTO BCES.Users (UserName) VALUES (@UserName); SELECT CAST(SCOPE_IDENTITY() as int);";
-            var insertUserRoleQuery = "INSERT INTO BCES.UserRoles (UserId, RoleId) VALUES (@UserId, @RoleId);";
-
-            using (var transaction = _dbConnection.BeginTransaction())
-            {
-                var newUserId = await _dbConnection.ExecuteScalarAsync<int>(insertUserQuery, new { UserName = userName }, transaction);
-                await _dbConnection.ExecuteAsync(insertUserRoleQuery, new { UserId = newUserId, RoleId = roleId }, transaction);
-                transaction.Commit();
-                return newUserId;
-            }
+            var query = "INSERT INTO Users (UserName, RoleId) VALUES (@UserName, @RoleId); SELECT CAST(SCOPE_IDENTITY() as int);";
+            return await _dbConnection.ExecuteScalarAsync<int>(query, new { UserName = userName, RoleId = roleId });
         }
 
         private async Task UpdateUserAsync(int userId, string userName, int roleId)
         {
-            var updateUserQuery = "UPDATE BCES.Users SET UserName = @UserName WHERE UserId = @UserId;";
-            var updateUserRoleQuery = "UPDATE BCES.UserRoles SET RoleId = @RoleId WHERE UserId = @UserId;";
-
-            using (var transaction = _dbConnection.BeginTransaction())
-            {
-                await _dbConnection.ExecuteAsync(updateUserQuery, new { UserName = userName, UserId = userId }, transaction);
-                await _dbConnection.ExecuteAsync(updateUserRoleQuery, new { RoleId = roleId, UserId = userId }, transaction);
-                transaction.Commit();
-            }
+            var query = "UPDATE Users SET UserName = @UserName, RoleId = @RoleId WHERE UserId = @UserId;";
+            await _dbConnection.ExecuteAsync(query, new { UserId = userId, UserName = userName, RoleId = roleId });
         }
 
         private async Task DeleteUserAsync(int userId)
         {
-            var deleteUserRoleQuery = "DELETE FROM BCES.UserRoles WHERE UserId = @UserId;";
-            var deleteUserQuery = "DELETE FROM BCES.Users WHERE UserId = @UserId;";
+            var query = "DELETE FROM Users WHERE UserId = @UserId;";
+            await _dbConnection.ExecuteAsync(query, new { UserId = userId });
+        }
 
-            using (var transaction = _dbConnection.BeginTransaction())
-            {
-                await _dbConnection.ExecuteAsync(deleteUserRoleQuery, new { UserId = userId }, transaction);
-                await _dbConnection.ExecuteAsync(deleteUserQuery, new { UserId = userId }, transaction);
-                transaction.Commit();
-            }
+        private async Task<IEnumerable<RoleModel>> GetRoles()
+        {
+            var query = "SELECT RoleId, RoleName FROM Roles";
+            return await _dbConnection.QueryAsync<RoleModel>(query);
+        }
+
+        public async Task<IActionResult> Index()
+        {
+            var roles = await GetRoles();
+            ViewData["Roles"] = roles;
+            return View();
         }
     }
 }
