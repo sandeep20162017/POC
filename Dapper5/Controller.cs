@@ -1,171 +1,148 @@
-using Microsoft.AspNetCore.Mvc;
-using BCES.Models.Admin;
 using Dapper;
-using System.Data;
-using System.Collections.Generic;
-using System.Linq;
+using Microsoft.AspNetCore.Mvc;
 using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
 
 namespace BCES.Controllers.Admin
 {
-    [Route("Admin/[controller]")]
     public class UserManagementGridController : Controller
     {
-        private readonly DapperContext _db;
         private readonly IDbConnection _dbConnection;
 
-        public UserManagementGridController(DapperContext dapper)
+        // Constructor to inject database connection directly
+        public UserManagementGridController(IDbConnection dbConnection)
         {
-            _db = dapper;
-            _dbConnection = _db.CreateConnection();
+            _dbConnection = dbConnection; // Initialize the database connection
         }
 
-        #region Read Users
-        [HttpGet("ReadUsers")]
-        public IActionResult ReadUsers()
+        /// <summary>
+        /// Read action to retrieve users for Kendo Grid
+        /// </summary>
+        public async Task<IActionResult> ReadUsers([DataSourceRequest] DataSourceRequest request)
         {
             try
             {
-                // SQL query to fetch users and their roles from UserView
-                var sql = @"
-                    SELECT u.UserId, u.UserName, r.RoleId, r.RoleName
-                    FROM BCES.Users u
-                    LEFT JOIN BCES.UserRoles ur ON u.UserId = ur.UserId
-                    LEFT JOIN BCES.Roles r ON ur.RoleId = r.RoleId";
-
-                // Fetch users with roles and map to UserViewModel with nested RoleModel
-                var userDictionary = new Dictionary<int, UserViewModel>();
-
-                var users = _dbConnection.Query<UserViewModel, RoleModel, UserViewModel>(
-                    sql,
-                    (user, role) =>
-                    {
-                        if (!userDictionary.TryGetValue(user.UserId, out var userEntry))
-                        {
-                            userEntry = user;
-                            userEntry.RoleModel = role; // Assign RoleModel to the user
-                            userDictionary.Add(userEntry.UserId, userEntry);
-                        }
-                        return userEntry;
-                    },
-                    splitOn: "RoleId"
-                ).Distinct().ToList(); // Ensure distinct users are returned
-
-                return Json(new { Data = users }); // Return data in a format that Kendo Grid expects
+                var userViews = await GetUserViews();
+                return Json(userViews.ToDataSourceResult(request));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
+                // Log the exception as needed
+                return StatusCode(500, "An error occurred while fetching users.");
             }
         }
-        #endregion
 
-        #region Create User
-        [HttpPost("CreateUser")]
-        public IActionResult CreateUser([FromBody] UserViewModel user)
+        /// <summary>
+        /// Update action to modify user details
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> UpdateUser([DataSourceRequest] DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<UserViewModel> userViewModels)
         {
-            if (user == null)
-                return BadRequest("User data is null.");
-
             try
             {
-                // Ensure RoleModel is initialized
-                user.RoleModel ??= new RoleModel();
-
-                // Insert user into Users table and retrieve UserId
-                var insertUserSql = "INSERT INTO BCES.Users (UserName) VALUES (@UserName); SELECT CAST(SCOPE_IDENTITY() as int)";
-                var userId = _dbConnection.ExecuteScalar<int>(insertUserSql, new { user.UserName });
-
-                // Insert role association in UserRoles table if RoleModel exists and RoleId is valid
-                if (user.RoleModel?.RoleId > 0)
+                var userViewModel = userViewModels.FirstOrDefault();
+                if (userViewModel != null)
                 {
-                    var insertRoleSql = "INSERT INTO BCES.UserRoles (UserId, RoleId) VALUES (@UserId, @RoleId)";
-                    _dbConnection.Execute(insertRoleSql, new { UserId = userId, RoleId = user.RoleModel.RoleId });
+                    userViewModel.RoleModel = userViewModel.RoleModel ?? new RoleModel();
+
+                    // Update user data in the database
+                    await UpdateUserAsync(userViewModel.UserId, userViewModel.UserName, userViewModel.RoleModel.RoleId);
                 }
 
-                // Return the user with the newly generated UserId
-                user.UserId = userId;
-                return Json(new { Data = user }); // Return data in a format that Kendo Grid expects
+                return Json(userViewModels.ToDataSourceResult(request, ModelState));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
+                // Log the exception as needed
+                return StatusCode(500, "An error occurred while updating the user.");
             }
         }
-        #endregion
 
-        #region Update User
-        [HttpPost("UpdateUser")]
-        public IActionResult UpdateUser([FromBody] UserViewModel user)
+        /// <summary>
+        /// Delete action to remove user and their role association
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> DeleteUser([DataSourceRequest] DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<UserViewModel> userViewModels)
         {
-            if (user == null)
-                return BadRequest("User data is null.");
-
             try
             {
-                // Ensure RoleModel is initialized
-                user.RoleModel ??= new RoleModel();
-
-                // Update user in Users table
-                var updateUserSql = "UPDATE BCES.Users SET UserName = @UserName WHERE UserId = @UserId";
-                _dbConnection.Execute(updateUserSql, new { user.UserName, user.UserId });
-
-                // Update or insert role association in UserRoles table
-                if (user.RoleModel?.RoleId > 0)
+                var userViewModel = userViewModels.FirstOrDefault();
+                if (userViewModel != null)
                 {
-                    var roleQuery = @"
-                        IF EXISTS (SELECT 1 FROM BCES.UserRoles WHERE UserId = @UserId)
-                            UPDATE BCES.UserRoles SET RoleId = @RoleId WHERE UserId = @UserId
-                        ELSE
-                            INSERT INTO BCES.UserRoles (UserId, RoleId) VALUES (@UserId, @RoleId)";
-                    _dbConnection.Execute(roleQuery, new { UserId = user.UserId, RoleId = user.RoleModel.RoleId });
+                    // Delete user and role association from the database
+                    await DeleteUserAsync(userViewModel.UserId);
                 }
 
-                return Json(new { Data = user }); // Return data in a format that Kendo Grid expects
+                return Json(userViewModels.ToDataSourceResult(request, ModelState));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
+                // Log the exception as needed
+                return StatusCode(500, "An error occurred while deleting the user.");
             }
         }
-        #endregion
 
-        #region Delete User
-        [HttpPost("DeleteUser")]
-        public IActionResult DeleteUser([FromBody] int id)
+        /// <summary>
+        /// Optional Cancel action
+        /// </summary>
+        [HttpPost]
+        public IActionResult Cancel([DataSourceRequest] DataSourceRequest request)
         {
-            try
-            {
-                // Remove role associations from UserRoles
-                _dbConnection.Execute("DELETE FROM BCES.UserRoles WHERE UserId = @UserId", new { UserId = id });
-
-                // Delete user from Users table
-                _dbConnection.Execute("DELETE FROM BCES.Users WHERE UserId = @UserId", new { UserId = id });
-
-                return Json(new { success = true });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
-            }
+            // Perform any necessary cleanup or logging
+            return Json(new { message = "Operation canceled" });
         }
-        #endregion
 
-        #region Get Roles for Dropdown
-        [HttpGet("GetRoles")]
-        public IActionResult GetRoles()
+        // Helper methods for Dapper database operations
+        private async Task<IEnumerable<UserViewModel>> GetUserViews()
         {
-            try
+            var query = @"
+                SELECT u.UserId, u.UserName, r.RoleId, r.RoleName
+                FROM BCES.Users u
+                INNER JOIN BCES.UserRoles ur ON ur.UserId = u.UserId
+                INNER JOIN BCES.Roles r ON r.RoleId = ur.RoleId";
+
+            var userViews = await _dbConnection.QueryAsync<UserViewModel, RoleModel, UserViewModel>(
+                query,
+                (user, role) =>
+                {
+                    user.RoleModel = role;
+                    return user;
+                },
+                splitOn: "RoleId"
+            );
+            return userViews.ToList();
+        }
+
+        private async Task UpdateUserAsync(int userId, string userName, int roleId)
+        {
+            var updateUserQuery = "UPDATE BCES.Users SET UserName = @UserName WHERE UserId = @UserId;";
+            var updateUserRoleQuery = "UPDATE BCES.UserRoles SET RoleId = @RoleId WHERE UserId = @UserId;";
+
+            using (var transaction = _dbConnection.BeginTransaction())
             {
-                // SQL query to fetch all roles
-                var roles = _dbConnection.Query<RoleModel>("SELECT RoleId, RoleName FROM BCES.Roles").ToList();
-                return Json(roles);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
+                await _dbConnection.ExecuteAsync(updateUserQuery, new { UserName = userName, UserId = userId }, transaction);
+                await _dbConnection.ExecuteAsync(updateUserRoleQuery, new { RoleId = roleId, UserId = userId }, transaction);
+                transaction.Commit();
             }
         }
-        #endregion
+
+        private async Task DeleteUserAsync(int userId)
+        {
+            var deleteUserRoleQuery = "DELETE FROM BCES.UserRoles WHERE UserId = @UserId;";
+            var deleteUserQuery = "DELETE FROM BCES.Users WHERE UserId = @UserId;";
+
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                await _dbConnection.ExecuteAsync(deleteUserRoleQuery, new { UserId = userId }, transaction);
+                await _dbConnection.ExecuteAsync(deleteUserQuery, new { UserId = userId }, transaction);
+                transaction.Commit();
+            }
+        }
     }
 }
