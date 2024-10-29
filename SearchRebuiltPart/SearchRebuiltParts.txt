@@ -1,0 +1,96 @@
+USE [BCES]
+GO
+
+/****** Object:  StoredProcedure [BCES].[SearchRebuiltParts]    Script Date: 2024-10-29 4:59:29 PM ******/
+DROP PROCEDURE [BCES].[SearchRebuiltParts]
+GO
+
+/****** Object:  StoredProcedure [BCES].[SearchRebuiltParts]    Script Date: 2024-10-29 4:59:29 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+-- =============================================
+-- Author:      [Your Name]
+-- Create date: [Current Date]
+-- Description: Stored procedure to search RebuiltParts based on various criteria
+-- =============================================
+CREATE PROCEDURE [BCES].[SearchRebuiltParts]
+    @RebuildNumber NVARCHAR(50) = NULL,
+    @Keyword NVARCHAR(100) = NULL,
+    @BusSeries NVARCHAR(20) = NULL,
+    @Description NVARCHAR(255) = NULL,
+    @ReturnCount INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Declare variables for dynamic SQL
+    DECLARE @ErrorNumber INT;
+    DECLARE @ErrorMessage NVARCHAR(4000);
+
+    -- Initialize the base query
+    SELECT 
+        SCP.StockPartID,
+        SCP.MMSStockCode,
+        SCP.Description AS StockPartDescription,
+        SCP.Keyword AS StockPartKeyword,
+        SCP.Quantity,
+        SCP.CoreCost,
+        RP.RebuiltStockCode,
+        RP.Description AS RebuiltPartDescription,
+        RP.Keyword AS RebuiltPartKeyword,
+        RP.JobNumber,
+        RP.CoreCode,
+        RP.CoreCost AS RebuiltPartCoreCost,
+        RP.SOPNumber,
+        BS.BusSeriesCode,
+        BS.BusSeriesDescription,
+        PT.PartTypeName,
+        CC.CostCentreCode,
+        CC.CostCentreDescription
+    INTO #TempResults
+    FROM 
+        [BCES].[StockCodedParts] SCP
+    LEFT JOIN 
+        [BCES].[RebuiltParts] RP ON SCP.RebuiltPartID = RP.RebuiltPartID
+    LEFT JOIN 
+        [BCES].[BusSeries] BS ON RP.BusSeriesID = BS.BusSeriesID
+    LEFT JOIN 
+        [BCES].[PartTypes] PT ON RP.PartTypeID = PT.PartTypeID
+    LEFT JOIN 
+        [BCES].[CostCentres] CC ON SCP.CostCentreID = CC.CostCentreID
+    WHERE 1=1
+
+    -- Add conditions based on the provided parameters
+    IF @RebuildNumber IS NOT NULL
+        DELETE FROM #TempResults WHERE RebuiltStockCode <> @RebuildNumber;
+
+    IF @Keyword IS NOT NULL
+        DELETE FROM #TempResults WHERE Keyword <> @Keyword AND StockPartKeyword <> @Keyword;
+
+    IF @BusSeries IS NOT NULL
+        DELETE FROM #TempResults WHERE BusSeriesCode <> @BusSeries;
+
+    IF @Description IS NOT NULL
+        DELETE FROM #TempResults WHERE RebuiltPartDescription <> @Description AND StockPartDescription <> @Description;
+
+    -- Get the count of results
+    SELECT @ReturnCount = COUNT(*) FROM #TempResults;
+
+    -- Print the count of results for debugging
+    PRINT 'Return Count:';
+    PRINT @ReturnCount;
+
+    -- Return the results
+    SELECT * FROM #TempResults;
+
+    -- Clean up the temporary table
+    DROP TABLE IF EXISTS #TempResults;
+END
+GO
+
+

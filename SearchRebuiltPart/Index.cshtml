@@ -1,0 +1,89 @@
+@{
+    ViewData["Title"] = "Rebuilt Parts";
+}
+
+<h2>Rebuilt Parts</h2>
+
+@(Html.Kendo().Grid<BCES.Models.Parts.RebuiltPart>()
+    .Name("RebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.StockPartID).Title("ID").Width(50);
+        columns.Bound(c => c.MMSStockCode).Title("Stock Code").Width(100);
+        columns.Bound(c => c.StockPartDescription).Title("Description").Width(200);
+        columns.Bound(c => c.Quantity).Title("Quantity").Width(75);
+        columns.Command(command => command.Custom("EditDetails").Click("onEditDetails")).Title("Actions").Width(150);
+    })
+    .Pageable()
+    .Sortable()
+    .Filterable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Read(read => read.Url("/api/RebuiltParts"))
+    )
+)
+
+<!-- Popup Template for Editing Details -->
+<div id="detailsPopup" style="display:none;">
+    @(Html.Kendo().Form<BCES.Models.Parts.RebuiltPart>()
+        .Name("detailsForm")
+        .Items(items =>
+        {
+            items.AddGroup().Label("Stock Part Info").Items(groupItems =>
+            {
+                groupItems.Add().Field(f => f.StockPartID).Label("ID").Editable(false);
+                groupItems.Add().Field(f => f.MMSStockCode).Label("Stock Code").Editable(false);
+                groupItems.Add().Field(f => f.StockPartDescription).Label("Description").Editable(false);
+            });
+            items.AddGroup().Label("Quantities and Cost").Items(groupItems =>
+            {
+                groupItems.Add().Field(f => f.Quantity).Label("Quantity").Editor(editor => editor.NumericTextBox());
+                groupItems.Add().Field(f => f.CoreCost).Label("Core Cost").Editor(editor => editor.NumericTextBox());
+            });
+        })
+        .Buttons(buttons =>
+        {
+            buttons.Add().Type("button").Text("Save").Name("saveButton").HtmlAttributes(new { onclick = "saveDetails()" });
+            buttons.Add().Type("button").Text("Cancel").Name("cancelButton").HtmlAttributes(new { onclick = "$('#detailsPopup').data('kendoWindow').close();" });
+        })
+    )
+</div>
+
+@section Scripts {
+    <script>
+        function onEditDetails(e) {
+            e.preventDefault();
+            var dataItem = this.dataItem($(e.currentTarget).closest("tr"));
+            
+            // Populate form with the selected data
+            $("#detailsForm").data("kendoForm").value(dataItem);
+
+            // Open the form in a Kendo Window
+            $("#detailsPopup").kendoWindow({
+                title: "Edit Part Details",
+                modal: true,
+                visible: false,
+                width: "500px"
+            }).data("kendoWindow").center().open();
+        }
+
+        function saveDetails() {
+            var partData = $("#detailsForm").data("kendoForm").value();
+
+            $.ajax({
+                url: '/api/RebuiltParts/Update',
+                type: 'POST',
+                data: JSON.stringify(partData),
+                contentType: 'application/json',
+                success: function(response) {
+                    alert(response);
+                    $("#detailsPopup").data("kendoWindow").close();
+                    $("#RebuiltPartsGrid").data("kendoGrid").dataSource.read(); // Refresh the grid
+                },
+                error: function(xhr) {
+                    alert("Error saving data: " + xhr.responseText);
+                }
+            });
+        }
+    </script>
+}
