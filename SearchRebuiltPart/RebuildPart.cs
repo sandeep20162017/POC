@@ -2,7 +2,7 @@ using System;
 
 namespace BCES.Models.Parts
 {
-    public class RebuiltPart
+    public class RebuildPartsModel
     {
         public int StockPartID { get; set; }
         public string MMSStockCode { get; set; }

@@ -1,75 +1,71 @@
-using System;
-using System.Collections.Generic;
-using System.Data;
-using System.Threading.Tasks;
 using BCES.Models.Parts;
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
 
 namespace BCES.Controllers.Parts
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    public class RebuiltPartsController : ControllerBase
+    public class PartsController : Controller
     {
         private readonly IDbConnection _dbConnection;
 
-        public RebuiltPartsController(IDbConnection dbConnection)
+        public PartsController(IDbConnection dbConnection)
         {
             _dbConnection = dbConnection;
         }
 
-        #region Methods
+        // GET: Parts
+        public IActionResult Index()
+        {
+            return View();
+        }
 
-        // GET: api/RebuiltParts
-        [HttpGet]
-        public async Task<IActionResult> GetRebuiltParts(string rebuildNumber = null, string keyword = null, string busSeries = null, string description = null)
+        #region Grid Operations
+
+        /// <summary>
+        /// Reads the data for the Kendo Grid using the stored procedure [BCES].[SearchStockCodedParts].
+        /// </summary>
+        /// <param name="request">The DataSourceRequest object.</param>
+        /// <returns>A JSON result containing the grid data.</returns>
+        public async Task<IActionResult> ReadParts([DataSourceRequest] DataSourceRequest request)
         {
             try
             {
-                var parameters = new DynamicParameters();
-                parameters.Add("@RebuildNumber", rebuildNumber);
-                parameters.Add("@Keyword", keyword);
-                parameters.Add("@BusSeries", busSeries);
-                parameters.Add("@Description", description);
-                parameters.Add("@ReturnCount", dbType: DbType.Int32, direction: ParameterDirection.Output);
-
-                var result = await _dbConnection.QueryAsync<RebuiltPart>(
-                    "[BCES].[SearchRebuiltParts]", parameters, commandType: CommandType.StoredProcedure);
-
-                int returnCount = parameters.Get<int>("@ReturnCount");
-
-                return Ok(new { Data = result, Count = returnCount });
+                var parts = await _dbConnection.QueryAsync<RebuildPartsModel>("[BCES].[SearchStockCodedParts]", commandType: CommandType.StoredProcedure);
+                return Json(parts.ToDataSourceResult(request));
             }
             catch (Exception ex)
             {
-                // Log exception as needed
-                return StatusCode(500, $"Internal server error: {ex.Message}");
+                return StatusCode(500, "An error occurred while fetching parts.");
             }
         }
 
-        // POST: api/RebuiltParts/Update
-        [HttpPost("Update")]
-        public IActionResult UpdateRebuiltPart([FromBody] RebuiltPart part)
+        /// <summary>
+        /// Adds a new RebuildPartsModel using a stored procedure (commented out for now).
+        /// </summary>
+        /// <param name="request">The DataSourceRequest object.</param>
+        /// <param name="part">The RebuildPartsModel object to be added.</param>
+        /// <returns>A JSON result containing the added part.</returns>
+        [HttpPost]
+        public async Task<IActionResult> AddPart([DataSourceRequest] DataSourceRequest request, [FromForm] RebuildPartsModel part)
         {
             try
             {
-                if (part == null)
-                    return BadRequest("Part data is null");
+                // TODO: Uncomment and implement the stored procedure call to add a new part.
+                // var partId = await _dbConnection.ExecuteScalarAsync<int>("[BCES].[AddRebuiltPart]", part, commandType: CommandType.StoredProcedure);
+                // part.StockPartID = partId;
 
-                // SQL command to update part record
-                // Uncomment and replace SQL here when database update is ready.
-                /*
-                var query = "UPDATE BCES.StockCodedParts SET Quantity = @Quantity, CoreCost = @CoreCost WHERE StockPartID = @StockPartID";
-                _dbConnection.Execute(query, new { part.Quantity, part.CoreCost, part.StockPartID });
-                */
-
-                return Ok("Update successful");
+                return Json(new[] { part }.ToDataSourceResult(request, ModelState));
             }
             catch (Exception ex)
             {
-                // Log exception as needed
-                return StatusCode(500, $"Internal server error: {ex.Message}");
+                return StatusCode(500, "An error occurred while adding the part.");
             }
         }
 
