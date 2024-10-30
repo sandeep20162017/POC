@@ -1,0 +1,147 @@
+-- Insert BusinessEntities from old schema
+INSERT INTO [BCES].[BusinessEntities] ([EntityTypeID], [Code], [Description])
+SELECT 
+    CASE 
+        WHEN [CostCentreCode] IS NOT NULL THEN 1
+        WHEN [BusSeriesCode] IS NOT NULL THEN 2
+    END,
+    COALESCE([CostCentreCode], [BusSeriesCode]),
+    COALESCE([CostCentreDescription], [BusSeriesDescription])
+FROM 
+    (SELECT TOP 10 [CostCentreCode], [CostCentreDescription] FROM [CES].[CostCentres]
+     UNION ALL
+     SELECT TOP 10 [BusSeriesCode], [BusSeriesDescription] FROM [CES].[BusSeries]) AS Combined;
+
+-- Insert Parts from old schema
+INSERT INTO [BCES].[Parts] ([PartTypeID], [RebuiltPartID], [SupplierID], [PartDescription], [Keyword], [Quantity], [UnitCost], [CoreCost], [CostCentreID])
+SELECT 
+    CASE 
+        WHEN [MMS_STOCK_CODE] IS NOT NULL THEN 1
+        WHEN [NonStockPartID] IS NOT NULL THEN 2
+    END,
+    NULL, -- Assuming no direct RebuiltPartID mapping
+    NULL, -- Assuming no direct SupplierID mapping
+    COALESCE([PartDescription], [PartDescription]),
+    COALESCE([Keyword], [Keyword]),
+    COALESCE([Quantity], [Quantity]),
+    COALESCE([UnitCost], [UnitCost]),
+    COALESCE([CoreCost], [CoreCost]),
+    NULL -- Assuming no direct CostCentreID mapping
+FROM 
+    (SELECT TOP 10 [MMS_STOCK_CODE], [PartDescription], [Keyword], [Quantity], [UnitCost], [CoreCost] FROM [CES].[StockCodedParts]
+     UNION ALL
+     SELECT TOP 10 [NonStockPartID], [PartDescription], [Keyword], [Quantity], [UnitCost], [CoreCost] FROM [CES].[NonStockCodedParts]) AS Combined;
+
+-- Insert RebuiltParts from old schema
+INSERT INTO [BCES].[RebuiltParts] ([RebuiltStockCode], [CoreCode], [CoreCost], [SOPNumber], [Description], [Keyword], [JobNumber], [BusSeriesID], [PartTypeID])
+SELECT 
+    [RebuiltStockCode],
+    [CoreCode],
+    [CoreCost],
+    [SOPNumber],
+    [Description],
+    [Keyword],
+    [JobNumber],
+    NULL, -- Assuming no direct BusSeriesID mapping
+    1 -- Assuming PartTypeID is always 1 for RebuiltParts
+FROM 
+    [CES].[RebuiltParts]
+WHERE 
+    RebuiltPartID IN (SELECT TOP 10 RebuiltPartID FROM [CES].[RebuiltParts]);
+
+-- Insert Vehicles from old schema
+INSERT INTO [BCES].[Vehicles] ([VehicleTypeID], [Make], [Model], [Year], [Engine], [Transmission], [Differential], [SOPNumber])
+SELECT 
+    (SELECT VehicleTypeID FROM [BCES].[VehicleTypes] WHERE VehicleTypeName = [VEH_SERIES_CODE]),
+    [MAKE],
+    [MODEL],
+    [YEAR],
+    [ENGINE],
+    [TRANSMISSION],
+    [DIFFERENTIAL],
+    [SOPNUMBER]
+FROM 
+    [CES].[VEHICLE_LIST]
+WHERE 
+    VEHICLE_LIST_ID IN (SELECT TOP 10 VEHICLE_LIST_ID FROM [CES].[VEHICLE_LIST]);
+
+-- Insert LabourTasks from old schema
+INSERT INTO [BCES].[LabourTasks] ([RebuiltPartID], [TaskDescription], [LabourPosition], [CostCentreID], [PercentUsage], [HoursRequiredH], [HoursRequiredM])
+SELECT 
+    NULL, -- Assuming no direct RebuiltPartID mapping
+    [TASK_DESCRIPTION],
+    [LABOUR_POSITION],
+    (SELECT BusinessEntityID FROM [BCES].[BusinessEntities] WHERE Code = [COST_CENTRE]),
+    [PERCENT_USAGE],
+    [HOURS_REQUIRED_H],
+    [HOURS_REQUIRED_M]
+FROM 
+    [CES].[LABOUR_TASKS]
+WHERE 
+    LabourTaskID IN (SELECT TOP 10 LabourTaskID FROM [CES].[LABOUR_TASKS]);
+
+-- Insert LabourRates from old schema
+INSERT INTO [BCES].[LabourRates] ([TaskID], [CostCentreID], [RatePerHour])
+SELECT 
+    (SELECT LabourTaskID FROM [BCES].[LabourTasks] WHERE TaskDescription = [TASK_DESCRIPTION]),
+    (SELECT BusinessEntityID FROM [BCES].[BusinessEntities] WHERE Code = [COST_CENTRE]),
+    [RATE_PER_HOUR]
+FROM 
+    [CES].[LABOUR_RATES]
+WHERE 
+    LabourRateID IN (SELECT TOP 10 LabourRateID FROM [CES].[LABOUR_RATES]);
+
+-- Insert Employees from old schema
+INSERT INTO [BCES].[Employees] ([EmployeeName], [RoleID])
+SELECT 
+    [EMPLOYEE_NAME],
+    (SELECT RoleID FROM [BCES].[EmployeeRoles] WHERE RoleName = [ROLE_NAME])
+FROM 
+    [CES].[EMPLOYEES]
+WHERE 
+    EmployeeID IN (SELECT TOP 10 EmployeeID FROM [CES].[EMPLOYEES]);
+
+-- Insert EmployeeLabour from old schema
+INSERT INTO [BCES].[EmployeeLabour] ([EmployeeID], [LabourTaskID])
+SELECT 
+    (SELECT EmployeeID FROM [BCES].[Employees] WHERE EmployeeName = [EMPLOYEE_NAME]),
+    (SELECT LabourTaskID FROM [BCES].[LabourTasks] WHERE TaskDescription = [TASK_DESCRIPTION])
+FROM 
+    [CES].[EMPLOYEE_LABOUR]
+WHERE 
+    ID IN (SELECT TOP 10 ID FROM [CES].[EMPLOYEE_LABOUR]);
+
+-- Insert LabourSummary from old schema
+INSERT INTO [BCES].[LabourSummary] ([SummaryTypeID], [LabourType], [CostCentre], [Task], [Usage], [Time], [RatePerHour], [TotalCost], [ExtendedTime], [EstimateType], [EstimateNumber], [WrenchTime])
+SELECT 
+    1, -- Assuming SummaryTypeID is always 1 for LabourSummary
+    [LABOUR_TYPE],
+    [COST_CENTRE],
+    [TASK],
+    [USAGE],
+    [TIME],
+    [RATE_PER_HOUR],
+    [TOTAL_COST],
+    [EXTENDED_TIME],
+    [ESTIMATE_TYPE],
+    [ESTIMATE_NUMBER],
+    [WRENCH_TIME]
+FROM 
+    [CES].[ALL_LABOUR_SUMMARY]
+WHERE 
+    SummaryID IN (SELECT TOP 10 SummaryID FROM [CES].[ALL_LABOUR_SUMMARY]);
+
+-- Insert MaterialSummary from old schema
+INSERT INTO [BCES].[MaterialSummary] ([SummaryTypeID], [AssemblyArea], [CostCentre], [TotalCost], [TaxableCost], [RBReference], [TotalUnitCost])
+SELECT 
+    2, -- Assuming SummaryTypeID is always 2 for MaterialSummary
+    [ASSEMBLY_AREA],
+    [COST_CENTRE],
+    [TOTAL_COST],
+    [TAXABLE_COST],
+    [RB_REFERENCE],
+    [TOTAL_UNIT_COST]
+FROM 
+    [CES].[ALL_MATERIAL_SUMMARY]
+WHERE 
+    SummaryID IN (SELECT TOP 10 SummaryID FROM [CES].[ALL_MATERIAL_SUMMARY]);
