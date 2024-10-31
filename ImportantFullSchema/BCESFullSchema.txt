@@ -1,152 +1,331 @@
--- Schema: BCES
--- Complete schema with referenced tables for a normalized structure
+-- Create the BCES schema if it doesn't exist
+IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = 'BCES')
+BEGIN
+    EXEC('CREATE SCHEMA BCES');
+END
 
--- Create EntityTypes Table
-CREATE TABLE [BCES].[EntityTypes] (
-    [EntityTypeID] INT IDENTITY(1,1) PRIMARY KEY,
-    [EntityTypeName] NVARCHAR(50) NOT NULL
+-- Grant necessary permissions to the user
+DECLARE @schemaName NVARCHAR(128) = 'BCES';
+DECLARE @userName NVARCHAR(128) = 'your_username'; -- Replace with your username
+
+EXEC sp_addrolemember 'db_owner', @userName; -- Grant db_owner role for simplicity, adjust as needed
+
+-- Disable all foreign key constraints
+EXEC sp_msforeachtable "ALTER TABLE ? NOCHECK CONSTRAINT all";
+
+-- Drop existing tables if they exist
+IF OBJECT_ID('BCES.VehicleEstimates', 'U') IS NOT NULL
+    DROP TABLE BCES.VehicleEstimates;
+
+IF OBJECT_ID('BCES.OEMKits', 'U') IS NOT NULL
+    DROP TABLE BCES.OEMKits;
+
+IF OBJECT_ID('BCES.MakeVsBuyEstimates', 'U') IS NOT NULL
+    DROP TABLE BCES.MakeVsBuyEstimates;
+
+IF OBJECT_ID('BCES.LabourTaskDescriptions', 'U') IS NOT NULL
+    DROP TABLE BCES.LabourTaskDescriptions;
+
+IF OBJECT_ID('BCES.LabourTypes', 'U') IS NOT NULL
+    DROP TABLE BCES.LabourTypes;
+
+IF OBJECT_ID('BCES.SalaryRates', 'U') IS NOT NULL
+    DROP TABLE BCES.SalaryRates;
+
+IF OBJECT_ID('BCES.YearMakeModel', 'U') IS NOT NULL
+    DROP TABLE BCES.YearMakeModel;
+
+IF OBJECT_ID('BCES.ApplicationSettings', 'U') IS NOT NULL
+    DROP TABLE BCES.ApplicationSettings;
+
+IF OBJECT_ID('BCES.Engines', 'U') IS NOT NULL
+    DROP TABLE BCES.Engines;
+
+IF OBJECT_ID('BCES.EmployeeLabour', 'U') IS NOT NULL
+    DROP TABLE BCES.EmployeeLabour;
+
+IF OBJECT_ID('BCES.LabourTasks', 'U') IS NOT NULL
+    DROP TABLE BCES.LabourTasks;
+
+IF OBJECT_ID('BCES.Materials', 'U') IS NOT NULL
+    DROP TABLE BCES.Materials;
+
+IF OBJECT_ID('BCES.NonStockCodedParts', 'U') IS NOT NULL
+    DROP TABLE BCES.NonStockCodedParts;
+
+IF OBJECT_ID('BCES.PartTypes', 'U') IS NOT NULL
+    DROP TABLE BCES.PartTypes;
+
+IF OBJECT_ID('BCES.RebuiltParts', 'U') IS NOT NULL
+    DROP TABLE BCES.RebuiltParts;
+
+IF OBJECT_ID('BCES.StockCodedParts', 'U') IS NOT NULL
+    DROP TABLE BCES.StockCodedParts;
+
+IF OBJECT_ID('BCES.Suppliers', 'U') IS NOT NULL
+    DROP TABLE BCES.Suppliers;
+
+IF OBJECT_ID('BCES.CostCentres', 'U') IS NOT NULL
+    DROP TABLE BCES.CostCentres;
+
+IF OBJECT_ID('BCES.Transmissions', 'U') IS NOT NULL
+    DROP TABLE BCES.Transmissions;
+
+IF OBJECT_ID('BCES.Differentials', 'U') IS NOT NULL
+    DROP TABLE BCES.Differentials;
+
+-- Create new tables
+
+-- Table: Engines
+-- Requirements Satisfied: R15, R16
+CREATE TABLE BCES.Engines (
+    EngineID INT IDENTITY(1,1) PRIMARY KEY,
+    Name NVARCHAR(25)
 );
 
--- Create BusinessEntities Table
-CREATE TABLE [BCES].[BusinessEntities] (
-    [BusinessEntityID] INT IDENTITY(1,1) PRIMARY KEY,
-    [EntityTypeID] INT FOREIGN KEY REFERENCES [BCES].[EntityTypes](EntityTypeID),
-    [Code] NVARCHAR(20) NOT NULL,
-    [Description] NVARCHAR(100) NULL
+-- Table: PartTypes
+-- Requirements Satisfied: R1, R4, R6, R9, R10, R11, R12, R20, R21, R30, R31
+IF OBJECT_ID('BCES.PartTypes', 'U') IS NULL
+    CREATE TABLE BCES.PartTypes (
+        PartTypeID INT IDENTITY(1,1) PRIMARY KEY,
+        PartTypeName NVARCHAR(50)
+    );
+
+-- Table: Suppliers
+-- Requirements Satisfied: R2, R5, R13, R14, R21, R25, R26, R32, R33
+CREATE TABLE BCES.Suppliers (
+    SupplierID INT IDENTITY(1,1) PRIMARY KEY,
+    SupplierName NVARCHAR(100),
+    SupplierCode NVARCHAR(50),
+    SupplierContact NVARCHAR(100)
 );
 
--- Create Suppliers Table
-CREATE TABLE [BCES].[Suppliers] (
-    [SupplierID] INT IDENTITY(1,1) PRIMARY KEY,
-    [SupplierName] NVARCHAR(100) NOT NULL,
-    [ContactName] NVARCHAR(100) NULL,
-    [ContactEmail] NVARCHAR(100) NULL,
-    [Phone] NVARCHAR(20) NULL,
-    [Address] NVARCHAR(255) NULL
-);
--- Create PartTypes Table
-CREATE TABLE [BCES].[PartTypes] (
-    [PartTypeID] INT IDENTITY(1,1) PRIMARY KEY,
-    [PartTypeName] NVARCHAR(50) NOT NULL
+-- Table: ApplicationSettings
+-- Requirements Satisfied: R40
+CREATE TABLE BCES.ApplicationSettings (
+    SettingID INT IDENTITY(1,1) PRIMARY KEY,
+    LabourOverhead DECIMAL(5, 2),
+    FringeValue DECIMAL(5, 2),
+    NonProductiveAdjustment DECIMAL(5, 2),
+    TaxRate DECIMAL(5, 2),
+    Use NVARCHAR(50)
 );
 
--- Create CostCentres Table
-CREATE TABLE [BCES].[CostCentres] (
-    [CostCentreID] INT IDENTITY(1,1) PRIMARY KEY,
-    [CostCentreName] NVARCHAR(100) NOT NULL,
-    [Description] NVARCHAR(255) NULL
+-- Table: YearMakeModel
+-- Requirements Satisfied: R37
+CREATE TABLE BCES.YearMakeModel (
+    YearMakeModelID INT IDENTITY(1,1) PRIMARY KEY,
+    Make NVARCHAR(50),
+    Model NVARCHAR(50),
+    Year NVARCHAR(4)
 );
 
--- Create Parts Table (Unified Parts and RebuiltParts)
-CREATE TABLE [BCES].[Parts] (
-    [PartID] INT IDENTITY(1,1) PRIMARY KEY,
-    [PartTypeID] INT FOREIGN KEY REFERENCES [BCES].[PartTypes](PartTypeID),
-    [SupplierID] INT FOREIGN KEY REFERENCES [BCES].[Suppliers](SupplierID),
-    [CostCentreID] INT FOREIGN KEY REFERENCES [BCES].[CostCentres](CostCentreID),
-    [PartDescription] NVARCHAR(255) NULL,
-    [Keyword] NVARCHAR(100) NULL,
-    [Quantity] INT NOT NULL,
-    [UnitCost] DECIMAL(10, 2) NULL,
-    [CoreCost] DECIMAL(10, 2) NULL,
-    [IsRebuilt] BIT NOT NULL DEFAULT 0,
-    [RebuiltStockCode] NVARCHAR(50) NULL,
-    [CoreCode] NVARCHAR(50) NULL,
-    [SOPNumber] NVARCHAR(50) NULL,
-    [JobNumber] NVARCHAR(50) NULL
+-- Table: SalaryRates
+-- Requirements Satisfied: R36
+CREATE TABLE BCES.SalaryRates (
+    SalaryRateID INT IDENTITY(1,1) PRIMARY KEY,
+    WageGroup NVARCHAR(50),
+    RatePerHour DECIMAL(10, 2),
+    DateEntered DATETIME
 );
 
-
-
--- Create VehicleTypes Table
-CREATE TABLE [BCES].[VehicleTypes] (
-    [VehicleTypeID] INT IDENTITY(1,1) PRIMARY KEY,
-    [VehicleTypeName] NVARCHAR(50) NOT NULL
+-- Table: LabourTypes
+-- Requirements Satisfied: R35
+CREATE TABLE BCES.LabourTypes (
+    LabourTypeID INT IDENTITY(1,1) PRIMARY KEY,
+    LabourDefinition NVARCHAR(50),
+    RatePerHour DECIMAL(10, 2),
+    HoursPerWeek DECIMAL(10, 2),
+    DateEntered DATETIME,
+    OverheadType NVARCHAR(50)
 );
 
--- Create Vehicles Table
-CREATE TABLE [BCES].[Vehicles] (
-    [VehicleID] INT IDENTITY(1,1) PRIMARY KEY,
-    [VehicleTypeID] INT FOREIGN KEY REFERENCES [BCES].[VehicleTypes](VehicleTypeID),
-    [Make] NVARCHAR(25) NULL,
-    [Model] NVARCHAR(25) NULL,
-    [Year] NVARCHAR(4) NULL,
-    [Engine] NVARCHAR(25) NULL,
-    [Transmission] NVARCHAR(25) NULL,
-    [Differential] NVARCHAR(25) NULL,
-    [SOPNumber] NVARCHAR(30) NULL
+-- Table: LabourTaskDescriptions
+-- Requirements Satisfied: R34
+CREATE TABLE BCES.LabourTaskDescriptions (
+    LabourTaskDescriptionID INT IDENTITY(1,1) PRIMARY KEY,
+    TaskDescription NVARCHAR(200)
 );
 
--- Create VehicleParts Table
-CREATE TABLE [BCES].[VehicleParts] (
-    [VehicleID] INT FOREIGN KEY REFERENCES [BCES].[Vehicles](VehicleID),
-    [PartID] INT FOREIGN KEY REFERENCES [BCES].[Parts](PartID),
-    PRIMARY KEY ([VehicleID], [PartID])
+-- Table: MakeVsBuyEstimates
+-- Requirements Satisfied: R28, R29, R30, R31, R32, R33
+CREATE TABLE BCES.MakeVsBuyEstimates (
+    MakeVsBuyEstimateID INT IDENTITY(1,1) PRIMARY KEY,
+    MakeVsBuyNumber NVARCHAR(50),
+    Keyword NVARCHAR(100),
+    Description NVARCHAR(255),
+    NumberOfBusUsingComponent NVARCHAR(50),
+    VendorPartNumber NVARCHAR(50),
+    MMSBuyCode NVARCHAR(50),
+    RebuiltCode NVARCHAR(50),
+    CoreCode NVARCHAR(50),
+    CoreCost DECIMAL(10, 2),
+    ProjectedAnnualUsage NVARCHAR(50),
+    BenchNumber NVARCHAR(50),
+    SOPNumber NVARCHAR(50),
+    JobNumber NVARCHAR(50),
+    ExternalRebuiltCost DECIMAL(10, 2),
+    RemanufacturedExchangeCost DECIMAL(10, 2),
+    BuyNewCost DECIMAL(10, 2),
+    VehicleEstimateID INT FOREIGN KEY REFERENCES BCES.VehicleEstimates(VehicleEstimateID)
 );
 
--- Create LabourTasks Table
-CREATE TABLE [BCES].[LabourTasks] (
-    [LabourTaskID] INT IDENTITY(1,1) PRIMARY KEY,
-    [PartID] INT FOREIGN KEY REFERENCES [BCES].[Parts](PartID),
-    [TaskDescription] NVARCHAR(255) NOT NULL,
-    [LabourPosition] NVARCHAR(100) NOT NULL,
-    [CostCentreID] INT FOREIGN KEY REFERENCES [BCES].[CostCentres](CostCentreID),
-    [PercentUsage] DECIMAL(5, 2) NOT NULL,
-    [HoursRequired] DECIMAL(5, 2) NULL
+-- Table: OEMKits
+-- Requirements Satisfied: R17, R23, R24
+CREATE TABLE BCES.OEMKits (
+    OEMKitID INT IDENTITY(1,1) PRIMARY KEY,
+    PartNumber NVARCHAR(50),
+    KitDetailedDescription NVARCHAR(250),
+    BriefDescription NVARCHAR(250)
 );
 
--- Create LabourRates Table
-CREATE TABLE [BCES].[LabourRates] (
-    [LabourRateID] INT IDENTITY(1,1) PRIMARY KEY,
-    [LabourTaskID] INT FOREIGN KEY REFERENCES [BCES].[LabourTasks](LabourTaskID),
-    [CostCentreID] INT FOREIGN KEY REFERENCES [BCES].[CostCentres](CostCentreID),
-    [RatePerHour] DECIMAL(10, 2) NOT NULL
+-- Table: VehicleEstimates
+-- Requirements Satisfied: R15, R16, R17
+CREATE TABLE BCES.VehicleEstimates (
+    VehicleEstimateID INT IDENTITY(1,1) PRIMARY KEY,
+    VehicleSeriesCode NVARCHAR(20),
+    NumberOfVehicles NVARCHAR(50),
+    ProjectDescription NVARCHAR(200),
+    DateEntered DATETIME,
+    EnteredBy NVARCHAR(25),
+    ModifiedLastBy NVARCHAR(25),
+    Make NVARCHAR(25),
+    Model NVARCHAR(25),
+    Year NVARCHAR(25),
+    EngineID INT FOREIGN KEY REFERENCES BCES.Engines(EngineID),
+    Transmission NVARCHAR(25),
+    Differential NVARCHAR(25),
+    SOPNumber NVARCHAR(25),
+    YearMakeModelID INT FOREIGN KEY REFERENCES BCES.YearMakeModel(YearMakeModelID),
+    TransmissionID INT FOREIGN KEY REFERENCES BCES.Transmissions(TransmissionID),
+    DifferentialID INT FOREIGN KEY REFERENCES BCES.Differentials(DifferentialID)
 );
 
--- Create EmployeeRoles Table
-CREATE TABLE [BCES].[EmployeeRoles] (
-    [RoleID] INT IDENTITY(1,1) PRIMARY KEY,
-    [RoleName] NVARCHAR(50) NOT NULL
+-- Table: BusSeries
+-- Requirements Satisfied: R1, R4, R6, R7, R9, R10, R11, R12, R19, R20, R21, R30, R31, R33
+CREATE TABLE BCES.BusSeries (
+    BusSeriesID INT IDENTITY(1,1) PRIMARY KEY,
+    BusSeriesCode NVARCHAR(20),
+    BusSeriesDescription NVARCHAR(100)
 );
 
--- Create Employees Table
-CREATE TABLE [BCES].[Employees] (
-    [EmployeeID] INT IDENTITY(1,1) PRIMARY KEY,
-    [EmployeeName] NVARCHAR(100) NOT NULL,
-    [RoleID] INT FOREIGN KEY REFERENCES [BCES].[EmployeeRoles](RoleID)
+-- Table: RebuiltParts
+-- Requirements Satisfied: R1, R4, R6, R7, R9, R10, R11, R12, R19, R20, R21, R30, R31, R33
+CREATE TABLE BCES.RebuiltParts (
+    RebuiltPartID INT IDENTITY(1,1) PRIMARY KEY,
+    RebuiltStockCode NVARCHAR(50),
+    Description NVARCHAR(255),
+    Keyword NVARCHAR(100),
+    JobNumber NVARCHAR(50),
+    MMSBuyCode NVARCHAR(50),
+    ToreCode NVARCHAR(50),
+    CoreCost DECIMAL(10, 2),
+    SOPNumber NVARCHAR(50),
+    BusSeriesID INT FOREIGN KEY REFERENCES BCES.BusSeries(BusSeriesID),
+    PartTypeID INT FOREIGN KEY REFERENCES BCES.PartTypes(PartTypeID)
 );
 
--- Create EmployeeLabour Table
-CREATE TABLE [BCES].[EmployeeLabour] (
-    [EmployeeID] INT FOREIGN KEY REFERENCES [BCES].[Employees](EmployeeID),
-    [LabourTaskID] INT FOREIGN KEY REFERENCES [BCES].[LabourTasks](LabourTaskID),
-    PRIMARY KEY ([EmployeeID], [LabourTaskID])
+-- Table: NonStockCodedParts
+-- Requirements Satisfied: R2, R3, R5, R13, R14, R21, R25, R26, R32, R33
+CREATE TABLE BCES.NonStockCodedParts (
+    NonStockPartID INT IDENTITY(1,1) PRIMARY KEY,
+    RebuiltPartID INT FOREIGN KEY REFERENCES BCES.RebuiltParts(RebuiltPartID),
+    SupplierID INT FOREIGN KEY REFERENCES BCES.Suppliers(SupplierID),
+    PartDescription NVARCHAR(255),
+    Keyword NVARCHAR(100),
+    Quantity INT,
+    UnitCost DECIMAL(10, 2),
+    CoreCost DECIMAL(10, 2),
+    CostCentreID INT FOREIGN KEY REFERENCES BCES.CostCentres(CostCentreID),
+    SupplierName NVARCHAR(100),
+    SupplierNumber NVARCHAR(100),
+    PartUnitCost DECIMAL(10, 2)
 );
 
--- Create SummaryTypes Table
-CREATE TABLE [BCES].[SummaryTypes] (
-    [SummaryTypeID] INT IDENTITY(1,1) PRIMARY KEY,
-    [SummaryTypeName] NVARCHAR(50) NOT NULL
+-- Table: StockCodedParts
+-- Requirements Satisfied: R11, R12, R20, R21, R30, R31
+CREATE TABLE BCES.StockCodedParts (
+    StockPartID INT IDENTITY(1,1) PRIMARY KEY,
+    RebuiltPartID INT FOREIGN KEY REFERENCES BCES.RebuiltParts(RebuiltPartID),
+    MMSStockCode NVARCHAR(50),
+    PartType NVARCHAR(50),
+    PartDescription NVARCHAR(255),
+    CostCentreID INT FOREIGN KEY REFERENCES BCES.CostCentres(CostCentreID),
+    PercentUsage DECIMAL(5, 2),
+    Quantity INT,
+    LastRevised DATETIME,
+    CoreCost DECIMAL(10, 2)
 );
 
--- Create Summaries Table (Unified LabourSummary and MaterialSummary)
-CREATE TABLE [BCES].[Summaries] (
-    [SummaryID] INT IDENTITY(1,1) PRIMARY KEY,
-    [SummaryTypeID] INT FOREIGN KEY REFERENCES [BCES].[SummaryTypes](SummaryTypeID),
-    [LabourType] NVARCHAR(50) NULL,
-    [CostCentreID] INT FOREIGN KEY REFERENCES [BCES].[CostCentres](CostCentreID),
-    [Task] NVARCHAR(200) NULL,
-    [Usage] NUMERIC(18, 2) NULL,
-    [Time] NUMERIC(18, 2) NULL,
-    [RatePerHour] NUMERIC(18, 2) NULL,
-    [TotalCost] DECIMAL(18, 2) NULL,
-    [ExtendedTime] NVARCHAR(8) NULL,
-    [EstimateType] NVARCHAR(3) NULL,
-    [EstimateNumber] NVARCHAR(25) NULL,
-    [WrenchTime] NVARCHAR(25) NULL,
-    [AssemblyArea] NVARCHAR(50) NULL,
-    [TaxableCost] DECIMAL(18, 2) NULL,
-    [RBReference] NVARCHAR(25) NULL,
-    [TotalUnitCost] DECIMAL(18, 2) NULL
+-- Table: Materials
+-- Requirements Satisfied: R9, R10, R11, R12, R13, R14, R30, R31, R32, R33
+CREATE TABLE BCES.Materials (
+    MaterialID INT IDENTITY(1,1) PRIMARY KEY,
+    RebuiltPartID INT FOREIGN KEY REFERENCES BCES.RebuiltParts(RebuiltPartID),
+    MaterialType INT,
+    Quantity INT,
+    PercentUsage DECIMAL(5, 2),
+    UnitCost DECIMAL(10, 2),
+    RebuiltNumber NVARCHAR(50),
+    Keyword NVARCHAR(100),
+    Description NVARCHAR(255),
+    LastRevised DATETIME,
+    PartCost DECIMAL(10, 2)
 );
 
+-- Table: LabourTasks
+-- Requirements Satisfied: R7, R8, R18, R29
+CREATE TABLE BCES.LabourTasks (
+    LabourTaskID INT IDENTITY(1,1) PRIMARY KEY,
+    RebuiltPartID INT FOREIGN KEY REFERENCES BCES.RebuiltParts(RebuiltPartID),
+    TaskDescriptionID INT FOREIGN KEY REFERENCES BCES.LabourTaskDescriptions(LabourTaskDescriptionID),
+    LabourPosition NVARCHAR(100),
+    CostCentreID INT FOREIGN KEY REFERENCES BCES.CostCentres(CostCentreID),
+    PercentUsage DECIMAL(5, 2),
+    HoursRequiredH INT,
+    HoursRequiredM INT
+);
 
+-- Table: EmployeeLabour
+-- Requirements Satisfied: R7
+CREATE TABLE BCES.EmployeeLabour (
+    EmployeeLabourID INT IDENTITY(1,1) PRIMARY KEY,
+    LabourDefn NVARCHAR(50),
+    DateEntered DATETIME,
+    LinkNumber NVARCHAR(25),
+    TypeID NVARCHAR(5),
+    CostCentre NVARCHAR(5),
+    Task NVARCHAR(200),
+    LabourType NVARCHAR(5),
+    Usage NVARCHAR(25),
+    HrsReqd NVARCHAR(25),
+    AdjHrs NVARCHAR(25),
+    DateRevised DATE,
+    TimeAddition DECIMAL(18, 2),
+    RebuiltPartNum NVARCHAR(30),
+    LastModifiedBy NVARCHAR(25),
+    LabourTypeID INT FOREIGN KEY REFERENCES BCES.LabourTypes(LabourTypeID),
+    SalaryRateID INT FOREIGN KEY REFERENCES BCES.SalaryRates(SalaryRateID)
+);
+
+-- Table: CostCentres
+-- Requirements Satisfied: R7, R8, R11, R12, R13, R14, R18, R20, R21, R22, R25, R26, R29, R30, R31, R32, R33
+CREATE TABLE BCES.CostCentres (
+    CostCentreID INT IDENTITY(1,1) PRIMARY KEY,
+    CostCentreCode NVARCHAR(20),
+    CostCentreDescription NVARCHAR(100)
+);
+
+-- Table: Transmissions
+-- Requirements Satisfied: R15, R16
+CREATE TABLE BCES.Transmissions (
+    TransmissionID INT IDENTITY(1,1) PRIMARY KEY,
+    Name NVARCHAR(25)
+);
+
+-- Table: Differentials
+-- Requirements Satisfied: R15, R16
+CREATE TABLE BCES.Differentials (
+    DifferentialID INT IDENTITY(1,1) PRIMARY KEY,
+    Name NVARCHAR(25)
+);
