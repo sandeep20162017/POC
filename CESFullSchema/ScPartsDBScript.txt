@@ -1,0 +1,143 @@
+USE [BCES]
+GO
+
+-- Drop existing foreign key constraints
+DECLARE @sql NVARCHAR(MAX) = N''
+
+-- Drop foreign key constraints referencing KitsSummary
+SELECT @sql = @sql + N'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(parent_object_id)) + '.' + QUOTENAME(OBJECT_NAME(parent_object_id)) + 
+                ' DROP CONSTRAINT ' + QUOTENAME(name) + ';'
+FROM sys.foreign_keys
+WHERE referenced_object_id = OBJECT_ID('BCES.KitsSummary')
+
+EXEC sp_executesql @sql
+
+-- Drop foreign key constraints referencing StockParts
+SET @sql = N''
+
+SELECT @sql = @sql + N'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(parent_object_id)) + '.' + QUOTENAME(OBJECT_NAME(parent_object_id)) + 
+                ' DROP CONSTRAINT ' + QUOTENAME(name) + ';'
+FROM sys.foreign_keys
+WHERE referenced_object_id = OBJECT_ID('BCES.StockParts')
+
+EXEC sp_executesql @sql
+
+-- Drop foreign key constraints referencing ScPartsUsed
+SET @sql = N''
+
+SELECT @sql = @sql + N'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(parent_object_id)) + '.' + QUOTENAME(OBJECT_NAME(parent_object_id)) + 
+                ' DROP CONSTRAINT ' + QUOTENAME(name) + ';'
+FROM sys.foreign_keys
+WHERE referenced_object_id = OBJECT_ID('BCES.ScPartsUsed')
+
+EXEC sp_executesql @sql
+
+-- Drop existing KitsSummary, StockParts, and ScPartsUsed tables
+DROP TABLE IF EXISTS [BCES].[KitsSummary];
+DROP TABLE IF EXISTS [BCES].[StockParts];
+DROP TABLE IF EXISTS [BCES].[ScPartsUsed];
+
+-- Recreate the KitsUsed table (if it does not exist)
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'KitsUsed' AND schema_id = SCHEMA_ID('BCES'))
+BEGIN
+    CREATE TABLE [BCES].[KitsUsed](
+        [KitsUsedId] [int] NOT NULL,
+        [PartNumber] [nvarchar](3) NULL,
+        [DateEntered] [datetime] NULL,
+        [UserEntered] [nvarchar](30) NULL,
+        [LastModifiedDate] [datetime] NULL,
+        [LinkCode] [nvarchar](30) NULL,
+    PRIMARY KEY CLUSTERED 
+    (
+        [KitsUsedId] ASC
+    )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+    ) ON [PRIMARY]
+END
+GO
+
+-- Recreate the KitsSummary table
+CREATE TABLE [BCES].[KitsSummary](
+    [KitsSummaryId] [int] NOT NULL,
+    [KitsUsedId] [int] NULL,
+    [StockCodedPartsId] [varchar](30) NULL, -- Changed to varchar(30)
+    [KitsMasterlistId] [int] NULL,
+    [OtherSubKitsColumns] [nvarchar](255) NULL,
+PRIMARY KEY CLUSTERED 
+(
+    [KitsSummaryId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+-- Add foreign keys to KitsSummary
+ALTER TABLE [BCES].[KitsSummary] WITH CHECK ADD FOREIGN KEY([KitsUsedId])
+REFERENCES [BCES].[KitsUsed] ([KitsUsedId])
+GO
+
+-- Recreate the ScPartsUsed table
+CREATE TABLE [BCES].[ScPartsUsed](
+    [ScPartsUsedId] [int] IDENTITY(1,1) NOT NULL,
+    [OrigSuppNum] [nvarchar](50) NULL,
+    [OrigSupplierName] [nvarchar](50) NULL,
+    [CostCentre] [nvarchar](4) NULL,
+    [QtyReqd] [nvarchar](10) NULL,
+    [PercentUsage] [nvarchar](10) NULL,
+    [DateEntered] [datetime] NULL,
+    [EnteredBy] [nvarchar](25) NULL,
+    [LastModifiedBy] [nvarchar](25) NULL,
+    [LastModifiedDate] [datetime] NULL,
+    [LinkCode] [nvarchar](30) NULL,
+    [Cost] [numeric](18, 2) NULL,
+    [LinkType] [nvarchar](3) NULL,
+    [CoreCost] [numeric](18, 2) NULL,
+    [MmsStockCode] [varchar](30) NULL, -- Changed to varchar(30)
+ CONSTRAINT [PK_ScPartsUsed] PRIMARY KEY CLUSTERED 
+(
+    [ScPartsUsedId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+-- Recreate the StockParts table
+CREATE TABLE [BCES].[StockParts](
+    [MMSStockCode] [varchar](30) NOT NULL, -- Changed to varchar(30)
+    [ScPartsUsedId] [int] NULL,
+    [StockCodedPartsId] [int] NULL,
+    [OtherStockCodedPartsColumns] [nvarchar](255) NULL,
+    [CorePartNumber] [nvarchar](30) NULL,
+    [PartType] [nvarchar](50) NULL,
+    [JobNumber] [nvarchar](30) NULL,
+    [DetailedDesc] [nvarchar](500) NULL,
+    [DateEntered] [nvarchar](8) NULL,
+    [ItemRefNumber] [nvarchar](16) NULL,
+    [OverheadType] [numeric](9, 0) NULL,
+    [CoreCharge] [numeric](9, 0) NULL,
+    [PartCost] [numeric](9, 0) NULL,
+    [LastModifiedDate] [datetime] NULL,
+    [LastModifiedBy] [nvarchar](30) NULL,
+    [AddedBy] [nvarchar](30) NULL,
+    [MmsNewCost] [numeric](15, 5) NULL,
+    [OemPartCost] [numeric](9, 0) NULL,
+    [MmsSyncDate] [datetime] NULL,
+    [OrigSupplierNum] [nvarchar](25) NULL,
+    [OrigSupplierName] [nvarchar](40) NULL,
+ CONSTRAINT [PK_MMSStockCode] PRIMARY KEY CLUSTERED 
+(
+    [MMSStockCode] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+-- Add foreign keys to StockParts
+ALTER TABLE [BCES].[StockParts] WITH CHECK ADD FOREIGN KEY([ScPartsUsedId])
+REFERENCES [BCES].[ScPartsUsed] ([ScPartsUsedId])
+GO
+
+ALTER TABLE [BCES].[StockParts] WITH CHECK ADD FOREIGN KEY([StockCodedPartsId])
+REFERENCES [BCES].[KitsSummary] ([KitsSummaryId])
+GO
+
+-- Add foreign key to ScPartsUsed
+ALTER TABLE [BCES].[ScPartsUsed] WITH CHECK ADD FOREIGN KEY([MmsStockCode])
+REFERENCES [BCES].[StockParts] ([MMSStockCode])
+GO

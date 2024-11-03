@@ -1,0 +1,55 @@
+USE [BCES]
+GO
+
+-- Drop foreign key constraints referencing StockParts
+ALTER TABLE [BCES].[KitsSummary] DROP CONSTRAINT [FK__KitsSumma__Stock__07C12930]
+GO
+
+-- Drop existing primary key constraint on StockParts
+DECLARE @PKName NVARCHAR(128);
+
+SELECT @PKName = name
+FROM sys.key_constraints
+WHERE type = 'PK'
+AND parent_object_id = OBJECT_ID('BCES.StockParts');
+
+IF @PKName IS NOT NULL
+BEGIN
+    EXEC('ALTER TABLE BCES.StockParts DROP CONSTRAINT ' + @PKName);
+END
+
+-- Rename columns to use camel case
+EXEC sp_rename 'BCES.StockParts.StockPartsId', 'MMSStockCode', 'COLUMN';
+EXEC sp_rename 'BCES.StockParts.ScPartsUsedId', 'ScPartsUsedId', 'COLUMN';
+EXEC sp_rename 'BCES.StockParts.StockCodedPartsId', 'StockCodedPartsId', 'COLUMN';
+EXEC sp_rename 'BCES.StockParts.OtherStockCodedPartsColumns', 'OtherStockCodedPartsColumns', 'COLUMN';
+
+-- Add the new primary key constraint with the desired name
+ALTER TABLE BCES.StockParts
+ADD CONSTRAINT PK_MMSStockCode PRIMARY KEY (MMSStockCode);
+
+-- Add the remaining columns with camel case names
+ALTER TABLE BCES.StockParts
+ADD
+    CorePartNumber NVARCHAR(30),
+    PartType NVARCHAR(50),
+    JobNumber NVARCHAR(30),
+    DetailedDesc NVARCHAR(500),
+    DateEntered NVARCHAR(8),
+    ItemRefNumber NVARCHAR(16),
+    OverheadType NUMERIC(9, 0),
+    CoreCharge NUMERIC(9, 0),
+    PartCost NUMERIC(9, 0),
+    LastModifiedDate DATETIME,
+    LastModifiedBy NVARCHAR(30),
+    AddedBy NVARCHAR(30),
+    MmsNewCost NUMERIC(15, 5),
+    OemPartCost NUMERIC(9, 0),
+    MmsSyncDate DATETIME,
+    OrigSupplierNum NVARCHAR(25),
+    OrigSupplierName NVARCHAR(40);
+
+-- Recreate the foreign key constraint in KitsSummary
+ALTER TABLE [BCES].[KitsSummary]  WITH CHECK ADD FOREIGN KEY([StockCodedPartsId])
+REFERENCES [BCES].[StockParts] ([MMSStockCode])
+GO
