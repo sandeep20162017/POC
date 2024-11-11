@@ -1,17 +1,16 @@
-public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+public void ConfigureServices(IServiceCollection services)
 {
-    // Use session
-    app.UseSession();
-
-    // Use custom middleware to set session variables
-    app.UseMiddleware<RoleSessionMiddleware>();
-
-    // Other middleware
-    app.UseRouting();
-    app.UseEndpoints(endpoints =>
+    // Add session services
+    services.AddSession(options =>
     {
-        endpoints.MapControllerRoute(
-            name: "default",
-            pattern: "{controller=Home}/{action=Index}/{id?}");
+        options.IdleTimeout = TimeSpan.FromMinutes(30);
+        options.Cookie.HttpOnly = true;
+        options.Cookie.IsEssential = true;
     });
+
+    // Add IHttpContextAccessor
+    services.AddHttpContextAccessor();
+
+    // Add other services
+    services.AddControllersWithViews();
 }
