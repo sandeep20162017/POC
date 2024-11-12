@@ -1,5 +1,7 @@
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
 using Microsoft.Extensions.Configuration;
 using System.Collections.Generic;
 using System.Data.SqlClient;
@@ -9,9 +11,7 @@ using BCES.Models.Parts;
 
 namespace BCES.Parts.Controllers
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    public class NscPartsUsedController : ControllerBase
+    public class NscPartsUsedController : Controller
     {
         private readonly string _connectionString;
 
@@ -20,29 +20,23 @@ namespace BCES.Parts.Controllers
             _connectionString = configuration.GetConnectionString("DefaultConnection");
         }
 
-        // GET: api/NscPartsUsed/view
-        [HttpGet("view")]
-        public async Task<ActionResult<IEnumerable<NscPartsUsedViewModel>>> GetNscPartsUsedView()
+        // GET: NscPartsUsed/Index
+        [HttpGet]
+        public IActionResult Index()
         {
-            var query = @"
-                SELECT 
-                    nspu.OrigSuppNum,
-                    nspu.OrigSupplierName,
-                    nspu.Keyword,
-                    nspu.PartDescription,
-                    nspu.PerUnitCost,
-                    nspu.Id
-                FROM 
-                    SCES.NscPartsUsed nspu;";
-
-            using (var connection = new SqlConnection(_connectionString))
-            {
-                var results = await connection.QueryAsync<NscPartsUsedViewModel>(query);
-                return Ok(results.ToList());
-            }
+            return View();
         }
 
-        // POST: api/NscPartsUsed
+        // POST: NscPartsUsed/GetNscPartsUsedView
+        [HttpPost]
+        public async Task<ActionResult> GetNscPartsUsedView([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid (you can use Dapper or any other method)
+            var model = await GetNscPartsUsedData();
+            return Json(model.ToDataSourceResult(request));
+        }
+
+        // POST: NscPartsUsed/CreateNscPartsUsed
         [HttpPost]
         public async Task<IActionResult> CreateNscPartsUsed([FromBody] NscPartsUsedViewModel nscPartsUsed)
         {
@@ -62,7 +56,7 @@ namespace BCES.Parts.Controllers
             }
         }
 
-        // PUT: api/NscPartsUsed/{id}
+        // PUT: NscPartsUsed/UpdateNscPartsUsed/{id}
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateNscPartsUsed(int id, [FromBody] NscPartsUsedViewModel nscPartsUsed)
         {
@@ -89,7 +83,7 @@ namespace BCES.Parts.Controllers
             }
         }
 
-        // DELETE: api/NscPartsUsed/{id}
+        // DELETE: NscPartsUsed/DeleteNscPartsUsed/{id}
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteNscPartsUsed(int id)
         {
@@ -101,6 +95,25 @@ namespace BCES.Parts.Controllers
             {
                 await connection.ExecuteAsync(deleteQuery, new { Id = id });
                 return Ok();
+            }
+        }
+
+        private async Task<IEnumerable<NscPartsUsedViewModel>> GetNscPartsUsedData()
+        {
+            var query = @"
+                SELECT 
+                    nspu.OrigSuppNum,
+                    nspu.OrigSupplierName,
+                    nspu.Keyword,
+                    nspu.PartDescription,
+                    nspu.PerUnitCost,
+                    nspu.Id
+                FROM 
+                    SCES.NscPartsUsed nspu;";
+
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                return await connection.QueryAsync<NscPartsUsedViewModel>(query);
             }
         }
     }
