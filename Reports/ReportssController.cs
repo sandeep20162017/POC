@@ -1,21 +1,28 @@
 using Microsoft.AspNetCore.Mvc;
-using Telerik.Reporting.Services;
 using Telerik.Reporting.Services.AspNetCore;
+using Telerik.Reporting.Services;
 
-[Route("api/reports")]
-[ApiController]
-public class ReportsController : ReportsControllerBase
+namespace BCES.Controllers.Reports
 {
-    public ReportsController(IReportServiceConfiguration reportServiceConfiguration)
-        : base(reportServiceConfiguration)
+    public class ReportsController : BaseController
     {
-    }
+        private readonly IReportServiceConfiguration _reportServiceConfiguration;
 
-    protected override CatalogItem ResolveReport(string report)
-    {
-        // Load the report definition from the file system or any other source
-        var reportProcessor = new Telerik.Reporting.Processing.ReportProcessor();
-        var reportSource = new Telerik.Reporting.UriReportSource { Uri = report + ".trdp" };
-        return new CatalogItem { Name = report, Type = "report", Path = report };
+        public ReportsController(
+            DapperContext dapper, 
+            IHttpContextAccessor httpContextAccessor, 
+            IReportServiceConfiguration reportServiceConfiguration)
+            : base(dapper, httpContextAccessor)
+        {
+            _reportServiceConfiguration = reportServiceConfiguration;
+        }
+
+        [Route("Reports/{reportName}")]
+        public IActionResult ReportViewer(string reportName)
+        {
+            // Pass the report name to the view
+            ViewData["ReportName"] = reportName;
+            return View();
+        }
     }
 }

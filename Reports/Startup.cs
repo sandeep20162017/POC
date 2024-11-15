@@ -1,29 +1,25 @@
-public void ConfigureServices(IServiceCollection services)
+using Telerik.Reporting.Cache.File;
+using Telerik.Reporting.Services;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Register Telerik Reporting services
+builder.Services.AddControllersWithViews();
+builder.Services.AddSingleton<IReportSourceResolver>(sp =>
+    new ReportFileResolver(System.IO.Path.Combine(builder.Environment.ContentRootPath, "Reports"))
+        .AddFallbackResolver());
+builder.Services.AddSingleton<IReportServiceConfiguration>(sp => new ReportServiceConfiguration
 {
-    services.AddControllers();
+    Storage = new FileStorage(),
+    ReportSourceResolver = sp.GetRequiredService<IReportSourceResolver>(),
+    HostAppId = "MyApp",
+    ReportSharingTimeout = 60,
+    MaxConcurrentReportExecutions = 2
+});
 
-    // Add Telerik Reporting service
-    services.TryAddSingleton<IReportServiceConfiguration>(sp =>
-        new ReportServiceConfiguration
-        {
-            ReportingEngineConfiguration = ConfigurationHelper.ResolveConfiguration(sp.GetService<IWebHostEnvironment>()),
-            HostAppId = "YourAppId",
-            Storage = new FileStorage(),
-            ReportSourceResolver = new UriReportSourceResolver(System.IO.Path.Combine(sp.GetService<IWebHostEnvironment>().ContentRootPath, "Reports"))
-        });
-}
+var app = builder.Build();
 
-public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
-{
-    if (env.IsDevelopment())
-    {
-        app.UseDeveloperExceptionPage();
-    }
-
-    app.UseRouting();
-
-    app.UseEndpoints(endpoints =>
-    {
-        endpoints.MapControllers();
-    });
-}
+app.UseStaticFiles();
+app.UseRouting();
+app.MapControllers();
+app.Run();
