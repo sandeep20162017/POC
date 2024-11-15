@@ -1,20 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
-using Telerik.Reporting.Services.AspNetCore;
-using Telerik.Reporting.Services;
 
 namespace BCES.Controllers.Reports
 {
     public class ReportsController : BaseController
     {
-        private readonly IReportServiceConfiguration _reportServiceConfiguration;
-
-        public ReportsController(
-            DapperContext dapper, 
-            IHttpContextAccessor httpContextAccessor, 
-            IReportServiceConfiguration reportServiceConfiguration)
+        public ReportsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor)
             : base(dapper, httpContextAccessor)
         {
-            _reportServiceConfiguration = reportServiceConfiguration;
         }
 
         [Route("Reports/{reportName}")]
@@ -22,7 +14,7 @@ namespace BCES.Controllers.Reports
         {
             // Pass the report name to the view
             ViewData["ReportName"] = reportName;
-            return View();
+            return View("DynamicReportViewer");
         }
     }
 }
