@@ -1,0 +1,53 @@
+// UserManagementController.cs
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System.Data;
+using System.Linq;
+
+public class UserManagementController : Controller
+{
+    private readonly IDbConnection _dbConnection;
+
+    public UserManagementController(IDbConnection dbConnection)
+    {
+        _dbConnection = dbConnection;
+    }
+
+    [HttpGet]
+    public IActionResult GetSites(int userId)
+    {
+        var sites = _dbConnection.Query<SiteModel>("SELECT SiteId, SiteName FROM SCES.Sites").ToList();
+
+        // Fetch selected sites for the user
+        var userSiteIds = _dbConnection.Query<int>(
+            "SELECT SiteId FROM SCES.UserSites WHERE UserId = @UserId", new { UserId = userId }).ToList();
+
+        // Mark selected sites
+        sites.ForEach(site => site.IsSelected = userSiteIds.Contains(site.SiteId));
+
+        return PartialView("_SiteCheckBoxGroup", sites);
+    }
+
+    [HttpPost]
+    public IActionResult SaveUserSites(int userId, List<int> selectedSiteIds)
+    {
+        try
+        {
+            // Delete existing user sites
+            _dbConnection.Execute("DELETE FROM SCES.UserSites WHERE UserId = @UserId", new { UserId = userId });
+
+            // Insert new user sites
+            foreach (var siteId in selectedSiteIds)
+            {
+                _dbConnection.Execute("INSERT INTO SCES.UserSites (UserId, SiteId) VALUES (@UserId, @SiteId)", 
+                    new { UserId = userId, SiteId = siteId });
+            }
+
+            return Json(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            return Json(new { success = false, message = ex.Message });
+        }
+    }
+}
