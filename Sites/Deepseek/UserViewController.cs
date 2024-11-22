@@ -17,6 +17,8 @@ namespace BCES.Admin.Controllers
 
         public IActionResult Index()
         {
+            ViewBag.Roles = GetRoles();
+            ViewBag.Sites = GetSites();
             return View();
         }
 
@@ -34,9 +36,9 @@ namespace BCES.Admin.Controllers
                     (user, site) =>
                     {
                         if (user.SelectedSites == null)
-                            user.SelectedSites = new List<int>();
+                            user.SelectedSites = new List<string>().ToArray();
                         if (site != null)
-                            user.SelectedSites.Add(site.SiteId);
+                            user.SelectedSites = user.SelectedSites.Concat(new[] { site.SiteId.ToString() }).ToArray();
                         return user;
                     },
                     splitOn: "SiteId"
@@ -62,7 +64,7 @@ namespace BCES.Admin.Controllers
                     new { model.UserName, model.SelectedRole }
                 );
 
-                foreach (var siteId in model.SelectedSites)
+                foreach (var siteId in model.SelectedSites.Select(int.Parse))
                 {
                     _dbConnection.Execute(
                         "INSERT INTO UserSites (UserId, SiteId) VALUES (@UserId, @SiteId);",
@@ -94,7 +96,7 @@ namespace BCES.Admin.Controllers
                     new { model.UserId }
                 );
 
-                foreach (var siteId in model.SelectedSites)
+                foreach (var siteId in model.SelectedSites.Select(int.Parse))
                 {
                     _dbConnection.Execute(
                         "INSERT INTO UserSites (UserId, SiteId) VALUES (@UserId, @SiteId);",
@@ -133,6 +135,16 @@ namespace BCES.Admin.Controllers
                 // Log exception
                 return Json(new { success = false, error = ex.Message });
             }
+        }
+
+        private List<RoleModel> GetRoles()
+        {
+            return _dbConnection.Query<RoleModel>("SELECT RoleId, RoleName FROM Roles").ToList();
+        }
+
+        private List<SiteModel> GetSites()
+        {
+            return _dbConnection.Query<SiteModel>("SELECT SiteId, SiteName FROM Sites").ToList();
         }
     }
 }
