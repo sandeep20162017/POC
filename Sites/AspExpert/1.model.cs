@@ -5,9 +5,9 @@ public class UserViewModel
     public int RoleId { get; set; }
     public string RoleName { get; set; }
 
-    // Temporary property to store the comma-separated SiteIds from SQL
-    public string SiteIdsString { get; set; }
+    public string SiteIds { get; set; } // Comma-separated Site IDs from SQL
+    public string SiteNames { get; set; } // Comma-separated Site Names from SQL
 
-    // Final parsed property
-    public List<int> SiteIds { get; set; }
+    public List<int> SiteIdsList { get; set; } // Parsed Site IDs
+    public List<string> SiteNamesList { get; set; } // Parsed Site Names
 }

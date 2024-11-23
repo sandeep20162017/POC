@@ -1,21 +1,27 @@
 [HttpGet]
 public IActionResult GetUsers()
 {
-    // Fetch aggregated data with the SQL query
+    // Fetch aggregated data with SiteIds and SiteNames
     var users = db.Query<UserViewModel>(
         @"SELECT u.UserId, u.UserName, u.RoleId, r.RoleName,
-                 STRING_AGG(CAST(us.SiteId AS VARCHAR), ',') AS SiteIdsString
+                 STRING_AGG(CAST(us.SiteId AS VARCHAR), ',') AS SiteIds,
+                 STRING_AGG(s.SiteName, ',') AS SiteNames
           FROM SCES.[User] u
           INNER JOIN SCES.[Role] r ON u.RoleId = r.RoleId
           LEFT JOIN SCES.UserSite us ON u.UserId = us.UserId
+          LEFT JOIN SCES.Site s ON us.SiteId = s.SiteId
           GROUP BY u.UserId, u.UserName, u.RoleId, r.RoleName").ToList();
 
-    // Parse SiteIdsString into SiteIds
+    // Map SiteIds and SiteNames to a usable format
     foreach (var user in users)
     {
-        user.SiteIds = string.IsNullOrEmpty(user.SiteIdsString)
+        user.SiteIdsList = string.IsNullOrEmpty(user.SiteIds)
             ? new List<int>()
-            : user.SiteIdsString.Split(',').Select(int.Parse).ToList();
+            : user.SiteIds.Split(',').Select(int.Parse).ToList();
+
+        user.SiteNamesList = string.IsNullOrEmpty(user.SiteNames)
+            ? new List<string>()
+            : user.SiteNames.Split(',').ToList();
     }
 
     // Fetch roles and sites for dropdowns
