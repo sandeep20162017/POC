@@ -1,27 +1,22 @@
 [HttpGet]
 public IActionResult GetUsers()
 {
-    // Fetch aggregated data using the SQL query
-    var users = db.Query<dynamic>(
+    // Fetch aggregated data with the SQL query
+    var users = db.Query<UserViewModel>(
         @"SELECT u.UserId, u.UserName, u.RoleId, r.RoleName,
-                 STRING_AGG(CAST(us.SiteId AS VARCHAR), ',') AS SiteIds
+                 STRING_AGG(CAST(us.SiteId AS VARCHAR), ',') AS SiteIdsString
           FROM SCES.[User] u
           INNER JOIN SCES.[Role] r ON u.RoleId = r.RoleId
           LEFT JOIN SCES.UserSite us ON u.UserId = us.UserId
           GROUP BY u.UserId, u.UserName, u.RoleId, r.RoleName").ToList();
 
-    // Map the raw data to UserViewModel
-    var userModels = users.Select(u => new UserViewModel
+    // Parse SiteIdsString into SiteIds
+    foreach (var user in users)
     {
-        UserId = u.UserId,
-        UserName = u.UserName,
-        RoleId = u.RoleId,
-        RoleName = u.RoleName,
-        // Parse SiteIds from comma-separated string to List<int>
-        SiteIds = string.IsNullOrEmpty(u.SiteIds)
+        user.SiteIds = string.IsNullOrEmpty(user.SiteIdsString)
             ? new List<int>()
-            : u.SiteIds.Split(',').Select(int.Parse).ToList()
-    }).ToList();
+            : user.SiteIdsString.Split(',').Select(int.Parse).ToList();
+    }
 
     // Fetch roles and sites for dropdowns
     var roles = db.Query<RoleModel>("SELECT RoleId, RoleName FROM SCES.[Role]").ToList();
@@ -32,5 +27,5 @@ public IActionResult GetUsers()
     ViewData["Sites"] = sites;
 
     // Return JSON result for the grid
-    return Json(userModels);
+    return Json(users);
 }
