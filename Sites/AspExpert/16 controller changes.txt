@@ -1,0 +1,48 @@
+public static class TempStorage
+{
+    public static Dictionary<string, List<string>> SelectedSites = new Dictionary<string, List<string>>();
+}
+
+///
+[HttpPost]
+public List<string> GetSelectedSite([FromBody] dynamic data)
+{
+    var sites = data?.sites?.ToObject<List<string>>() ?? Enumerable.Empty<string>().ToList();
+    // Store the selected sites in the dictionary with a unique key
+    string key = Guid.NewGuid().ToString();
+    TempStorage.SelectedSites[key] = sites;
+
+    // Return the key to the client
+    return new List<string> { key };
+}
+
+//
+[HttpPost]
+public async Task<IActionResult> UpdateUser([DataSourceRequest] DataSourceRequest request, UserViewModel userViewModel)
+{
+    if (userViewModel == null || userViewModel.SiteIds == null)
+    {
+        return BadRequest("Invalid user data.");
+    }
+
+    // Retrieve the key from the userViewModel (assuming it's passed from the client)
+    string key = userViewModel.Key;
+
+    // Retrieve the selected sites from the dictionary using the key
+    if (!TempStorage.SelectedSites.TryGetValue(key, out var sites))
+    {
+        return BadRequest("Selected sites not found.");
+    }
+
+    // Convert the sites to a list of integers (assuming site IDs are integers)
+    var siteIds = sites.Select(int.Parse).ToList();
+
+    // Perform the update logic
+    try
+    {
+        // Open the connection
+        _dbConnection.Open();
+        using (var transaction = _dbConnection.BeginTransaction())
+        {
+            // Update the user in the Users table
+            var updateUser
