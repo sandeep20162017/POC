@@ -1,0 +1,67 @@
+private async Task<int> UpdateUserAsync(string userName, int roleId, List<string> siteIds)
+{
+    // Start a transaction
+    using (var transaction = _dbConnection.BeginTransaction())
+    {
+        try
+        {
+            // Update the user's role in the Users table
+            var updateUserQuery = @"
+                UPDATE SCES.Users
+                SET RoleId = @RoleId
+                WHERE UserName = @UserName;
+            ";
+
+            await _dbConnection.ExecuteAsync(updateUserQuery, new { RoleId = roleId, UserName = userName }, transaction);
+
+            // Fetch the UserId for the given UserName
+            var userIdQuery = @"
+                SELECT UserId
+                FROM SCES.Users
+                WHERE UserName = @UserName;
+            ";
+
+            var userId = await _dbConnection.QuerySingleOrDefaultAsync<int>(userIdQuery, new { UserName = userName }, transaction);
+
+            if (userId == 0)
+            {
+                throw new Exception("User not found.");
+            }
+
+            // Delete existing UserSites entries for the user
+            var deleteUserSitesQuery = @"
+                DELETE FROM SCES.UserSites
+                WHERE UserId = @UserId;
+            ";
+
+            await _dbConnection.ExecuteAsync(deleteUserSitesQuery, new { UserId = userId }, transaction);
+
+            // Insert new UserSites entries
+            var insertUserSitesQuery = @"
+                INSERT INTO SCES.UserSites (UserId, SiteId)
+                VALUES (@UserId, @SiteId);
+            ";
+
+            foreach (var siteId in siteIds)
+            {
+                await _dbConnection.ExecuteAsync(insertUserSitesQuery, new { UserId = userId, SiteId = siteId }, transaction);
+            }
+
+            // Commit the transaction
+            transaction.Commit();
+
+            return userId;
+        }
+        catch (Exception ex)
+        {
+            // Rollback the transaction in case of any error
+            transaction.Rollback();
+
+            // Log the exception (consider using a logging framework)
+            Console.WriteLine($"Error updating user: {ex.Message}");
+
+            // Rethrow the exception to propagate it to the caller
+            throw;
+        }
+    }
+}
