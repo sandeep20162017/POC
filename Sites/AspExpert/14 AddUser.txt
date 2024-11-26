@@ -1,0 +1,48 @@
+private async Task<int> AddUserAsync(string userName, int roleId, List<int> siteIds)
+{
+    // Start a transaction
+    using (var transaction = _dbConnection.BeginTransaction())
+    {
+        try
+        {
+            // Insert into Users table
+            var insertUserQuery = @"
+                INSERT INTO SCES.Users (UserName, FullName, RoleId)
+                VALUES (@UserName, @FullName, @RoleId);
+                SELECT CAST(SCOPE_IDENTITY() as int);";
+
+            var userId = await _dbConnection.QuerySingleAsync<int>(insertUserQuery, new
+            {
+                UserName = userName,
+                FullName = userName, // Assuming FullName is the same as UserName for simplicity
+                RoleId = roleId
+            }, transaction);
+
+            // Insert into UserSites table
+            var insertUserSitesQuery = @"
+                INSERT INTO SCES.UserSites (UserId, SiteId)
+                VALUES (@UserId, @SiteId);";
+
+            foreach (var siteId in siteIds)
+            {
+                await _dbConnection.ExecuteAsync(insertUserSitesQuery, new
+                {
+                    UserId = userId,
+                    SiteId = siteId
+                }, transaction);
+            }
+
+            // Commit the transaction
+            transaction.Commit();
+
+            return userId;
+        }
+        catch (Exception ex)
+        {
+            // Rollback the transaction in case of any error
+            transaction.Rollback();
+            // Handle or log the exception
+            throw new Exception("Failed to add user.", ex);
+        }
+    }
+}
