@@ -1,19 +1,27 @@
 SELECT
-    rl.RebuiltStockNum AS RebuiltStockCode,
-    rl.DetailedDesc AS Description,
-    rl.Keyword AS Keywords,
-    rl.JobNumber,
-    rl.MmsStockCode AS MMSBuyCode,
-    rl.CorePartNum AS CoreCode,
-    rl.SopNumber,
-    rl.BuyNewCost AS BuyCost,
-    rl.RemanCost AS RemanufacturedCode,
-    STRING_AGG(vl.VehicleSeriesCode, ', ') WITHIN GROUP (ORDER BY vl.VehicleSeriesCode) AS ListOfVehicles
+    rb.RebuiltStockNum AS RebuiltStockCode,
+    rb.DetailedDesc AS Description,
+    rb.Keyword AS Keywords,
+    rb.JobNumber,
+    rb.BuyNewCost AS MMSBuyCode,
+    rb.CorePartNum AS CoreCode,
+    rb.SOPNumber,
+    rb.BuyNewCost AS BuyCost,
+    rb.RemanCost AS RemanufacturedCode,
+    ISNULL(
+        STRING_AGG(CAST(rblb.ListId AS VARCHAR), ','),
+        ''
+    ) AS ListOfVehicles
 FROM
-    BCES.RbMasterlist rl
+    BCES.RbMasterlist rb
 LEFT JOIN
-    BCES.VehicleSeries vs ON rl.RbMasterlistId = vs.RbMasterlistId
-LEFT JOIN
-    BCES.VehicleList vl ON vs.VehicleSeriesId = vl.VehicleSeriesId
+    SCES.RbListOfBuses rblb ON rb.RebuiltStockNum = rblb.RebuiltStockNum
 GROUP BY
-    rl.RbMasterlistId, rl.RebuiltStockNum, rl.DetailedDesc, rl.Keyword, rl.JobNumber, rl.MmsStockCode, rl.CorePartNum, rl.SopNumber, rl.BuyNewCost, rl.RemanCost;
+    rb.RebuiltStockNum,
+    rb.DetailedDesc,
+    rb.Keyword,
+    rb.JobNumber,
+    rb.BuyNewCost,
+    rb.CorePartNum,
+    rb.SOPNumber,
+    rb.RemanCost;
