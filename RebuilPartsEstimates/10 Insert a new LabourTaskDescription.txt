@@ -1,0 +1,55 @@
+-- Step 1: Insert a new LabourTaskDescription
+DECLARE @TaskDescription VARCHAR(50) = 'Assembly Line Inspection';
+
+IF NOT EXISTS (SELECT 1 FROM SCES.LabourTaskDescriptions WHERE TaskDescription = @TaskDescription)
+BEGIN
+    INSERT INTO SCES.LabourTaskDescriptions (TaskDescription)
+    VALUES (@TaskDescription);
+END;
+
+-- Step 2: Prepare synthetic data for EmployeeLabour
+DECLARE @CostCentre VARCHAR(5) = 'C001'; -- Replace with a valid CostCentre from SCES.CostCenters
+DECLARE @LabourType VARCHAR(5) = 'L01'; -- Replace with a valid LabourType from SCES.EmplClass
+DECLARE @Usage VARCHAR(25) = '70%';
+DECLARE @HrsReqd VARCHAR(25) = '8';
+DECLARE @RebuiltPartNum VARCHAR(30) = 'SW1001'; -- Example Rebuilt Stock Number
+DECLARE @LastModifiedBy VARCHAR(25) = 'admin'; -- Replace with a valid username
+
+-- Validate foreign key dependencies
+IF NOT EXISTS (SELECT 1 FROM SCES.CostCenters WHERE CostCentre = @CostCentre)
+BEGIN
+    RAISERROR ('Invalid CostCentre: %s', 16, 1, @CostCentre);
+    RETURN;
+END;
+
+IF NOT EXISTS (SELECT 1 FROM SCES.EmplClass WHERE LabourType = @LabourType)
+BEGIN
+    RAISERROR ('Invalid LabourType: %s', 16, 1, @LabourType);
+    RETURN;
+END;
+
+IF NOT EXISTS (SELECT 1 FROM SCES.RbMasterlist WHERE JobNumber = 'JOB1')
+BEGIN
+    RAISERROR ('No JobNumber found for JOB1', 16, 1);
+    RETURN;
+END;
+
+-- Step 3: Insert the new LabourTask into EmployeeLabour
+INSERT INTO SCES.EmployeeLabour (
+    LabourDefn, DateEntered, LinkNumber, TypeId, CostCentre, Task, 
+    LabourType, Usage, HrsReqd, AdjHrs, DateRevised, TimeAddition, 
+    RebuiltPartNum, LastModifiedBy
+)
+VALUES (
+    'Assembly Labour', GETDATE(), 'Link123', NULL, @CostCentre, @TaskDescription,
+    @LabourType, @Usage, @HrsReqd, NULL, NULL, 0.0,
+    @RebuiltPartNum, @LastModifiedBy
+);
+
+-- Step 4: Retrieve the new LabourTask for verification
+SELECT 
+    Id, LabourDefn, CostCentre, Task, LabourType, Usage, HrsReqd, RebuiltPartNum
+FROM 
+    SCES.EmployeeLabour
+WHERE 
+    RebuiltPartNum = @RebuiltPartNum AND CostCentre = @CostCentre AND Task = @TaskDescription;
