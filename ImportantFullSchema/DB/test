@@ -1,0 +1,2852 @@
+USE [CES]
+GO
+/****** Object:  Schema [CES]    Script Date: 12/6/2024 5:27:23 PM ******/
+CREATE SCHEMA [CES]
+
+CREATE FUNCTION [CES].[decimal_minutes_to_hhmm]
+    (@vi_DecimalMinutes VARCHAR(20)) RETURNS VARCHAR(4000) AS
+ BEGIN
+DECLARE @varResult varchar(100);
+DECLARE @varHours int;
+DECLARE @varMinutes int;
+
+    SET @varHours = floor( convert(decimal(10), @vi_DecimalMinutes)/60);
+    SET @varMinutes = @vi_DecimalMinutes  - (@varHours * 60.0);
+
+    IF (len(@varMinutes) < 2) BEGIN
+        SET @varResult = CAST(@varHours AS VARCHAR(10)) + ':0' + ISNULL(CAST(@varMinutes AS VARCHAR(10)), '');
+    END
+    ELSE BEGIN
+        SET @varResult = CAST(@varHours AS VARCHAR(10)) + ':' + CAST(@varMinutes AS VARCHAR(10));
+    END 
+
+    RETURN @varResult;
+END;
+ 
+CREATE FUNCTION [CES].[final_cost]
+  ( @vi_percent varchar(20),
+  @vi_quantity varchar(20),
+  @vi_cost decimal(10,2),
+  @vi_corecost decimal(10,2))
+
+RETURNS VARCHAR(4000) AS
+ BEGIN
+DECLARE @total decimal(38,4);
+ 
+    SET @total = (cast(replace(isnull(@vi_percent,'0'),',','.') as decimal(10,4))/ 100) * cast(@vi_quantity as decimal(10,4)) * @vi_cost;
+    RETURN round(@total - @vi_corecost,2) ;
+END;
+ 
+CREATE TABLE [CES].[EMPLOYEE_SALARIES](
+	[WAGE_GROUP] [numeric](10, 0) NOT NULL,
+	[RATE_PER_HOUR] [numeric](18, 2) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+ CONSTRAINT [PK_WAGE_GROUP] PRIMARY KEY CLUSTERED 
+(
+	[WAGE_GROUP] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+
+CREATE TABLE [CES].[EMPL_CLASS](
+	[LABOUR_TYPE] [numeric](10, 0) NOT NULL,
+	[LABOUR_DEFN] [nvarchar](50) NULL,
+	[WAGE_GROUP] [numeric](10, 0) NULL,
+	[HRS_PER_WEEK] [numeric](18, 4) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[OVERHEADTYPE] [numeric](5, 2) NOT NULL,
+ CONSTRAINT [PK_LABOUR_TYPE] PRIMARY KEY CLUSTERED 
+(
+	[LABOUR_TYPE] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [CES].[EMPLOYEE_LABOUR](
+	[ID] [int] IDENTITY(1,1) NOT NULL,
+	[LABOUR_DEFN] [nvarchar](50) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[LINK_NUMBER] [nvarchar](25) NULL,
+	[TYPEID] [nvarchar](5) NULL,
+	[COSTCENTRE] [nvarchar](5) NULL,
+	[TASK] [nvarchar](50) NULL,
+	[LABOUR_TYPE] [nvarchar](5) NULL,
+	[USAGE] [nvarchar](25) NULL,
+	[HRS_REQD] [nvarchar](25) NULL,
+	[ADJ_HRS] [nvarchar](25) NULL,
+	[DATE_REVISED] [date] NULL,
+	[TIME_ADDITION] [numeric](18, 2) NULL,
+	[REBUILT_PART_NUM] [nvarchar](30) NULL,
+	[LAST_MODIFIED_BY] [nvarchar](25) NULL,
+ CONSTRAINT [PK_EMPLOYEE_LABOUR] PRIMARY KEY CLUSTERED 
+(
+	[ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ CREATE VIEW [CES].[CR_EMPLOEELABOURCCTOTALS] ("LABOUR_DEFN", "COSTCENTRE", "WAGE_GROUP", "RATE_PER_HOUR", "TIME_ADDITION", "USAGE", "LINK_NUMBER") AS 
+  select
+        temptable.labour_defn,
+        temptable.costcentre,
+        temptable.WAGE_GROUP,
+        temptable.rate_per_hour,
+        temptable.time_addition,
+        temptable.usage,
+        temptable.link_number
+    from(
+    select
+        CES.EMPLOYEE_LABOUR.labour_defn,
+        CES.EMPLOYEE_LABOUR.costcentre,
+        B.WAGE_GROUP,
+        B.rate_per_hour,
+        CES.EMPLOYEE_LABOUR.time_addition,
+        CES.EMPLOYEE_LABOUR.usage,
+        CES.EMPLOYEE_LABOUR.link_number
+    from
+        CES.EMPLOYEE_LABOUR,
+        CES.EMPLOYEE_SALARIES b,
+        CES.EMPL_CLASS c
+    where
+        CES.EMPLOYEE_LABOUR.labour_defn = upper(c.labour_defn) and
+        b.wage_group=c.wage_group and
+        CES.EMPLOYEE_LABOUR.typeid = 'RB') tempTable
+    order by
+        temptable.COSTCENTRE offset 0 rows;
+
+
+GO
+
+CREATE TABLE [CES].[KITS_MASTERLIST](
+	[ESTIMATED_COST] [numeric](18, 2) NULL,
+	[KEYWORD] [nvarchar](50) NULL,
+	[DETAILED_DESC] [nvarchar](250) NULL,
+	[MODIFIED_LAST_BY] [nvarchar](25) NULL,
+	[MODIFIED_LAST_DATE] [date] NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[PART_NUMBER] [nvarchar](30) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [CES].[KITS_USED](
+	[PART_NUMBER] [nvarchar](30) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[USER_ENTERED] [nvarchar](30) NULL,
+	[LAST_MODIFIED_BY] [nvarchar](30) NULL,
+	[LAST_MODIFIED_DATE] [datetime] NULL,
+	[COST_CENTRE] [nvarchar](5) NULL,
+	[LINK_CODE] [nvarchar](30) NULL
+) ON [PRIMARY]
+GO
+
+  CREATE   VIEW [CES].[OEM_KITS_TOTAL2] ([LINK], [TOTAL_KIT_COST]) AS 
+  select KITUSED.link_code, sum(isnull(KITMASTER.estimated_cost,0)) as total_kit_cost from  CES.KITS_USED KITUSED, CES.KITS_MASTERLIST KITMASTER where (KITUSED.part_number = KITMASTER.part_number) group by KITUSED.link_code
+ ;
+GO
+
+CREATE TABLE [CES].[RB_MASTERLIST](
+	[MMS_STOCK_CODE] [nvarchar](30) NULL,
+	[ITEM_REF_NUMBER] [nvarchar](16) NULL,
+	[DETAILED_DESC] [nvarchar](250) NULL,
+	[KEYWORD] [nvarchar](250) NULL,
+	[CORE_PART_NUM] [nvarchar](30) NULL,
+	[REBUILT_STOCK_NUM] [nvarchar](30) NULL,
+	[CORE_CHARGE] [nvarchar](25) NULL,
+	[JOB_NUMBER] [nvarchar](25) NULL,
+	[DATE_MODIFIED] [datetime] NULL,
+	[LAST_MODIFIED_BY] [nvarchar](50) NOT NULL,
+	[ESTIMATED_COST] [numeric](20, 2) NULL,
+	[SOP_NUMBER] [nvarchar](25) NULL,
+	[BUY_NEW_COST] [nvarchar](25) NULL,
+	[REMAN_COST] [nvarchar](25) NULL,
+	[EXTERNAL_COST] [nvarchar](25) NULL,
+	[DATE_CONVERTED] [datetime] NULL,
+	[ACTIVE] [numeric](4, 0) NULL,
+	[RB_MASTERLIST_ID] [int] IDENTITY(1,1) NOT NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[RB_MASTERLIST_ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+ CONSTRAINT [UK_REBUILT_STOCK_NUM] UNIQUE NONCLUSTERED 
+(
+	[REBUILT_STOCK_NUM] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [CES].[TEMP_MATERIALS_LIST](
+	[ASSEMBLY_AREA] [nvarchar](50) NULL,
+	[COST_CENTRE] [nvarchar](5) NULL,
+	[TOTAL_COST] [nvarchar](25) NULL,
+	[TAXABLE_COST] [nvarchar](25) NULL,
+	[RB_REFERENCE] [nvarchar](25) NULL,
+	[TOTAL_UNIT_COST] [nvarchar](25) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[SC_PARTS_USED]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[SC_PARTS_USED](
+	[MMS_STOCK_CODE] [nvarchar](30) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[REB_PART_COST] [numeric](18, 2) NULL,
+	[USER_ENTERED] [nvarchar](50) NULL,
+	[MMS_COST] [numeric](18, 2) NULL,
+	[OEM_COST] [numeric](18, 2) NULL,
+	[LAST_MODIFIED_BY] [nvarchar](25) NULL,
+	[LAST_MODIFIED_DATE] [datetime] NULL,
+	[MMS_REBUILT_CODE] [nvarchar](30) NULL,
+	[COST_CENTRE] [nvarchar](4) NULL,
+	[QTY_REQD] [nvarchar](10) NULL,
+	[PERCENT_USAGE] [nvarchar](10) NULL,
+	[LINK_CODE] [nvarchar](30) NULL,
+	[REBUILT_PART] [nvarchar](1) NULL,
+	[LINK_TYPE] [nvarchar](3) NULL,
+	[CORECOST] [numeric](18, 2) NULL,
+	[ORIG_SUP_NUM] [nvarchar](50) NULL,
+	[ORIG_SUPPLIER_NAME] [nvarchar](50) NULL,
+	[ID] [int] IDENTITY(1,1) NOT NULL,
+ CONSTRAINT [PK_SC_PARTS_USED] PRIMARY KEY CLUSTERED 
+(
+	[ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  View [dbo].[RBP_USED]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE VIEW [dbo].[RBP_USED]
+AS
+SELECT        ROW_NUMBER() OVER (ORDER BY B.mms_rebuilt_code) AS Id, UPPER(B.mms_rebuilt_code) AS [RebuiltNumber], isnull(A.RB_UNIT_COST, 0) AS [UnitCost], UPPER(B.cost_centre) AS [CC], UPPER(B.qty_reqd) AS [QTY], 
+REPLACE(B.percent_usage, ',', '.') AS [Percentage], B.corecost AS [CoreCost], isnull(A.RB_COST, 0) AS [TotalCost], UPPER(C.detailed_desc) AS [Description], UPPER(C.keyword) AS [Keyword],link_code ,rebuilt_part,link_type
+FROM            ces.SC_PARTS_USED B LEFT JOIN
+                         ces.RB_MASTERLIST C ON C.rebuilt_stock_num = B.MMS_REBUILT_CODE LEFT JOIN
+                             (SELECT        round(sum(cast(total_cost AS decimal(7, 2))), 2) AS RB_COST, round(sum(cast(total_unit_cost AS decimal(7, 2))), 2) AS RB_UNIT_COST, rb_reference
+                               FROM            ces.TEMP_materials_list
+                               GROUP BY rb_reference) A ON a.RB_REFERENCE = B.MMS_REBUILT_CODE
+GO
+/****** Object:  Table [CES].[NSC_PARTS_USED]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[NSC_PARTS_USED](
+	[ORIG_SUPP_NUM] [nvarchar](50) NULL,
+	[ORIG_SUPPLIER_NAME] [nvarchar](50) NULL,
+	[COST_CENTRE] [nvarchar](4) NULL,
+	[QTY_REQD] [nvarchar](10) NULL,
+	[PERCENT_USAGE] [nvarchar](10) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[ENTERED_BY] [nvarchar](25) NULL,
+	[LAST_MODIFIED_BY] [nvarchar](25) NULL,
+	[LAST_MODIFIED_DATE] [datetime] NULL,
+	[LINK_CODE] [nvarchar](30) NULL,
+	[COST] [numeric](18, 2) NULL,
+	[LINK_TYPE] [nvarchar](3) NULL,
+	[CORECOST] [numeric](18, 2) NULL,
+	[ID] [numeric](10, 0) NULL,
+	[OID] [int] IDENTITY(1,1) NOT NULL,
+ CONSTRAINT [PK_NSC_PARTS_USED] PRIMARY KEY CLUSTERED 
+(
+	[OID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[NON_STOCK_CODED_PARTS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[NON_STOCK_CODED_PARTS](
+	[ORIG_SUPPLIER_NUM] [nvarchar](50) NULL,
+	[ORIG_SUPPLIER_NAME] [nvarchar](50) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[OEM_PART_COST] [numeric](18, 2) NULL,
+	[DETAILED_DESC] [nvarchar](500) NULL,
+	[PART_ADDED_BY] [nvarchar](25) NULL,
+	[LAST_MODIFIED_BY] [nvarchar](25) NULL,
+	[LAST_MODIFIED_DATE] [datetime] NULL,
+	[KEYWORD] [nvarchar](50) NULL,
+	[ID] [numeric](10, 0) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  View [dbo].[NonStockPart_USED]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE VIEW [dbo].[NonStockPart_USED]
+AS
+SELECT        UPPER(NON_STOCK_CODED_PARTS.orig_supplier_num) AS SupplierNumber, UPPER(NON_STOCK_CODED_PARTS.orig_supplier_name) AS SupplierName, NON_STOCK_CODED_PARTS.oem_part_cost AS UnitCost, 
+                         UPPER(NSC_PARTS_USED.qty_reqd) AS [QTY], REPLACE(NSC_PARTS_USED.percent_usage, ',', '.') AS Percentage, cast(ces.FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, 
+                         NSC_PARTS_USED.corecost, 0) as decimal(18,2)) AS CoreCost, cast(ces.FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0) as decimal(38,2)) AS TotalCost, 
+                         UPPER(NSC_PARTS_USED.cost_centre) AS [CC], isnull(UPPER(NON_STOCK_CODED_PARTS.detailed_desc), '') AS Description, isnull(UPPER(NON_STOCK_CODED_PARTS.keyword), '') AS Keyword, 
+                         UPPER(NSC_PARTS_USED.id) AS [Id], UPPER(NSC_PARTS_USED.last_modified_date) AS LastModifiedDate, ROW_NUMBER() OVER (ORDER BY NON_STOCK_CODED_PARTS.orig_supplier_num) AS Uid, 
+NSC_PARTS_USED.link_code, NSC_PARTS_USED.link_type
+FROM            ces.NSC_PARTS_USED LEFT JOIN
+                         ces.NON_STOCK_CODED_PARTS NON_STOCK_CODED_PARTS ON NON_STOCK_CODED_PARTS.id = NSC_PARTS_USED.id
+GO
+/****** Object:  Table [CES].[STOCK_CODED_PARTS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[STOCK_CODED_PARTS](
+	[MMS_STOCK_CODE] [nvarchar](30) NOT NULL,
+	[CORE_PART_NUMBER] [nvarchar](30) NULL,
+	[PART_TYPE] [nvarchar](50) NULL,
+	[JOB_NUMBER] [nvarchar](30) NULL,
+	[DETAILED_DESC] [nvarchar](500) NULL,
+	[DATE_ENTERED] [nvarchar](8) NULL,
+	[ITEM_REF_NUMBER] [nvarchar](16) NULL,
+	[OVERHEADTYPE] [numeric](9, 0) NULL,
+	[CORE_CHARGE] [numeric](9, 0) NULL,
+	[PART_COST] [numeric](9, 0) NULL,
+	[LAST_MODIFIED_DATE] [datetime] NULL,
+	[LAST_MODIFIED_BY] [nvarchar](30) NULL,
+	[ADDED_BY] [nvarchar](30) NULL,
+	[MMS_NEW_COST] [numeric](15, 5) NULL,
+	[OEM_PART_COST] [numeric](9, 0) NULL,
+	[MMS_SYNC_DATE] [datetime] NULL,
+	[ORIG_SUPPLIER_NUM] [nvarchar](25) NULL,
+	[ORIG_SUPPLIER_NAME] [nvarchar](40) NULL,
+ CONSTRAINT [PRIMARY_KEY_SC_PARTS] PRIMARY KEY CLUSTERED 
+(
+	[MMS_STOCK_CODE] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  View [dbo].[StockPart_USED]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE VIEW [dbo].[StockPart_USED]
+AS
+SELECT        UPPER(SC_PARTS_USED.mms_stock_code) AS StockCode, isnull(SC_PARTS_USED.mms_cost, 0) AS UnitCost, UPPER(SC_PARTS_USED.qty_reqd) AS [QTY], REPLACE(SC_PARTS_USED.percent_usage, ',', '.') AS Percentage, 
+                         cast(ces.FINAL_COST(SC_PARTS_USED.percent_usage, SC_PARTS_USED.qty_reqd, SC_PARTS_USED.corecost, 0) as decimal(18,2)) AS CoreCost, cast(ces.FINAL_COST(SC_PARTS_USED.percent_usage, SC_PARTS_USED.qty_reqd, 
+                         SC_PARTS_USED.mms_cost, 0) as decimal(38,2)) AS TotalCost, UPPER(SC_PARTS_USED.cost_centre) AS [CC], isnull(UPPER(STOCK_CODED_PARTS.detailed_desc), '') AS Description, isnull(UPPER(STOCK_CODED_PARTS.part_type), '') 
+                         AS Keyword, SC_PARTS_USED.oem_cost AS OEMCost, SC_PARTS_USED.mms_rebuilt_code AS MMSRebuiltCode, SC_PARTS_USED.reb_part_cost AS RebuiltPartCost, UPPER(SC_PARTS_USED.rebuilt_part) AS RebuiltPart, 
+                         ROW_NUMBER() OVER (ORDER BY SC_PARTS_USED.mms_stock_code) AS Id, SC_PARTS_USED.link_code, SC_PARTS_USED.link_type
+FROM            ces.SC_PARTS_USED LEFT JOIN
+                         ces.STOCK_CODED_PARTS ON STOCK_CODED_PARTS.mms_stock_code = SC_PARTS_USED.mms_stock_code
+GO
+/****** Object:  Table [CES].[ACCESS_LEVEL]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ACCESS_LEVEL](
+	[ACCESS_LEVEL_ID] [numeric](38, 0) NOT NULL,
+	[ACCESS_LEVEL_DESCRIPTION] [nvarchar](100) NULL,
+ CONSTRAINT [ACCESS_LEVEL_ID] PRIMARY KEY CLUSTERED 
+(
+	[ACCESS_LEVEL_ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ALL_LABOUR_SUMMARY]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ALL_LABOUR_SUMMARY](
+	[LABOUR_TYPE] [nvarchar](50) NOT NULL,
+	[COST_CENTRE] [nvarchar](4) NOT NULL,
+	[TASK] [nvarchar](200) NULL,
+	[USAGE] [numeric](18, 2) NOT NULL,
+	[TIME] [numeric](18, 2) NOT NULL,
+	[WRENCH_TIME] [nvarchar](8) NOT NULL,
+	[RATE_PER_HOUR] [numeric](18, 2) NOT NULL,
+	[TOTAL_COST] [numeric](18, 2) NOT NULL,
+	[EXTENDED_TIME] [nvarchar](8) NULL,
+	[ESTIMATE_TYPE] [nvarchar](3) NOT NULL,
+	[ESTIMATE_NUMBER] [nvarchar](25) NOT NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ALL_MATERIAL_SUMMARY]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ALL_MATERIAL_SUMMARY](
+	[ASSEMBLY_AREA] [nvarchar](50) NULL,
+	[COST_CENTRE] [nvarchar](5) NULL,
+	[TOTAL_COST] [nvarchar](25) NULL,
+	[TAXABLE_COST] [nvarchar](25) NULL,
+	[RB_REFERENCE] [nvarchar](25) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_MB_EMPLOYEE_LABOUR]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_MB_EMPLOYEE_LABOUR](
+	[ID] [int] IDENTITY(1,1) NOT NULL,
+	[LABOUR_DEFN] [nvarchar](50) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[LINK_NUMBER] [nvarchar](25) NULL,
+	[TYPEID] [nvarchar](5) NULL,
+	[COSTCENTRE] [nvarchar](5) NULL,
+	[TASK] [nvarchar](50) NULL,
+	[LABOUR_TYPE] [nvarchar](5) NULL,
+	[USAGE] [nvarchar](25) NULL,
+	[HRS_REQD] [nvarchar](25) NULL,
+	[ADJ_HRS] [nvarchar](25) NULL,
+	[TIME_ADDITION] [numeric](18, 2) NULL,
+	[ARCH_MB_MASTERLIST] [numeric](38, 0) NOT NULL,
+ CONSTRAINT [PK_ARCH_MB_EMPLOYEE_LABOUR] PRIMARY KEY CLUSTERED 
+(
+	[ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_MB_LABOUR_CC_TOTAL]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_MB_LABOUR_CC_TOTAL](
+	[COST_CENTRE] [nvarchar](5) NULL,
+	[ARCH_MB_MASTERLIST_ID] [numeric](38, 0) NOT NULL,
+	[TOTAL_HOURS] [numeric](18, 2) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_MB_LIST_BUSES]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_MB_LIST_BUSES](
+	[BUS_DESCRIPTION] [nvarchar](500) NULL,
+	[ARCH_MB_MASTERLIST_ID] [numeric](38, 0) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_MB_MASTERLIST]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_MB_MASTERLIST](
+	[MB_NUMBER] [nvarchar](25) NOT NULL,
+	[KEYWORD] [nvarchar](50) NULL,
+	[DESCRIPTION] [nvarchar](50) NULL,
+	[BUS_TYPE] [nvarchar](50) NULL,
+	[NUM_BUS_COMP] [nvarchar](10) NULL,
+	[VENDOR_PART_NUM] [nvarchar](25) NULL,
+	[BUY_CODE] [nvarchar](25) NOT NULL,
+	[REBUILD_CODE] [nvarchar](25) NULL,
+	[CORE_CODE] [nvarchar](25) NULL,
+	[ANNUAL_USAGE] [nvarchar](25) NULL,
+	[BENCH_NUMBER] [nvarchar](25) NULL,
+	[SAMPLE_PROVIDED] [nvarchar](25) NULL,
+	[RECOMMENDATION] [nvarchar](1) NULL,
+	[REMAN_COST] [nvarchar](25) NULL,
+	[EXTERNAL_COST] [nvarchar](25) NULL,
+	[BUY_NEW_COST] [nvarchar](25) NULL,
+	[INTERNAL_COST] [nvarchar](25) NULL,
+	[SOP_NUMBER] [nvarchar](25) NULL,
+	[CORE_COST] [nvarchar](25) NULL,
+	[JOB_NUMBER] [nvarchar](25) NULL,
+	[ARCH_MB_MASTERLIST_ID] [numeric](18, 2) NOT NULL,
+	[ARCHIVED_BY] [nvarchar](50) NULL,
+	[LABOUR_COST] [numeric](20, 2) NOT NULL,
+	[LABOUR_OVERHEAD_AMOUNT] [numeric](20, 2) NOT NULL,
+	[LABOUR_TOTAL] [numeric](20, 2) NOT NULL,
+	[MATERIALS_TOTAL] [numeric](20, 2) NOT NULL,
+	[TOTAL_MB_ESTIMATE_COST] [numeric](20, 2) NOT NULL,
+	[DATE_ARCHIVED] [datetime] NULL,
+	[TOTAL_TAX] [numeric](20, 2) NULL,
+	[TOTAL_COST_TAX] [numeric](20, 2) NULL,
+ CONSTRAINT [PK_ARCH_MB_MASTERLIST] PRIMARY KEY CLUSTERED 
+(
+	[ARCH_MB_MASTERLIST_ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_MB_MATERIALS_CC_TOTAL]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_MB_MATERIALS_CC_TOTAL](
+	[COST_CENTRE] [nvarchar](5) NULL,
+	[TOTAL_COST] [numeric](18, 2) NULL,
+	[ARCH_MB_MASTERLIST_ID] [numeric](38, 0) NOT NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_MB_NSC_PARTS_USED]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_MB_NSC_PARTS_USED](
+	[ORIG_SUPP_NUM] [nvarchar](50) NULL,
+	[ORIG_SUPPLIER_NAME] [nvarchar](50) NULL,
+	[COST_CENTRE] [nvarchar](4) NULL,
+	[QTY_REQD] [nvarchar](10) NULL,
+	[PERCENT_USAGE] [nvarchar](10) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[ENTERED_BY] [nvarchar](25) NULL,
+	[LINK_CODE] [nvarchar](30) NULL,
+	[COST] [numeric](18, 2) NULL,
+	[LINK_TYPE] [nvarchar](3) NULL,
+	[CORECOST] [numeric](18, 2) NULL,
+	[ARCH_MB_MASTERLIST_ID] [numeric](38, 0) NOT NULL,
+	[TOTAL_COST] [numeric](18, 2) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_MB_SC_PARTS_USED]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_MB_SC_PARTS_USED](
+	[MMS_STOCK_CODE] [nvarchar](30) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[REB_PART_COST] [numeric](18, 2) NULL,
+	[USER_ENTERED] [nvarchar](50) NULL,
+	[MMS_COST] [numeric](18, 2) NULL,
+	[OEM_COST] [numeric](18, 2) NULL,
+	[MMS_REBUILT_CODE] [nvarchar](30) NULL,
+	[COST_CENTRE] [nvarchar](4) NULL,
+	[QTY_REQD] [nvarchar](10) NULL,
+	[PERCENT_USAGE] [nvarchar](10) NULL,
+	[LINK_CODE] [nvarchar](30) NULL,
+	[REBUILT_PART] [nvarchar](1) NULL,
+	[LINK_TYPE] [nvarchar](3) NULL,
+	[CORECOST] [numeric](18, 2) NULL,
+	[ARCH_MB_MASTERLIST_ID] [numeric](38, 0) NOT NULL,
+	[TOTAL_COST] [numeric](18, 2) NULL,
+	[SC_KEYWORD] [nvarchar](50) NULL,
+	[SC_DESCRIPTION] [nvarchar](500) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_RB_EMPLOYEE_LABOUR]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_RB_EMPLOYEE_LABOUR](
+	[ID] [int] IDENTITY(1,1) NOT NULL,
+	[LABOUR_DEFN] [nvarchar](50) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[LINK_NUMBER] [nvarchar](25) NULL,
+	[TYPEID] [nvarchar](5) NULL,
+	[COSTCENTRE] [nvarchar](5) NULL,
+	[TASK] [nvarchar](50) NULL,
+	[LABOUR_TYPE] [nvarchar](5) NULL,
+	[USAGE] [nvarchar](25) NULL,
+	[HRS_REQD] [nvarchar](25) NULL,
+	[ADJ_HRS] [nvarchar](25) NULL,
+	[TIME_ADDITION] [numeric](18, 2) NULL,
+	[ARCH_RB_MASTERLIST_ID] [numeric](38, 0) NOT NULL,
+ CONSTRAINT [PK_ARCH_RB_EMPLOYEE_LABOUR] PRIMARY KEY CLUSTERED 
+(
+	[ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_RB_LABOUR_CC_TOTAL]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_RB_LABOUR_CC_TOTAL](
+	[COST_CENTRE] [nvarchar](5) NULL,
+	[ARCH_RB_MASTERLIST_ID] [numeric](38, 0) NOT NULL,
+	[TOTAL_HOURS] [nvarchar](25) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_RB_LIST_BUSES]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_RB_LIST_BUSES](
+	[BUS_DESCRIPTION] [nvarchar](500) NULL,
+	[ARCH_RB_MASTERLIST_ID] [numeric](38, 0) NOT NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_RB_MASTERLIST]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_RB_MASTERLIST](
+	[MMS_STOCK_CODE] [nvarchar](30) NULL,
+	[ITEM_REF_NUMBER] [nvarchar](16) NULL,
+	[DETAILED_DESC] [nvarchar](250) NULL,
+	[KEYWORD] [nvarchar](250) NULL,
+	[CORE_PART_NUM] [nvarchar](30) NULL,
+	[REBUILT_STOCK_NUM] [nvarchar](30) NULL,
+	[CORE_CHARGE] [nvarchar](25) NULL,
+	[JOB_NUMBER] [nvarchar](25) NULL,
+	[DATE_ARCHIVED] [datetime] NULL,
+	[ARCHIVED_BY] [nvarchar](50) NULL,
+	[ESTIMATED_COST] [numeric](20, 2) NOT NULL,
+	[SOP_NUMBER] [nvarchar](25) NULL,
+	[ARCH_RB_MASTERLIST_ID] [numeric](38, 0) NOT NULL,
+	[LABOUR_COST] [numeric](20, 2) NOT NULL,
+	[LABOUR_OVERHEAD_AMOUNT] [numeric](20, 2) NOT NULL,
+	[LABOUR_TOTAL] [numeric](20, 2) NOT NULL,
+	[MATERIALS_TOTAL] [numeric](20, 2) NOT NULL,
+	[TOTAL_REBUILT_PART_COST] [numeric](20, 2) NOT NULL,
+	[TAX_TOTAL] [numeric](20, 2) NULL,
+	[TOTAL_COST_TAX] [numeric](20, 2) NULL,
+ CONSTRAINT [PK_ARCH_RB_MASTERLIST] PRIMARY KEY CLUSTERED 
+(
+	[ARCH_RB_MASTERLIST_ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+ CONSTRAINT [UK_ARCH_RB_MASTERLIST] UNIQUE NONCLUSTERED 
+(
+	[REBUILT_STOCK_NUM] ASC,
+	[DATE_ARCHIVED] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_RB_MATERIALS_CC_TOTAL]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_RB_MATERIALS_CC_TOTAL](
+	[COST_CENTRE] [nvarchar](5) NULL,
+	[TOTAL_COST] [numeric](18, 2) NULL,
+	[ARCH_RB_MASTERLIST_ID] [numeric](38, 0) NOT NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_RB_NSC_PARTS_USED]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_RB_NSC_PARTS_USED](
+	[ORIG_SUPP_NUM] [nvarchar](50) NULL,
+	[ORIG_SUPPLIER_NAME] [nvarchar](50) NULL,
+	[COST_CENTRE] [nvarchar](4) NULL,
+	[QTY_REQD] [nvarchar](10) NULL,
+	[PERCENT_USAGE] [nvarchar](10) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[ENTERED_BY] [nvarchar](25) NULL,
+	[LINK_CODE] [nvarchar](30) NULL,
+	[COST] [numeric](18, 2) NULL,
+	[LINK_TYPE] [nvarchar](3) NULL,
+	[CORECOST] [numeric](18, 2) NULL,
+	[ARCH_RB_MASTERLIST_ID] [numeric](38, 0) NOT NULL,
+	[TOTAL_COST] [numeric](18, 2) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_RB_SC_PARTS_USED]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_RB_SC_PARTS_USED](
+	[MMS_STOCK_CODE] [nvarchar](30) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[REB_PART_COST] [numeric](18, 2) NULL,
+	[USER_ENTERED] [nvarchar](50) NULL,
+	[MMS_COST] [numeric](18, 2) NULL,
+	[OEM_COST] [numeric](18, 2) NULL,
+	[MMS_REBUILT_CODE] [nvarchar](30) NULL,
+	[COST_CENTRE] [nvarchar](4) NULL,
+	[QTY_REQD] [nvarchar](10) NULL,
+	[PERCENT_USAGE] [nvarchar](10) NULL,
+	[LINK_CODE] [nvarchar](30) NULL,
+	[REBUILT_PART] [nvarchar](1) NULL,
+	[LINK_TYPE] [nvarchar](3) NULL,
+	[CORECOST] [numeric](18, 2) NULL,
+	[ARCH_RB_MASTERLIST_ID] [numeric](38, 0) NOT NULL,
+	[TOTAL_COST] [numeric](18, 2) NULL,
+	[SC_KEYWORD] [nvarchar](50) NULL,
+	[SC_DESCRIPTION] [nvarchar](500) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_VEH_EMPLOYEE_LABOUR]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_VEH_EMPLOYEE_LABOUR](
+	[LABOUR_DEFN] [nvarchar](50) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[LINK_NUMBER] [nvarchar](25) NULL,
+	[TYPEID] [nvarchar](5) NULL,
+	[COSTCENTRE] [nvarchar](5) NULL,
+	[TASK] [nvarchar](50) NULL,
+	[LABOUR_TYPE] [nvarchar](5) NULL,
+	[USAGE] [nvarchar](25) NULL,
+	[HRS_REQD] [nvarchar](25) NULL,
+	[ADJ_HRS] [nvarchar](25) NULL,
+	[TIME_ADDITION] [numeric](18, 2) NULL,
+	[ARCH_VEHICLE_LIST_ID] [numeric](38, 0) NOT NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_VEH_KITS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_VEH_KITS](
+	[PART_NUMBER] [nvarchar](30) NULL,
+	[ESTIMATED_COST] [numeric](18, 2) NULL,
+	[ARCH_VEHICLE_LIST_ID] [numeric](38, 0) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_VEH_LABOUR_CC_TOTAL]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_VEH_LABOUR_CC_TOTAL](
+	[ARCH_VEHICLE_LIST_ID] [numeric](38, 0) NOT NULL,
+	[COST_CENTRE] [nvarchar](5) NULL,
+	[TOTAL_HOURS] [numeric](18, 2) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_VEH_MATERIALS_CC_TOTAL]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_VEH_MATERIALS_CC_TOTAL](
+	[COST_CENTRE] [nvarchar](5) NULL,
+	[TOTAL_COST] [numeric](18, 2) NULL,
+	[ARCH_VEHICLE_LIST_ID] [numeric](38, 0) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_VEH_NSC_PARTS_USED]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_VEH_NSC_PARTS_USED](
+	[ORIG_SUPP_NUM] [nvarchar](50) NULL,
+	[ORIG_SUPPLIER_NAME] [nvarchar](50) NULL,
+	[COST_CENTRE] [nvarchar](4) NULL,
+	[QTY_REQD] [nvarchar](10) NULL,
+	[PERCENT_USAGE] [nvarchar](10) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[ENTERED_BY] [nvarchar](25) NULL,
+	[LINK_CODE] [nvarchar](30) NULL,
+	[COST] [numeric](18, 2) NULL,
+	[LINK_TYPE] [nvarchar](3) NULL,
+	[CORECOST] [numeric](18, 2) NULL,
+	[ARCH_VEHICLE_LIST_ID] [numeric](38, 0) NOT NULL,
+	[TOTAL_COST] [numeric](18, 2) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_VEH_SC_PARTS_USED]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_VEH_SC_PARTS_USED](
+	[MMS_STOCK_CODE] [nvarchar](30) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[REB_PART_COST] [numeric](18, 2) NULL,
+	[USER_ENTERED] [nvarchar](50) NULL,
+	[MMS_COST] [numeric](18, 2) NULL,
+	[OEM_COST] [numeric](18, 2) NULL,
+	[MMS_REBUILT_CODE] [nvarchar](30) NULL,
+	[COST_CENTRE] [nvarchar](4) NULL,
+	[QTY_REQD] [nvarchar](10) NULL,
+	[PERCENT_USAGE] [nvarchar](10) NULL,
+	[LINK_CODE] [nvarchar](30) NULL,
+	[REBUILT_PART] [nvarchar](1) NULL,
+	[LINK_TYPE] [nvarchar](3) NULL,
+	[CORECOST] [numeric](18, 2) NULL,
+	[ARCH_VEHICLE_LIST_ID] [numeric](38, 0) NOT NULL,
+	[TOTAL_COST] [numeric](18, 2) NULL,
+	[SC_KEYWORD] [nvarchar](50) NULL,
+	[SC_DESCRIPTION] [nvarchar](500) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ARCH_VEHICLE_LIST]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ARCH_VEHICLE_LIST](
+	[VEH_SERIES_CODE] [nvarchar](75) NULL,
+	[NUM_OF_VEHICLES] [nvarchar](10) NULL,
+	[PROJ_DESC] [nvarchar](200) NULL,
+	[DATE_ARCHIVED] [datetime] NULL,
+	[ARCHIVED_BY] [nvarchar](25) NULL,
+	[MAKE] [nvarchar](25) NULL,
+	[MODEL] [nvarchar](25) NULL,
+	[YEAR] [nvarchar](4) NULL,
+	[ENGINE] [nvarchar](25) NULL,
+	[TRANSMISSION] [nvarchar](25) NULL,
+	[DIFFERENTIAL] [nvarchar](25) NULL,
+	[ARCH_VEHICLE_LIST_ID] [numeric](38, 0) NOT NULL,
+	[LABOUR_COST] [numeric](20, 2) NOT NULL,
+	[LABOUR_OVERHEAD_AMOUNT] [numeric](20, 2) NOT NULL,
+	[LABOUR_TOTAL] [numeric](20, 2) NOT NULL,
+	[MATERIALS_TOTAL] [numeric](20, 2) NOT NULL,
+	[TOTAL_BUS_ESTIMATE_COST] [numeric](20, 2) NOT NULL,
+	[TOTAL_TAX] [numeric](20, 2) NULL,
+	[TOTAL_COST_TAX] [numeric](20, 2) NULL,
+	[OEM_KITS_TOTAL] [numeric](20, 2) NOT NULL,
+	[SOPNUMBER] [nvarchar](25) NULL,
+	[OLD_ID] [numeric](38, 0) NULL,
+ CONSTRAINT [PK_ARCH_VEHICLE_LIST] PRIMARY KEY CLUSTERED 
+(
+	[ARCH_VEHICLE_LIST_ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[AUDIT_MODIFY_HISTORY]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[AUDIT_MODIFY_HISTORY](
+	[ID] [numeric](38, 0) NOT NULL,
+	[USER_NAME] [nvarchar](15) NOT NULL,
+	[DATE_CHANGED] [datetime] NOT NULL,
+	[ACTION] [nvarchar](500) NOT NULL,
+	[ESTIMATE_NUMBER] [nvarchar](500) NOT NULL,
+	[ESTIMATE_TYPE] [nvarchar](4) NOT NULL,
+	[REF_1] [nvarchar](500) NULL,
+	[REF_2] [nvarchar](500) NULL,
+	[REF_3] [nvarchar](500) NULL,
+	[REF_4] [nvarchar](500) NULL,
+	[REF_5] [nvarchar](500) NULL,
+	[REF_6] [nvarchar](500) NULL,
+	[REF_7] [nvarchar](500) NULL,
+	[REF_8] [nvarchar](500) NULL,
+	[REF_9] [nvarchar](500) NULL,
+	[REF_10] [nvarchar](500) NULL,
+	[REF_11] [nvarchar](500) NULL,
+	[REF_12] [nvarchar](500) NULL,
+	[REF_13] [nvarchar](500) NULL,
+	[REF_14] [nvarchar](500) NULL,
+	[REF_15] [nvarchar](500) NULL,
+	[REF_16] [nvarchar](500) NULL,
+	[REF_17] [nvarchar](500) NULL,
+	[REF_18] [nvarchar](500) NULL,
+	[REF_19] [nvarchar](500) NULL,
+	[REF_20] [nvarchar](500) NULL,
+	[REF_21] [nvarchar](500) NULL,
+	[REF_22] [nvarchar](500) NULL,
+	[REF_23] [nvarchar](500) NULL,
+	[REF_24] [nvarchar](500) NULL,
+	[REF_25] [nvarchar](500) NULL,
+	[REF_26] [nvarchar](500) NULL,
+	[REF_27] [nvarchar](500) NULL,
+	[REF_28] [nvarchar](500) NULL,
+	[REF_29] [nvarchar](500) NULL,
+	[REF_30] [nvarchar](500) NULL,
+	[REF_31] [nvarchar](500) NULL,
+	[REF_32] [nvarchar](500) NULL,
+	[REF_33] [nvarchar](500) NULL,
+	[REF_34] [nvarchar](500) NULL,
+	[REF_35] [nvarchar](500) NULL,
+	[REF_36] [nvarchar](500) NULL,
+	[REF_37] [nvarchar](500) NULL,
+	[REF_38] [nvarchar](500) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[BUYTEMP]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[BUYTEMP](
+	[PART_NUMBER] [nvarchar](50) NULL,
+	[LAST_PRICE] [nvarchar](50) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[CES_SETTINGS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[CES_SETTINGS](
+	[CES_SETTINGS_ID] [numeric](38, 0) NOT NULL,
+	[PARAMETER] [nvarchar](100) NOT NULL,
+	[VALUE] [nvarchar](200) NULL,
+ CONSTRAINT [PK_CES_SETTINGS_ID] PRIMARY KEY CLUSTERED 
+(
+	[CES_SETTINGS_ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+ CONSTRAINT [UK_CES_SETTINGS_PARAMETER] UNIQUE NONCLUSTERED 
+(
+	[PARAMETER] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[COST_CENTRES]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[COST_CENTRES](
+	[NAME] [nvarchar](50) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[COST_CENTRE] [nvarchar](4) NOT NULL,
+ CONSTRAINT [PK_COST_CENTRES] PRIMARY KEY CLUSTERED 
+(
+	[COST_CENTRE] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[DIFFERENTIAL]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[DIFFERENTIAL](
+	[NAME] [nvarchar](25) NOT NULL,
+ CONSTRAINT [PK_DIFFERENTIAL] PRIMARY KEY CLUSTERED 
+(
+	[NAME] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ENGINES]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ENGINES](
+	[NAME] [nvarchar](25) NOT NULL,
+ CONSTRAINT [PK_ENGINES] PRIMARY KEY CLUSTERED 
+(
+	[NAME] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[ERRORS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[ERRORS](
+	[LOG_ID] [numeric](38, 0) NOT NULL,
+	[USER_NAME] [nvarchar](50) NULL,
+	[DATE_TIME] [datetime] NULL,
+	[MODULE_NAME] [nvarchar](100) NULL,
+	[FUNCTION_NAME] [nvarchar](100) NULL,
+	[LINE_NUM] [numeric](38, 0) NULL,
+	[ERROR_DESC] [nvarchar](2000) NULL,
+	[ERR_NUM] [numeric](38, 0) NULL,
+ CONSTRAINT [PK_ERRORS] PRIMARY KEY CLUSTERED 
+(
+	[LOG_ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[LABOUR_TASK_DESCRIPTIONS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[LABOUR_TASK_DESCRIPTIONS](
+	[TASK_ID] [numeric](38, 0) NOT NULL,
+	[TASK_DESCRIPTION] [nvarchar](200) NOT NULL,
+ CONSTRAINT [TASK_ID] PRIMARY KEY CLUSTERED 
+(
+	[TASK_ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+ CONSTRAINT [TASK_DESCRIPTION] UNIQUE NONCLUSTERED 
+(
+	[TASK_DESCRIPTION] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[last_buy_price]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[last_buy_price](
+	[PART_NUMBER] [nchar](6) NOT NULL,
+	[LAST_PRICE] [float] NULL,
+	[ORDER_NUMBER] [nchar](9) NULL,
+	[ORDER_SIGNAL_DATE] [date] NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[LASTPRICENOTAX]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[LASTPRICENOTAX](
+	[MMS_STOCK_CODE] [nvarchar](30) NOT NULL,
+	[PRICE] [numeric](18, 2) NULL,
+ CONSTRAINT [PK_LASTPRICENOTAX] PRIMARY KEY CLUSTERED 
+(
+	[MMS_STOCK_CODE] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[LIST_OF_BUSES]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[LIST_OF_BUSES](
+	[LIST_ID] [numeric](38, 0) NOT NULL,
+	[DESCRIPTION] [nvarchar](75) NULL,
+ CONSTRAINT [LIST_ID] PRIMARY KEY CLUSTERED 
+(
+	[LIST_ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[MB_LIST]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[MB_LIST](
+	[MB_NUMBER] [nvarchar](25) NOT NULL,
+	[KEYWORD] [nvarchar](50) NULL,
+	[DESCRIPTION] [nvarchar](50) NULL,
+	[BUS_TYPE] [nvarchar](50) NULL,
+	[NUM_BUS_COMP] [nvarchar](10) NULL,
+	[VENDOR_PART_NUM] [nvarchar](25) NULL,
+	[BUY_CODE] [nvarchar](25) NOT NULL,
+	[REBUILD_CODE] [nvarchar](25) NULL,
+	[CORE_CODE] [nvarchar](25) NULL,
+	[ANNUAL_USAGE] [nvarchar](25) NULL,
+	[BENCH_NUMBER] [nvarchar](25) NULL,
+	[SAMPLE_PROVIDED] [nvarchar](25) NULL,
+	[RECOMMENDATION] [nvarchar](1) NULL,
+	[REMAN_COST] [nvarchar](25) NULL,
+	[EXTERNAL_COST] [nvarchar](25) NULL,
+	[BUY_NEW_COST] [nvarchar](25) NULL,
+	[INTERNAL_COST] [nvarchar](25) NULL,
+	[SOP_NUMBER] [nvarchar](25) NULL,
+	[CORE_COST] [nvarchar](25) NULL,
+	[JOB_NUMBER] [nvarchar](25) NULL,
+	[DATE_OPENED] [datetime] NULL,
+	[READMANUALNEWPRICE] [numeric](38, 0) NULL,
+ CONSTRAINT [PK_MBLIST] PRIMARY KEY CLUSTERED 
+(
+	[MB_NUMBER] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[MB_LIST_OF_BUSES]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[MB_LIST_OF_BUSES](
+	[MB_NUMBER] [nvarchar](25) NOT NULL,
+	[LIST_ID] [numeric](38, 0) NOT NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[MMS_COST_TEMP]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[MMS_COST_TEMP](
+	[MMS_NEW_CODE] [nvarchar](13) NULL,
+	[MMS_NEW_COST] [numeric](9, 0) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[MMS_NEW_COSTS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[MMS_NEW_COSTS](
+	[MMS_NEW_CODE] [nvarchar](6) NOT NULL,
+	[MMS_NEW_COST] [numeric](18, 4) NULL,
+	[OEM_SUPPLIER] [nvarchar](50) NULL,
+	[OEM_PART_NUMBER] [nvarchar](50) NULL,
+	[OEM_PART_COST] [numeric](18, 4) NULL,
+	[SUPPLIER_NAME] [nvarchar](50) NULL,
+	[SUPPLIER_PART_NUM] [nvarchar](25) NULL,
+	[SUPPLIER_COST] [numeric](18, 4) NULL,
+	[THIRDPARTY_NAME] [nvarchar](50) NULL,
+	[THIRDPART_PART_NUM] [nvarchar](50) NULL,
+	[THIRDPARTY_COST] [numeric](18, 4) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[PART_TYPE] [nvarchar](40) NULL,
+	[DETAILED_DESC] [nvarchar](max) NULL,
+	[MMS_SYNC_DATE] [datetime] NULL
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[NON_STOCK_CODED_PARTS_TEMP]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[NON_STOCK_CODED_PARTS_TEMP](
+	[ORIG_SUPPLIER_NUM] [nvarchar](50) NULL,
+	[ORIG_SUPPLIER_NAME] [nvarchar](50) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[OEM_PART_COST] [numeric](18, 2) NULL,
+	[DETAILED_DESC] [nvarchar](500) NULL,
+	[PART_ADDED_BY] [nvarchar](25) NULL,
+	[LAST_MODIFIED_BY] [nvarchar](25) NULL,
+	[LAST_MODIFIED_DATE] [date] NULL,
+	[KEYWORD] [nvarchar](50) NULL,
+	[ID] [numeric](10, 0) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[NSC_PARTS_USED_TEMP]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[NSC_PARTS_USED_TEMP](
+	[ORIG_SUPP_NUM] [nvarchar](50) NULL,
+	[ORIG_SUPPLIER_NAME] [nvarchar](50) NULL,
+	[COST_CENTRE] [nvarchar](4) NULL,
+	[QTY_REQD] [nvarchar](10) NULL,
+	[PERCENT_USAGE] [nvarchar](10) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[ENTERED_BY] [nvarchar](25) NULL,
+	[LAST_MODIFIED_BY] [nvarchar](25) NULL,
+	[LAST_MODIFIED_DATE] [datetime] NULL,
+	[LINK_CODE] [nvarchar](30) NULL,
+	[COST] [numeric](18, 2) NULL,
+	[LINK_TYPE] [nvarchar](3) NULL,
+	[CORECOST] [numeric](18, 2) NULL,
+	[ID] [numeric](10, 0) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[Order_Master]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[Order_Master](
+	[ORDER_NUMBER] [nchar](9) NOT NULL,
+	[ORDER_LINE] [numeric](5, 0) NOT NULL,
+	[ORDER_PART_NUMBER_OM] [nvarchar](25) NULL,
+	[ORDER_PLANT_LOCATION_OM] [nchar](3) NOT NULL,
+	[ORIGINAL_ORDER_QTY_OM] [numeric](11, 3) NOT NULL,
+	[CUSTOMER_ORDER_NUMBER] [nchar](12) NULL,
+	[ORDER_TYPE] [nchar](1) NULL,
+	[ORDER_SIGNAL_DATE] [nchar](8) NULL,
+	[DATE_LAST_RECEIVED] [datetime] NULL,
+	[ORIGINAL_PROMISE_DATE] [datetime] NULL,
+	[T_ACCT_NO_OM] [nvarchar](8) NULL,
+	[MO_PRINT_DATE] [datetime] NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[PART_MASTER]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[PART_MASTER](
+	[PART_NUMBER] [nchar](13) NOT NULL,
+	[DESCRIPTION_PM] [nvarchar](35) NULL,
+	[LEVEL_TOTAL_COST_LA_PM] [numeric](15, 5) NULL,
+	[LEVEL_TOTAL_COST_WA_PM] [numeric](15, 5) NULL,
+	[PRODUCT_CODE_PM] [nvarchar](10) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[Part_Master_C]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[Part_Master_C](
+	[PART_NUMBER] [nchar](6) NOT NULL,
+	[AUTO_APPROVE_FLAG_PM] [nchar](1) NOT NULL,
+	[AUTO_GEN_PO_FLAG_PM] [nchar](1) NOT NULL,
+	[CYCLE_COUNT_INCLUDE_FLAG_PM] [nchar](1) NOT NULL,
+	[DESCRIPTION_PM] [nvarchar](30) NULL,
+	[GST_EXEMPT_IND_PM] [nchar](1) NOT NULL,
+	[HAZARDOUS_MATERIAL_PM] [nchar](1) NOT NULL,
+	[HOLD_CODE_PM] [nchar](1) NOT NULL,
+	[OVER_ISSUE_FLAG_PM] [nchar](1) NOT NULL,
+	[ISSUE_UNIT_MEASURE_PM] [nchar](2) NOT NULL,
+	[LEVEL_TOTAL_COST_FS_PM] [numeric](15, 5) NOT NULL,
+	[LEVEL_TOTAL_COST_LA_PM] [numeric](15, 5) NOT NULL,
+	[LEVEL_TOTAL_COST_WA_PM] [numeric](15, 5) NOT NULL,
+	[PRODUCT_CODE_PM] [nvarchar](10) NOT NULL,
+	[PST_EXEMPT_IND_PM] [nchar](1) NOT NULL,
+	[PURCHASE_UNIT_MEASURE_PM] [nchar](2) NOT NULL,
+	[PURCHASE_UOM_CONF_FACT_PM] [numeric](12, 4) NOT NULL,
+	[SHOPPING_BASKET_IND_PM] [nchar](1) NOT NULL,
+	[CORE_NUMBER] [nchar](6) NULL,
+	[BUY_NUMBER] [nchar](10) NULL,
+	[SUGGESTED_SOURCE_PM] [nchar](2) NULL,
+	[QUALITY_ASSURANCE] [nchar](2) NULL,
+	[SERIAL_LOT_CONTROL_CODE] [nchar](1) NULL,
+	[LOT_CONTROL_DATE_TYPE] [nchar](1) NULL,
+	[BUYER_CODE] [nchar](8) NULL,
+	[COMMODITY_CODE] [nvarchar](15) NULL,
+	[PVNLT_OVERRIDE_FLAG] [nchar](1) NULL,
+	[MSDS_NUMBER] [nchar](6) NULL,
+	[OUT_FOR_TENDER_IND] [nchar](1) NULL,
+	[LIVE_CODE] [nchar](1) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[PART_ORDER]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[PART_ORDER](
+	[STOCK_CODED_NUMBER] [nchar](13) NULL,
+	[T_ACCT_NO_OM] [nvarchar](8) NULL,
+	[ORIGINAL_ORDER_QTY_OM] [numeric](11, 3) NULL,
+	[COST_CENTRE] [nchar](4) NULL,
+	[DATE_ORDERED] [date] NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[PO_Item]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[PO_Item](
+	[ORDER_NUMBER] [nchar](9) NOT NULL,
+	[ORDER_LINE_NO] [numeric](5, 0) NOT NULL,
+	[PART_TYPE] [nchar](1) NULL,
+	[PART_DECRIPTION] [nchar](30) NULL,
+	[VENDOR_PART_NUMBER] [nchar](25) NULL,
+	[SHIP_TO_ADDR] [nchar](10) NULL,
+	[ITEM_LIMIT] [numeric](15, 4) NULL,
+	[UNIT_PRICE] [numeric](15, 4) NULL,
+	[VENDOR_UNIT_PRCE] [numeric](15, 4) NULL,
+	[ITEM_AMT] [numeric](15, 4) NULL,
+	[ACTUAL_UNIT_PRICE] [numeric](15, 4) NULL,
+	[ITEM_STATUS] [nchar](1) NULL,
+	[ITEM_STATUS_DATE] [datetime] NULL,
+	[ORDER_QTY] [numeric](15, 3) NULL,
+	[GROSS_QTY_RECEIVED] [numeric](15, 3) NULL,
+	[NET_QTY_RECEIVED] [numeric](15, 3) NULL,
+	[QTY_INVOICED] [numeric](15, 3) NULL,
+	[QTY_IN_RECEIVING] [numeric](15, 3) NULL,
+	[QTY_IN_INSPECTION] [numeric](15, 3) NULL,
+	[QTY_STOCKED] [numeric](15, 3) NULL,
+	[QTY_SCRAPPED] [numeric](15, 3) NULL,
+	[QTY_REWORKED] [numeric](15, 3) NULL,
+	[QTY_RETURNED] [numeric](15, 3) NULL,
+	[QTY_DUE] [numeric](15, 3) NULL,
+	[INVOICE_STATUS] [nchar](1) NULL,
+	[VENDOR_UNIT_MEASURE] [nchar](2) NULL,
+	[PURCHASE_UNIT_MEASURE] [nchar](2) NULL,
+	[ISSUE_UNIT_MEASURE] [nchar](2) NULL,
+	[UNIT_MEASURE_CONV_FACTOR_1] [numeric](12, 4) NULL,
+	[UNIT_MEASURE_CONV_FACTOR_2] [numeric](12, 4) NULL,
+	[HAZARDOUS_MATERIAL_CODE] [nchar](1) NULL,
+	[EXTENSION_CHARGE_1] [numeric](15, 4) NULL,
+	[EXTENSION_CHARGE_FACTOR_1] [nchar](1) NULL,
+	[EXTENSION_CHARGE_TYPE_1] [nchar](1) NULL,
+	[EXTENSION_CHARGE_2] [numeric](15, 4) NULL,
+	[EXTENSION_CHARGE_FACTOR_2] [nchar](1) NULL,
+	[EXTENSION_CHARGE_TYPE_2] [nchar](1) NULL,
+	[EXTENSION_CHARGE_3] [numeric](15, 4) NULL,
+	[EXTENSION_CHARGE_FACTOR_3] [nchar](1) NULL,
+	[EXTENSION_CHARGE_TYPE_3] [nchar](1) NULL,
+	[PLACED_QTY] [numeric](15, 3) NULL,
+	[VENDOR_NUMBER] [nchar](10) NULL,
+	[PRICE_SOURCE] [nchar](1) NULL,
+	[CLEARANCE_FLAG] [nchar](1) NULL,
+	[DISCOUNT_PERCENT] [numeric](9, 4) NULL,
+	[ORDER_QTY_ENTERED] [numeric](15, 3) NULL,
+	[MATCHING_OPTION] [nchar](1) NULL,
+	[PARTIAL_PAY_FLAG] [nchar](1) NULL,
+	[SALES_TAX_PRORATE] [nchar](1) NULL,
+	[FREIGHT_PRORATE] [nchar](1) NULL,
+	[MISC_PRORATE_1] [nchar](1) NULL,
+	[MISC_PRORATE_2] [nchar](1) NULL,
+	[DISCOUNT_PRORATE] [nchar](1) NULL,
+	[REQ_AUTO_PURCHASE_FLAG] [nchar](1) NULL,
+	[EFF_DATE] [datetime] NULL,
+	[SUGGESTED_SOURCE] [nchar](2) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[DATE_LAST_ACTIVITY] [datetime] NULL,
+	[PO_ITEM_SUFFIX] [numeric](5, 0) NULL,
+	[AUTO_GEN_PO_FLAG] [nchar](1) NULL,
+	[SCHEDULE_INVOICE_FLAG] [nchar](1) NULL,
+	[RETURN_CONTAINER_COUNT] [numeric](10, 0) NULL,
+	[RETURN_CONTAINER_TYPE] [nchar](1) NULL,
+	[PRICE_PER_CONTAINER] [numeric](12, 4) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[PRICENOTAX]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[PRICENOTAX](
+	[MMS_STOCK_CODE] [nvarchar](30) NULL,
+	[PRICE] [numeric](18, 2) NULL,
+	[DATE_LAST_ACTIVITY] [datetime] NULL,
+	[DESCRIPTION] [nvarchar](200) NULL,
+	[VENDOR_PART_NUMBER] [nvarchar](50) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[RB_LIST_OF_BUSES]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[RB_LIST_OF_BUSES](
+	[REBUILT_STOCK_NUM] [nvarchar](30) NOT NULL,
+	[LIST_ID] [numeric](38, 0) NOT NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[SC_OEMKITS_TEXT_DATA]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[SC_OEMKITS_TEXT_DATA](
+	[MMS_NEW_CODE] [nvarchar](30) NULL,
+	[TEXT_DATA] [nvarchar](132) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[STOCK_CODED_PARTS_BACKUP]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[STOCK_CODED_PARTS_BACKUP](
+	[MMS_STOCK_CODE] [nvarchar](30) NOT NULL,
+	[CORE_PART_NUMBER] [nvarchar](30) NULL,
+	[PART_TYPE] [nvarchar](50) NULL,
+	[JOB_NUMBER] [nvarchar](30) NULL,
+	[DETAILED_DESC] [nvarchar](500) NULL,
+	[DATE_ENTERED] [nvarchar](8) NULL,
+	[ITEM_REF_NUMBER] [nvarchar](16) NULL,
+	[OVERHEADTYPE] [numeric](9, 0) NULL,
+	[CORE_CHARGE] [numeric](9, 0) NULL,
+	[PART_COST] [numeric](9, 0) NULL,
+	[LAST_MODIFIED_DATE] [datetime] NULL,
+	[LAST_MODIFIED_BY] [nvarchar](30) NULL,
+	[ADDED_BY] [nvarchar](30) NOT NULL,
+	[MMS_NEW_COST] [numeric](15, 5) NULL,
+	[OEM_PART_COST] [numeric](9, 0) NULL,
+	[MMS_SYNC_DATE] [datetime] NULL,
+	[ORIG_SUPPLIER_NUM] [nvarchar](50) NULL,
+	[ORIG_SUPPLIER_NAME] [nvarchar](50) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[STOCK_CODED_PARTS_VPN]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[STOCK_CODED_PARTS_VPN](
+	[ORIG_SUPPLIER_NUM] [nvarchar](50) NOT NULL,
+	[MMS_STOCK_CODE] [nvarchar](30) NULL,
+	[ORIG_SUPPLIER_NAME] [nvarchar](50) NOT NULL,
+	[PART_DESCRIPTION] [nvarchar](264) NULL,
+	[PART_TYPE] [nvarchar](30) NULL,
+	[DATE_ENTRY] [datetime] NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[SUB_KITS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[SUB_KITS](
+	[KIT_PART_NUMBER] [nvarchar](30) NULL,
+	[PART_TYPE] [nvarchar](3) NULL,
+	[SUPPLIER_NUMBER] [nvarchar](50) NULL,
+	[SUPPLIER_NAME] [nvarchar](50) NULL,
+	[STOCK_CODE] [nvarchar](30) NULL,
+	[QTY] [nvarchar](10) NULL,
+	[SUB_KIT_LETTER] [nvarchar](5) NULL,
+	[DESCRIPTION] [nvarchar](500) NULL,
+	[SEQUENCE] [numeric](10, 0) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[TEMP]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[TEMP](
+	[MMS_STOCK_CODE] [nvarchar](30) NULL,
+	[DATE_ENTERED] [datetime] NULL,
+	[OVERHEADTYPE] [numeric](2, 0) NULL,
+	[REB_PART_COST] [numeric](9, 0) NULL,
+	[USER_ENTERED] [nvarchar](50) NULL,
+	[MMS_COST] [numeric](18, 2) NULL,
+	[OEM_COST] [numeric](18, 2) NULL,
+	[LAST_MODIFIED_BY] [nvarchar](25) NULL,
+	[LAST_MODIFIED_DATE] [datetime] NULL,
+	[MMS_REBUILT_CODE] [nvarchar](30) NULL,
+	[COST_CENTRE] [nvarchar](4) NULL,
+	[QTY_REQD] [nvarchar](10) NULL,
+	[PERCENT_USAGE] [nvarchar](10) NULL,
+	[MAKEBUY_CODE] [nvarchar](30) NULL,
+	[REBUILT_PART] [nvarchar](1) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[TEMP_KIT_PARTS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[TEMP_KIT_PARTS](
+	[PART_TYPE] [nvarchar](3) NULL,
+	[SUPPLIER_NUMBER] [nvarchar](50) NULL,
+	[SUPPLIER_NAME] [nvarchar](50) NULL,
+	[STOCK_CODE] [nvarchar](30) NULL,
+	[COST_CENTRE] [nvarchar](4) NULL,
+	[QTY] [nvarchar](10) NULL,
+	[PERCENT_USAGE] [nvarchar](10) NULL,
+	[UNIT_COST] [numeric](18, 2) NULL,
+	[CORE_COST] [numeric](18, 2) NULL,
+	[COST] [numeric](18, 2) NULL,
+	[DESCRIPTION] [nvarchar](500) NULL,
+	[KEYWORD] [nvarchar](50) NULL,
+	[LAST_MODIFIED_DATE] [datetime] NULL,
+	[ROW_ID] [nchar](18) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[TEMP_LABOUR_LIST]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[TEMP_LABOUR_LIST](
+	[LABOUR_TYPE] [nvarchar](50) NULL,
+	[CC] [nvarchar](4) NULL,
+	[TASK] [nvarchar](200) NULL,
+	[USAGE] [numeric](18, 2) NULL,
+	[TIME] [numeric](18, 2) NULL,
+	[RATE_PER_HOUR] [numeric](18, 2) NULL,
+	[TOTAL_COST] [numeric](18, 2) NULL,
+	[EXTENDED_TIME] [nvarchar](8) NULL,
+	[ESTIMATE_TYPE] [nvarchar](3) NULL,
+	[ESTIMATE_NUMBER] [nvarchar](25) NULL,
+	[WRENCH_TIME] [nvarchar](25) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[TEMP_RBP_COST]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[TEMP_RBP_COST](
+	[TOTAL_COST] [numeric](20, 10) NULL,
+	[RB_NUMBER] [nvarchar](30) NULL,
+	[DETAILED_DESC] [nvarchar](250) NULL,
+	[EXTERNAL_COST] [nvarchar](25) NULL,
+	[ACTIVE] [numeric](38, 0) NULL,
+	[KEYWORD] [nvarchar](250) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[TEST]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[TEST](
+	[ACCESS_LEVEL_ID2] [numeric](38, 0) NOT NULL,
+	[ACCESS_LEVEL_DESCRIPTION] [nvarchar](100) NULL,
+ CONSTRAINT [ACCESS_LEVEL_ID2] PRIMARY KEY CLUSTERED 
+(
+	[ACCESS_LEVEL_ID2] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[TEXT_DATA]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[TEXT_DATA](
+	[TEXT_TYPE] [nchar](4) NOT NULL,
+	[TEXT_KEY] [nvarchar](35) NOT NULL,
+	[TEXT_LINE_NO] [numeric](5, 0) NOT NULL,
+	[TEXT_LINE_TX] [nvarchar](132) NOT NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[TRANSMISSIONS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[TRANSMISSIONS](
+	[NAME] [nvarchar](25) NOT NULL,
+ CONSTRAINT [PK_TRANSMISSIONS] PRIMARY KEY CLUSTERED 
+(
+	[NAME] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[TYPE_OF_VEHICLE]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[TYPE_OF_VEHICLE](
+	[MAKE] [nvarchar](25) NOT NULL,
+	[MODEL] [nvarchar](25) NOT NULL,
+	[YEAR] [nvarchar](4) NOT NULL,
+ CONSTRAINT [PK_TYPE_OF_VEHICLE] PRIMARY KEY CLUSTERED 
+(
+	[MAKE] ASC,
+	[MODEL] ASC,
+	[YEAR] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[UserProfile]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[UserProfile](
+	[UserProfileId] [int] IDENTITY(1,1) NOT NULL,
+	[FirstName] [nvarchar](max) NULL,
+	[LastName] [nvarchar](max) NULL,
+	[Email] [nvarchar](max) NULL,
+	[Password] [nvarchar](max) NULL,
+	[ConfirmPassword] [nvarchar](max) NULL,
+	[OldPassword] [nvarchar](max) NULL,
+	[ProfilePicture] [nvarchar](max) NULL,
+	[ApplicationUserId] [nvarchar](max) NULL,
+ CONSTRAINT [PK_UserProfile] PRIMARY KEY CLUSTERED 
+(
+	[UserProfileId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[USERS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[USERS](
+	[USERNAME] [nvarchar](15) NOT NULL,
+	[DATE_CHANGED] [datetime] NULL,
+	[PASSWORD] [nvarchar](25) NULL,
+	[PSWD_CHANGE_DATE] [datetime] NULL,
+	[ACCESS_LEVEL] [numeric](38, 0) NULL,
+	[PREVIOUS_ACCESS_LEVEL] [numeric](38, 0) NULL,
+	[DATE_CHANGED_BACK] [datetime] NULL,
+	[USE_OVERHEAD_FRINGE] [nvarchar](1) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[VEHICLE_LIST]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[VEHICLE_LIST](
+	[VEHICLE_LIST_ID] [numeric](38, 0) NOT NULL,
+	[VEH_SERIES_CODE] [nvarchar](500) NOT NULL,
+	[NUM_OF_VEHICLES] [nvarchar](10) NOT NULL,
+	[PROJ_DESC] [nvarchar](200) NOT NULL,
+	[DATE_ENTERED] [datetime] NOT NULL,
+	[ENTERED_BY] [nvarchar](25) NOT NULL,
+	[MODIFIED_LAST_BY] [nvarchar](25) NOT NULL,
+	[MODIFIED_LAST_DATE] [datetime] NOT NULL,
+	[MAKE] [nvarchar](25) NULL,
+	[MODEL] [nvarchar](25) NULL,
+	[YEAR] [nvarchar](4) NULL,
+	[ENGINE] [nvarchar](25) NULL,
+	[TRANSMISSION] [nvarchar](25) NULL,
+	[DIFFERENTIAL] [nvarchar](25) NULL,
+	[SOPNUMBER] [nvarchar](30) NULL,
+ CONSTRAINT [PK_VEHICLE_LIST] PRIMARY KEY CLUSTERED 
+(
+	[VEHICLE_LIST_ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[VENDOR_PART_DESC]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[VENDOR_PART_DESC](
+	[PART_NUMBER] [nchar](13) NOT NULL,
+	[PRINT_SEQ] [numeric](10, 0) NULL,
+	[VENDOR_PART_NUMBER] [nvarchar](25) NULL,
+	[BUSINESS_NAME] [nvarchar](40) NULL,
+	[PART_XDESC_ED_LINE] [nvarchar](132) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [CES].[VENDOR_PART_DESC_BACK]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [CES].[VENDOR_PART_DESC_BACK](
+	[PART_NUMBER] [nvarchar](6) NOT NULL,
+	[PRINT_SEQ] [numeric](10, 0) NOT NULL,
+	[VEND_PART_SEQ] [numeric](10, 0) NOT NULL,
+	[VENDOR_PART_NUMBER] [nvarchar](25) NOT NULL,
+	[BUSINESS_NAME] [nvarchar](40) NOT NULL,
+	[PART_XDESC_ED_SEQ] [numeric](10, 0) NOT NULL,
+	[PART_XDESC_ED_LINE] [nvarchar](132) NOT NULL,
+	[PART_XDESC_NP_SEQ] [numeric](10, 0) NOT NULL,
+	[PART_XDESC_NP_LINE] [nvarchar](132) NOT NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TEMP_LABOUR_LIST]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TEMP_LABOUR_LIST](
+	[LABOUR_TYPE] [varchar](50) NULL,
+	[CC] [varchar](4) NULL,
+	[TASK] [varchar](200) NULL,
+	[USAGE] [numeric](18, 2) NULL,
+	[TIME] [numeric](18, 2) NULL,
+	[RATE_PER_HOUR] [numeric](18, 2) NULL,
+	[TOTAL_COST] [numeric](18, 2) NULL,
+	[EXTENDED_TIME] [nvarchar](8) NULL,
+	[ESTIMATE_TYPE] [varchar](3) NULL,
+	[ESTIMATE_NUMBER] [varchar](25) NULL,
+	[WRENCH_TIME] [varchar](25) NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TempTable]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TempTable](
+	[ASSEMBLY AREA] [nvarchar](50) NOT NULL,
+	[CC] [nvarchar](4) NOT NULL,
+	[TOTAL COST] [decimal](38, 2) NOT NULL,
+	[TAXABLE COST] [decimal](38, 2) NOT NULL
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[V_FINAL_PRICE]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[V_FINAL_PRICE](
+	[LABOUR_COST] [numeric](38, 2) NULL
+) ON [PRIMARY]
+GO
+ALTER TABLE [CES].[ARCH_RB_EMPLOYEE_LABOUR]  WITH CHECK ADD  CONSTRAINT [FK_ARCH_EMPLOYEE_LABOUR] FOREIGN KEY([ARCH_RB_MASTERLIST_ID])
+REFERENCES [CES].[ARCH_RB_MASTERLIST] ([ARCH_RB_MASTERLIST_ID])
+GO
+ALTER TABLE [CES].[ARCH_RB_EMPLOYEE_LABOUR] CHECK CONSTRAINT [FK_ARCH_EMPLOYEE_LABOUR]
+GO
+ALTER TABLE [CES].[ARCH_RB_LABOUR_CC_TOTAL]  WITH CHECK ADD  CONSTRAINT [FK_ARCH_RB_LABOUR_CC_TOTAL] FOREIGN KEY([ARCH_RB_MASTERLIST_ID])
+REFERENCES [CES].[ARCH_RB_MASTERLIST] ([ARCH_RB_MASTERLIST_ID])
+GO
+ALTER TABLE [CES].[ARCH_RB_LABOUR_CC_TOTAL] CHECK CONSTRAINT [FK_ARCH_RB_LABOUR_CC_TOTAL]
+GO
+ALTER TABLE [CES].[ARCH_RB_LIST_BUSES]  WITH CHECK ADD  CONSTRAINT [FK_ARCH_RB_LIST_BUSES] FOREIGN KEY([ARCH_RB_MASTERLIST_ID])
+REFERENCES [CES].[ARCH_RB_MASTERLIST] ([ARCH_RB_MASTERLIST_ID])
+GO
+ALTER TABLE [CES].[ARCH_RB_LIST_BUSES] CHECK CONSTRAINT [FK_ARCH_RB_LIST_BUSES]
+GO
+ALTER TABLE [CES].[ARCH_RB_MASTERLIST]  WITH CHECK ADD  CONSTRAINT [FK_ARCH_RB_MASTERLIST] FOREIGN KEY([REBUILT_STOCK_NUM])
+REFERENCES [CES].[RB_MASTERLIST] ([REBUILT_STOCK_NUM])
+GO
+ALTER TABLE [CES].[ARCH_RB_MASTERLIST] CHECK CONSTRAINT [FK_ARCH_RB_MASTERLIST]
+GO
+ALTER TABLE [CES].[ARCH_RB_MATERIALS_CC_TOTAL]  WITH CHECK ADD  CONSTRAINT [FK_ARCH_RB_MATERIALS_CC_TOTALS] FOREIGN KEY([ARCH_RB_MASTERLIST_ID])
+REFERENCES [CES].[ARCH_RB_MASTERLIST] ([ARCH_RB_MASTERLIST_ID])
+GO
+ALTER TABLE [CES].[ARCH_RB_MATERIALS_CC_TOTAL] CHECK CONSTRAINT [FK_ARCH_RB_MATERIALS_CC_TOTALS]
+GO
+ALTER TABLE [CES].[ARCH_RB_NSC_PARTS_USED]  WITH CHECK ADD  CONSTRAINT [FK_ARCH_NSC_PARTS_USED] FOREIGN KEY([ARCH_RB_MASTERLIST_ID])
+REFERENCES [CES].[ARCH_RB_MASTERLIST] ([ARCH_RB_MASTERLIST_ID])
+GO
+ALTER TABLE [CES].[ARCH_RB_NSC_PARTS_USED] CHECK CONSTRAINT [FK_ARCH_NSC_PARTS_USED]
+GO
+ALTER TABLE [CES].[ARCH_RB_SC_PARTS_USED]  WITH CHECK ADD  CONSTRAINT [FK_ARCH_SC_PARTS_USED] FOREIGN KEY([ARCH_RB_MASTERLIST_ID])
+REFERENCES [CES].[ARCH_RB_MASTERLIST] ([ARCH_RB_MASTERLIST_ID])
+GO
+ALTER TABLE [CES].[ARCH_RB_SC_PARTS_USED] CHECK CONSTRAINT [FK_ARCH_SC_PARTS_USED]
+GO
+ALTER TABLE [CES].[ARCH_VEH_EMPLOYEE_LABOUR]  WITH CHECK ADD  CONSTRAINT [FK_ARCH_VEH_EMPLOYEE_LABOUR] FOREIGN KEY([ARCH_VEHICLE_LIST_ID])
+REFERENCES [CES].[ARCH_VEHICLE_LIST] ([ARCH_VEHICLE_LIST_ID])
+GO
+ALTER TABLE [CES].[ARCH_VEH_EMPLOYEE_LABOUR] CHECK CONSTRAINT [FK_ARCH_VEH_EMPLOYEE_LABOUR]
+GO
+ALTER TABLE [CES].[ARCH_VEH_KITS]  WITH CHECK ADD  CONSTRAINT [FK_ARCH_VEH_KITS] FOREIGN KEY([ARCH_VEHICLE_LIST_ID])
+REFERENCES [CES].[ARCH_VEHICLE_LIST] ([ARCH_VEHICLE_LIST_ID])
+GO
+ALTER TABLE [CES].[ARCH_VEH_KITS] CHECK CONSTRAINT [FK_ARCH_VEH_KITS]
+GO
+ALTER TABLE [CES].[ARCH_VEH_NSC_PARTS_USED]  WITH CHECK ADD  CONSTRAINT [FK_ARCH_VEH_NSC_PARTS_USED] FOREIGN KEY([ARCH_VEHICLE_LIST_ID])
+REFERENCES [CES].[ARCH_VEHICLE_LIST] ([ARCH_VEHICLE_LIST_ID])
+GO
+ALTER TABLE [CES].[ARCH_VEH_NSC_PARTS_USED] CHECK CONSTRAINT [FK_ARCH_VEH_NSC_PARTS_USED]
+GO
+ALTER TABLE [CES].[ARCH_VEH_SC_PARTS_USED]  WITH CHECK ADD  CONSTRAINT [FK_ARCH_VEH_SC_PARTS_USED] FOREIGN KEY([ARCH_VEHICLE_LIST_ID])
+REFERENCES [CES].[ARCH_VEHICLE_LIST] ([ARCH_VEHICLE_LIST_ID])
+GO
+ALTER TABLE [CES].[ARCH_VEH_SC_PARTS_USED] CHECK CONSTRAINT [FK_ARCH_VEH_SC_PARTS_USED]
+GO
+ALTER TABLE [CES].[EMPL_CLASS]  WITH CHECK ADD  CONSTRAINT [FK_WAGE_GROUP] FOREIGN KEY([WAGE_GROUP])
+REFERENCES [CES].[EMPLOYEE_SALARIES] ([WAGE_GROUP])
+GO
+ALTER TABLE [CES].[EMPL_CLASS] CHECK CONSTRAINT [FK_WAGE_GROUP]
+GO
+ALTER TABLE [CES].[MB_LIST_OF_BUSES]  WITH CHECK ADD  CONSTRAINT [FK_LIST_ID] FOREIGN KEY([LIST_ID])
+REFERENCES [CES].[LIST_OF_BUSES] ([LIST_ID])
+ON DELETE CASCADE
+GO
+ALTER TABLE [CES].[MB_LIST_OF_BUSES] CHECK CONSTRAINT [FK_LIST_ID]
+GO
+ALTER TABLE [CES].[RB_LIST_OF_BUSES]  WITH CHECK ADD  CONSTRAINT [FK_RB_LIST_OF_BUSES_LIST_ID] FOREIGN KEY([LIST_ID])
+REFERENCES [CES].[LIST_OF_BUSES] ([LIST_ID])
+GO
+ALTER TABLE [CES].[RB_LIST_OF_BUSES] CHECK CONSTRAINT [FK_RB_LIST_OF_BUSES_LIST_ID]
+GO
+ALTER TABLE [CES].[USERS]  WITH CHECK ADD  CONSTRAINT [FK_ACCESS_LEVEL_ID] FOREIGN KEY([ACCESS_LEVEL])
+REFERENCES [CES].[ACCESS_LEVEL] ([ACCESS_LEVEL_ID])
+GO
+ALTER TABLE [CES].[USERS] CHECK CONSTRAINT [FK_ACCESS_LEVEL_ID]
+GO
+/****** Object:  StoredProcedure [CES].[AUDIT_INSERT_MODIFY_HISTORY]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE PROCEDURE [CES].[AUDIT_INSERT_MODIFY_HISTORY]
+    (@vi_user_name VARCHAR(4000),
+     @vi_action VARCHAR(4000),
+     @vi_estimate_number VARCHAR(4000),
+     @vi_estimate_type VARCHAR(4000),
+     @vi_ref_1 VARCHAR(4000),
+     @vi_ref_2 VARCHAR(4000),
+     @vi_ref_3 VARCHAR(4000),
+     @vi_ref_4 VARCHAR(4000),
+     @vi_ref_5 VARCHAR(4000),
+     @vi_ref_6 VARCHAR(4000),
+     @vi_ref_7 VARCHAR(4000),
+     @vi_ref_8 VARCHAR(4000),
+     @vi_ref_9 VARCHAR(4000),
+     @vi_ref_10 VARCHAR(4000),
+     @vi_ref_11 VARCHAR(4000),
+     @vi_ref_12 VARCHAR(4000),
+     @vi_ref_13 VARCHAR(4000),
+     @vi_ref_14 VARCHAR(4000),
+     @vi_ref_15 VARCHAR(4000),
+     @vi_ref_16 VARCHAR(4000),
+     @vi_ref_17 VARCHAR(4000),
+     @vi_ref_18 VARCHAR(4000),
+     @vi_ref_19 VARCHAR(4000),
+     @vi_ref_20 VARCHAR(4000),
+     @vi_ref_21 VARCHAR(4000),
+     @vi_ref_22 VARCHAR(4000),
+     @vi_ref_23 VARCHAR(4000),
+     @vi_ref_24 VARCHAR(4000),
+     @vi_ref_25 VARCHAR(4000),
+     @vi_ref_26 VARCHAR(4000),
+     @vi_ref_27 VARCHAR(4000),
+     @vi_ref_28 VARCHAR(4000),
+     @vi_ref_29 VARCHAR(4000),
+     @vi_ref_30 VARCHAR(4000),
+     @vi_ref_31 VARCHAR(4000),
+     @vi_ref_32 VARCHAR(4000),
+     @vi_ref_33 VARCHAR(4000),
+     @vi_ref_34 VARCHAR(4000),
+     @vi_ref_35 VARCHAR(4000),
+     @vi_ref_36 VARCHAR(4000),
+     @vi_ref_37 VARCHAR(4000),
+     @vi_ref_38 VARCHAR(4000),
+     @vo_ret_val NUMERIC OUTPUT
+)
+AS
+ BEGIN
+DECLARE @n_count FLOAT;
+DECLARE @id_n FLOAT;
+ 
+    -- Increase id by 1.
+    SELECT
+        @n_count = count(*)
+    FROM
+        CES.AUDIT_MODIFY_HISTORY;
+    IF @n_count <> 0 BEGIN
+        SELECT
+            @id_n = MAX(ID)
+        FROM
+            AUDIT_MODIFY_HISTORY;
+        SET @id_n = @id_n + 1;
+    END
+    ELSE BEGIN
+        -- Very first record.
+        SET @id_n = 1;
+    END 
+		BEGIN TRY
+	BEGIN TRANSACTION
+    INSERT INTO CES.AUDIT_MODIFY_HISTORY
+        (
+         id,
+         user_name,
+         date_changed,
+         action, estimate_number, estimate_type,
+         ref_1, ref_2, ref_3, ref_4, ref_5, ref_6, ref_7, ref_8, ref_9, ref_10,
+         ref_11, ref_12, ref_13, ref_14, ref_15, ref_16, ref_17, ref_18, ref_19, ref_20,
+         ref_21, ref_22, ref_23, ref_24, ref_25, ref_26, ref_27, ref_28, ref_29, ref_30,
+         ref_31, ref_32, ref_33, ref_34, ref_35, ref_36, ref_37, ref_38
+        )
+        VALUES
+        (
+         @id_n,
+         @vi_user_name,
+         GETDATE(),
+         @vi_action, @vi_estimate_number, @vi_estimate_type,
+         @vi_ref_1, @vi_ref_2, @vi_ref_3, @vi_ref_4, @vi_ref_5, @vi_ref_6, @vi_ref_7, @vi_ref_8, @vi_ref_9, @vi_ref_10,
+         @vi_ref_11, @vi_ref_12, @vi_ref_13, @vi_ref_14, @vi_ref_15, @vi_ref_16, @vi_ref_17, @vi_ref_18, @vi_ref_19, @vi_ref_20,
+         @vi_ref_21, @vi_ref_22, @vi_ref_23, @vi_ref_24, @vi_ref_25, @vi_ref_26, @vi_ref_27, @vi_ref_28, @vi_ref_29, @vi_ref_30,
+         @vi_ref_31, @vi_ref_32, @vi_ref_33, @vi_ref_34, @vi_ref_35, @vi_ref_36, @vi_ref_37, @vi_ref_38
+        );
+    COMMIT;
+    SET @vo_ret_val = 0;
+	    RETURN 0;
+	END TRY
+	BEGIN CATCH
+		ROLLBACK
+		SET @vo_ret_val = -125
+        RETURN -1
+	END CATCH
+
+END ;
+GO
+/****** Object:  StoredProcedure [CES].[CES_INQUIRY_RETRIEVE_MB_LABOUR]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [CES].[CES_INQUIRY_RETRIEVE_MB_LABOUR]
+    (@vi_idnum VARCHAR(50) /* Use -meta option MB_LIST.MB_NUMBER%TYPE */,
+     @vi_type VARCHAR(50)
+    ) AS
+BEGIN
+SET NOCOUNT ON;
+        SELECT
+            EMPLOYEE_LABOUR.labour_defn AS "LABOUR TYPE",
+            EMPLOYEE_LABOUR.costcentre AS "CC",
+            EMPLOYEE_LABOUR.task AS "TASK",
+            REPLACE(EMPLOYEE_LABOUR.usage,',','.') AS "USAGE",
+            EMPLOYEE_LABOUR.hrs_reqd AS "TIME",
+            EMPLOYEE_LABOUR.adj_hrs AS "WRENCH TIME",
+            EMPLOYEE_LABOUR.date_revised AS "DATE REVISED",
+            EMPLOYEE_LABOUR.time_addition AS "TIME ADDITION",
+            CES_SETTINGS.value AS "VALUE",
+            newId() AS ROWID
+        FROM
+            CES.EMPLOYEE_LABOUR,
+            (SELECT
+                CES_SETTINGS.value
+             FROM
+                CES.CES_SETTINGS
+             WHERE
+                CES_SETTINGS.parameter = 'NON_PRODUCTIVE_ADJUSTMENT') CES_SETTINGS
+        WHERE
+            EMPLOYEE_LABOUR.link_number = @vi_idnum AND
+            EMPLOYEE_LABOUR.typeid = @vi_type
+        ORDER BY
+            EMPLOYEE_LABOUR.costcentre;
+END;
+GO
+/****** Object:  StoredProcedure [CES].[CES_INQUIRY_RETRIEVE_TRANSMISSIONS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE PROCEDURE [CES].[CES_INQUIRY_RETRIEVE_TRANSMISSIONS]
+ AS
+BEGIN
+SET NOCOUNT ON;
+            
+SELECT   ROW_NUMBER() OVER (ORDER BY NAME
+   ) ROWID,
+   UPPER(TRANSMISSIONS.name) AS NAME
+
+        FROM
+            CES.TRANSMISSIONS;
+END;
+
+GO
+/****** Object:  StoredProcedure [CES].[get_labour_cost]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE Procedure [CES].[get_labour_cost]
+(@vi_IDnum varchar(4000), @vi_type varchar(4000),
+@V_FINAL_PRICE DECIMAL(20,2) OUTPUT
+)
+
+--RETURNS float 
+AS
+BEGIN
+
+
+DECLARE  @SqlStatment AS NVARCHAR(1000)
+DECLARE @cur_RBRec_RebuiltCode varchar(50);
+DECLARE @cur_RBRec_QTY varchar(50);
+DECLARE @cur_RBRec_Usage varchar(50);
+DECLARE @cur_RBRec_LinkCode varchar(50);
+DECLARE @V_LINK_CODE VARCHAR(30);
+DECLARE @V_PRICE decimal (20,10);
+DECLARE @V_RET_VAL VARCHAR(25);
+Declare @Adjustment decimal (20,10);
+declare @cur_LabourRec_LABOURTYPE varchar(50);
+	 declare  @cur_LabourRec_CC varchar(50);
+	 declare  @cur_LabourRec_TASK varchar(50);
+	 declare  @cur_LabourRec_USAGE varchar(50);
+	 declare  @cur_LabourRec_TIME varchar(50);
+	 declare @cur_LabourRec_RATEPERHOUR Numeric(18,2);
+	declare @cur_LabourRec_TIMEADDITION Numeric(18,2);
+	declare @cur_LabourRec_WRENCHTIME varchar(50);
+DECLARE @C_RB_LIST_To_Prop_vi_IDnum varchar;
+	DECLARE C_RB_LIST_To_Prop CURSOR LOCAL 
+	FOR
+	SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS [link_code],
+                SC_PARTS_USED.qty_reqd AS [QTY],
+                SC_PARTS_USED.percent_usage AS [%],
+                SC_PARTS_USED.mms_rebuilt_code AS [Rebuilt Code]
+        FROM
+            CES.SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = @vi_type AND
+            upper(SC_PARTS_USED.link_code) = upper(@vi_IDnum)
+
+				--OPEN C_RB_LIST_To_Prop
+
+					
+			--CLOSE C_RB_LIST_To_Prop
+		--DEALLOCATE C_RB_LIST_To_Prop
+
+    DECLARE cur_Labour CURSOR LOCAL FOR
+	--SELECT 
+ --     *
+ --   FROM 
+ --     [dbo].[TEMP_TABLE];
+ SELECT
+            EMPLOYEE_LABOUR.labour_defn AS [LABOUR TYPE],
+            EMPLOYEE_LABOUR.costcentre AS [CC],
+            EMPLOYEE_LABOUR.task AS [TASK],
+            REPLACE(EMPLOYEE_LABOUR.usage,',','.') AS [USAGE],
+            EMPLOYEE_LABOUR.hrs_reqd AS [TIME],
+            EMPLOYEE_SALARIES.rate_per_hour AS [RATE PER HOUR],
+            EMPLOYEE_LABOUR.time_addition AS [TIME ADDITION],
+            [CES].hhmm_to_decimal(EMPLOYEE_LABOUR.adj_hrs) AS [WRENCH TIME]
+        FROM
+            CES.EMPLOYEE_LABOUR,
+            CES.EMPLOYEE_SALARIES,
+            CES.EMPL_CLASS
+        WHERE
+            EMPLOYEE_LABOUR.labour_defn = UPPER(EMPL_CLASS.labour_defn) AND
+            EMPLOYEE_SALARIES.wage_group = EMPL_CLASS.wage_group AND
+            EMPLOYEE_LABOUR.link_number = @vi_IDnum AND
+            EMPLOYEE_LABOUR.typeid = @vi_type
+	SET @SqlStatment = 'TRUNCATE TABLE TEMP_LABOUR_LIST'
+
+			EXECUTE sp_executesql  @SqlStatment ;
+
+	OPEN cur_Labour
+FETCH NEXT FROM cur_Labour INTO @cur_LabourRec_LABOURTYPE, @cur_LabourRec_CC, @cur_LabourRec_TASK, @cur_LabourRec_USAGE, @cur_LabourRec_TIME, @cur_LabourRec_RATEPERHOUR,@cur_LabourRec_TIMEADDITION,  @cur_LabourRec_WRENCHTIME;
+
+WHILE @@FETCH_STATUS = 0
+    BEGIN
+	IF @@FETCH_STATUS <> 0 BREAK
+	print 'here 1'
+	insert into dbo.TEMP_LABOUR_LIST values (
+  @cur_LabourRec_LABOURTYPE
+  ,@cur_LabourRec_CC 
+  ,@cur_LabourRec_TASK 
+  , @cur_LabourRec_USAGE 
+  ,[CES].hhmm_to_minutes(@cur_LabourRec_TIMEADDITION)
+  ,@cur_LabourRec_RATEPERHOUR  
+  	,@cur_LabourRec_RATEPERHOUR * [CES].hhmm_to_minutes(@cur_LabourRec_TIMEADDITION) * @cur_LabourRec_USAGE / 6000
+	, CONVERT(DECIMAL(10,2),round((@cur_LabourRec_USAGE / 100.0) * [CES].hhmm_to_minutes(@cur_LabourRec_TIMEADDITION),2))
+ ,@vi_type
+,@vi_IDnum
+, round((@cur_LabourRec_USAGE / 100.0) * [CES].hhmm_to_minutes(@cur_LabourRec_WRENCHTIME),2)
+ )
+
+--insert into dbo.TEMP_LABOUR_LIST values (
+--  'MECHANICAL SERVICEPERSON'
+--  ,'05H2'
+--  ,''
+--  , 100 
+--  ,120 --[CES].hhmm_to_minutes(@cur_LabourRec_TIMEADDITION)
+--  ,35 
+--  	,70 --@cur_LabourRec_RATEPERHOUR * [CES].hhmm_to_minutes(@cur_LabourRec_TIMEADDITION) * @cur_LabourRec_USAGE / 6000
+--	,'120'-- round((@cur_LabourRec_USAGE / 100.0) * [CES].hhmm_to_minutes(@cur_LabourRec_TIMEADDITION),2)
+-- ,@vi_type
+--,@vi_IDnum
+--, '93'
+-- )
+ 
+FETCH NEXT FROM cur_Labour INTO @cur_LabourRec_LABOURTYPE, @cur_LabourRec_CC, @cur_LabourRec_TASK, @cur_LabourRec_USAGE, @cur_LabourRec_TIME, @cur_LabourRec_RATEPERHOUR,@cur_LabourRec_TIMEADDITION,  @cur_LabourRec_WRENCHTIME;
+
+	END
+
+close cur_Labour
+Deallocate cur_Labour
+SELECT @V_PRICE = count(*) FROM SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = UPPER(@vi_type) AND
+            upper(SC_PARTS_USED.link_code) = upper(@vi_IDnum);
+
+if @V_PRICE > 0 begin
+open C_RB_LIST_To_Prop;
+WHILE 1=1 BEGIN
+	print 'here 2'
+    FETCH C_RB_LIST_To_Prop
+    INTO @cur_RBRec_LinkCode,@cur_RBRec_QTY, @cur_RBRec_Usage, @cur_RBRec_RebuiltCode ;
+    IF @@FETCH_STATUS <> 0 BREAK;
+	SET @Adjustment =@cur_RBRec_QTY * cast(replace(ISNULL(@cur_RBRec_USAGE,'0'),',','.') as float)/100;
+    EXEC CES.WRITE_LABOUR @cur_RBRec_RebuiltCode,@cur_RBRec_QTY;
+
+END;
+CLOSE C_RB_LIST_To_Prop;
+DEALLOCATE C_RB_LIST_To_Prop;
+End;
+   --Select @V_FINAL_PRICE=0
+SELECT @V_FINAL_PRICE = round(sum(total_cost),2)
+        FROM
+            TEMP_LABOUR_LIST;
+--SELECT @V_FINAL_PRICE AS 'LABOUR_COST';
+RETURN @V_FINAL_PRICE;
+END;
+GO
+/****** Object:  StoredProcedure [CES].[get_material_cost]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE Procedure [CES].[get_material_cost]
+(@vi_IDnum varchar(4000), @vi_type varchar(4000), @V_FINAL_PRICE DECIMAL(20,2) OUTPUT)
+AS
+ BEGIN
+ DECLARE  @SqlStatment AS NVARCHAR(1000)
+ Declare @Adjustment decimal (20,10);
+DECLARE @V_LINK_CODE VARCHAR(30);
+DECLARE @V_PRICE decimal (20,10);
+DECLARE @V_RET_VAL VARCHAR(25);
+DECLARE @V_KIT_TOTAL DECIMAL(20,10);
+DECLARE @C_RB_LIST_To_Prop_vi_IDnum varchar;
+DECLARE @cur_MaterialRec_ASSEMBLYAREA varchar(50);
+declare @cur_MaterialRec_CC varchar(50);
+declare @cur_MaterialRec_TOTALCOST varchar(50);
+declare @cur_MaterialRec_TAXABLECOST varchar(50) ;
+DECLARE C_RB_LIST_To_Prop CURSOR LOCAL 
+FOR
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS [link_code],
+                SC_PARTS_USED.qty_reqd AS [QTY],
+                SC_PARTS_USED.percent_usage AS [%],
+                SC_PARTS_USED.mms_rebuilt_code AS [Rebuilt Code]
+        FROM
+            CES.SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = UPPER(@vi_type) AND
+            upper(SC_PARTS_USED.link_code) = upper(@vi_IDnum);
+
+DECLARE @cur_RBRec_RebuiltCode varchar(50);
+declare @cur_RBRec_QTY varchar(50);
+declare @cur_RBRec_Usage varchar(50);
+DECLARE @cur_RBRec_LinkCode varchar(50);
+
+DECLARE @cur_Material_vi_IDnum varchar;
+
+DECLARE cur_Material CURSOR LOCAL FOR
+
+       SELECT
+            isnull(C.name,'NONE') AS [ASSEMBLY AREA],
+            isnull(A.cost_centre, '0') AS [CC],
+           isnull(SUM(A.cost), '0') AS [TOTAL COST],
+          isnull(SUM(A.taxcost), '0')AS [TAXABLE COST]
+
+
+        FROM
+            (SELECT
+                cost_centre,
+                 (Convert(Decimal(10,2),[CES].[final_cost](percent_usage, qty_reqd, mms_cost, 0))	- Convert(Decimal(10,2),CES.FINAL_COST(percent_usage, qty_reqd, corecost, 0))) AS cost,
+                 Convert(Decimal(10,2),[CES].[final_cost](percent_usage, qty_reqd, mms_cost, 0)) AS taxcost
+             FROM
+                [CES].SC_PARTS_USED
+             WHERE
+                link_code = upper(@vi_IDnum) AND
+                rebuilt_part = 'N' AND
+                link_type =upper(@vi_type)
+             UNION ALL
+                    SELECT
+                        NSC_PARTS_USED.cost_centre,
+                       (Convert(Decimal(10,2),[CES].[final_cost](NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0)) -  Convert(Decimal(10,2),CES.FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NSC_PARTS_USED.corecost, 0))) as cost,
+                      CONVERT(Decimal(10,2),[CES].[final_cost](NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0)) AS taxcost
+                    FROM
+                        [CES].NSC_PARTS_USED NSC_PARTS_USED RIGHT OUTER JOIN CES.NON_STOCK_CODED_PARTS ON NON_STOCK_CODED_PARTS.ID= NSC_PARTS_USED.ID
+                    WHERE
+                        NSC_PARTS_USED.link_code = upper(@vi_IDnum) AND
+                        NSC_PARTS_USED.link_type = UPPER(@vi_type)
+) A,
+            CES.COST_CENTRES C
+        WHERE
+            C.cost_centre = A.cost_centre
+        GROUP BY
+            A.cost_centre,
+            C.NAME;
+
+
+
+ 	SET @SqlStatment = 'TRUNCATE TABLE CES.TEMP_MATERIALS_LIST'
+
+			EXECUTE sp_executesql  @SqlStatment ;
+--commit;
+--set @cur_Material_vi_IDnum = upper;
+		
+open cur_Material;
+FETCH NEXT FROM cur_Material
+    INTO @cur_MaterialRec_ASSEMBLYAREA, @cur_MaterialRec_CC, @cur_MaterialRec_TOTALCOST, @cur_MaterialRec_TAXABLECOST
+WHILE @@FETCH_STATUS = 0
+    BEGIN 
+
+	IF @@FETCH_STATUS <> 0 BREAK;
+	
+    print @cur_MaterialRec_TOTALCOST
+    insert into CES.TEMP_MATERIALS_LIST values  (@cur_MaterialRec_ASSEMBLYAREA,@cur_MaterialRec_CC ,@cur_MaterialRec_TOTALCOST,@cur_MaterialRec_TAXABLECOST,@vi_IDnum,@cur_MaterialRec_TOTALCOST);
+	FETCH NEXT FROM cur_Material
+    INTO @cur_MaterialRec_ASSEMBLYAREA, @cur_MaterialRec_CC, @cur_MaterialRec_TOTALCOST, @cur_MaterialRec_TAXABLECOST;
+END;
+CLOSE cur_Material;
+DEALLOCATE cur_Material;
+
+
+SELECT @V_PRICE = count(*) FROM CES.SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = UPPER(@vi_type) AND
+            upper(SC_PARTS_USED.link_code) = upper(@vi_IDnum);
+
+
+-- built part (rb_num) in this procedure resides
+-- lt parts update the prices of those rebuilt parts as well.
+if @V_PRICE > 0 begin
+
+
+open C_RB_LIST_To_Prop;
+WHILE 1=1 BEGIN
+ FETCH C_RB_LIST_To_Prop
+    INTO @cur_RBRec_LinkCode,@cur_RBRec_QTY, @cur_RBRec_Usage,@cur_RBRec_RebuiltCode ;
+    IF @@FETCH_STATUS <> 0 BREAK;
+	SET @Adjustment =@cur_RBRec_QTY * cast(replace(ISNULL(@cur_RBRec_USAGE,'0'),',','.') as decimal(10,2))/100.00;
+    EXEC CES.WRITE_MATERIALS @cur_RBRec_RebuiltCode,@Adjustment, @cur_RBRec_RebuiltCode ,1;
+
+   
+END;
+CLOSE C_RB_LIST_To_Prop;
+DEALLOCATE C_RB_LIST_To_Prop;
+end;
+
+
+SELECT @V_KIT_TOTAL = count(*) FROM CES.OEM_KITS_TOTAL2 WHERE OEM_KITS_TOTAL2.LINK = @vi_IDnum;
+
+if upper(@vi_type) = 'BUS' and @V_KIT_TOTAL > 0 begin
+    SELECT @V_KIT_TOTAL = TOTAL_KIT_COST FROM OEM_KITS_TOTAL2 WHERE OEM_KITS_TOTAL2.LINK = @vi_IDnum;
+    insert into CES.TEMP_MATERIALS_LIST values ('KITS','05H7',@V_KIT_TOTAL,@V_KIT_TOTAL,@vi_IDnum,@V_KIT_TOTAL);
+end 
+
+
+
+SELECT @V_FINAL_PRICE = round(sum(ISNULL(CONVERT(Decimal(10,2),total_cost),0)),2) --as RB_COST
+        FROM
+            CES.TEMP_MATERIALS_LIST;
+RETURN @V_FINAL_PRICE ;
+
+
+END;
+ 
+GO
+/****** Object:  StoredProcedure [CES].[RETRIEVE_ALL_LABOUR]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [CES].[RETRIEVE_ALL_LABOUR]
+    (@vi_idnum varchar(4000),
+     @vi_type VARCHAR(4000) 
+    ) AS
+ BEGIN
+     DECLARE @V_PRICE DECIMAL(20,2);
+ 
+SET NOCOUNT ON;
+
+--SET @V_PRICE = EXEC [CES].get_labour_cost @vi_idnum,@vi_type;
+EXEC @V_PRICE = [CES].get_labour_cost @vi_idnum,@vi_type, @V_PRICE output;
+       SELECT
+            CC AS [COST CENTRE],
+            [CES].DECIMAL_MINUTES_TO_HHMM(Convert (varchar(20),SUM(CAST(extended_time as Decimal(10))))) AS [LABOUR HRS],
+            SUM(TOTAL_COST) AS [TOTAL COST]
+        FROM
+            [dbo].TEMP_LABOUR_LIST
+        GROUP BY
+            CC
+        ORDER BY
+            CC ASC;
+
+
+END;
+GO
+/****** Object:  StoredProcedure [CES].[RETRIEVE_EST_TO_PROPAGATE_RB]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [CES].[RETRIEVE_EST_TO_PROPAGATE_RB]
+    (@vi_idnum VARCHAR(4000) 
+     ) AS
+BEGIN
+SET NOCOUNT ON;
+        SELECT
+            UPPER(SC_PARTS_USED.link_code) AS [link_code],
+            UPPER(SC_PARTS_USED.link_type) AS [link_type]
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.mms_rebuilt_code = @vi_idnum;
+END;
+GO
+/****** Object:  StoredProcedure [CES].[RETRIEVE_RBP_TOTAL_COST2]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [CES].[RETRIEVE_RBP_TOTAL_COST2]
+    (@vi_idnum VARCHAR(4000),
+     @vi_type VARCHAR(4000)) AS
+ BEGIN
+
+DECLARE @V_LINK_CODE VARCHAR(30);
+DECLARE @V_PRICE decimal (20,10);
+DECLARE @V_RET_VAL VARCHAR(25);
+
+DECLARE @C_RB_LIST_To_Prop_vi_IDnum varchar;
+
+DECLARE C_RB_LIST_To_Prop CURSOR LOCAL 
+FOR
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS [link_code],
+                SC_PARTS_USED.qty_reqd AS [QTY],
+                SC_PARTS_USED.percent_usage AS [%],
+                SC_PARTS_USED.mms_rebuilt_code AS [Rebuilt Code]
+        FROM
+            CES.SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = @vi_type AND
+            upper(SC_PARTS_USED.link_code) = upper(@vi_idnum);
+
+
+SET NOCOUNT ON;
+EXEC @V_PRICE = [CES].get_material_cost @vi_idnum,@vi_type, @V_PRICE output;
+        SELECT
+            COST_CENTRE AS [CC],
+            SUM(Convert(Decimal(10,2),TOTAL_COST)) AS [TOTAL COST],
+           SUM(Convert(Decimal(10,2),TAXABLE_COST)) AS [TAXABLE COST]
+        FROM
+            [CES].TEMP_MATERIALS_LIST
+        GROUP BY
+            COST_CENTRE
+        ORDER BY
+            COST_CENTRE ASC;
+END;
+GO
+/****** Object:  StoredProcedure [CES].[WRITE_LABOUR]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE Procedure [CES].[WRITE_LABOUR]
+(@vi_IDnum varchar(4000), 
+    @vi_Adjustment decimal
+)
+
+--RETURNS float 
+AS
+BEGIN
+
+
+DECLARE  @SqlStatment AS NVARCHAR(1000)
+DECLARE @cur_RBRec_RebuiltCode varchar(50);
+DECLARE @cur_RBRec_QTY varchar(50);
+DECLARE @cur_RBRec_Usage varchar(50);
+DECLARE @cur_RBRec_LinkCode varchar(50);
+DECLARE @V_LINK_CODE VARCHAR(30);
+DECLARE @V_PRICE decimal (20,10);
+DECLARE @V_RET_VAL VARCHAR(25);
+Declare @Adjustment decimal (20,10);
+declare @cur_LabourRec_LABOURTYPE varchar(50);
+	 declare  @cur_LabourRec_CC varchar(50);
+	 declare  @cur_LabourRec_TASK varchar(50);
+	 declare  @cur_LabourRec_USAGE varchar(50);
+	 declare  @cur_LabourRec_TIME varchar(50);
+	 declare @cur_LabourRec_RATEPERHOUR Numeric(18,2);
+	declare @cur_LabourRec_TIMEADDITION Numeric(18,2);
+	declare @cur_LabourRec_WRENCHTIME varchar(50);
+DECLARE @C_RB_LIST_To_Prop_vi_IDnum varchar;
+	DECLARE C_RB_LIST_To_Prop CURSOR LOCAL 
+	FOR
+	SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS [link_code],
+                SC_PARTS_USED.qty_reqd AS [QTY],
+                SC_PARTS_USED.percent_usage AS [%],
+                SC_PARTS_USED.mms_rebuilt_code AS [Rebuilt Code]
+        FROM
+            CES.SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            upper(SC_PARTS_USED.link_code) = upper(@vi_IDnum)
+
+				--OPEN C_RB_LIST_To_Prop
+
+					
+			--CLOSE C_RB_LIST_To_Prop
+		--DEALLOCATE C_RB_LIST_To_Prop
+
+    DECLARE cur_Labour CURSOR LOCAL FOR
+	--SELECT 
+ --     *
+ --   FROM 
+ --     [dbo].[TEMP_TABLE];
+ SELECT
+            EMPLOYEE_LABOUR.labour_defn AS [LABOUR TYPE],
+            EMPLOYEE_LABOUR.costcentre AS [CC],
+            EMPLOYEE_LABOUR.task AS [TASK],
+            REPLACE(EMPLOYEE_LABOUR.usage,',','.') AS [USAGE],
+            EMPLOYEE_LABOUR.hrs_reqd AS [TIME],
+            EMPLOYEE_SALARIES.rate_per_hour AS [RATE PER HOUR],
+            EMPLOYEE_LABOUR.time_addition AS [TIME ADDITION],
+            [CES].hhmm_to_decimal(EMPLOYEE_LABOUR.adj_hrs) AS [WRENCH TIME]
+        FROM
+            CES.EMPLOYEE_LABOUR,
+            CES.EMPLOYEE_SALARIES,
+            CES.EMPL_CLASS
+        WHERE
+            EMPLOYEE_LABOUR.labour_defn = UPPER(EMPL_CLASS.labour_defn) AND
+            EMPLOYEE_SALARIES.wage_group = EMPL_CLASS.wage_group AND
+            EMPLOYEE_LABOUR.link_number = @vi_IDnum AND
+            EMPLOYEE_LABOUR.typeid = 'RB'
+
+
+	OPEN cur_Labour
+FETCH NEXT FROM cur_Labour INTO @cur_LabourRec_LABOURTYPE, @cur_LabourRec_CC, @cur_LabourRec_TASK, @cur_LabourRec_USAGE, @cur_LabourRec_TIME, @cur_LabourRec_RATEPERHOUR,@cur_LabourRec_TIMEADDITION,  @cur_LabourRec_WRENCHTIME;
+
+WHILE @@FETCH_STATUS = 0
+    BEGIN
+	IF @@FETCH_STATUS <> 0 BREAK
+	print 'here 1'
+	insert into dbo.TEMP_LABOUR_LIST values (
+  @cur_LabourRec_LABOURTYPE
+  ,@cur_LabourRec_CC 
+  ,@cur_LabourRec_TASK 
+  , @cur_LabourRec_USAGE 
+  ,[CES].hhmm_to_minutes(@cur_LabourRec_TIMEADDITION)
+  ,@cur_LabourRec_RATEPERHOUR  
+  	,@cur_LabourRec_RATEPERHOUR * [CES].hhmm_to_minutes(@cur_LabourRec_TIMEADDITION) * @cur_LabourRec_USAGE / 6000
+	, CONVERT(DECIMAL(10,2),round((@cur_LabourRec_USAGE / 100.0) * [CES].hhmm_to_minutes(@cur_LabourRec_TIMEADDITION),2))
+ ,'RB'
+,@vi_IDnum
+, round((@cur_LabourRec_USAGE / 100.0) * [CES].hhmm_to_minutes(@cur_LabourRec_WRENCHTIME),2)
+ )
+
+--insert into dbo.TEMP_LABOUR_LIST values (
+--  'MECHANICAL SERVICEPERSON'
+--  ,'05H2'
+--  ,''
+--  , 100 
+--  ,120 --[CES].hhmm_to_minutes(@cur_LabourRec_TIMEADDITION)
+--  ,35 
+--  	,70 --@cur_LabourRec_RATEPERHOUR * [CES].hhmm_to_minutes(@cur_LabourRec_TIMEADDITION) * @cur_LabourRec_USAGE / 6000
+--	,'120'-- round((@cur_LabourRec_USAGE / 100.0) * [CES].hhmm_to_minutes(@cur_LabourRec_TIMEADDITION),2)
+-- ,@vi_type
+--,@vi_IDnum
+--, '93'
+-- )
+ 
+FETCH NEXT FROM cur_Labour INTO @cur_LabourRec_LABOURTYPE, @cur_LabourRec_CC, @cur_LabourRec_TASK, @cur_LabourRec_USAGE, @cur_LabourRec_TIME, @cur_LabourRec_RATEPERHOUR,@cur_LabourRec_TIMEADDITION,  @cur_LabourRec_WRENCHTIME;
+
+	END
+
+close cur_Labour
+Deallocate cur_Labour
+SELECT @V_PRICE = count(*) FROM SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            upper(SC_PARTS_USED.link_code) = upper(@vi_IDnum);
+
+if @V_PRICE > 0 begin
+open C_RB_LIST_To_Prop;
+WHILE 1=1 BEGIN
+	print 'here 2'
+    FETCH C_RB_LIST_To_Prop
+    INTO @cur_RBRec_LinkCode,@cur_RBRec_QTY, @cur_RBRec_Usage, @cur_RBRec_RebuiltCode ;
+    IF @@FETCH_STATUS <> 0 BREAK;
+	--@cur_RBRec_QTY * @cur_RBRec_USAGE/100) * @vi_Adjustment
+	SET @Adjustment =(convert(int,@cur_RBRec_QTY)  * @cur_RBRec_USAGE/100.0) * @vi_Adjustment;
+	EXEC [CES].WRITE_LABOUR @cur_RBRec_RebuiltCode, @Adjustment;
+END;
+CLOSE C_RB_LIST_To_Prop;
+DEALLOCATE C_RB_LIST_To_Prop;
+End;
+
+END;
+GO
+/****** Object:  StoredProcedure [CES].[WRITE_MATERIALS]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE PROCEDURE [CES].[WRITE_MATERIALS]
+   (@vi_idnum VARCHAR(4000),
+    @vi_Adjustment float,
+    @vi_RBReference varchar(4000),
+    @vi_Adjustment2 float)
+AS
+BEGIN
+
+--  ariables as shown above
+DECLARE @V_LINK_CODE VARCHAR(30);
+DECLARE @V_PRICE decimal (20,10);
+DECLARE @V_RET_VAL VARCHAR(25);
+Declare @Adjustment decimal (20,10);
+Declare @Adjustment_ decimal (20,10);
+  DECLARE @C_RB_LIST_To_Prop_vi_IDnum varchar;
+  DECLARE C_RB_LIST_To_Prop CURSOR LOCAL 
+FOR
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS [link_code],
+                UPPER(SC_PARTS_USED.qty_reqd) AS [QTY],
+                SC_PARTS_USED.percent_usage AS [%],
+                UPPER(SC_PARTS_USED.mms_rebuilt_code) as [Rebuilt Code]
+        FROM
+            CES.SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            upper(SC_PARTS_USED.link_code) = upper(@vi_idnum);
+
+DECLARE @cur_RBRec_RebuiltCode varchar(50);
+declare @cur_RBRec_QTY varchar(50);
+declare @cur_RBRec_Usage varchar(50);
+
+
+  DECLARE @cur_Material_vi_IDnum varchar;
+
+  DECLARE cur_Material CURSOR LOCAL 
+FOR
+
+       SELECT
+            isnull(C.name,'NONE') AS [ASSEMBLY AREA],
+            isnull(A.cost_centre, '0') AS [CC],
+            isnull(sum(A.cost), '0') AS [TOTAL COST],
+            isnull(sum(A.taxcost), '0')AS [TAXABLE COST]
+        FROM
+            (SELECT
+                cost_centre,
+                 (Convert(Decimal(10,2),[CES].[final_cost](percent_usage, qty_reqd, mms_cost, 0))	- Convert(Decimal(10,2),CES.FINAL_COST(percent_usage, qty_reqd, corecost, 0))) AS cost,
+                 Convert(Decimal(10,2),[CES].[final_cost](percent_usage, qty_reqd, mms_cost, 0)) AS taxcost
+             FROM
+                [CES].SC_PARTS_USED
+             WHERE
+                link_code = upper(@vi_IDnum) AND
+				rebuilt_part = 'N' AND
+                link_type = 'RB'
+             UNION ALL
+                    SELECT
+                        NSC_PARTS_USED.cost_centre,
+                       (Convert(Decimal(10,2),[CES].[final_cost](NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0)) -  Convert(Decimal(10,2),CES.FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NSC_PARTS_USED.corecost, 0))) as cost,
+                      CONVERT(Decimal(10,2),[CES].[final_cost](NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0)) AS taxcost
+                    FROM
+                        [CES].NSC_PARTS_USED NSC_PARTS_USED RIGHT OUTER JOIN CES.NON_STOCK_CODED_PARTS ON NON_STOCK_CODED_PARTS.ID= NSC_PARTS_USED.ID
+                    WHERE
+                        NSC_PARTS_USED.link_code = upper(@vi_IDnum) AND
+                        NSC_PARTS_USED.link_type = 'RB'
+) A,
+            CES.COST_CENTRES C
+        WHERE
+            C.cost_centre = A.cost_centre
+        GROUP BY
+            A.cost_centre,
+            C.NAME;
+
+DECLARE @cur_MaterialRec_ASSEMBLYAREA varchar(50);
+declare @cur_MaterialRec_CC varchar(50);
+declare @cur_MaterialRec_TOTALCOST varchar(50);
+declare @cur_MaterialRec_TAXABLECOST varchar(50);
+
+ 
+SET NOCOUNT ON;
+
+
+open cur_Material;
+WHILE 1=1 BEGIN
+
+    FETCH cur_Material
+    INTO @cur_MaterialRec_ASSEMBLYAREA, @cur_MaterialRec_CC, @cur_MaterialRec_TOTALCOST, @cur_MaterialRec_TAXABLECOST;
+   IF @@FETCH_STATUS <> 0 BREAK;
+
+    
+    insert into CES.TEMP_MATERIALS_LIST values (@cur_MaterialRec_ASSEMBLYAREA,@cur_MaterialRec_CC ,round(@cur_MaterialRec_TOTALCOST * @vi_Adjustment,2) ,@cur_MaterialRec_TAXABLECOST * @vi_Adjustment ,@vi_RBReference, @vi_Adjustment2 * @cur_MaterialRec_TOTALCOST);
+
+END;
+CLOSE cur_Material;
+DEALLOCATE cur_Material;
+
+
+--archive rb part#
+
+SELECT @V_PRICE = count(*) FROM CES.SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            upper(SC_PARTS_USED.link_code) = upper(@vi_idnum);
+--commit;
+
+--  built part (rb_num) in this procedure resides
+--  lt parts update the prices of those rebuilt parts as well.
+if @V_PRICE > 0 begin
+
+
+open C_RB_LIST_To_Prop;
+WHILE 1=1 BEGIN
+
+    FETCH C_RB_LIST_To_Prop
+    INTO @cur_RBRec_RebuiltCode, @cur_RBRec_QTY, @cur_RBRec_Usage;
+     IF @@FETCH_STATUS <> 0 BREAK;
+	 	SET @Adjustment =(convert(int,@cur_RBRec_QTY)  * @cur_RBRec_USAGE/100.0) * @vi_Adjustment;
+			 	SET @Adjustment_ =@vi_Adjustment2 * (convert(int,@cur_RBRec_QTY) * @cur_RBRec_Usage/100.0);
+
+	EXEC [CES].WRITE_MATERIALS @cur_RBRec_RebuiltCode,@Adjustment, @vi_RBReference, @Adjustment_;
+
+END;
+CLOSE C_RB_LIST_To_Prop;
+DEALLOCATE C_RB_LIST_To_Prop;
+end 
+
+
+
+--RETURN;
+
+
+--EXCEPTION
+--   WHEN OTHERS THEN
+--    raiserror('-20001', sqlerrm, 16, 1);
+--    print substring(ISNULL(CONVERT(VARCHAR, @@ERROR), '') + ': '+ISNULL(SQLERRM, ''),1,255);
+END;
+ 
+GO
+EXEC sys.sp_addextendedproperty @name=N'MS_DiagramPane1', @value=N'[0E232FF0-B466-11cf-A24F-00AA00A3EFFF, 1.00]
+Begin DesignProperties = 
+   Begin PaneConfigurations = 
+      Begin PaneConfiguration = 0
+         NumPanes = 4
+         Configuration = "(H (1[40] 4[20] 2[20] 3) )"
+      End
+      Begin PaneConfiguration = 1
+         NumPanes = 3
+         Configuration = "(H (1 [50] 4 [25] 3))"
+      End
+      Begin PaneConfiguration = 2
+         NumPanes = 3
+         Configuration = "(H (1 [50] 2 [25] 3))"
+      End
+      Begin PaneConfiguration = 3
+         NumPanes = 3
+         Configuration = "(H (4 [30] 2 [40] 3))"
+      End
+      Begin PaneConfiguration = 4
+         NumPanes = 2
+         Configuration = "(H (1 [56] 3))"
+      End
+      Begin PaneConfiguration = 5
+         NumPanes = 2
+         Configuration = "(H (2 [66] 3))"
+      End
+      Begin PaneConfiguration = 6
+         NumPanes = 2
+         Configuration = "(H (4 [50] 3))"
+      End
+      Begin PaneConfiguration = 7
+         NumPanes = 1
+         Configuration = "(V (3))"
+      End
+      Begin PaneConfiguration = 8
+         NumPanes = 3
+         Configuration = "(H (1[56] 4[18] 2) )"
+      End
+      Begin PaneConfiguration = 9
+         NumPanes = 2
+         Configuration = "(H (1 [75] 4))"
+      End
+      Begin PaneConfiguration = 10
+         NumPanes = 2
+         Configuration = "(H (1[66] 2) )"
+      End
+      Begin PaneConfiguration = 11
+         NumPanes = 2
+         Configuration = "(H (4 [60] 2))"
+      End
+      Begin PaneConfiguration = 12
+         NumPanes = 1
+         Configuration = "(H (1) )"
+      End
+      Begin PaneConfiguration = 13
+         NumPanes = 1
+         Configuration = "(V (4))"
+      End
+      Begin PaneConfiguration = 14
+         NumPanes = 1
+         Configuration = "(V (2))"
+      End
+      ActivePaneConfig = 0
+   End
+   Begin DiagramPane = 
+      Begin Origin = 
+         Top = 0
+         Left = 0
+      End
+      Begin Tables = 
+      End
+   End
+   Begin SQLPane = 
+   End
+   Begin DataPane = 
+      Begin ParameterDefaults = ""
+      End
+   End
+   Begin CriteriaPane = 
+      Begin ColumnWidths = 11
+         Column = 1440
+         Alias = 900
+         Table = 1170
+         Output = 720
+         Append = 1400
+         NewValue = 1170
+         SortType = 1350
+         SortOrder = 1410
+         GroupBy = 1350
+         Filter = 1350
+         Or = 1350
+         Or = 1350
+         Or = 1350
+      End
+   End
+End
+' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'VIEW',@level1name=N'NonStockPart_USED'
+GO
+EXEC sys.sp_addextendedproperty @name=N'MS_DiagramPaneCount', @value=1 , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'VIEW',@level1name=N'NonStockPart_USED'
+GO
+EXEC sys.sp_addextendedproperty @name=N'MS_DiagramPane1', @value=N'[0E232FF0-B466-11cf-A24F-00AA00A3EFFF, 1.00]
+Begin DesignProperties = 
+   Begin PaneConfigurations = 
+      Begin PaneConfiguration = 0
+         NumPanes = 4
+         Configuration = "(H (1[40] 4[20] 2[20] 3) )"
+      End
+      Begin PaneConfiguration = 1
+         NumPanes = 3
+         Configuration = "(H (1 [50] 4 [25] 3))"
+      End
+      Begin PaneConfiguration = 2
+         NumPanes = 3
+         Configuration = "(H (1 [50] 2 [25] 3))"
+      End
+      Begin PaneConfiguration = 3
+         NumPanes = 3
+         Configuration = "(H (4 [30] 2 [40] 3))"
+      End
+      Begin PaneConfiguration = 4
+         NumPanes = 2
+         Configuration = "(H (1 [56] 3))"
+      End
+      Begin PaneConfiguration = 5
+         NumPanes = 2
+         Configuration = "(H (2 [66] 3))"
+      End
+      Begin PaneConfiguration = 6
+         NumPanes = 2
+         Configuration = "(H (4 [50] 3))"
+      End
+      Begin PaneConfiguration = 7
+         NumPanes = 1
+         Configuration = "(V (3))"
+      End
+      Begin PaneConfiguration = 8
+         NumPanes = 3
+         Configuration = "(H (1[56] 4[18] 2) )"
+      End
+      Begin PaneConfiguration = 9
+         NumPanes = 2
+         Configuration = "(H (1 [75] 4))"
+      End
+      Begin PaneConfiguration = 10
+         NumPanes = 2
+         Configuration = "(H (1[66] 2) )"
+      End
+      Begin PaneConfiguration = 11
+         NumPanes = 2
+         Configuration = "(H (4 [60] 2))"
+      End
+      Begin PaneConfiguration = 12
+         NumPanes = 1
+         Configuration = "(H (1) )"
+      End
+      Begin PaneConfiguration = 13
+         NumPanes = 1
+         Configuration = "(V (4))"
+      End
+      Begin PaneConfiguration = 14
+         NumPanes = 1
+         Configuration = "(V (2))"
+      End
+      ActivePaneConfig = 0
+   End
+   Begin DiagramPane = 
+      Begin Origin = 
+         Top = 0
+         Left = 0
+      End
+      Begin Tables = 
+      End
+   End
+   Begin SQLPane = 
+   End
+   Begin DataPane = 
+      Begin ParameterDefaults = ""
+      End
+   End
+   Begin CriteriaPane = 
+      Begin ColumnWidths = 11
+         Column = 1440
+         Alias = 900
+         Table = 1170
+         Output = 720
+         Append = 1400
+         NewValue = 1170
+         SortType = 1350
+         SortOrder = 1410
+         GroupBy = 1350
+         Filter = 1350
+         Or = 1350
+         Or = 1350
+         Or = 1350
+      End
+   End
+End
+' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'VIEW',@level1name=N'RBP_USED'
+GO
+EXEC sys.sp_addextendedproperty @name=N'MS_DiagramPaneCount', @value=1 , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'VIEW',@level1name=N'RBP_USED'
+GO
+EXEC sys.sp_addextendedproperty @name=N'MS_DiagramPane1', @value=N'[0E232FF0-B466-11cf-A24F-00AA00A3EFFF, 1.00]
+Begin DesignProperties = 
+   Begin PaneConfigurations = 
+      Begin PaneConfiguration = 0
+         NumPanes = 4
+         Configuration = "(H (1[40] 4[20] 2[20] 3) )"
+      End
+      Begin PaneConfiguration = 1
+         NumPanes = 3
+         Configuration = "(H (1 [50] 4 [25] 3))"
+      End
+      Begin PaneConfiguration = 2
+         NumPanes = 3
+         Configuration = "(H (1 [50] 2 [25] 3))"
+      End
+      Begin PaneConfiguration = 3
+         NumPanes = 3
+         Configuration = "(H (4 [30] 2 [40] 3))"
+      End
+      Begin PaneConfiguration = 4
+         NumPanes = 2
+         Configuration = "(H (1 [56] 3))"
+      End
+      Begin PaneConfiguration = 5
+         NumPanes = 2
+         Configuration = "(H (2 [66] 3))"
+      End
+      Begin PaneConfiguration = 6
+         NumPanes = 2
+         Configuration = "(H (4 [50] 3))"
+      End
+      Begin PaneConfiguration = 7
+         NumPanes = 1
+         Configuration = "(V (3))"
+      End
+      Begin PaneConfiguration = 8
+         NumPanes = 3
+         Configuration = "(H (1[56] 4[18] 2) )"
+      End
+      Begin PaneConfiguration = 9
+         NumPanes = 2
+         Configuration = "(H (1 [75] 4))"
+      End
+      Begin PaneConfiguration = 10
+         NumPanes = 2
+         Configuration = "(H (1[66] 2) )"
+      End
+      Begin PaneConfiguration = 11
+         NumPanes = 2
+         Configuration = "(H (4 [60] 2))"
+      End
+      Begin PaneConfiguration = 12
+         NumPanes = 1
+         Configuration = "(H (1) )"
+      End
+      Begin PaneConfiguration = 13
+         NumPanes = 1
+         Configuration = "(V (4))"
+      End
+      Begin PaneConfiguration = 14
+         NumPanes = 1
+         Configuration = "(V (2))"
+      End
+      ActivePaneConfig = 0
+   End
+   Begin DiagramPane = 
+      Begin Origin = 
+         Top = 0
+         Left = 0
+      End
+      Begin Tables = 
+      End
+   End
+   Begin SQLPane = 
+   End
+   Begin DataPane = 
+      Begin ParameterDefaults = ""
+      End
+   End
+   Begin CriteriaPane = 
+      Begin ColumnWidths = 11
+         Column = 1440
+         Alias = 900
+         Table = 1170
+         Output = 720
+         Append = 1400
+         NewValue = 1170
+         SortType = 1350
+         SortOrder = 1410
+         GroupBy = 1350
+         Filter = 1350
+         Or = 1350
+         Or = 1350
+         Or = 1350
+      End
+   End
+End
+' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'VIEW',@level1name=N'StockPart_USED'
+GO
+EXEC sys.sp_addextendedproperty @name=N'MS_DiagramPaneCount', @value=1 , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'VIEW',@level1name=N'StockPart_USED'
+GO
