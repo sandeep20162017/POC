@@ -1,0 +1,2054 @@
+USE [SBCES]
+GO
+
+/****** Object: Schema [SBCES] Script Date: 12/6/2024 5:27:23 PM ******/
+CREATE SCHEMA [SBCES]
+GO
+
+CREATE FUNCTION [SBCES].[DecimalMinutesToHhmm]
+    (@ViDecimalMinutes VARCHAR(20)) RETURNS VARCHAR(4000) AS
+BEGIN
+    DECLARE @VarResult VARCHAR(100);
+    DECLARE @VarHours INT;
+    DECLARE @VarMinutes INT;
+
+    SET @VarHours = FLOOR(CONVERT(DECIMAL(10), @ViDecimalMinutes)/60);
+    SET @VarMinutes = @ViDecimalMinutes - (@VarHours * 60.0);
+
+    IF (LEN(@VarMinutes) < 2) BEGIN
+        SET @VarResult = CAST(@VarHours AS VARCHAR(10)) + ':0' + ISNULL(CAST(@VarMinutes AS VARCHAR(10)), '');
+    END
+    ELSE BEGIN
+        SET @VarResult = CAST(@VarHours AS VARCHAR(10)) + ':' + CAST(@VarMinutes AS VARCHAR(10));
+    END 
+
+    RETURN @VarResult;
+END;
+GO
+
+CREATE FUNCTION [SBCES].[FinalCost]
+    (@ViPercent VARCHAR(20),
+     @ViQuantity VARCHAR(20),
+     @ViCost DECIMAL(10,2),
+     @ViCoreCost DECIMAL(10,2))
+RETURNS VARCHAR(4000) AS
+BEGIN
+    DECLARE @Total DECIMAL(38,4);
+ 
+    SET @Total = (CAST(REPLACE(ISNULL(@ViPercent,'0'),',','.') AS DECIMAL(10,4))/ 100) * CAST(@ViQuantity AS DECIMAL(10,4)) * @ViCost;
+    RETURN ROUND(@Total - @ViCoreCost, 2);
+END;
+GO
+
+CREATE TABLE [SBCES].[EmployeeSalaries](
+    [WageGroup] INT NOT NULL,
+    [RatePerHour] NUMERIC(18, 2) NULL,
+    [DateEntered] DATETIME NULL,
+    CONSTRAINT [PK_WageGroup] PRIMARY KEY CLUSTERED 
+    (
+        [WageGroup] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[EmplClass](
+    [LabourType] INT NOT NULL,
+    [LabourDefn] VARCHAR(50) NULL,
+    [WageGroup] INT NULL,
+    [HrsPerWeek] NUMERIC(18, 4) NULL,
+    [DateEntered] DATETIME NULL,
+    [OverheadType] NUMERIC(5, 2) NOT NULL,
+    CONSTRAINT [PK_LabourType] PRIMARY KEY CLUSTERED 
+    (
+        [LabourType] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+    CONSTRAINT [FK_WageGroup] FOREIGN KEY ([WageGroup]) REFERENCES [SBCES].[EmployeeSalaries]([WageGroup])
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[EmployeeLabour](
+    [Id] INT IDENTITY(1,1) NOT NULL,
+    [LabourDefn] VARCHAR(50) NULL,
+    [DateEntered] DATETIME NULL,
+    [LinkNumber] VARCHAR(25) NULL,
+    [TypeId] VARCHAR(5) NULL,
+    [CostCentre] VARCHAR(5) NULL,
+    [Task] VARCHAR(50) NULL,
+    [LabourType] INT NULL,
+    [Usage] VARCHAR(25) NULL,
+    [HrsReqd] VARCHAR(25) NULL,
+    [AdjHrs] VARCHAR(25) NULL,
+    [DateRevised] DATE NULL,
+    [TimeAddition] NUMERIC(18, 2) NULL,
+    [RebuiltPartNum] VARCHAR(30) NULL,
+    [LastModifiedBy] VARCHAR(25) NULL,
+    CONSTRAINT [PK_EmployeeLabour] PRIMARY KEY CLUSTERED 
+    (
+        [Id] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+    CONSTRAINT [FK_LabourType_] FOREIGN KEY ([LabourType]) REFERENCES [SBCES].[EmplClass]([LabourType])
+) ON [PRIMARY]
+GO
+
+CREATE VIEW [SBCES].[CrEmployeeLabourCctotals] ("LabourDefn", "CostCentre", "WageGroup", "RatePerHour", "TimeAddition", "Usage", "LinkNumber") AS 
+SELECT
+    temptable.labourDefn,
+    temptable.costCentre,
+    temptable.wageGroup,
+    temptable.ratePerHour,
+    temptable.timeAddition,
+    temptable.usage,
+    temptable.linkNumber
+FROM
+    (
+    SELECT
+        SBCES.EmployeeLabour.labourDefn,
+        SBCES.EmployeeLabour.costCentre,
+        B.wageGroup,
+        B.ratePerHour,
+        SBCES.EmployeeLabour.timeAddition,
+        SBCES.EmployeeLabour.usage,
+        SBCES.EmployeeLabour.linkNumber
+    FROM
+        SBCES.EmployeeLabour,
+        SBCES.EmployeeSalaries B,
+        SBCES.EmplClass C
+    WHERE
+        SBCES.EmployeeLabour.labourDefn = UPPER(C.labourDefn) AND
+        B.wageGroup = C.wageGroup AND
+        SBCES.EmployeeLabour.typeId = 'RB'
+    ) tempTable
+ORDER BY
+    tempTable.costCentre OFFSET 0 ROWS;
+GO
+
+CREATE TABLE [SBCES].[KitsMasterlist](
+    [PartNumber] VARCHAR(30) NULL,
+    [EstimatedCost] NUMERIC(18, 2) NULL,
+    [Keyword] VARCHAR(50) NULL,
+    [DetailedDesc] VARCHAR(250) NULL,
+    [LastModifiedBy] VARCHAR(25) NULL,
+    [LastModifiedDate] DATE NULL,
+    [DateEntered] DATETIME NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[KitsUsed](
+    [PartNumber] VARCHAR(30) NULL,
+    [DateEntered] DATETIME NULL,
+    [EnteredBy] VARCHAR(30) NULL,
+    [LastModifiedBy] VARCHAR(30) NULL,
+    [LastModifiedDate] DATETIME NULL,
+    [CostCentre] VARCHAR(5) NULL,
+    [LinkCode] VARCHAR(30) NULL
+) ON [PRIMARY]
+GO
+
+CREATE VIEW [SBCES].[OemKitsTotal2] ([Link], [TotalKitCost]) AS 
+SELECT
+    KitUsed.linkCode, SUM(ISNULL(KitMaster.estimatedCost, 0)) AS totalKitCost
+FROM
+    SBCES.KitsUsed KitUsed,
+    SBCES.KitsMasterlist KitMaster
+WHERE
+    (KitUsed.partNumber = KitMaster.partNumber)
+GROUP BY
+    KitUsed.linkCode;
+GO
+
+CREATE TABLE [SBCES].[RbMasterlist](
+    [RbMasterlistId] INT IDENTITY(1,1) NOT NULL,
+    [MmsStockCode] VARCHAR(30) NULL,
+    [ItemRefNumber] VARCHAR(16) NULL,
+    [DetailedDesc] VARCHAR(250) NULL,
+    [Keyword] VARCHAR(250) NULL,
+    [CorePartNum] VARCHAR(30) NULL,
+    [RebuiltStockNum] VARCHAR(30) NULL,
+    [CoreCharge] VARCHAR(25) NULL,
+    [JobNumber] VARCHAR(25) NULL,
+    [DateEntered] DATETIME NULL,
+    [LastModifiedBy] VARCHAR(50) NOT NULL,
+    [EstimatedCost] NUMERIC(20, 2) NULL,
+    [SopNumber] VARCHAR(25) NULL,
+    [BuyNewCost] VARCHAR(25) NULL,
+    [RemanCost] VARCHAR(25) NULL,
+    [ExternalCost] VARCHAR(25) NULL,
+    [Active] INT NULL,
+    CONSTRAINT [PK_RbMasterlistId] PRIMARY KEY CLUSTERED 
+    (
+        [RbMasterlistId] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+    CONSTRAINT [UK_RebuiltStockNum] UNIQUE NONCLUSTERED 
+    (
+        [RebuiltStockNum] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[TempMaterialsList](
+    [AssemblyArea] VARCHAR(50) NULL,
+    [CostCentre] VARCHAR(5) NULL,
+    [TotalCost] VARCHAR(25) NULL,
+    [TaxableCost] VARCHAR(25) NULL,
+    [RbReference] VARCHAR(25) NULL,
+    [TotalUnitCost] VARCHAR(25) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ScPartsUsed](
+    [Id] INT IDENTITY(1,1) NOT NULL,
+    [MmsStockCode] VARCHAR(30) NULL,
+    [DateEntered] DATETIME NULL,
+    [RebPartCost] NUMERIC(18, 2) NULL,
+    [EnteredBy] VARCHAR(50) NULL,
+    [MmsCost] NUMERIC(18, 2) NULL,
+    [OemCost] NUMERIC(18, 2) NULL,
+    [LastModifiedBy] VARCHAR(25) NULL,
+    [LastModifiedDate] DATETIME NULL,
+    [MmsRebuiltCode] VARCHAR(30) NULL,
+    [CostCentre] VARCHAR(4) NULL,
+    [QtyReqd] VARCHAR(10) NULL,
+    [PercentUsage] VARCHAR(10) NULL,
+    [LinkCode] VARCHAR(30) NULL,
+    [RebuiltPart] VARCHAR(1) NULL,
+    [LinkType] VARCHAR(3) NULL,
+    [CoreCost] NUMERIC(18, 2) NULL,
+    [OrigSupNum] VARCHAR(50) NULL,
+    [OrigSupplierName] VARCHAR(50) NULL,
+    CONSTRAINT [PK_ScPartsUsed] PRIMARY KEY CLUSTERED 
+    (
+        [Id] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE VIEW [SBCES].[RbpUsed]
+AS
+SELECT
+    ROW_NUMBER() OVER (ORDER BY B.mmsRebuiltCode) AS Id,
+    UPPER(B.mmsRebuiltCode) AS RebuiltNumber,
+    ISNULL(A.RbUnitCost, 0) AS UnitCost,
+    UPPER(B.costCentre) AS CC,
+    UPPER(B.qtyReqd) AS QTY,
+    REPLACE(B.percentUsage, ',', '.') AS Percentage,
+    B.coreCost AS CoreCost,
+    ISNULL(A.RbCost, 0) AS TotalCost,
+    UPPER(C.detailedDesc) AS Description,
+    UPPER(C.keyword) AS Keyword,
+    linkCode,
+    rebuiltPart,
+    linkType
+FROM
+    SBCES.ScPartsUsed B
+    LEFT JOIN SBCES.RbMasterlist C ON C.rebuiltStockNum = B.mmsRebuiltCode
+    LEFT JOIN (
+        SELECT
+            ROUND(SUM(CAST(totalCost AS DECIMAL(7, 2))), 2) AS RbCost,
+            ROUND(SUM(CAST(totalUnitCost AS DECIMAL(7, 2))), 2) AS RbUnitCost,
+            rbReference
+        FROM
+            SBCES.TempMaterialsList
+        GROUP BY
+            rbReference
+    ) A ON A.rbReference = B.mmsRebuiltCode;
+GO
+
+CREATE TABLE [SBCES].[NscPartsUsed](
+    [Oid] INT IDENTITY(1,1) NOT NULL,
+    [OrigSuppNum] VARCHAR(50) NULL,
+    [OrigSupplierName] VARCHAR(50) NULL,
+    [CostCentre] VARCHAR(4) NULL,
+    [QtyReqd] VARCHAR(10) NULL,
+    [PercentUsage] VARCHAR(10) NULL,
+    [DateEntered] DATETIME NULL,
+    [EnteredBy] VARCHAR(25) NULL,
+    [LastModifiedBy] VARCHAR(25) NULL,
+    [LastModifiedDate] DATETIME NULL,
+    [LinkCode] VARCHAR(30) NULL,
+    [Cost] NUMERIC(18, 2) NULL,
+    [LinkType] VARCHAR(3) NULL,
+    [CoreCost] NUMERIC(18, 2) NULL,
+    [Id] INT NULL,
+    CONSTRAINT [PK_NscPartsUsed] PRIMARY KEY CLUSTERED 
+    (
+        [Oid] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[NonStockCodedParts](
+    [Id] INT NULL,
+    [OrigSupplierNum] VARCHAR(50) NULL,
+    [OrigSupplierName] VARCHAR(50) NULL,
+    [DateEntered] DATETIME NULL,
+    [OemPartCost] NUMERIC(18, 2) NULL,
+    [DetailedDesc] VARCHAR(500) NULL,
+    [PartAddedBy] VARCHAR(25) NULL,
+    [LastModifiedBy] VARCHAR(25) NULL,
+    [LastModifiedDate] DATETIME NULL,
+    [Keyword] VARCHAR(50) NULL
+) ON [PRIMARY]
+GO
+
+CREATE VIEW [SBCES].[NonStockPartUsed]
+AS
+SELECT
+    UPPER(NonStockCodedParts.origSupplierNum) AS SupplierNumber,
+    UPPER(NonStockCodedParts.origSupplierName) AS SupplierName,
+    NonStockCodedParts.oemPartCost AS UnitCost,
+    UPPER(NscPartsUsed.qtyReqd) AS QTY,
+    REPLACE(NscPartsUsed.percentUsage, ',', '.') AS Percentage,
+    CAST(SBCES.FinalCost(NscPartsUsed.percentUsage, NscPartsUsed.qtyReqd, NscPartsUsed.coreCost, 0) AS DECIMAL(18,2)) AS CoreCost,
+    CAST(SBCES.FinalCost(NscPartsUsed.percentUsage, NscPartsUsed.qtyReqd, NonStockCodedParts.oemPartCost, 0) AS DECIMAL(38,2)) AS TotalCost,
+    UPPER(NscPartsUsed.costCentre) AS CC,
+    ISNULL(UPPER(NonStockCodedParts.detailedDesc), '') AS Description,
+    ISNULL(UPPER(NonStockCodedParts.keyword), '') AS Keyword,
+    UPPER(NscPartsUsed.id) AS Id,
+    UPPER(NscPartsUsed.lastModifiedDate) AS LastModifiedDate,
+    ROW_NUMBER() OVER (ORDER BY NonStockCodedParts.origSupplierNum) AS Uid,
+    NscPartsUsed.linkCode,
+    NscPartsUsed.linkType
+FROM
+    SBCES.NscPartsUsed
+    LEFT JOIN SBCES.NonStockCodedParts NonStockCodedParts ON NonStockCodedParts.id = NscPartsUsed.id;
+GO
+
+CREATE TABLE [SBCES].[StockCodedParts](
+    [MmsStockCode] VARCHAR(30) NOT NULL,
+    [CorePartNumber] VARCHAR(30) NULL,
+    [PartType] VARCHAR(50) NULL,
+    [JobNumber] VARCHAR(30) NULL,
+    [DetailedDesc] VARCHAR(500) NULL,
+    [DateEntered] VARCHAR(8) NULL,
+    [ItemRefNumber] VARCHAR(16) NULL,
+    [OverheadType] INT NULL,
+    [CoreCharge] INT NULL,
+    [PartCost] INT NULL,
+    [LastModifiedDate] DATETIME NULL,
+    [LastModifiedBy] VARCHAR(30) NULL,
+    [AddedBy] VARCHAR(30) NULL,
+    [MmsNewCost] NUMERIC(15, 5) NULL,
+    [OemPartCost] INT NULL,
+    [MmsSyncDate] DATETIME NULL,
+    [OrigSupplierNum] VARCHAR(25) NULL,
+    [OrigSupplierName] VARCHAR(40) NULL,
+    CONSTRAINT [PrimaryKeyScParts] PRIMARY KEY CLUSTERED 
+    (
+        [MmsStockCode] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE VIEW [SBCES].[StockPartUsed]
+AS
+SELECT
+    UPPER(ScPartsUsed.mmsStockCode) AS StockCode,
+    ISNULL(ScPartsUsed.mmsCost, 0) AS UnitCost,
+    UPPER(ScPartsUsed.qtyReqd) AS QTY,
+    REPLACE(ScPartsUsed.percentUsage, ',', '.') AS Percentage,
+    CAST(SBCES.FinalCost(ScPartsUsed.percentUsage, ScPartsUsed.qtyReqd, ScPartsUsed.coreCost, 0) AS DECIMAL(18,2)) AS CoreCost,
+    CAST(SBCES.FinalCost(ScPartsUsed.percentUsage, ScPartsUsed.qtyReqd, ScPartsUsed.mmsCost, 0) AS DECIMAL(38,2)) AS TotalCost,
+    UPPER(ScPartsUsed.costCentre) AS CC,
+    ISNULL(UPPER(StockCodedParts.detailedDesc), '') AS Description,
+    ISNULL(UPPER(StockCodedParts.partType), '') AS Keyword,
+    ScPartsUsed.oemCost AS OemCost,
+    ScPartsUsed.mmsRebuiltCode AS MmsRebuiltCode,
+    ScPartsUsed.rebPartCost AS RebuiltPartCost,
+    UPPER(ScPartsUsed.rebuiltPart) AS RebuiltPart,
+    ROW_NUMBER() OVER (ORDER BY ScPartsUsed.mmsStockCode) AS Id,
+    ScPartsUsed.linkCode,
+    ScPartsUsed.linkType
+FROM
+    SBCES.ScPartsUsed
+    LEFT JOIN SBCES.StockCodedParts ON StockCodedParts.mmsStockCode = ScPartsUsed.mmsStockCode;
+GO
+
+
+CREATE TABLE [SBCES].[AllLabourSummary](
+    [LabourType] VARCHAR(50) NOT NULL,
+    [CostCentre] VARCHAR(4) NOT NULL,
+    [Task] VARCHAR(200) NULL,
+    [Usage] NUMERIC(18, 2) NOT NULL,
+    [Time] NUMERIC(18, 2) NOT NULL,
+    [WrenchTime] VARCHAR(8) NOT NULL,
+    [RatePerHour] NUMERIC(18, 2) NOT NULL,
+    [TotalCost] NUMERIC(18, 2) NOT NULL,
+    [ExtendedTime] VARCHAR(8) NULL,
+    [EstimateType] VARCHAR(3) NOT NULL,
+    [EstimateNumber] VARCHAR(25) NOT NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[AllMaterialSummary](
+    [AssemblyArea] VARCHAR(50) NULL,
+    [CostCentre] VARCHAR(5) NULL,
+    [TotalCost] VARCHAR(25) NULL,
+    [TaxableCost] VARCHAR(25) NULL,
+    [RbReference] VARCHAR(25) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchMbEmployeeLabour](
+    [Id] INT IDENTITY(1,1) NOT NULL,
+    [LabourDefn] VARCHAR(50) NULL,
+    [DateEntered] DATETIME NULL,
+    [LinkNumber] VARCHAR(25) NULL,
+    [TypeId] VARCHAR(5) NULL,
+    [CostCentre] VARCHAR(5) NULL,
+    [Task] VARCHAR(50) NULL,
+    [LabourType] VARCHAR(5) NULL,
+    [Usage] VARCHAR(25) NULL,
+    [HrsReqd] VARCHAR(25) NULL,
+    [AdjHrs] VARCHAR(25) NULL,
+    [TimeAddition] NUMERIC(18, 2) NULL,
+    [ArchMbMasterlist] INT NOT NULL,
+    CONSTRAINT [PK_ArchMbEmployeeLabour] PRIMARY KEY CLUSTERED 
+    (
+        [Id] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchMblabourCcTotal](
+    [CostCentre] VARCHAR(5) NULL,
+    [ArchMbMasterlistId] INT NOT NULL,
+    [TotalHours] NUMERIC(18, 2) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchMbListBuses](
+    [BusDescription] VARCHAR(500) NULL,
+    [ArchMbMasterlistId] INT NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchMbMasterlist](
+    [ArchMbMasterlistId] INT NOT NULL,
+    [MbNumber] VARCHAR(25) NOT NULL,
+    [Keyword] VARCHAR(50) NULL,
+    [Description] VARCHAR(50) NULL,
+    [BusType] VARCHAR(50) NULL,
+    [NumBusComp] VARCHAR(10) NULL,
+    [VendorPartNum] VARCHAR(25) NULL,
+    [BuyCode] VARCHAR(25) NOT NULL,
+    [RebuildCode] VARCHAR(25) NULL,
+    [CoreCode] VARCHAR(25) NULL,
+    [AnnualUsage] VARCHAR(25) NULL,
+    [BenchNumber] VARCHAR(25) NULL,
+    [SampleProvided] VARCHAR(25) NULL,
+    [Recommendation] VARCHAR(1) NULL,
+    [RemanCost] VARCHAR(25) NULL,
+    [ExternalCost] VARCHAR(25) NULL,
+    [BuyNewCost] VARCHAR(25) NULL,
+    [InternalCost] VARCHAR(25) NULL,
+    [SopNumber] VARCHAR(25) NULL,
+    [CoreCost] VARCHAR(25) NULL,
+    [JobNumber] VARCHAR(25) NULL,
+    [LabourCost] NUMERIC(20, 2) NOT NULL,
+    [LabourOverheadAmount] NUMERIC(20, 2) NOT NULL,
+    [LabourTotal] NUMERIC(20, 2) NOT NULL,
+    [MaterialsTotal] NUMERIC(20, 2) NOT NULL,
+    [TotalMbEstimateCost] NUMERIC(20, 2) NOT NULL,
+    [DateEntered] DATETIME NULL,
+    [TotalTax] NUMERIC(20, 2) NULL,
+    [TotalCostTax] NUMERIC(20, 2) NULL,
+    CONSTRAINT [PK_ArchMbMasterlist] PRIMARY KEY CLUSTERED 
+    (
+        [ArchMbMasterlistId] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchMbmaterielsCcTotal](
+    [CostCentre] VARCHAR(5) NULL,
+    [TotalCost] NUMERIC(18, 2) NULL,
+    [ArchMbMasterlistId] INT NOT NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchMbNscPartsUsed](
+    [OrigSuppNum] VARCHAR(50) NULL,
+    [OrigSupplierName] VARCHAR(50) NULL,
+    [CostCentre] VARCHAR(4) NULL,
+    [QtyReqd] VARCHAR(10) NULL,
+    [PercentUsage] VARCHAR(10) NULL,
+    [DateEntered] DATETIME NULL,
+    [EnteredBy] VARCHAR(25) NULL,
+    [LinkCode] VARCHAR(30) NULL,
+    [Cost] NUMERIC(18, 2) NULL,
+    [LinkType] VARCHAR(3) NULL,
+    [Corecost] NUMERIC(18, 2) NULL,
+    [ArchMbMasterlistId] INT NOT NULL,
+    [TotalCost] NUMERIC(18, 2) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchMbScPartsUsed](
+    [MmsStockCode] VARCHAR(30) NULL,
+    [DateEntered] DATETIME NULL,
+    [RebPartCost] NUMERIC(18, 2) NULL,
+    [UserEntered] VARCHAR(50) NULL,
+    [MmsCost] NUMERIC(18, 2) NULL,
+    [OemCost] NUMERIC(18, 2) NULL,
+    [MmsRebuiltCode] VARCHAR(30) NULL,
+    [CostCentre] VARCHAR(4) NULL,
+    [QtyReqd] VARCHAR(10) NULL,
+    [PercentUsage] VARCHAR(10) NULL,
+    [LinkCode] VARCHAR(30) NULL,
+    [RebuiltPart] VARCHAR(1) NULL,
+    [LinkType] VARCHAR(3) NULL,
+    [Corecost] NUMERIC(18, 2) NULL,
+    [ArchMbMasterlistId] INT NOT NULL,
+    [TotalCost] NUMERIC(18, 2) NULL,
+    [ScKeyword] VARCHAR(50) NULL,
+    [ScDescription] VARCHAR(500) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchRbEmployeeLabour](
+    [Id] INT IDENTITY(1,1) NOT NULL,
+    [LabourDefn] VARCHAR(50) NULL,
+    [DateEntered] DATETIME NULL,
+    [LinkNumber] VARCHAR(25) NULL,
+    [TypeId] VARCHAR(5) NULL,
+    [Costcentre] VARCHAR(5) NULL,
+    [Task] VARCHAR(50) NULL,
+    [LabourType] VARCHAR(5) NULL,
+    [Usage] VARCHAR(25) NULL,
+    [HrsReqd] VARCHAR(25) NULL,
+    [AdjHrs] VARCHAR(25) NULL,
+    [TimeAddition] NUMERIC(18, 2) NULL,
+    [ArchRbMasterlistId] INT NOT NULL,
+    CONSTRAINT [PK_ArchRbEmployeeLabour] PRIMARY KEY CLUSTERED 
+    (
+        [Id] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchRbLabourCcTotal](
+    [CostCentre] VARCHAR(5) NULL,
+    [ArchRbMasterlistId] INT NOT NULL,
+    [TotalHours] VARCHAR(25) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchRbListBuses](
+    [BusDescription] VARCHAR(500) NULL,
+    [ArchRbMasterlistId] INT NOT NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchRbMasterlist](
+    [ArchRbMasterlistId] INT NOT NULL,
+    [MmsStockCode] VARCHAR(30) NULL,
+    [ItemRefNumber] VARCHAR(16) NULL,
+    [DetailedDesc] VARCHAR(250) NULL,
+    [Keyword] VARCHAR(250) NULL,
+    [CorePartNum] VARCHAR(30) NULL,
+    [RebuiltStockNum] VARCHAR(30) NULL,
+    [CoreCharge] VARCHAR(25) NULL,
+    [JobNumber] VARCHAR(25) NULL,
+    [DateEntered] DATETIME NULL,
+    [EnteredBy] VARCHAR(50) NULL,
+    [EstimatedCost] NUMERIC(20, 2) NOT NULL,
+    [SopNumber] VARCHAR(25) NULL,
+    [LabourCost] NUMERIC(20, 2) NOT NULL,
+    [LabourOverheadAmount] NUMERIC(20, 2) NOT NULL,
+    [LabourTotal] NUMERIC(20, 2) NOT NULL,
+    [MaterialsTotal] NUMERIC(20, 2) NOT NULL,
+    [TotalRebuiltPartCost] NUMERIC(20, 2) NOT NULL,
+    [TaxTotal] NUMERIC(20, 2) NULL,
+    [TotalCostTax] NUMERIC(20, 2) NULL,
+    CONSTRAINT [PK_ArchRbMasterlist] PRIMARY KEY CLUSTERED 
+    (
+        [ArchRbMasterlistId] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+    CONSTRAINT [UK_ArchRbMasterlist] UNIQUE NONCLUSTERED 
+    (
+        [RebuiltStockNum] ASC,
+        [DateEntered] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchRbMaterialsCcTotal](
+    [CostCentre] VARCHAR(5) NULL,
+    [TotalCost] NUMERIC(18, 2) NULL,
+    [ArchRbMasterlistId] INT NOT NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchRbNscPartsUsed](
+    [OrigSuppNum] VARCHAR(50) NULL,
+    [OrigSupplierName] VARCHAR(50) NULL,
+    [CostCentre] VARCHAR(4) NULL,
+    [QtyReqd] VARCHAR(10) NULL,
+    [PercentUsage] VARCHAR(10) NULL,
+    [DateEntered] DATETIME NULL,
+    [EnteredBy] VARCHAR(25) NULL,
+    [LinkCode] VARCHAR(30) NULL,
+    [Cost] NUMERIC(18, 2) NULL,
+    [LinkType] VARCHAR(3) NULL,
+    [Corecost] NUMERIC(18, 2) NULL,
+    [ArchRbMasterlistId] INT NOT NULL,
+    [TotalCost] NUMERIC(18, 2) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchRbScPartsUsed](
+    [MmsStockCode] VARCHAR(30) NULL,
+    [DateEntered] DATETIME NULL,
+    [RebPartCost] NUMERIC(18, 2) NULL,
+    [UserEntered] VARCHAR(50) NULL,
+    [MmsCost] NUMERIC(18, 2) NULL,
+    [OemCost] NUMERIC(18, 2) NULL,
+    [MmsRebuiltCode] VARCHAR(30) NULL,
+    [CostCentre] VARCHAR(4) NULL,
+    [QtyReqd] VARCHAR(10) NULL,
+    [PercentUsage] VARCHAR(10) NULL,
+    [LinkCode] VARCHAR(30) NULL,
+    [RebuiltPart] VARCHAR(1) NULL,
+    [LinkType] VARCHAR(3) NULL,
+    [Corecost] NUMERIC(18, 2) NULL,
+    [ArchRbMasterlistId] INT NOT NULL,
+    [TotalCost] NUMERIC(18, 2) NULL,
+    [ScKeyword] VARCHAR(50) NULL,
+    [ScDescription] VARCHAR(500) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchVehEmployeeLabour](
+    [LabourDefn] VARCHAR(50) NULL,
+    [DateEntered] DATETIME NULL,
+    [LinkNumber] VARCHAR(25) NULL,
+    [TypeId] VARCHAR(5) NULL,
+    [Costcentre] VARCHAR(5) NULL,
+    [Task] VARCHAR(50) NULL,
+    [LabourType] VARCHAR(5) NULL,
+    [Usage] VARCHAR(25) NULL,
+    [HrsReqd] VARCHAR(25) NULL,
+    [AdjHrs] VARCHAR(25) NULL,
+    [TimeAddition] NUMERIC(18, 2) NULL,
+    [ArchVehicleListId] INT NOT NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchVehKits](
+    [PartNumber] VARCHAR(30) NULL,
+    [EstimatedCost] NUMERIC(18, 2) NULL,
+    [ArchVehicleListId] INT NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchVehLabourCcTotal](
+    [ArchVehicleListId] INT NOT NULL,
+    [CostCentre] VARCHAR(5) NULL,
+    [TotalHours] NUMERIC(18, 2) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchVehMaterialsCcTotal](
+    [CostCentre] VARCHAR(5) NULL,
+    [TotalCost] NUMERIC(18, 2) NULL,
+    [ArchVehicleListId] INT NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchVehNscPartsUsed](
+    [OrigSuppNum] VARCHAR(50) NULL,
+    [OrigSupplierName] VARCHAR(50) NULL,
+    [CostCentre] VARCHAR(4) NULL,
+    [QtyReqd] VARCHAR(10) NULL,
+    [PercentUsage] VARCHAR(10) NULL,
+    [DateEntered] DATETIME NULL,
+    [EnteredBy] VARCHAR(25) NULL,
+    [LinkCode] VARCHAR(30) NULL,
+    [Cost] NUMERIC(18, 2) NULL,
+    [LinkType] VARCHAR(3) NULL,
+    [Corecost] NUMERIC(18, 2) NULL,
+    [ArchVehicleListId] INT NOT NULL,
+    [TotalCost] NUMERIC(18, 2) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchVehScPartsUsed](
+    [MmsStockCode] VARCHAR(30) NULL,
+    [DateEntered] DATETIME NULL,
+    [RebPartCost] NUMERIC(18, 2) NULL,
+    [UserEntered] VARCHAR(50) NULL,
+    [MmsCost] NUMERIC(18, 2) NULL,
+    [OemCost] NUMERIC(18, 2) NULL,
+    [MmsRebuiltCode] VARCHAR(30) NULL,
+    [CostCentre] VARCHAR(4) NULL,
+    [QtyReqd] VARCHAR(10) NULL,
+    [PercentUsage] VARCHAR(10) NULL,
+    [LinkCode] VARCHAR(30) NULL,
+    [RebuiltPart] VARCHAR(1) NULL,
+    [LinkType] VARCHAR(3) NULL,
+    [Corecost] NUMERIC(18, 2) NULL,
+    [ArchVehicleListId] INT NOT NULL,
+    [TotalCost] NUMERIC(18, 2) NULL,
+    [ScKeyword] VARCHAR(50) NULL,
+    [ScDescription] VARCHAR(500) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ArchVehicleList](
+    [ArchVehicleListId] INT NOT NULL,
+    [VehSeriesCode] VARCHAR(75) NULL,
+    [NumOfVehicles] VARCHAR(10) NULL,
+    [ProjDesc] VARCHAR(200) NULL,
+    [DateEntered] DATETIME NULL,
+    [EnteredBy] VARCHAR(25) NULL,
+    [Make] VARCHAR(25) NULL,
+    [Model] VARCHAR(25) NULL,
+    [Year] VARCHAR(4) NULL,
+    [Engine] VARCHAR(25) NULL,
+    [Transmission] VARCHAR(25) NULL,
+    [Differential] VARCHAR(25) NULL,
+    [LabourCost] NUMERIC(20, 2) NOT NULL,
+    [LabourOverheadAmount] NUMERIC(20, 2) NOT NULL,
+    [LabourTotal] NUMERIC(20, 2) NOT NULL,
+    [MaterialsTotal] NUMERIC(20, 2) NOT NULL,
+    [TotalBusEstimateCost] NUMERIC(20, 2) NOT NULL,
+    [TotalTax] NUMERIC(20, 2) NULL,
+    [TotalCostTax] NUMERIC(20, 2) NULL,
+    [OemKitsTotal] NUMERIC(20, 2) NOT NULL,
+    [Sopnumber] VARCHAR(25) NULL,
+    [OldId] INT NULL,
+    CONSTRAINT [PK_ArchVehicleList] PRIMARY KEY CLUSTERED 
+    (
+        [ArchVehicleListId] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[AuditModifyHistory](
+    [Id] INT NOT NULL,
+    [UserName] VARCHAR(15) NOT NULL,
+    [DateChanged] DATETIME NOT NULL,
+    [Action] VARCHAR(500) NOT NULL,
+    [EstimateNumber] VARCHAR(500) NOT NULL,
+    [EstimateType] VARCHAR(4) NOT NULL,
+    [Ref1] VARCHAR(500) NULL,
+    [Ref2] VARCHAR(500) NULL,
+    [Ref3] VARCHAR(500) NULL,
+    [Ref4] VARCHAR(500) NULL,
+    [Ref5] VARCHAR(500) NULL,
+    [Ref6] VARCHAR(500) NULL,
+    [Ref7] VARCHAR(500) NULL,
+    [Ref8] VARCHAR(500) NULL,
+    [Ref9] VARCHAR(500) NULL,
+    [Ref10] VARCHAR(500) NULL,
+    [Ref11] VARCHAR(500) NULL,
+    [Ref12] VARCHAR(500) NULL,
+    [Ref13] VARCHAR(500) NULL,
+    [Ref14] VARCHAR(500) NULL,
+    [Ref15] VARCHAR(500) NULL,
+    [Ref16] VARCHAR(500) NULL,
+    [Ref17] VARCHAR(500) NULL,
+    [Ref18] VARCHAR(500) NULL,
+    [Ref19] VARCHAR(500) NULL,
+    [Ref20] VARCHAR(500) NULL,
+    [Ref21] VARCHAR(500) NULL,
+    [Ref22] VARCHAR(500) NULL,
+    [Ref23] VARCHAR(500) NULL,
+    [Ref24] VARCHAR(500) NULL,
+    [Ref25] VARCHAR(500) NULL,
+    [Ref26] VARCHAR(500) NULL,
+    [Ref27] VARCHAR(500) NULL,
+    [Ref28] VARCHAR(500) NULL,
+    [Ref29] VARCHAR(500) NULL,
+    [Ref30] VARCHAR(500) NULL,
+    [Ref31] VARCHAR(500) NULL,
+    [Ref32] VARCHAR(500) NULL,
+    [Ref33] VARCHAR(500) NULL,
+    [Ref34] VARCHAR(500) NULL,
+    [Ref35] VARCHAR(500) NULL,
+    [Ref36] VARCHAR(500) NULL,
+    [Ref37] VARCHAR(500) NULL,
+    [Ref38] VARCHAR(500) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[BuyTemp](
+    [PartNumber] VARCHAR(50) NULL,
+    [LastPrice] VARCHAR(50) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[CesSettings](
+    [CesSettingsId] INT NOT NULL,
+    [Parameter] VARCHAR(100) NOT NULL,
+    [Value] VARCHAR(200) NULL,
+    CONSTRAINT [PK_CesSettingsId] PRIMARY KEY CLUSTERED 
+    (
+        [CesSettingsId] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+    CONSTRAINT [UK_CesSettingsParameter] UNIQUE NONCLUSTERED 
+    (
+        [Parameter] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[CostCentres](
+    [CostCentre] VARCHAR(4) NOT NULL,
+    [Name] VARCHAR(50) NULL,
+    [DateEntered] DATETIME NULL,
+    CONSTRAINT [PK_CostCentres] PRIMARY KEY CLUSTERED 
+    (
+        [CostCentre] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[Differential](
+    [Name] VARCHAR(25) NOT NULL,
+    CONSTRAINT [PK_Differential] PRIMARY KEY CLUSTERED 
+    (
+        [Name] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[Engines](
+    [Name] VARCHAR(25) NOT NULL,
+    CONSTRAINT [PK_Engines] PRIMARY KEY CLUSTERED 
+    (
+        [Name] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[Errors](
+    [LogId] INT NOT NULL,
+    [UserName] VARCHAR(50) NULL,
+    [DateTime] DATETIME NULL,
+    [ModuleName] VARCHAR(100) NULL,
+    [FunctionName] VARCHAR(100) NULL,
+    [LineNum] INT NULL,
+    [ErrorDesc] VARCHAR(2000) NULL,
+    [ErrNum] INT NULL,
+    CONSTRAINT [PK_Errors] PRIMARY KEY CLUSTERED 
+    (
+        [LogId] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[LabourTaskDescriptions](
+    [TaskId] INT NOT NULL,
+    [TaskDescription] VARCHAR(200) NOT NULL,
+    CONSTRAINT [TaskId] PRIMARY KEY CLUSTERED 
+    (
+        [TaskId] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+    CONSTRAINT [TaskDescription] UNIQUE NONCLUSTERED 
+    (
+        [TaskDescription] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[LastBuyPrice](
+    [PartNumber] NCHAR(6) NOT NULL,
+    [LastPrice] FLOAT NULL,
+    [OrderNumber] NCHAR(9) NULL,
+    [OrderSignalDate] DATE NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[LastPriceNoTax](
+    [MmsStockCode] VARCHAR(30) NOT NULL,
+    [Price] NUMERIC(18, 2) NULL,
+    CONSTRAINT [PK_LastPriceNoTax] PRIMARY KEY CLUSTERED 
+    (
+        [MmsStockCode] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ListOfBuses](
+    [ListId] INT NOT NULL,
+    [Description] VARCHAR(75) NULL,
+    CONSTRAINT [ListId] PRIMARY KEY CLUSTERED 
+    (
+        [ListId] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[MbList](
+    [MbNumber] VARCHAR(25) NOT NULL,
+    [Keyword] VARCHAR(50) NULL,
+    [Description] VARCHAR(50) NULL,
+    [BusType] VARCHAR(50) NULL,
+    [NumBusComp] VARCHAR(10) NULL,
+    [VendorPartNum] VARCHAR(25) NULL,
+    [BuyCode] VARCHAR(25) NOT NULL,
+    [RebuildCode] VARCHAR(25) NULL,
+    [CoreCode] VARCHAR(25) NULL,
+    [AnnualUsage] VARCHAR(25) NULL,
+    [BenchNumber] VARCHAR(25) NULL,
+    [SampleProvided] VARCHAR(25) NULL,
+    [Recommendation] VARCHAR(1) NULL,
+    [RemanCost] VARCHAR(25) NULL,
+    [ExternalCost] VARCHAR(25) NULL,
+    [BuyNewCost] VARCHAR(25) NULL,
+    [InternalCost] VARCHAR(25) NULL,
+    [SopNumber] VARCHAR(25) NULL,
+    [CoreCost] VARCHAR(25) NULL,
+    [JobNumber] VARCHAR(25) NULL,
+    [DateOpened] DATETIME NULL,
+    [Readmanualnewprice] INT NULL,
+    CONSTRAINT [PK_MbList] PRIMARY KEY CLUSTERED 
+    (
+        [MbNumber] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[MbListOfBuses](
+    [MbNumber] VARCHAR(25) NOT NULL,
+    [ListId] INT NOT NULL,
+    CONSTRAINT [FK_ListId] FOREIGN KEY ([ListId]) REFERENCES [SBCES].[ListOfBuses]([ListId])
+    ON DELETE CASCADE
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[MmsCostTemp](
+    [MmsNewCode] VARCHAR(13) NULL,
+    [MmsNewCost] NUMERIC(9, 0) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[MmsNewCosts](
+    [MmsNewCode] VARCHAR(6) NOT NULL,
+    [MmsNewCost] NUMERIC(18, 4) NULL,
+    [OemSupplier] VARCHAR(50) NULL,
+    [OemPartNumber] VARCHAR(50) NULL,
+    [OemPartCost] NUMERIC(18, 4) NULL,
+    [SupplierName] VARCHAR(50) NULL,
+    [SupplierPartNum] VARCHAR(25) NULL,
+    [SupplierCost] NUMERIC(18, 4) NULL,
+    [ThirdpartyName] VARCHAR(50) NULL,
+    [ThirdpartPartNum] VARCHAR(50) NULL,
+    [ThirdpartyCost] NUMERIC(18, 4) NULL,
+    [DateEntered] DATETIME NULL,
+    [PartType] VARCHAR(40) NULL,
+    [DetailedDesc] VARCHAR(MAX) NULL,
+    [MmsSyncDate] DATETIME NULL
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[NonStockCodedPartsTemp](
+    [OrigSupplierNum] VARCHAR(50) NULL,
+    [OrigSupplierName] VARCHAR(50) NULL,
+    [DateEntered] DATETIME NULL,
+    [OemPartCost] NUMERIC(18, 2) NULL,
+    [DetailedDesc] VARCHAR(500) NULL,
+    [PartAddedBy] VARCHAR(25) NULL,
+    [LastModifiedBy] VARCHAR(25) NULL,
+    [LastModifiedDate] DATE NULL,
+    [Keyword] VARCHAR(50) NULL,
+    [Id] INT NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[NscPartsUsedTemp](
+    [OrigSuppNum] VARCHAR(50) NULL,
+    [OrigSupplierName] VARCHAR(50) NULL,
+    [CostCentre] VARCHAR(4) NULL,
+    [QtyReqd] VARCHAR(10) NULL,
+    [PercentUsage] VARCHAR(10) NULL,
+    [DateEntered] DATETIME NULL,
+    [EnteredBy] VARCHAR(25) NULL,
+    [LastModifiedBy] VARCHAR(25) NULL,
+    [LastModifiedDate] DATETIME NULL,
+    [LinkCode] VARCHAR(30) NULL,
+    [Cost] NUMERIC(18, 2) NULL,
+    [LinkType] VARCHAR(3) NULL,
+    [Corecost] NUMERIC(18, 2) NULL,
+    [Id] INT NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[OrderMaster](
+    [OrderNumber] NCHAR(9) NOT NULL,
+    [OrderLine] NUMERIC(5, 0) NOT NULL,
+    [OrderPartNumberOm] VARCHAR(25) NULL,
+    [OrderPlantLocationOm] NCHAR(3) NOT NULL,
+    [OriginalOrderQtyOm] NUMERIC(11, 3) NOT NULL,
+    [CustomerOrderNumber] NCHAR(12) NULL,
+    [OrderType] NCHAR(1) NULL,
+    [OrderSignalDate] NCHAR(8) NULL,
+    [DateLastReceived] DATETIME NULL,
+    [OriginalPromiseDate] DATETIME NULL,
+    [TAcctNoOm] VARCHAR(8) NULL,
+    [MoPrintDate] DATETIME NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[PartMaster](
+    [PartNumber] NCHAR(13) NOT NULL,
+    [DescriptionPm] VARCHAR(35) NULL,
+    [LevelTotalCostLaPm] NUMERIC(15, 5) NULL,
+    [LevelTotalCostWaPm] NUMERIC(15, 5) NULL,
+    [ProductCodePm] VARCHAR(10) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[PartMasterC](
+    [PartNumber] NCHAR(6) NOT NULL,
+    [AutoApproveFlagPm] NCHAR(1) NOT NULL,
+    [AutoGenPoFlagPm] NCHAR(1) NOT NULL,
+    [CycleCountIncludeFlagPm] NCHAR(1) NOT NULL,
+    [DescriptionPm] VARCHAR(30) NULL,
+    [GstExemptIndPm] NCHAR(1) NOT NULL,
+    [HazardousMaterialPm] NCHAR(1) NOT NULL,
+    [HoldCodePm] NCHAR(1) NOT NULL,
+    [OverIssueFlagPm] NCHAR(1) NOT NULL,
+    [IssueUnitMeasurePm] NCHAR(2) NOT NULL,
+    [LevelTotalCostFsPm] NUMERIC(15, 5) NOT NULL,
+    [LevelTotalCostLaPm] NUMERIC(15, 5) NOT NULL,
+    [LevelTotalCostWaPm] NUMERIC(15, 5) NOT NULL,
+    [ProductCodePm] VARCHAR(10) NOT NULL,
+    [PstExemptIndPm] NCHAR(1) NOT NULL,
+    [PurchaseUnitMeasurePm] NCHAR(2) NOT NULL,
+    [PurchaseUomConfFactPm] NUMERIC(12, 4) NOT NULL,
+    [ShoppingBasketIndPm] NCHAR(1) NOT NULL,
+    [CoreNumber] NCHAR(6) NULL,
+    [BuyNumber] NCHAR(10) NULL,
+    [SuggestedSourcePm] NCHAR(2) NULL,
+    [QualityAssurance] NCHAR(2) NULL,
+    [SerialLotControlCode] NCHAR(1) NULL,
+    [LotControlDateType] NCHAR(1) NULL,
+    [BuyerCode] NCHAR(8) NULL,
+    [CommodityCode] VARCHAR(15) NULL,
+    [PvnltOverrideFlag] NCHAR(1) NULL,
+    [MsdsNumber] NCHAR(6) NULL,
+    [OutForTenderInd] NCHAR(1) NULL,
+    [LiveCode] NCHAR(1) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[PartOrder](
+    [StockCodedNumber] NCHAR(13) NULL,
+    [TAcctNoOm] VARCHAR(8) NULL,
+    [OriginalOrderQtyOm] NUMERIC(11, 3) NULL,
+    [CostCentre] NCHAR(4) NULL,
+    [DateOrdered] DATE NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[PoItem](
+    [OrderNumber] NCHAR(9) NOT NULL,
+    [OrderLineNo] NUMERIC(5, 0) NOT NULL,
+    [PartType] NCHAR(1) NULL,
+    [PartDecrition] NCHAR(30) NULL,
+    [VendorPartNumber] NCHAR(25) NULL,
+    [ShipToAddr] NCHAR(10) NULL,
+    [ItemLimit] NUMERIC(15, 4) NULL,
+    [UnitPrice] NUMERIC(15, 4) NULL,
+    [VendorUnitPrce] NUMERIC(15, 4) NULL,
+    [ItemAmt] NUMERIC(15, 4) NULL,
+    [ActualUnitPrice] NUMERIC(15, 4) NULL,
+    [ItemStatus] NCHAR(1) NULL,
+    [ItemStatusDate] DATETIME NULL,
+    [OrderQty] NUMERIC(15, 3) NULL,
+    [GrossQtyReceived] NUMERIC(15, 3) NULL,
+    [NetQtyReceived] NUMERIC(15, 3) NULL,
+    [QtyInvoiced] NUMERIC(15, 3) NULL,
+    [QtyInReceiving] NUMERIC(15, 3) NULL,
+    [QtyInInspection] NUMERIC(15, 3) NULL,
+    [QtyStocked] NUMERIC(15, 3) NULL,
+    [QtyScrapped] NUMERIC(15, 3) NULL,
+    [QtyReworked] NUMERIC(15, 3) NULL,
+    [QtyReturned] NUMERIC(15, 3) NULL,
+    [QtyDue] NUMERIC(15, 3) NULL,
+    [InvoiceStatus] NCHAR(1) NULL,
+    [VendorUnitMeasure] NCHAR(2) NULL,
+    [PurchaseUnitMeasure] NCHAR(2) NULL,
+    [IssueUnitMeasure] NCHAR(2) NULL,
+    [UnitMeasureConvFactor1] NUMERIC(12, 4) NULL,
+    [UnitMeasureConvFactor2] NUMERIC(12, 4) NULL,
+    [HazardousMaterialCode] NCHAR(1) NULL,
+    [ExtensionCharge1] NUMERIC(15, 4) NULL,
+    [ExtensionChargeFactor1] NCHAR(1) NULL,
+    [ExtensionChargeType1] NCHAR(1) NULL,
+    [ExtensionCharge2] NUMERIC(15, 4) NULL,
+    [ExtensionChargeFactor2] NCHAR(1) NULL,
+    [ExtensionChargeType2] NCHAR(1) NULL,
+    [ExtensionCharge3] NUMERIC(15, 4) NULL,
+    [ExtensionChargeFactor3] NCHAR(1) NULL,
+    [ExtensionChargeType3] NCHAR(1) NULL,
+    [PlacedQty] NUMERIC(15, 3) NULL,
+    [VendorNumber] NCHAR(10) NULL,
+    [PriceSource] NCHAR(1) NULL,
+    [ClearanceFlag] NCHAR(1) NULL,
+    [DiscountPercent] NUMERIC(9, 4) NULL,
+    [OrderQtyEntered] NUMERIC(15, 3) NULL,
+    [MatchingOption] NCHAR(1) NULL,
+    [PartialPayFlag] NCHAR(1) NULL,
+    [SalesTaxProrate] NCHAR(1) NULL,
+    [FreightProrate] NCHAR(1) NULL,
+    [MiscProrate1] NCHAR(1) NULL,
+    [MiscProrate2] NCHAR(1) NULL,
+    [DiscountProrate] NCHAR(1) NULL,
+    [ReqAutoPurchaseFlag] NCHAR(1) NULL,
+    [EffDate] DATETIME NULL,
+    [SuggestedSource] NCHAR(2) NULL,
+    [DateEntered] DATETIME NULL,
+    [DateLastActivity] DATETIME NULL,
+    [PoItemSuffix] NUMERIC(5, 0) NULL,
+    [AutoGenPoFlag] NCHAR(1) NULL,
+    [ScheduleInvoiceFlag] NCHAR(1) NULL,
+    [ReturnContainerCount] INT NULL,
+    [ReturnContainerType] NCHAR(1) NULL,
+    [PricePerContainer] NUMERIC(12, 4) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[PriceNotTax](
+    [MmsStockCode] VARCHAR(30) NULL,
+    [Price] NUMERIC(18, 2) NULL,
+    [DateLastActivity] DATETIME NULL,
+    [Description] VARCHAR(200) NULL,
+    [VendorPartNumber] VARCHAR(50) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[RbListOfBuses](
+    [RebuiltStockNum] VARCHAR(30) NOT NULL,
+    [ListId] INT NOT NULL,
+    CONSTRAINT [FK_RbListOfBusesListId] FOREIGN KEY ([ListId]) REFERENCES [SBCES].[ListOfBuses]([ListId])
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[ScOemkitsTextData](
+    [MmsNewCode] VARCHAR(30) NULL,
+    [TextData] VARCHAR(132) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[StockCodedPartsBackup](
+    [MmsStockCode] VARCHAR(30) NOT NULL,
+    [CorePartNumber] VARCHAR(30) NULL,
+    [PartType] VARCHAR(50) NULL,
+    [JobNumber] VARCHAR(30) NULL,
+    [DetailedDesc] VARCHAR(500) NULL,
+    [DateEntered] VARCHAR(8) NULL,
+    [ItemRefNumber] VARCHAR(16) NULL,
+    [Overheadtype] NUMERIC(9, 0) NULL,
+    [CoreCharge] NUMERIC(9, 0) NULL,
+    [PartCost] NUMERIC(9, 0) NULL,
+    [LastModifiedDate] DATETIME NULL,
+    [LastModifiedBy] VARCHAR(30) NULL,
+    [AddedBy] VARCHAR(30) NOT NULL,
+    [MmsNewCost] NUMERIC(15, 5) NULL,
+    [OemPartCost] NUMERIC(9, 0) NULL,
+    [MmsSyncDate] DATETIME NULL,
+    [OrigSupplierNum] VARCHAR(50) NULL,
+    [OrigSupplierName] VARCHAR(50) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[StockCodedPartsVpn](
+    [OrigSupplierNum] VARCHAR(50) NOT NULL,
+    [MmsStockCode] VARCHAR(30) NULL,
+    [OrigSupplierName] VARCHAR(50) NOT NULL,
+    [PartDescription] VARCHAR(264) NULL,
+    [PartType] VARCHAR(30) NULL,
+    [DateEntry] DATETIME NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[SubKits](
+    [KitPartNumber] VARCHAR(30) NULL,
+    [PartType] VARCHAR(3) NULL,
+    [SupplierNumber] VARCHAR(50) NULL,
+    [SupplierName] VARCHAR(50) NULL,
+    [StockCode] VARCHAR(30) NULL,
+    [Qty] VARCHAR(10) NULL,
+    [SubKitLetter] VARCHAR(5) NULL,
+    [Description] VARCHAR(500) NULL,
+    [Sequence] INT NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[Temp](
+    [MmsStockCode] VARCHAR(30) NULL,
+    [DateEntered] DATETIME NULL,
+    [Overheadtype] NUMERIC(2, 0) NULL,
+    [RebPartCost] NUMERIC(9, 0) NULL,
+    [UserEntered] VARCHAR(50) NULL,
+    [MmsCost] NUMERIC(18, 2) NULL,
+    [OemCost] NUMERIC(18, 2) NULL,
+    [LastModifiedBy] VARCHAR(25) NULL,
+    [LastModifiedDate] DATETIME NULL,
+    [MmsRebuiltCode] VARCHAR(30) NULL,
+    [CostCentre] VARCHAR(4) NULL,
+    [QtyReqd] VARCHAR(10) NULL,
+    [PercentUsage] VARCHAR(10) NULL,
+    [MakebuyCode] VARCHAR(30) NULL,
+    [RebuiltPart] VARCHAR(1) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[TempKitParts](
+    [PartType] VARCHAR(3) NULL,
+    [SupplierNumber] VARCHAR(50) NULL,
+    [SupplierName] VARCHAR(50) NULL,
+    [StockCode] VARCHAR(30) NULL,
+    [CostCentre] VARCHAR(4) NULL,
+    [Qty] VARCHAR(10) NULL,
+    [PercentUsage] VARCHAR(10) NULL,
+    [UnitCost] NUMERIC(18, 2) NULL,
+    [CoreCost] NUMERIC(18, 2) NULL,
+    [Cost] NUMERIC(18, 2) NULL,
+    [Description] VARCHAR(500) NULL,
+    [Keyword] VARCHAR(50) NULL,
+    [LastModifiedDate] DATETIME NULL,
+    [RowId] NCHAR(18) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[TempLabourList](
+    [LabourType] VARCHAR(50) NULL,
+    [Cc] VARCHAR(4) NULL,
+    [Task] VARCHAR(200) NULL,
+    [Usage] NUMERIC(18, 2) NULL,
+    [Time] NUMERIC(18, 2) NULL,
+    [RatePerHour] NUMERIC(18, 2) NULL,
+    [TotalCost] NUMERIC(18, 2) NULL,
+    [ExtendedTime] VARCHAR(8) NULL,
+    [EstimateType] VARCHAR(3) NULL,
+    [EstimateNumber] VARCHAR(25) NULL,
+    [WrenchTime] VARCHAR(25) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[TempRbpCost](
+    [TotalCost] NUMERIC(20, 10) NULL,
+    [RbNumber] VARCHAR(30) NULL,
+    [DetailedDesc] VARCHAR(250) NULL,
+    [ExternalCost] VARCHAR(25) NULL,
+    [Active] INT NULL,
+    [Keyword] VARCHAR(250) NULL
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[Transmissions](
+    [Name] VARCHAR(25) NOT NULL,
+    CONSTRAINT [PK_Transmissions] PRIMARY KEY CLUSTERED 
+    (
+        [Name] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[TypeOfVehicle](
+    [Make] VARCHAR(25) NOT NULL,
+    [Model] VARCHAR(25) NOT NULL,
+    [Year] VARCHAR(4) NOT NULL,
+    CONSTRAINT [PK_TypeOfVehicle] PRIMARY KEY CLUSTERED 
+    (
+        [Make] ASC,
+        [Model] ASC,
+        [Year] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[VehicleList](
+    [VehicleListId] INT NOT NULL,
+    [VehSeriesCode] VARCHAR(500) NOT NULL,
+    [NumOfVehicles] VARCHAR(10) NOT NULL,
+    [ProjDesc] VARCHAR(200) NOT NULL,
+    [DateEntered] DATETIME NOT NULL,
+    [EnteredBy] VARCHAR(25) NOT NULL,
+    [ModifiedLastBy] VARCHAR(25) NOT NULL,
+    [ModifiedLastDate] DATETIME NOT NULL,
+    [Make] VARCHAR(25) NULL,
+    [Model] VARCHAR(25) NULL,
+    [Year] VARCHAR(4) NULL,
+    [Engine] VARCHAR(25) NULL,
+    [Transmission] VARCHAR(25) NULL,
+    [Differential] VARCHAR(25) NULL,
+    [Sopnumber] VARCHAR(30) NULL,
+    CONSTRAINT [PK_VehicleList] PRIMARY KEY CLUSTERED 
+    (
+        [VehicleListId] ASC
+    ) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+CREATE TABLE [SBCES].[VendorPartDesc](
+    [PartNumber] CHAR(13) NOT NULL,
+    [PrintSeq] INT NULL,
+    [VendorPartNumber] VARCHAR(25) NULL,
+    [BusinessName] VARCHAR(40) NULL,
+    [PartXdescEdLine] VARCHAR(132) NULL
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[ArchRbEmployeeLabour]  WITH CHECK ADD  CONSTRAINT [FK_ArchEmployeeLabour] FOREIGN KEY([ArchRbMasterlistId])
+REFERENCES [SBCES].[ArchRbMasterlist] ([ArchRbMasterlistId])
+GO
+ALTER TABLE [SBCES].[ArchRbEmployeeLabour] CHECK CONSTRAINT [FK_ArchEmployeeLabour]
+GO
+
+ALTER TABLE [SBCES].[ArchRbLabourCcTotal]  WITH CHECK ADD  CONSTRAINT [FK_ArchRbLabourCcTotal] FOREIGN KEY([ArchRbMasterlistId])
+REFERENCES [SBCES].[ArchRbMasterlist] ([ArchRbMasterlistId])
+GO
+ALTER TABLE [SBCES].[ArchRbLabourCcTotal] CHECK CONSTRAINT [FK_ArchRbLabourCcTotal]
+GO
+
+ALTER TABLE [SBCES].[ArchRbListBuses]  WITH CHECK ADD  CONSTRAINT [FK_ArchRbListBuses] FOREIGN KEY([ArchRbMasterlistId])
+REFERENCES [SBCES].[ArchRbMasterlist] ([ArchRbMasterlistId])
+GO
+ALTER TABLE [SBCES].[ArchRbListBuses] CHECK CONSTRAINT [FK_ArchRbListBuses]
+GO
+
+ALTER TABLE [SBCES].[ArchRbMasterlist]  WITH CHECK ADD  CONSTRAINT [FK_ArchRbMasterlist] FOREIGN KEY([RebuiltStockNum])
+REFERENCES [SBCES].[RbMasterlist] ([RebuiltStockNum])
+GO
+ALTER TABLE [SBCES].[ArchRbMasterlist] CHECK CONSTRAINT [FK_ArchRbMasterlist]
+GO
+
+ALTER TABLE [SBCES].[ArchRbMaterialsCcTotal]  WITH CHECK ADD  CONSTRAINT [FK_ArchRbMaterialsCcTotals] FOREIGN KEY([ArchRbMasterlistId])
+REFERENCES [SBCES].[ArchRbMasterlist] ([ArchRbMasterlistId])
+GO
+ALTER TABLE [SBCES].[ArchRbMaterialsCcTotal] CHECK CONSTRAINT [FK_ArchRbMaterialsCcTotals]
+GO
+
+ALTER TABLE [SBCES].[ArchRbNscPartsUsed]  WITH CHECK ADD  CONSTRAINT [FK_ArchNscPartsUsed] FOREIGN KEY([ArchRbMasterlistId])
+REFERENCES [SBCES].[ArchRbMasterlist] ([ArchRbMasterlistId])
+GO
+ALTER TABLE [SBCES].[ArchRbNscPartsUsed] CHECK CONSTRAINT [FK_ArchNscPartsUsed]
+GO
+
+ALTER TABLE [SBCES].[ArchRbScPartsUsed]  WITH CHECK ADD  CONSTRAINT [FK_ArchScPartsUsed] FOREIGN KEY([ArchRbMasterlistId])
+REFERENCES [SBCES].[ArchRbMasterlist] ([ArchRbMasterlistId])
+GO
+ALTER TABLE [SBCES].[ArchRbScPartsUsed] CHECK CONSTRAINT [FK_ArchScPartsUsed]
+GO
+
+ALTER TABLE [SBCES].[ArchVehEmployeeLabour]  WITH CHECK ADD  CONSTRAINT [FK_ArchVehEmployeeLabour] FOREIGN KEY([ArchVehicleListId])
+REFERENCES [SBCES].[ArchVehicleList] ([ArchVehicleListId])
+GO
+ALTER TABLE [SBCES].[ArchVehEmployeeLabour] CHECK CONSTRAINT [FK_ArchVehEmployeeLabour]
+GO
+
+ALTER TABLE [SBCES].[ArchVehKits]  WITH CHECK ADD  CONSTRAINT [FK_ArchVehKits] FOREIGN KEY([ArchVehicleListId])
+REFERENCES [SBCES].[ArchVehicleList] ([ArchVehicleListId])
+GO
+ALTER TABLE [SBCES].[ArchVehKits] CHECK CONSTRAINT [FK_ArchVehKits]
+GO
+
+ALTER TABLE [SBCES].[ArchVehNscPartsUsed]  WITH CHECK ADD  CONSTRAINT [FK_ArchVehNscPartsUsed] FOREIGN KEY([ArchVehicleListId])
+REFERENCES [SBCES].[ArchVehicleList] ([ArchVehicleListId])
+GO
+ALTER TABLE [SBCES].[ArchVehNscPartsUsed] CHECK CONSTRAINT [FK_ArchVehNscPartsUsed]
+GO
+
+ALTER TABLE [SBCES].[ArchVehScPartsUsed]  WITH CHECK ADD  CONSTRAINT [FK_ArchVehScPartsUsed] FOREIGN KEY([ArchVehicleListId])
+REFERENCES [SBCES].[ArchVehicleList] ([ArchVehicleListId])
+GO
+ALTER TABLE [SBCES].[ArchVehScPartsUsed] CHECK CONSTRAINT [FK_ArchVehScPartsUsed]
+GO
+
+ALTER TABLE [SBCES].[EmplClass]  WITH CHECK ADD  CONSTRAINT [FK_WageGroup_] FOREIGN KEY([WageGroup])
+REFERENCES [SBCES].[EmployeeSalaries] ([WageGroup])
+GO
+ALTER TABLE [SBCES].[EmplClass] CHECK CONSTRAINT [FK_WageGroup]
+GO
+
+ALTER TABLE [SBCES].[MbListOfBuses]  WITH CHECK ADD  CONSTRAINT [FK_ListId__] FOREIGN KEY([ListId])
+REFERENCES [SBCES].[ListOfBuses] ([ListId])
+ON DELETE NO ACTION
+GO
+ALTER TABLE [SBCES].[MbListOfBuses] CHECK CONSTRAINT [FK_ListId]
+GO
+
+ALTER TABLE [SBCES].[RbListOfBuses]  WITH CHECK ADD  CONSTRAINT [FK_RbListOfBusesListId_] FOREIGN KEY([ListId])
+REFERENCES [SBCES].[ListOfBuses] ([ListId])
+GO
+ALTER TABLE [SBCES].[RbListOfBuses] CHECK CONSTRAINT [FK_RbListOfBusesListId]
+GO
+
+
+/****** Object:  StoredProcedure [SBCES].[AuditInsertModifyHistory]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE PROCEDURE [SBCES].[AuditInsertModifyHistory]
+    (@viUserName VARCHAR(4000),
+     @viAction VARCHAR(4000),
+     @viEstimateNumber VARCHAR(4000),
+     @viEstimateType VARCHAR(4000),
+     @viRef1 VARCHAR(4000),
+     @viRef2 VARCHAR(4000),
+     @viRef3 VARCHAR(4000),
+     @viRef4 VARCHAR(4000),
+     @viRef5 VARCHAR(4000),
+     @viRef6 VARCHAR(4000),
+     @viRef7 VARCHAR(4000),
+     @viRef8 VARCHAR(4000),
+     @viRef9 VARCHAR(4000),
+     @viRef10 VARCHAR(4000),
+     @viRef11 VARCHAR(4000),
+     @viRef12 VARCHAR(4000),
+     @viRef13 VARCHAR(4000),
+     @viRef14 VARCHAR(4000),
+     @viRef15 VARCHAR(4000),
+     @viRef16 VARCHAR(4000),
+     @viRef17 VARCHAR(4000),
+     @viRef18 VARCHAR(4000),
+     @viRef19 VARCHAR(4000),
+     @viRef20 VARCHAR(4000),
+     @viRef21 VARCHAR(4000),
+     @viRef22 VARCHAR(4000),
+     @viRef23 VARCHAR(4000),
+     @viRef24 VARCHAR(4000),
+     @viRef25 VARCHAR(4000),
+     @viRef26 VARCHAR(4000),
+     @viRef27 VARCHAR(4000),
+     @viRef28 VARCHAR(4000),
+     @viRef29 VARCHAR(4000),
+     @viRef30 VARCHAR(4000),
+     @viRef31 VARCHAR(4000),
+     @viRef32 VARCHAR(4000),
+     @viRef33 VARCHAR(4000),
+     @viRef34 VARCHAR(4000),
+     @viRef35 VARCHAR(4000),
+     @viRef36 VARCHAR(4000),
+     @viRef37 VARCHAR(4000),
+     @viRef38 VARCHAR(4000),
+     @voRetVal NUMERIC OUTPUT
+)
+AS
+BEGIN
+    DECLARE @nCount FLOAT;
+    DECLARE @idN FLOAT;
+    
+    -- Increase id by 1.
+    SELECT @nCount = COUNT(*) FROM SBCES.AuditModifyHistory;
+    IF @nCount <> 0 BEGIN
+        SELECT @idN = MAX(ID) FROM SBCES.AuditModifyHistory;
+        SET @idN = @idN + 1;
+    END
+    ELSE BEGIN
+        -- Very first record.
+        SET @idN = 1;
+    END 
+
+    BEGIN TRY
+        BEGIN TRANSACTION
+        INSERT INTO SBCES.AuditModifyHistory
+        (
+            Id,
+            UserName,
+            DateChanged,
+            Action,
+            EstimateNumber,
+            EstimateType,
+            Ref1, Ref2, Ref3, Ref4, Ref5, Ref6, Ref7, Ref8, Ref9, Ref10,
+            Ref11, Ref12, Ref13, Ref14, Ref15, Ref16, Ref17, Ref18, Ref19, Ref20,
+            Ref21, Ref22, Ref23, Ref24, Ref25, Ref26, Ref27, Ref28, Ref29, Ref30,
+            Ref31, Ref32, Ref33, Ref34, Ref35, Ref36, Ref37, Ref38
+        )
+        VALUES
+        (
+            @idN,
+            @viUserName,
+            GETDATE(),
+            @viAction, @viEstimateNumber, @viEstimateType,
+            @viRef1, @viRef2, @viRef3, @viRef4, @viRef5, @viRef6, @viRef7, @viRef8, @viRef9, @viRef10,
+            @viRef11, @viRef12, @viRef13, @viRef14, @viRef15, @viRef16, @viRef17, @viRef18, @viRef19, @viRef20,
+            @viRef21, @viRef22, @viRef23, @viRef24, @viRef25, @viRef26, @viRef27, @viRef28, @viRef29, @viRef30,
+            @viRef31, @viRef32, @viRef33, @viRef34, @viRef35, @viRef36, @viRef37, @viRef38
+        );
+        COMMIT;
+        SET @voRetVal = 0;
+        RETURN 0;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK
+        SET @voRetVal = -125
+        RETURN -1
+    END CATCH
+END;
+GO
+
+/****** Object:  StoredProcedure [SBCES].[CesInquiryRetrieveMlLabour]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [SBCES].[CesInquiryRetrieveMlLabour]
+    (@viIdnum VARCHAR(50),
+     @viType VARCHAR(50)
+    ) AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT
+        EmployeeLabour.LabourDefn AS "LabourType",
+        EmployeeLabour.CostCentre AS "CC",
+        EmployeeLabour.Task AS "Task",
+        REPLACE(EmployeeLabour.Usage,',','.') AS "Usage",
+        EmployeeLabour.HrsReqd AS "Time",
+        EmployeeLabour.AdjHrs AS "WrenchTime",
+        EmployeeLabour.DateRevised AS "DateRevised",
+        EmployeeLabour.TimeAddition AS "TimeAddition",
+        CesSettings.Value AS "Value",
+        NEWID() AS RowId
+    FROM
+        SBCES.EmployeeLabour,
+        (SELECT CesSettings.Value
+         FROM SBCES.CesSettings
+         WHERE CesSettings.Parameter = 'NonProductiveAdjustment') CesSettings
+    WHERE
+        EmployeeLabour.LinkNumber = @viIdnum AND
+        EmployeeLabour.TypeId = @viType
+    ORDER BY
+        EmployeeLabour.CostCentre;
+END;
+GO
+
+/****** Object:  StoredProcedure [SBCES].[CesInquiryRetrieveTransmissions]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE PROCEDURE [SBCES].[CesInquiryRetrieveTransmissions]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT ROW_NUMBER() OVER (ORDER BY Name) AS RowId,
+           UPPER(Transmissions.Name) AS Name
+    FROM SBCES.Transmissions;
+END;
+GO
+
+/****** Object:  StoredProcedure [SBCES].[GetLabourCost]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [SBCES].[GetLabourCost]
+    (@viIdnum VARCHAR(4000), @viType VARCHAR(4000),
+     @VFinalPrice DECIMAL(20,2) OUTPUT
+)
+AS
+BEGIN
+    DECLARE @SqlStatement AS NVARCHAR(1000);
+    DECLARE @curRBRecRebuiltCode VARCHAR(50);
+    DECLARE @curRBRecQty VARCHAR(50);
+    DECLARE @curRBRecUsage VARCHAR(50);
+    DECLARE @curRBRecLinkCode VARCHAR(50);
+    DECLARE @VLinkCode VARCHAR(30);
+    DECLARE @VPrice DECIMAL(20,10);
+    DECLARE @VRetVal VARCHAR(25);
+    DECLARE @Adjustment DECIMAL(20,10);
+    DECLARE @curLabourRecLabourType VARCHAR(50);
+    DECLARE @curLabourRecCC VARCHAR(50);
+    DECLARE @curLabourRecTask VARCHAR(50);
+    DECLARE @curLabourRecUsage VARCHAR(50);
+    DECLARE @curLabourRecTime VARCHAR(50);
+    DECLARE @curLabourRecRatePerHour NUMERIC(18,2);
+    DECLARE @curLabourRecTimeAddition NUMERIC(18,2);
+    DECLARE @curLabourRecWrenchTime VARCHAR(50);
+
+    DECLARE C_RB_List_To_Prop CURSOR LOCAL FOR
+    SELECT DISTINCT UPPER(SCPartsUsed.LinkCode) AS LinkCode,
+                    SCPartsUsed.QtyReqd AS Qty,
+                    SCPartsUsed.PercentUsage AS Usage,
+                    SCPartsUsed.MMSRebuiltCode AS RebuiltCode
+    FROM SBCES.SCPartsUsed
+    WHERE SCPartsUsed.RebuiltPart = 'Y' AND
+          SCPartsUsed.LinkType = @viType AND
+          UPPER(SCPartsUsed.LinkCode) = UPPER(@viIdnum);
+
+    DECLARE cur_Labour CURSOR LOCAL FOR
+    SELECT EmployeeLabour.LabourDefn AS LabourType,
+           EmployeeLabour.CostCentre AS CC,
+           EmployeeLabour.Task AS Task,
+           REPLACE(EmployeeLabour.Usage,',','.') AS Usage,
+           EmployeeLabour.HrsReqd AS Time,
+           EmployeeSalaries.RatePerHour AS RatePerHour,
+           EmployeeLabour.TimeAddition AS TimeAddition,
+           SBCES.HHmmToDecimal(EmployeeLabour.AdjHrs) AS WrenchTime
+    FROM SBCES.EmployeeLabour,
+         SBCES.EmployeeSalaries,
+         SBCES.EmplClass
+    WHERE EmployeeLabour.LabourDefn = UPPER(EmplClass.LabourDefn) AND
+          EmployeeSalaries.WageGroup = EmplClass.WageGroup AND
+          EmployeeLabour.LinkNumber = @viIdnum AND
+          EmployeeLabour.TypeId = @viType;
+
+    SET @SqlStatement = 'TRUNCATE TABLE dbo.TempLabourList';
+    EXECUTE sp_executesql @SqlStatement;
+
+    OPEN cur_Labour;
+    FETCH NEXT FROM cur_Labour INTO @curLabourRecLabourType, @curLabourRecCC, @curLabourRecTask, @curLabourRecUsage, @curLabourRecTime, @curLabourRecRatePerHour, @curLabourRecTimeAddition, @curLabourRecWrenchTime;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        INSERT INTO dbo.TempLabourList VALUES (
+            @curLabourRecLabourType,
+            @curLabourRecCC,
+            @curLabourRecTask,
+            @curLabourRecUsage,
+            SBCES.HHmmToMinutes(@curLabourRecTimeAddition),
+            @curLabourRecRatePerHour,
+            @curLabourRecRatePerHour * SBCES.HHmmToMinutes(@curLabourRecTimeAddition) * @curLabourRecUsage / 6000,
+            CONVERT(DECIMAL(10,2), ROUND((@curLabourRecUsage / 100.0) * SBCES.HHmmToMinutes(@curLabourRecTimeAddition), 2)),
+            @viType,
+            @viIdnum,
+            ROUND((@curLabourRecUsage / 100.0) * SBCES.HHmmToMinutes(@curLabourRecWrenchTime), 2)
+        );
+        FETCH NEXT FROM cur_Labour INTO @curLabourRecLabourType, @curLabourRecCC, @curLabourRecTask, @curLabourRecUsage, @curLabourRecTime, @curLabourRecRatePerHour, @curLabourRecTimeAddition, @curLabourRecWrenchTime;
+    END;
+    CLOSE cur_Labour;
+    DEALLOCATE cur_Labour;
+
+    SELECT @VPrice = COUNT(*) FROM SBCES.SCPartsUsed WHERE
+          SCPartsUsed.RebuiltPart = 'Y' AND
+          SCPartsUsed.LinkType = UPPER(@viType) AND
+          UPPER(SCPartsUsed.LinkCode) = UPPER(@viIdnum);
+
+    IF @VPrice > 0
+    BEGIN
+        OPEN C_RB_List_To_Prop;
+        WHILE 1=1
+        BEGIN
+            FETCH C_RB_List_To_Prop INTO @curRBRecLinkCode, @curRBRecQty, @curRBRecUsage, @curRBRecRebuiltCode;
+            IF @@FETCH_STATUS <> 0 BREAK;
+            SET @Adjustment = @curRBRecQty * CAST(REPLACE(ISNULL(@curRBRecUsage,'0'),',','.') AS DECIMAL(10,2)) / 100;
+            EXEC SBCES.WriteLabour @curRBRecRebuiltCode, @curRBRecQty;
+        END;
+        CLOSE C_RB_List_To_Prop;
+        DEALLOCATE C_RB_List_To_Prop;
+    END;
+
+    SELECT @VFinalPrice = ROUND(SUM(TotalCost), 2)
+    FROM dbo.TempLabourList;
+    RETURN @VFinalPrice;
+END;
+GO
+
+/****** Object:  StoredProcedure [SBCES].[GetMaterialCost]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [SBCES].[GetMaterialCost]
+    (@viIdnum VARCHAR(4000), @viType VARCHAR(4000), @VFinalPrice DECIMAL(20,2) OUTPUT)
+AS
+BEGIN
+    DECLARE @SqlStatement AS NVARCHAR(1000);
+    DECLARE @Adjustment DECIMAL(20,10);
+    DECLARE @VLinkCode VARCHAR(30);
+    DECLARE @VPrice DECIMAL(20,10);
+    DECLARE @VRetVal VARCHAR(25);
+    DECLARE @VKitTotal DECIMAL(20,10);
+    DECLARE @C_RB_List_To_Prop_ViIdnum VARCHAR(50);
+    DECLARE @curMaterialRecAssemblyArea VARCHAR(50);
+    DECLARE @curMaterialRecCC VARCHAR(50);
+    DECLARE @curMaterialRecTotalCost VARCHAR(50);
+    DECLARE @curMaterialRecTaxableCost VARCHAR(50);
+
+    DECLARE C_RB_List_To_Prop CURSOR LOCAL FOR
+    SELECT DISTINCT UPPER(SCPartsUsed.LinkCode) AS LinkCode,
+                    SCPartsUsed.QtyReqd AS Qty,
+                    SCPartsUsed.PercentUsage AS Usage,
+                    SCPartsUsed.MMSRebuiltCode AS RebuiltCode
+    FROM SBCES.SCPartsUsed
+    WHERE SCPartsUsed.RebuiltPart = 'Y' AND
+          SCPartsUsed.LinkType = UPPER(@viType) AND
+          UPPER(SCPartsUsed.LinkCode) = UPPER(@viIdnum);
+
+    DECLARE @curRBRecRebuiltCode VARCHAR(50);
+    DECLARE @curRBRecQty VARCHAR(50);
+    DECLARE @curRBRecUsage VARCHAR(50);
+    DECLARE @curRBRecLinkCode VARCHAR(50);
+
+    DECLARE cur_Material CURSOR LOCAL FOR
+    SELECT ISNULL(C.Name, 'NONE') AS AssemblyArea,
+           ISNULL(A.CostCentre, '0') AS CC,
+           ISNULL(SUM(A.Cost), '0') AS TotalCost,
+           ISNULL(SUM(A.TaxCost), '0') AS TaxableCost
+    FROM (SELECT CostCentre,
+                 CONVERT(DECIMAL(10,2), SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) - SBCES.FinalCost(PercentUsage, QtyReqd, CoreCost, 0)) AS Cost,
+                 CONVERT(DECIMAL(10,2), SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0)) AS TaxCost
+          FROM SBCES.SCPartsUsed
+          WHERE LinkCode = UPPER(@viIdnum) AND
+                RebuiltPart = 'N' AND
+                LinkType = UPPER(@viType)
+          UNION ALL
+          SELECT NSCPartsUsed.CostCentre,
+                 CONVERT(DECIMAL(10,2), SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) - SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NSCPartsUsed.CoreCost, 0)) AS Cost,
+                 CONVERT(DECIMAL(10,2), SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0)) AS TaxCost
+          FROM SBCES.NSCPartsUsed NSCPartsUsed RIGHT OUTER JOIN SBCES.NonStockCodedParts ON NonStockCodedParts.Id = NSCPartsUsed.Id
+          WHERE NSCPartsUsed.LinkCode = UPPER(@viIdnum) AND
+                NSCPartsUsed.LinkType = UPPER(@viType)) A,
+          SBCES.CostCentres C
+    WHERE C.CostCentre = A.CostCentre
+    GROUP BY A.CostCentre, C.Name;
+
+    SET @SqlStatement = 'TRUNCATE TABLE SBCES.TempMaterialsList';
+    EXECUTE sp_executesql @SqlStatement;
+
+    OPEN cur_Material;
+    FETCH NEXT FROM cur_Material INTO @curMaterialRecAssemblyArea, @curMaterialRecCC, @curMaterialRecTotalCost, @curMaterialRecTaxableCost;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        INSERT INTO SBCES.TempMaterialsList VALUES (@curMaterialRecAssemblyArea, @curMaterialRecCC, @curMaterialRecTotalCost, @curMaterialRecTaxableCost, @viIdnum, @curMaterialRecTotalCost);
+        FETCH NEXT FROM cur_Material INTO @curMaterialRecAssemblyArea, @curMaterialRecCC, @curMaterialRecTotalCost, @curMaterialRecTaxableCost;
+    END;
+    CLOSE cur_Material;
+    DEALLOCATE cur_Material;
+
+    SELECT @VPrice = COUNT(*) FROM SBCES.SCPartsUsed WHERE
+          SCPartsUsed.RebuiltPart = 'Y' AND
+          SCPartsUsed.LinkType = UPPER(@viType) AND
+          UPPER(SCPartsUsed.LinkCode) = UPPER(@viIdnum);
+
+    IF @VPrice > 0
+    BEGIN
+        OPEN C_RB_List_To_Prop;
+        WHILE 1=1
+        BEGIN
+            FETCH C_RB_List_To_Prop INTO @curRBRecLinkCode, @curRBRecQty, @curRBRecUsage, @curRBRecRebuiltCode;
+            IF @@FETCH_STATUS <> 0 BREAK;
+            SET @Adjustment = @curRBRecQty * CAST(REPLACE(ISNULL(@curRBRecUsage,'0'),',','.') AS DECIMAL(10,2)) / 100.00;
+            EXEC SBCES.WriteMaterials @curRBRecRebuiltCode, @Adjustment, @curRBRecRebuiltCode, 1;
+        END;
+        CLOSE C_RB_List_To_Prop;
+        DEALLOCATE C_RB_List_To_Prop;
+    END;
+
+    SELECT @VKitTotal = COUNT(*) FROM SBCES.OemKitsTotal2 WHERE OemKitsTotal2.Link = @viIdnum;
+
+    IF UPPER(@viType) = 'BUS' AND @VKitTotal > 0
+    BEGIN
+        SELECT @VKitTotal = TotalKitCost FROM SBCES.OemKitsTotal2 WHERE OemKitsTotal2.Link = @viIdnum;
+        INSERT INTO SBCES.TempMaterialsList VALUES ('Kits', '05H7', @VKitTotal, @VKitTotal, @viIdnum, @VKitTotal);
+    END
+
+    SELECT @VFinalPrice = ROUND(SUM(ISNULL(CONVERT(DECIMAL(10,2), TotalCost), 0)), 2)
+    FROM SBCES.TempMaterialsList;
+    RETURN @VFinalPrice;
+END;
+GO
+
+/****** Object:  StoredProcedure [SBCES].[RetrieveAllLabour]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [SBCES].[RetrieveAllLabour]
+    (@viIdnum VARCHAR(4000),
+     @viType VARCHAR(4000)
+    ) AS
+BEGIN
+    DECLARE @VPrice DECIMAL(20,2);
+    SET NOCOUNT ON;
+    EXEC @VPrice = SBCES.GetLabourCost @viIdnum, @viType, @VPrice OUTPUT;
+    SELECT
+        CC AS CostCentre,
+        SBCES.DecimalMinutesToHHMM(CONVERT(VARCHAR(20), SUM(CAST(ExtendedTime AS DECIMAL(10))))) AS LabourHrs,
+        SUM(TotalCost) AS TotalCost
+    FROM dbo.TempLabourList
+    GROUP BY CC
+    ORDER BY CC ASC;
+END;
+GO
+
+/****** Object:  StoredProcedure [SBCES].[RetrieveEstToPropagateRb]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [SBCES].[RetrieveEstToPropagateRb]
+    (@ViIdnum VARCHAR(4000))
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT
+        UPPER(ScPartsUsed.LinkCode) AS [LinkCode],
+        UPPER(ScPartsUsed.LinkType) AS [LinkType]
+    FROM
+        SBCES.ScPartsUsed
+    WHERE
+        ScPartsUsed.RebuiltPart = 'Y' AND
+        ScPartsUsed.MmsRebuiltCode = @ViIdnum;
+END;
+GO
+
+/****** Object:  StoredProcedure [SBCES].[RetrieveRbpTotalCost2]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [SBCES].[RetrieveRbpTotalCost2]
+    (@ViIdnum VARCHAR(4000),
+     @ViType VARCHAR(4000))
+AS
+BEGIN
+    DECLARE @VLinkCode VARCHAR(30);
+    DECLARE @VPrice DECIMAL(20,10);
+    DECLARE @VRetVal VARCHAR(25);
+    DECLARE @CrbListToPropViIdnum VARCHAR;
+
+    DECLARE CrbListToProp CURSOR LOCAL
+    FOR
+    SELECT DISTINCT UPPER(ScPartsUsed.LinkCode) AS [LinkCode],
+                    ScPartsUsed.QtyReqd AS [Qty],
+                    ScPartsUsed.PercentUsage AS [%],
+                    ScPartsUsed.MmsRebuiltCode AS [RebuiltCode]
+    FROM
+        SBCES.ScPartsUsed
+    WHERE
+        ScPartsUsed.RebuiltPart = 'Y' AND
+        ScPartsUsed.LinkType = @ViType AND
+        UPPER(ScPartsUsed.LinkCode) = UPPER(@ViIdnum);
+
+    SET NOCOUNT ON;
+    EXEC @VPrice = [SBCES].GetMaterialCost @ViIdnum, @ViType, @VPrice OUTPUT;
+    SELECT
+        CostCentre AS [CC],
+        SUM(CONVERT(DECIMAL(10,2), TotalCost)) AS [TotalCost],
+        SUM(CONVERT(DECIMAL(10,2), TaxableCost)) AS [TaxableCost]
+    FROM
+        [SBCES].TempMaterialsList
+    GROUP BY
+        CostCentre
+    ORDER BY
+        CostCentre ASC;
+END;
+GO
+
+/****** Object:  StoredProcedure [SBCES].[WriteLabour]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [SBCES].[WriteLabour]
+    (@ViIdnum VARCHAR(4000),
+     @ViAdjustment DECIMAL)
+AS
+BEGIN
+    DECLARE @SqlStatement AS NVARCHAR(1000);
+    DECLARE @CurRBRecRebuiltCode VARCHAR(50);
+    DECLARE @CurRBRecQty VARCHAR(50);
+    DECLARE @CurRBRecUsage VARCHAR(50);
+    DECLARE @CurRBRecLinkCode VARCHAR(50);
+    DECLARE @VLinkCode VARCHAR(30);
+    DECLARE @VPrice DECIMAL(20,10);
+    DECLARE @VRetVal VARCHAR(25);
+    DECLARE @Adjustment DECIMAL(20,10);
+    DECLARE @CurLabourRecLabourType VARCHAR(50);
+    DECLARE @CurLabourRecCC VARCHAR(50);
+    DECLARE @CurLabourRecTask VARCHAR(50);
+    DECLARE @CurLabourRecUsage VARCHAR(50);
+    DECLARE @CurLabourRecTime VARCHAR(50);
+    DECLARE @CurLabourRecRatePerHour NUMERIC(18,2);
+    DECLARE @CurLabourRecTimeAddition NUMERIC(18,2);
+    DECLARE @CurLabourRecWrenchTime VARCHAR(50);
+    DECLARE @CrbListToPropViIdnum VARCHAR;
+
+    DECLARE CrbListToProp CURSOR LOCAL
+    FOR
+    SELECT DISTINCT UPPER(ScPartsUsed.LinkCode) AS [LinkCode],
+                    ScPartsUsed.QtyReqd AS [Qty],
+                    ScPartsUsed.PercentUsage AS [%],
+                    ScPartsUsed.MmsRebuiltCode AS [RebuiltCode]
+    FROM
+        SBCES.ScPartsUsed
+    WHERE
+        ScPartsUsed.RebuiltPart = 'Y' AND
+        ScPartsUsed.LinkType = 'RB' AND
+        UPPER(ScPartsUsed.LinkCode) = UPPER(@ViIdnum);
+
+    DECLARE CurLabour CURSOR LOCAL
+    FOR
+    SELECT
+        EmployeeLabour.LabourDefn AS [LabourType],
+        EmployeeLabour.CostCentre AS [CC],
+        EmployeeLabour.Task AS [Task],
+        REPLACE(EmployeeLabour.Usage,',','.') AS [Usage],
+        EmployeeLabour.HrsReqd AS [Time],
+        EmployeeSalaries.RatePerHour AS [RatePerHour],
+        EmployeeLabour.TimeAddition AS [TimeAddition],
+        SBCES.HHmmToDecimal(EmployeeLabour.AdjHrs) AS [WrenchTime]
+    FROM
+        SBCES.EmployeeLabour,
+        SBCES.EmployeeSalaries,
+        SBCES.EmplClass
+    WHERE
+        EmployeeLabour.LabourDefn = UPPER(EmplClass.LabourDefn) AND
+        EmployeeSalaries.WageGroup = EmplClass.WageGroup AND
+        EmployeeLabour.LinkNumber = @ViIdnum AND
+        EmployeeLabour.TypeId = 'RB';
+
+    OPEN CurLabour;
+    FETCH NEXT FROM CurLabour INTO @CurLabourRecLabourType, @CurLabourRecCC, @CurLabourRecTask, @CurLabourRecUsage, @CurLabourRecTime, @CurLabourRecRatePerHour, @CurLabourRecTimeAddition, @CurLabourRecWrenchTime;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        IF @@FETCH_STATUS <> 0 BREAK;
+        PRINT 'here 1';
+        INSERT INTO dbo.TempLabourList VALUES (
+            @CurLabourRecLabourType,
+            @CurLabourRecCC,
+            @CurLabourRecTask,
+            @CurLabourRecUsage,
+            SBCES.HHmmToMinutes(@CurLabourRecTimeAddition),
+            @CurLabourRecRatePerHour,
+            @CurLabourRecRatePerHour * SBCES.HHmmToMinutes(@CurLabourRecTimeAddition) * @CurLabourRecUsage / 6000,
+            CONVERT(DECIMAL(10,2), ROUND((@CurLabourRecUsage / 100.0) * SBCES.HHmmToMinutes(@CurLabourRecTimeAddition), 2)),
+            'RB',
+            @ViIdnum,
+            ROUND((@CurLabourRecUsage / 100.0) * SBCES.HHmmToMinutes(@CurLabourRecWrenchTime), 2)
+        );
+        FETCH NEXT FROM CurLabour INTO @CurLabourRecLabourType, @CurLabourRecCC, @CurLabourRecTask, @CurLabourRecUsage, @CurLabourRecTime, @CurLabourRecRatePerHour, @CurLabourRecTimeAddition, @CurLabourRecWrenchTime;
+    END;
+    CLOSE CurLabour;
+    DEALLOCATE CurLabour;
+
+    SELECT @VPrice = COUNT(*) FROM SBCES.ScPartsUsed WHERE
+        ScPartsUsed.RebuiltPart = 'Y' AND
+        ScPartsUsed.LinkType = 'RB' AND
+        UPPER(ScPartsUsed.LinkCode) = UPPER(@ViIdnum);
+
+    IF @VPrice > 0
+    BEGIN
+        OPEN CrbListToProp;
+        WHILE 1=1
+        BEGIN
+            FETCH CrbListToProp INTO @CurRBRecLinkCode, @CurRBRecQty, @CurRBRecUsage, @CurRBRecRebuiltCode;
+            IF @@FETCH_STATUS <> 0 BREAK;
+            SET @Adjustment = (CONVERT(INT, @CurRBRecQty) * @CurRBRecUsage / 100.0) * @ViAdjustment;
+            EXEC [SBCES].WriteLabour @CurRBRecRebuiltCode, @Adjustment;
+        END;
+        CLOSE CrbListToProp;
+        DEALLOCATE CrbListToProp;
+    END;
+END;
+GO
+
+/****** Object:  StoredProcedure [SBCES].[WriteMaterials]    Script Date: 12/6/2024 5:27:23 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE PROCEDURE [SBCES].[WriteMaterials]
+    (@ViIdnum VARCHAR(4000),
+     @ViAdjustment FLOAT,
+     @ViRBReference VARCHAR(4000),
+     @ViAdjustment2 FLOAT)
+AS
+BEGIN
+    DECLARE @VLinkCode VARCHAR(30);
+    DECLARE @VPrice DECIMAL(20,10);
+    DECLARE @VRetVal VARCHAR(25);
+    DECLARE @Adjustment DECIMAL(20,10);
+    DECLARE @Adjustment_ DECIMAL(20,10);
+    DECLARE @CrbListToPropViIdnum VARCHAR;
+    DECLARE CrbListToProp CURSOR LOCAL
+    FOR
+    SELECT DISTINCT UPPER(ScPartsUsed.LinkCode) AS [LinkCode],
+                    UPPER(ScPartsUsed.QtyReqd) AS [Qty],
+                    ScPartsUsed.PercentUsage AS [%],
+                    UPPER(ScPartsUsed.MmsRebuiltCode) AS [RebuiltCode]
+    FROM
+        SBCES.ScPartsUsed
+    WHERE
+        ScPartsUsed.RebuiltPart = 'Y' AND
+        ScPartsUsed.LinkType = 'RB' AND
+        UPPER(ScPartsUsed.LinkCode) = UPPER(@ViIdnum);
+
+    DECLARE @CurRBRecRebuiltCode VARCHAR(50);
+    DECLARE @CurRBRecQty VARCHAR(50);
+    DECLARE @CurRBRecUsage VARCHAR(50);
+    DECLARE @CurMaterialViIdnum VARCHAR;
+
+    DECLARE CurMaterial CURSOR LOCAL
+    FOR
+    SELECT
+        ISNULL(C.Name, 'NONE') AS [AssemblyArea],
+        ISNULL(A.CostCentre, '0') AS [CC],
+        ISNULL(SUM(A.Cost), '0') AS [TotalCost],
+        ISNULL(SUM(A.TaxCost), '0') AS [TaxableCost]
+    FROM
+        (SELECT
+            CostCentre,
+            CONVERT(DECIMAL(10,2), SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) - CONVERT(DECIMAL(10,2), SBCES.FinalCost(PercentUsage, QtyReqd, CoreCost, 0))) AS Cost,
+            CONVERT(DECIMAL(10,2), SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0)) AS TaxCost
+         FROM
+            SBCES.ScPartsUsed
+         WHERE
+            LinkCode = UPPER(@ViIdnum) AND
+            RebuiltPart = 'N' AND
+            LinkType = 'RB'
+         UNION ALL
+         SELECT
+            NScPartsUsed.CostCentre,
+            CONVERT(DECIMAL(10,2), SBCES.FinalCost(NScPartsUsed.PercentUsage, NScPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) - CONVERT(DECIMAL(10,2), SBCES.FinalCost(NScPartsUsed.PercentUsage, NScPartsUsed.QtyReqd, NScPartsUsed.CoreCost, 0))) AS Cost,
+            CONVERT(DECIMAL(10,2), SBCES.FinalCost(NScPartsUsed.PercentUsage, NScPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0)) AS TaxCost
+         FROM
+            SBCES.NScPartsUsed NScPartsUsed RIGHT OUTER JOIN SBCES.NonStockCodedParts ON NonStockCodedParts.Id = NScPartsUsed.Id
+         WHERE
+            NScPartsUsed.LinkCode = UPPER(@ViIdnum) AND
+            NScPartsUsed.LinkType = 'RB'
+        ) A,
+        SBCES.CostCentres C
+    WHERE
+        C.CostCentre = A.CostCentre
+    GROUP BY
+        A.CostCentre,
+        C.Name;
+
+    DECLARE @CurMaterialRecAssemblyArea VARCHAR(50);
+    DECLARE @CurMaterialRecCC VARCHAR(50);
+    DECLARE @CurMaterialRecTotalCost VARCHAR(50);
+    DECLARE @CurMaterialRecTaxableCost VARCHAR(50);
+
+    SET NOCOUNT ON;
+
+    OPEN CurMaterial;
+    WHILE 1=1
+    BEGIN
+        FETCH CurMaterial INTO @CurMaterialRecAssemblyArea, @CurMaterialRecCC, @CurMaterialRecTotalCost, @CurMaterialRecTaxableCost;
+        IF @@FETCH_STATUS <> 0 BREAK;
+        INSERT INTO SBCES.TempMaterialsList VALUES (@CurMaterialRecAssemblyArea, @CurMaterialRecCC, ROUND(@CurMaterialRecTotalCost * @ViAdjustment, 2), @CurMaterialRecTaxableCost * @ViAdjustment, @ViRBReference, @ViAdjustment2 * @CurMaterialRecTotalCost);
+    END;
+    CLOSE CurMaterial;
+    DEALLOCATE CurMaterial;
+
+    SELECT @VPrice = COUNT(*) FROM SBCES.ScPartsUsed WHERE
+        ScPartsUsed.RebuiltPart = 'Y' AND
+        ScPartsUsed.LinkType = 'RB' AND
+        UPPER(ScPartsUsed.LinkCode) = UPPER(@ViIdnum);
+
+    IF @VPrice > 0
+    BEGIN
+        OPEN CrbListToProp;
+        WHILE 1=1
+        BEGIN
+            FETCH CrbListToProp INTO @CurRBRecRebuiltCode, @CurRBRecQty, @CurRBRecUsage;
+            IF @@FETCH_STATUS <> 0 BREAK;
+            SET @Adjustment = (CONVERT(INT, @CurRBRecQty) * @CurRBRecUsage / 100.0) * @ViAdjustment;
+            SET @Adjustment_ = @ViAdjustment2 * (CONVERT(INT, @CurRBRecQty) * @CurRBRecUsage / 100.0);
+            EXEC [SBCES].WriteMaterials @CurRBRecRebuiltCode, @Adjustment, @ViRBReference, @Adjustment_;
+        END;
+        CLOSE CrbListToProp;
+        DEALLOCATE CrbListToProp;
+    END;
+END;
+GO
