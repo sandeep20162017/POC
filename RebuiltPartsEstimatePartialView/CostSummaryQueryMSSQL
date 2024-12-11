@@ -1,0 +1,23 @@
+SELECT ISNULL(C.Name, 'NONE') AS [ASSEMBLY AREA], 
+       ISNULL(A.CostCentre, '0') AS [CC], 
+       ISNULL(SUM(CAST(A.Cost AS DECIMAL(18, 2))), '0') AS [TOTAL COST], 
+       ISNULL(SUM(CAST(A.Taxcost AS DECIMAL(18, 2))), '0') AS [TAXABLE COST]
+FROM (
+    SELECT CostCentre, 
+           CAST((BCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) - BCES.FinalCost(PercentUsage, QtyReqd, Corecost, 0)) AS DECIMAL(18, 2)) AS Cost, 
+           CAST(BCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS Taxcost 
+    FROM SBCES.ScPartsUsed 
+    WHERE LinkCode = UPPER(@B2) 
+      AND RebuiltPart = 'N' 
+      AND LinkType = UPPER(@B1)
+    UNION ALL
+    SELECT NscPartsUsed.CostCentre, 
+           CAST((BCES.FinalCost(NscPartsUsed.PercentUsage, NscPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) - BCES.FinalCost(NscPartsUsed.PercentUsage, NscPartsUsed.QtyReqd, NscPartsUsed.Corecost, 0)) AS DECIMAL(18, 2)) AS Cost, 
+           CAST(BCES.FinalCost(NscPartsUsed.PercentUsage, NscPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18, 2)) AS Taxcost 
+    FROM SBCES.NscPartsUsed
+    LEFT JOIN SBCES.NonStockCodedParts ON NonStockCodedParts.Id = NscPartsUsed.Id
+    WHERE NscPartsUsed.LinkCode = UPPER(@B2) 
+      AND NscPartsUsed.LinkType = UPPER(@B1)
+) A
+JOIN SBCES.CostCentres C ON C.CostCentre = A.CostCentre
+GROUP BY A.CostCentre, C.Name;
