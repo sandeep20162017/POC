@@ -1,50 +1,91 @@
-USE [CES]
-GO
-
-BEGIN TRANSACTION;
-
--- Insert data from [CES].[EMPLOYEE_LABOUR] to [SBCES].[EmployeeLabour]
-INSERT INTO [SBCES].[EmployeeLabour] (
-    [LabourDefn],
-    [DateEntered],
-    [LinkNumber],
-    [TypeId],
-    [CostCentre],
-    [Task],
-    [LabourType],
-    [Usage],
-    [HrsReqd],
-    [AdjHrs],
-    [DateRevised],
-    [TimeAddition],
-    [RebuiltPartNum],
-    [LastModifiedBy]
-)
-SELECT
-    [LABOUR_DEFN],
-    [DATE_ENTERED],
-    [LINK_NUMBER],
-    [TYPEID],
-    [COSTCENTRE],
-    [TASK],
-    CAST([LABOUR_TYPE] AS INT), -- Ensure LabourType is cast to INT
-    [USAGE],
-    [HRS_REQD],
-    [ADJ_HRS],
-    [DATE_REVISED],
-    [TIME_ADDITION],
-    [REBUILT_PART_NUM],
-    [LAST_MODIFIED_BY]
-FROM [CES].[EMPLOYEE_LABOUR];
-
--- Check if any rows were inserted
-IF @@ROWCOUNT > 0
-BEGIN
-    PRINT 'Data inserted successfully.';
-    COMMIT TRANSACTION;
-END
-ELSE
-BEGIN
-    PRINT 'No data was inserted.';
-    ROLLBACK TRANSACTION;
-END
+SELECT ISNULL(C.Name, 'NONE') AS [ASSEMBLY AREA], 
+       ISNULL(A.CostCentre, '0') AS [CC], 
+       ISNULL(SUM(CAST(A.Cost AS DECIMAL(18, 2))), '0') AS [TOTAL COST], 
+       ISNULL(SUM(CAST(A.Taxcost AS DECIMAL(18, 2))), '0') AS [TAXABLE COST]
+FROM (
+    SELECT CostCentre, 
+          (CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL (18,2)) - CAST(SBCES.FinalCost(PercentUsage, QtyReqd, Corecost, 0) AS DECIMAL(18,2)))  AS Cost, 
+           CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS Taxcost 
+    FROM SBCES.ScPartsUsed 
+    WHERE
+	--LinkCode = UPPER(@B2) 
+      --AND 
+	  RebuiltPart = 'N' 
+      AND LinkType = 'BUS'
+    UNION ALL
+    SELECT NscPartsUsed.CostCentre, 
+           ( CAST (SBCES.FinalCost(NscPartsUsed.PercentUsage, NscPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18,2)) - CAST(SBCES.FinalCost(NscPartsUsed.PercentUsage, NscPartsUsed.QtyReqd, NscPartsUsed.Corecost, 0) AS DECIMAL(18,2))) AS Cost, 
+           CAST(SBCES.FinalCost(NscPartsUsed.PercentUsage, NscPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18, 2)) AS Taxcost 
+    FROM SBCES.NscPartsUsed
+    LEFT JOIN SBCES.NonStockCodedParts ON NonStockCodedParts.Id = NscPartsUsed.Id
+    WHERE 
+	--NscPartsUsed.LinkCode = UPPER(@B2) 
+     --AND 
+	 NscPartsUsed.LinkType = 'BUS'
+) A
+JOIN SBCES.CostCentres C ON C.CostCentre = A.CostCentre
+where C.CostCentre = '05H2'
+GROUP BY A.CostCentre, C.Name;
+-------------
+SELECT UPPER(ScPartsUsed.MmsRebuiltCode) AS [REBUILT NUMBER], 
+           ISNULL(A.RbUnitCost, 0) AS [UNIT COST], 
+           UPPER(ScPartsUsed.CostCentre) AS [CC], 
+           UPPER(ScPartsUsed.QtyReqd) AS [QTY], 
+           REPLACE(ScPartsUsed.PercentUsage, ',', '.') AS [%], 
+           ScPartsUsed.Corecost AS [CORE COST], 
+           ISNULL(A.RbCost, 0) AS [TOTAL COST], 
+           UPPER(RbMasterlist.DetailedDesc) AS [DESCRIPTION], 
+           UPPER(RbMasterlist.Keyword) AS [KEYWORD]
+    FROM SBCES.ScPartsUsed
+    LEFT JOIN SBCES.RbMasterlist ON RbMasterlist.RebuiltStockNum = ScPartsUsed.MmsRebuiltCode
+    LEFT JOIN (
+        SELECT TotalCost AS RbCost, 
+               TotalUnitCost AS RbUnitCost, 
+               RbReference 
+        FROM SBCES.TempMaterialsList 
+        GROUP BY RbReference
+    ) A ON A.RbReference = ScPartsUsed.MmsRebuiltCode
+    WHERE 
+	--ScPartsUsed.LinkCode = UPPER(@B2) 
+     -- AND 
+	  ScPartsUsed.RebuiltPart = 'Y' 
+    --  AND ScPartsUsed.LinkType = UPPER(@B1)
+    ORDER BY ScPartsUsed.MmsRebuiltCode;
+-------------------
+ SELECT UPPER(RebuiltStockNum) AS [rebuilt_stock_num], 
+           MmsStockCode, 
+           Keyword, 
+           DetailedDesc, 
+           ISNULL(SopNumber, ' ') AS [sop_number], 
+           ISNULL(JobNumber, ' ') AS [job_number], 
+           CorePartNum, 
+           CoreCharge, 
+           EstimatedCost
+          -- DateModified, 
+           Active
+    FROM SBCES.RbMasterlist;
+-------------------------
+SELECT DISTINCT UPPER(ScPartsUsed.LinkCode) AS [link_code], 
+                    ScPartsUsed.QtyReqd AS [QTY], 
+                    ScPartsUsed.PercentUsage AS [%], 
+                    ScPartsUsed.MmsRebuiltCode AS [Rebuilt Code]
+    FROM SBCES.ScPartsUsed
+    WHERE ScPartsUsed.RebuiltPart = 'Y' 
+     -- AND ScPartsUsed.LinkType = UPPER(@B2) 
+      --AND UPPER(ScPartsUsed.LinkCode) = UPPER(@B1);
+-------------------------
+SELECT el.LabourDefn AS [LABOUR TYPE], 
+           el.Costcentre AS [CC], 
+           el.Task AS [TASK], 
+           REPLACE(el.Usage, ',', '.') AS [USAGE], 
+           el.HrsReqd AS [TIME], 
+           es.RatePerHour AS [RATE PER HOUR], 
+           el.TimeAddition AS [TIME ADDITION]
+          -- HHMM_TO_DECIMAL(EmployeeLabour.AdjHrs) AS [WRENCH TIME]
+    FROM SBCES.EmployeeLabour el
+	JOIN SBCES.EmplClass ec ON el.LabourDefn = UPPER(ec.LabourDefn)
+    JOIN SBCES.EmployeeSalaries es ON es.WageGroup = ec.WageGroup
+    
+ --   WHERE
+	--EmployeeLabour.LinkNumber = @B2 
+ --     AND EmployeeLabour.Typeid = @B1;
