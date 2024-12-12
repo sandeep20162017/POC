@@ -1,0 +1,232 @@
+To populate the `TempLabourList` and `TempMaterialsList` tables based on the provided reference script, we need to translate the Oracle SQL logic into MS SQL Server syntax. Below is the SQL script to populate these temporary tables.
+
+---
+
+### **Populate `TempLabourList`**
+
+The `TempLabourList` table is populated based on the labour details from the `EmployeeLabour` table. The logic involves calculating the total cost and extended time for each labour entry.
+
+```sql
+-- Populate TempLabourList
+INSERT INTO dbo.TempLabourList (
+    LabourType,
+    CC,
+    Task,
+    Usage,
+    Time,
+    RatePerHour,
+    TotalCost,
+    ExtendedTime,
+    EstimateType,
+    EstimateNumber,
+    WrenchTime
+)
+SELECT 
+    EL.LabourDefn AS LabourType,
+    EL.CostCentre AS CC,
+    EL.Task,
+    REPLACE(EL.Usage, ',', '.') AS Usage,
+    EL.HrsReqd AS Time,
+    ES.RatePerHour,
+    ES.RatePerHour * CAST(EL.HrsReqd AS DECIMAL(10, 2)) * CAST(REPLACE(EL.Usage, ',', '.') AS DECIMAL(10, 2)) / 100 AS TotalCost,
+    SBCES.DecimalMinutesToHhmm(EL.AdjHrs) AS ExtendedTime,
+    EL.TypeId AS EstimateType,
+    EL.LinkNumber AS EstimateNumber,
+    EL.AdjHrs AS WrenchTime
+FROM 
+    SBCES.EmployeeLabour EL
+    JOIN SBCES.EmplClass EC ON EL.LabourDefn = UPPER(EC.LabourDefn)
+    JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
+WHERE 
+    EL.LinkNumber = @LinkCode
+    AND EL.TypeId = @LinkType;
+```
+
+---
+
+### **Populate `TempMaterialsList`**
+
+The `TempMaterialsList` table is populated based on the material costs from the `ScPartsUsed` and `NScPartsUsed` tables. The logic involves calculating the total cost and taxable cost for each material entry.
+
+```sql
+-- Populate TempMaterialsList
+INSERT INTO SBCES.TempMaterialsList (
+    AssemblyArea,
+    CostCentre,
+    TotalCost,
+    TaxableCost,
+    RbReference
+)
+SELECT 
+    ISNULL(C.Name, 'NONE') AS AssemblyArea,
+    ISNULL(A.CostCentre, '0') AS CostCentre,
+    SUM(CAST(A.Cost AS DECIMAL(18, 2))) AS TotalCost,
+    SUM(CAST(A.TaxCost AS DECIMAL(18, 2))) AS TaxableCost,
+    @LinkCode AS RbReference
+FROM (
+    -- Stock-coded parts
+    SELECT 
+        CostCentre,
+        CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) - SBCES.FinalCost(PercentUsage, QtyReqd, CoreCost, 0) AS DECIMAL(18, 2)) AS Cost,
+        CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS TaxCost
+    FROM 
+        SBCES.ScPartsUsed
+    WHERE 
+        LinkCode = @LinkCode
+        AND RebuiltPart = 'N'
+        AND LinkType = @LinkType
+
+    UNION ALL
+
+    -- Non-stock-coded parts
+    SELECT 
+        NSCPartsUsed.CostCentre,
+        CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) - SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NSCPartsUsed.CoreCost, 0) AS DECIMAL(18, 2)) AS Cost,
+        CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18, 2)) AS TaxCost
+    FROM 
+        SBCES.NSCPartsUsed
+        JOIN SBCES.NonStockCodedParts ON NSCPartsUsed.Id = NonStockCodedParts.Id
+    WHERE 
+        NSCPartsUsed.LinkCode = @LinkCode
+        AND NSCPartsUsed.LinkType = @LinkType
+) A
+JOIN SBCES.CostCentres C ON A.CostCentre = C.CostCentre
+GROUP BY 
+    A.CostCentre, C.Name;
+```
+
+---
+
+### **Explanation**
+
+1. **`TempLabourList`**:
+   - The `EmployeeLabour` table is joined with `EmplClass` and `EmployeeSalaries` to calculate the total cost and extended time for each labour entry.
+   - The `SBCES.DecimalMinutesToHhmm` function is used to convert the `AdjHrs` to `HH:MM` format.
+
+2. **`TempMaterialsList`**:
+   - The `ScPartsUsed` and `NScPartsUsed` tables are used to calculate the total cost and taxable cost for each material entry.
+   - The `SBCES.FinalCost` function is used to calculate the cost and taxable cost for stock-coded and non-stock-coded parts.
+
+---
+
+### **Testing the Script**
+
+You can test the script with a temporary table to ensure it works as expected:
+
+```sql
+-- Create temporary tables for testing
+CREATE TABLE #TempLabourList (
+    LabourType VARCHAR(50),
+    CC VARCHAR(10),
+    Task VARCHAR(100),
+    Usage DECIMAL(10, 2),
+    Time VARCHAR(10),
+    RatePerHour DECIMAL(10, 2),
+    TotalCost DECIMAL(18, 2),
+    ExtendedTime VARCHAR(10),
+    EstimateType VARCHAR(10),
+    EstimateNumber VARCHAR(25),
+    WrenchTime VARCHAR(10)
+);
+
+CREATE TABLE #TempMaterialsList (
+    AssemblyArea VARCHAR(50),
+    CostCentre VARCHAR(10),
+    TotalCost DECIMAL(18, 2),
+    TaxableCost DECIMAL(18, 2),
+    RbReference VARCHAR(25)
+);
+
+-- Populate TempLabourList
+INSERT INTO #TempLabourList (
+    LabourType,
+    CC,
+    Task,
+    Usage,
+    Time,
+    RatePerHour,
+    TotalCost,
+    ExtendedTime,
+    EstimateType,
+    EstimateNumber,
+    WrenchTime
+)
+SELECT 
+    EL.LabourDefn AS LabourType,
+    EL.CostCentre AS CC,
+    EL.Task,
+    REPLACE(EL.Usage, ',', '.') AS Usage,
+    EL.HrsReqd AS Time,
+    ES.RatePerHour,
+    ES.RatePerHour * CAST(EL.HrsReqd AS DECIMAL(10, 2)) * CAST(REPLACE(EL.Usage, ',', '.') AS DECIMAL(10, 2)) / 100 AS TotalCost,
+    SBCES.DecimalMinutesToHhmm(EL.AdjHrs) AS ExtendedTime,
+    EL.TypeId AS EstimateType,
+    EL.LinkNumber AS EstimateNumber,
+    EL.AdjHrs AS WrenchTime
+FROM 
+    SBCES.EmployeeLabour EL
+    JOIN SBCES.EmplClass EC ON EL.LabourDefn = UPPER(EC.LabourDefn)
+    JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
+WHERE 
+    EL.LinkNumber = @LinkCode
+    AND EL.TypeId = @LinkType;
+
+-- Populate TempMaterialsList
+INSERT INTO #TempMaterialsList (
+    AssemblyArea,
+    CostCentre,
+    TotalCost,
+    TaxableCost,
+    RbReference
+)
+SELECT 
+    ISNULL(C.Name, 'NONE') AS AssemblyArea,
+    ISNULL(A.CostCentre, '0') AS CostCentre,
+    SUM(CAST(A.Cost AS DECIMAL(18, 2))) AS TotalCost,
+    SUM(CAST(A.TaxCost AS DECIMAL(18, 2))) AS TaxableCost,
+    @LinkCode AS RbReference
+FROM (
+    -- Stock-coded parts
+    SELECT 
+        CostCentre,
+        CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) - SBCES.FinalCost(PercentUsage, QtyReqd, CoreCost, 0) AS DECIMAL(18, 2)) AS Cost,
+        CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS TaxCost
+    FROM 
+        SBCES.ScPartsUsed
+    WHERE 
+        LinkCode = @LinkCode
+        AND RebuiltPart = 'N'
+        AND LinkType = @LinkType
+
+    UNION ALL
+
+    -- Non-stock-coded parts
+    SELECT 
+        NSCPartsUsed.CostCentre,
+        CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) - SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NSCPartsUsed.CoreCost, 0) AS DECIMAL(18, 2)) AS Cost,
+        CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18, 2)) AS TaxCost
+    FROM 
+        SBCES.NSCPartsUsed
+        JOIN SBCES.NonStockCodedParts ON NSCPartsUsed.Id = NonStockCodedParts.Id
+    WHERE 
+        NSCPartsUsed.LinkCode = @LinkCode
+        AND NSCPartsUsed.LinkType = @LinkType
+) A
+JOIN SBCES.CostCentres C ON A.CostCentre = C.CostCentre
+GROUP BY 
+    A.CostCentre, C.Name;
+
+-- Clean up temporary tables
+DROP TABLE #TempLabourList;
+DROP TABLE #TempMaterialsList;
+```
+
+---
+
+### **Summary**
+
+- The script populates `TempLabourList` and `TempMaterialsList` based on the provided reference logic.
+- It handles both stock-coded and non-stock-coded parts for material costs.
+- The logic is modular and can be applied to your actual table.
+
+Let me know if you need further clarification!
