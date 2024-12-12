@@ -1,183 +1,74 @@
--- Enable CLR (Common Language Runtime) for custom functions if required
--- EXEC sp_configure 'clr enabled', 1;
--- RECONFIGURE;
+USE [CES];
+GO
 
--- Declare variables for testing
-DECLARE @B1 NVARCHAR(100); -- Represents the LINK_TYPE (e.g., 'TYPE_A')
-DECLARE @B2 NVARCHAR(100); -- Represents the LINK_CODE (e.g., 'CODE_X')
-DECLARE @B3 NVARCHAR(100); -- Represents additional parameters (e.g., 'RB')
-DECLARE @B4 NVARCHAR(100); -- Represents additional parameters (e.g., 'RB')
-DECLARE @B5 DECIMAL(18, 2); -- Represents a numeric value (e.g., 100.00)
-DECLARE @B6 DECIMAL(18, 2); -- Represents a numeric value (e.g., 50.00)
-DECLARE @B7 NVARCHAR(100); -- Represents additional parameters (e.g., 'LABOUR_TYPE')
-DECLARE @B8 NVARCHAR(100); -- Represents additional parameters (e.g., 'CC')
-DECLARE @B9 NVARCHAR(100); -- Represents additional parameters (e.g., 'TASK')
+-- Start a transaction
+BEGIN TRANSACTION;
 
--- Assign test values to the variables
-SET @B1 = 'TYPE_A'; -- Example LINK_TYPE
-SET @B2 = 'CODE_X'; -- Example LINK_CODE
-SET @B3 = 'RB';     -- Example additional parameter
-SET @B4 = 'RB';     -- Example additional parameter
-SET @B5 = 100.00;   -- Example numeric value
-SET @B6 = 50.00;    -- Example numeric value
-SET @B7 = 'LABOUR_TYPE'; -- Example additional parameter
-SET @B8 = 'CC';     -- Example additional parameter
-SET @B9 = 'TASK';   -- Example additional parameter
-
--- Enable exception handling and logging
 BEGIN TRY
-    -- Query 1: Cost Summary Query
-    SELECT ISNULL(C.Name, 'NONE') AS [ASSEMBLY AREA], 
-           ISNULL(A.CostCentre, '0') AS [CC], 
-           ISNULL(SUM(A.Cost), '0') AS [TOTAL COST], 
-           ISNULL(SUM(A.Taxcost), '0') AS [TAXABLE COST]
-    FROM (
-        SELECT CostCentre, 
-               (FINAL_COST(PercentUsage, QtyReqd, MmsCost, 0) - FINAL_COST(PercentUsage, QtyReqd, Corecost, 0)) AS Cost, 
-               FINAL_COST(PercentUsage, QtyReqd, MmsCost, 0) AS Taxcost 
-        FROM SBCES.ScPartsUsed 
-        WHERE LinkCode = UPPER(@B2) 
-          AND RebuiltPart = 'N' 
-          AND LinkType = UPPER(@B1)
-        UNION ALL
-        SELECT NscPartsUsed.CostCentre, 
-               (FINAL_COST(NscPartsUsed.PercentUsage, NscPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) - FINAL_COST(NscPartsUsed.PercentUsage, NscPartsUsed.QtyReqd, NscPartsUsed.Corecost, 0)) AS Cost, 
-               FINAL_COST(NscPartsUsed.PercentUsage, NscPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS Taxcost 
-        FROM SBCES.NscPartsUsed
-        LEFT JOIN SBCES.NonStockCodedParts ON NonStockCodedParts.Id = NscPartsUsed.Id
-        WHERE NscPartsUsed.LinkCode = UPPER(@B2) 
-          AND NscPartsUsed.LinkType = UPPER(@B1)
-    ) A
-    JOIN SBCES.CostCentres C ON C.CostCentre = A.CostCentre
-    GROUP BY A.CostCentre, C.Name;
+    -- Validate that all LabourType values in [CES].[EMPLOYEE_LABOUR] exist in [SBCES].[EmplClass]
+    IF NOT EXISTS (
+        SELECT 1
+        FROM [CES].[EMPLOYEE_LABOUR] AS EL
+        LEFT JOIN [SBCES].[EmplClass] AS EC ON CAST(EL.[LABOUR_TYPE] AS INT) = EC.[LabourType]
+        WHERE EC.[LabourType] IS NULL
+    )
+    BEGIN
+        -- Insert data from [CES].[EMPLOYEE_LABOUR] to [SBCES].[EmployeeLabour]
+        INSERT INTO [SBCES].[EmployeeLabour] (
+            [LabourDefn],
+            [DateEntered],
+            [LinkNumber],
+            [TypeId],
+            [CostCentre],
+            [Task],
+            [LabourType],
+            [Usage],
+            [HrsReqd],
+            [AdjHrs],
+            [DateRevised],
+            [TimeAddition],
+            [RebuiltPartNum],
+            [LastModifiedBy]
+        )
+        SELECT
+            CAST([LABOUR_DEFN] AS VARCHAR(50)) AS [LabourDefn], -- Convert NVARCHAR to VARCHAR
+            [DATE_ENTERED],
+            CAST([LINK_NUMBER] AS VARCHAR(25)) AS [LinkNumber], -- Convert NVARCHAR to VARCHAR
+            CAST([TYPEID] AS VARCHAR(5)) AS [TypeId],           -- Convert NVARCHAR to VARCHAR
+            CAST([COSTCENTRE] AS VARCHAR(5)) AS [CostCentre],   -- Convert NVARCHAR to VARCHAR
+            CAST([TASK] AS VARCHAR(50)) AS [Task],              -- Convert NVARCHAR to VARCHAR
+            CAST([LABOUR_TYPE] AS INT) AS [LabourType],         -- Convert NVARCHAR to INT
+            CAST([USAGE] AS VARCHAR(25)) AS [Usage],            -- Convert NVARCHAR to VARCHAR
+            CAST([HRS_REQD] AS VARCHAR(25)) AS [HrsReqd],       -- Convert NVARCHAR to VARCHAR
+            CAST([ADJ_HRS] AS VARCHAR(25)) AS [AdjHrs],         -- Convert NVARCHAR to VARCHAR
+            [DATE_REVISED],
+            [TIME_ADDITION],
+            CAST([REBUILT_PART_NUM] AS VARCHAR(30)) AS [RebuiltPartNum], -- Convert NVARCHAR to VARCHAR
+            CAST([LAST_MODIFIED_BY] AS VARCHAR(25)) AS [LastModifiedBy]   -- Convert NVARCHAR to VARCHAR
+        FROM [CES].[EMPLOYEE_LABOUR];
 
-    -- Query 2: Rebuilt Parts Query
-    SELECT UPPER(ScPartsUsed.MmsRebuiltCode) AS [REBUILT NUMBER], 
-           ISNULL(A.RbUnitCost, 0) AS [UNIT COST], 
-           UPPER(ScPartsUsed.CostCentre) AS [CC], 
-           UPPER(ScPartsUsed.QtyReqd) AS [QTY], 
-           REPLACE(ScPartsUsed.PercentUsage, ',', '.') AS [%], 
-           ScPartsUsed.Corecost AS [CORE COST], 
-           ISNULL(A.RbCost, 0) AS [TOTAL COST], 
-           UPPER(RbMasterlist.DetailedDesc) AS [DESCRIPTION], 
-           UPPER(RbMasterlist.Keyword) AS [KEYWORD]
-    FROM SBCES.ScPartsUsed
-    LEFT JOIN SBCES.RbMasterlist ON RbMasterlist.RebuiltStockNum = ScPartsUsed.MmsRebuiltCode
-    LEFT JOIN (
-        SELECT ROUND(SUM(TotalCost), 2) AS RbCost, 
-               ROUND(SUM(TotalUnitCost), 2) AS RbUnitCost, 
-               RbReference 
-        FROM SBCES.TempMaterialsList 
-        GROUP BY RbReference
-    ) A ON A.RbReference = ScPartsUsed.MmsRebuiltCode
-    WHERE ScPartsUsed.LinkCode = UPPER(@B2) 
-      AND ScPartsUsed.RebuiltPart = 'Y' 
-      AND ScPartsUsed.LinkType = UPPER(@B1)
-    ORDER BY ScPartsUsed.MmsRebuiltCode;
+        -- Commit the transaction if everything is successful
+        COMMIT TRANSACTION;
+        PRINT 'Data migration completed successfully.';
+    END
+    ELSE
+    BEGIN
+        -- Log invalid LabourType values
+        SELECT 
+            EL.[ID],
+            EL.[LABOUR_TYPE] AS [InvalidLabourType]
+        FROM [CES].[EMPLOYEE_LABOUR] AS EL
+        LEFT JOIN [SBCES].[EmplClass] AS EC ON CAST(EL.[LABOUR_TYPE] AS INT) = EC.[LabourType]
+        WHERE EC.[LabourType] IS NULL;
 
-    -- Query 3: RB_MASTERLIST Query
-    SELECT UPPER(RebuiltStockNum) AS [rebuilt_stock_num], 
-           MmsStockCode, 
-           Keyword, 
-           DetailedDesc, 
-           ISNULL(SopNumber, ' ') AS [sop_number], 
-           ISNULL(JobNumber, ' ') AS [job_number], 
-           CorePartNum, 
-           CoreCharge, 
-           EstimatedCost, 
-           DateModified, 
-           Active
-    FROM SBCES.RbMasterlist;
-
-    -- Query 4: CES_INQUIRY.RETRIEVE_RB
-    SELECT DISTINCT UPPER(ScPartsUsed.LinkCode) AS [link_code], 
-                    ScPartsUsed.QtyReqd AS [QTY], 
-                    ScPartsUsed.PercentUsage AS [%], 
-                    ScPartsUsed.MmsRebuiltCode AS [Rebuilt Code]
-    FROM SBCES.ScPartsUsed
-    WHERE ScPartsUsed.RebuiltPart = 'Y' 
-      AND ScPartsUsed.LinkType = UPPER(@B2) 
-      AND UPPER(ScPartsUsed.LinkCode) = UPPER(@B1);
-
-    -- Query 5: CES_INQUIRY.RETRIEVE_ALL_LABOUR
-    SELECT EmployeeLabour.LabourDefn AS [LABOUR TYPE], 
-           EmployeeLabour.Costcentre AS [CC], 
-           EmployeeLabour.Task AS [TASK], 
-           REPLACE(EmployeeLabour.Usage, ',', '.') AS [USAGE], 
-           EmployeeLabour.HrsReqd AS [TIME], 
-           EmployeeSalaries.RatePerHour AS [RATE PER HOUR], 
-           EmployeeLabour.TimeAddition AS [TIME ADDITION], 
-           HHMM_TO_DECIMAL(EmployeeLabour.AdjHrs) AS [WRENCH TIME]
-    FROM SBCES.EmployeeLabour
-    JOIN SBCES.EmployeeSalaries ON EmployeeSalaries.WageGroup = EmplClass.WageGroup
-    JOIN SBCES.EmplClass ON EmployeeLabour.LabourDefn = UPPER(EmplClass.LabourDefn)
-    WHERE EmployeeLabour.LinkNumber = @B2 
-      AND EmployeeLabour.Typeid = @B1;
-
-    -- Query 6: CES_INQUIRY.RETRIEVE_MB_LABOUR
-    SELECT EmployeeLabour.LabourDefn AS [LABOUR TYPE], 
-           EmployeeLabour.Costcentre AS [CC], 
-           EmployeeLabour.Task AS [TASK], 
-           REPLACE(EmployeeLabour.Usage, ',', '.') AS [USAGE], 
-           EmployeeLabour.HrsReqd AS [TIME], 
-           EmployeeLabour.AdjHrs AS [WRENCH TIME], 
-           EmployeeLabour.DateRevised AS [DATE REVISED], 
-           EmployeeLabour.TimeAddition AS [TIME ADDITION], 
-           CesSettings.Value AS [VALUE]
-    FROM SBCES.EmployeeLabour
-    CROSS APPLY (
-        SELECT CesSettings.Value 
-        FROM SBCES.CesSettings 
-        WHERE CesSettings.Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'
-    ) CesSettings
-    WHERE EmployeeLabour.LinkNumber = @B2 
-      AND EmployeeLabour.Typeid = @B1
-    ORDER BY EmployeeLabour.Costcentre;
-
-    -- Query 7: Insert into TEMP_LABOUR_LIST
-    INSERT INTO SBCES.TempLabourList (Column1, Column2, Column3, Column4, Column5, Column6, Column7, Column8, Column9, Column10, Column11)
-    VALUES (@B9, @B8, @B7, @B3, ROUND((HHMM_TO_MINUTES(@B5) * @B1), 0), @B6, (@B6 / 60) * ROUND(HHMM_TO_MINUTES(@B5) * @B1) * (@B3 / 100), ROUND((@B3 / 100) * HHMM_TO_MINUTES(@B5) * @B1), 'RB', UPPER(@B4), ROUND((@B3 / 100) * ROUND(HHMM_TO_MINUTES(@B2) * @B1)));
-
-    -- Query 8: Sum of Total Cost
-    SELECT ROUND(SUM(TotalCost), 2) AS LabourCost 
-    FROM SBCES.TempLabourList;
-
-    -- Query 9: Cost Summary Query (Repeated)
-    SELECT ISNULL(C.Name, 'NONE') AS [ASSEMBLY AREA], 
-           ISNULL(A.CostCentre, '0') AS [CC], 
-           ISNULL(SUM(A.Cost), '0') AS [TOTAL COST], 
-           ISNULL(SUM(A.Taxcost), '0') AS [TAXABLE COST]
-    FROM (
-        SELECT CostCentre, 
-               (FINAL_COST(PercentUsage, QtyReqd, MmsCost, 0) - FINAL_COST(PercentUsage, QtyReqd, Corecost, 0)) AS Cost, 
-               FINAL_COST(PercentUsage, QtyReqd, MmsCost, 0) AS Taxcost 
-        FROM SBCES.ScPartsUsed 
-        WHERE LinkCode = UPPER(@B2) 
-          AND RebuiltPart = 'N' 
-          AND LinkType = UPPER(@B1)
-        UNION ALL
-        SELECT NscPartsUsed.CostCentre, 
-               (FINAL_COST(NscPartsUsed.PercentUsage, NscPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) - FINAL_COST(NscPartsUsed.PercentUsage, NscPartsUsed.QtyReqd, NscPartsUsed.Corecost, 0)) AS Cost, 
-               FINAL_COST(NscPartsUsed.PercentUsage, NscPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS Taxcost 
-        FROM SBCES.NscPartsUsed
-        LEFT JOIN SBCES.NonStockCodedParts ON NonStockCodedParts.Id = NscPartsUsed.Id
-        WHERE NscPartsUsed.LinkCode = UPPER(@B2) 
-          AND NscPartsUsed.LinkType = UPPER(@B1)
-    ) A
-    JOIN SBCES.CostCentres C ON C.CostCentre = A.CostCentre
-    GROUP BY A.CostCentre, C.Name;
-
+        -- Rollback the transaction
+        ROLLBACK TRANSACTION;
+        PRINT 'Data migration failed due to invalid LabourType values. Check the log for details.';
+    END
 END TRY
 BEGIN CATCH
-    -- Log the error
-    DECLARE @ErrorMessage NVARCHAR(4000);
-    DECLARE @ErrorSeverity INT;
-    DECLARE @ErrorState INT;
-
-    SELECT 
-        @ErrorMessage = ERROR_MESSAGE(),
-        @ErrorSeverity = ERROR_SEVERITY(),
-        @ErrorState = ERROR_STATE();
-
-    RAISERROR (@ErrorMessage, @ErrorSeverity, @ErrorState);
+    -- Rollback the transaction if an error occurs
+    ROLLBACK TRANSACTION;
+    PRINT 'Error occurred during data migration: ' + ERROR_MESSAGE();
 END CATCH;
+GO
