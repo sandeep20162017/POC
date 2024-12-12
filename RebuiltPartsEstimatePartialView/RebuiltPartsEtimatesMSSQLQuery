@@ -1,432 +1,200 @@
-Below are the rewritten scripts based on the provided details. The scripts now retrieve `LinkCode` and `LinkType` from `RebuiltPartNumber` and use them to fetch labour details, labour hour summary, material cost summary, and total costs.
-
----
-
-### **1. Get LinkCode and LinkType**
-This script retrieves `LinkCode` and `LinkType` from the `RebuiltPartNumber`.
-
-```sql
-USE [SBCES]
+USE [CES]
 GO
 
--- Procedure to retrieve LinkCode and LinkType
-CREATE PROCEDURE [SBCES].[GetLinkCodeAndLinkType]
-    @RebuiltPartNumber VARCHAR(30),
-    @LinkCode VARCHAR(30) OUTPUT,
-    @LinkType VARCHAR(5) OUTPUT
-AS
+DECLARE @RebuiltPartNumber VARCHAR(30) = '035434'; -- Input RebuiltPartNumber
+
+-- Declare variables for LinkCode and LinkType
+DECLARE @LinkCode VARCHAR(30);
+DECLARE @LinkType VARCHAR(5);
+
+PRINT @LinkCode
+PRINT @LinkType
+-- Retrieve LinkCode and LinkType
+PRINT 'Retrieving LinkCode and LinkType...';
+SELECT DISTINCT 
+    @LinkCode = LinkCode,
+    @LinkType = LinkType
+FROM 
+    [SBCES].[ScPartsUsed]
+WHERE 
+    LinkCode = @RebuiltPartNumber;
+
+-- If not found in ScPartsUsed, check NScPartsUsed
+IF @LinkCode IS NULL
 BEGIN
-    SET NOCOUNT ON;
-
-    BEGIN TRY
-        -- Retrieve LinkCode and LinkType from ScPartsUsed
-        SELECT DISTINCT 
-            @LinkCode = LinkCode,
-            @LinkType = LinkType
-        FROM 
-            [SBCES].[ScPartsUsed]
-        WHERE 
-            LinkCode = @RebuiltPartNumber;
-
-        -- If not found in ScPartsUsed, check NScPartsUsed
-        IF @LinkCode IS NULL
-        BEGIN
-            SELECT DISTINCT 
-                @LinkCode = LinkCode,
-                @LinkType = LinkType
-            FROM 
-                [SBCES].[NScPartsUsed]
-            WHERE 
-                LinkCode = @RebuiltPartNumber;
-        END
-    END TRY
-    BEGIN CATCH
-        -- Handle exceptions
-        DECLARE @ErrorMessage NVARCHAR(4000);
-        DECLARE @ErrorSeverity INT;
-        DECLARE @ErrorState INT;
-
-        SELECT 
-            @ErrorMessage = ERROR_MESSAGE(),
-            @ErrorSeverity = ERROR_SEVERITY(),
-            @ErrorState = ERROR_STATE();
-
-        RAISERROR (@ErrorMessage, @ErrorSeverity, @ErrorState);
-    END CATCH
+    SELECT DISTINCT 
+        @LinkCode = LinkCode,
+        @LinkType = LinkType
+    FROM 
+        [SBCES].[NScPartsUsed]
+    WHERE 
+        LinkCode = @RebuiltPartNumber;
 END
-GO
-```
 
----
+PRINT 'LinkCode: ' + ISNULL(@LinkCode, 'Not Found');
+PRINT 'LinkType: ' + ISNULL(@LinkType, 'Not Found');
 
-### **2. Get Labour Details**
-This script retrieves labour details using the `LinkCode` and `LinkType` obtained from the above procedure.
-
-```sql
-USE [SBCES]
-GO
-
--- Procedure to retrieve Labour Details
-CREATE PROCEDURE [SBCES].[GetLabourDetails]
-    @RebuiltPartNumber VARCHAR(30)
-AS
+-- Check if LinkCode and LinkType were found
+IF @LinkCode IS NULL OR @LinkType IS NULL
 BEGIN
-    SET NOCOUNT ON;
-
-    BEGIN TRY
-        -- Declare variables for LinkCode and LinkType
-        DECLARE @LinkCode VARCHAR(30);
-        DECLARE @LinkType VARCHAR(5);
-
-        -- Retrieve LinkCode and LinkType
-        EXEC [SBCES].[GetLinkCodeAndLinkType] 
-            @RebuiltPartNumber,
-            @LinkCode OUTPUT,
-            @LinkType OUTPUT;
-
-        -- Retrieve Labour Details
-        SELECT 
-            EL.LabourDefn AS [LABOUR TYPE],
-            EL.CostCentre AS [CC],
-            EL.Task AS [TASK],
-            REPLACE(EL.Usage, ',', '.') AS [USAGE],
-            EL.HrsReqd AS [TIME],
-            ES.RatePerHour AS [RATE PER HOUR],
-            EL.TimeAddition AS [TIME ADDITION]
-        FROM 
-            SBCES.EmployeeLabour EL
-            JOIN SBCES.EmplClass EC ON EL.LabourDefn = UPPER(EC.LabourDefn)
-            JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
-        WHERE 
-            EL.LinkNumber = @LinkCode
-            AND EL.TypeId = @LinkType;
-    END TRY
-    BEGIN CATCH
-        -- Handle exceptions
-        DECLARE @ErrorMessage NVARCHAR(4000);
-        DECLARE @ErrorSeverity INT;
-        DECLARE @ErrorState INT;
-
-        SELECT 
-            @ErrorMessage = ERROR_MESSAGE(),
-            @ErrorSeverity = ERROR_SEVERITY(),
-            @ErrorState = ERROR_STATE();
-
-        RAISERROR (@ErrorMessage, @ErrorSeverity, @ErrorState);
-    END CATCH
+    PRINT 'Error: LinkCode or LinkType not found for RebuiltPartNumber: ' + @RebuiltPartNumber;
+    RETURN;
 END
-GO
-```
 
----
+-- Section 1: Labour Details
+PRINT 'Fetching Labour Details...';
+SELECT 
+    EL.LabourDefn AS [LABOUR TYPE],
+    EL.CostCentre AS [CC],
+    EL.Task AS [TASK],
+    REPLACE(EL.Usage, ',', '.') AS [USAGE],
+    EL.HrsReqd AS [TIME],
+    ES.RatePerHour AS [RATE PER HOUR],
+    EL.TimeAddition AS [TIME ADDITION]
+FROM 
+    SBCES.EmployeeLabour EL
+    JOIN SBCES.EmplClass EC ON EL.LabourDefn = UPPER(EC.LabourDefn)
+    JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
+WHERE 
+    EL.LinkNumber = @LinkCode
+    AND EL.TypeId = @LinkType;
 
-### **3. Get Labour Hour Summary**
-This script retrieves the total labour hours for each `CostCentre` (`CC`).
+PRINT 'Labour Details fetched successfully.';
 
-```sql
-USE [SBCES]
-GO
+-- Section 2: Labour Hour Summary
+PRINT 'Fetching Labour Hour Summary...';
+PRINT 'Fetching Labour Hour Summary...';
+PRINT 'Fetching Labour Hour Summary...';
+PRINT 'Fetching Labour Hour Summary...';
+SELECT 
+    CostCentre,
+    -- Sum of HrsReqd (converted to minutes) and then to HH:MM format
+    SBCES.DecimalMinutesToHhmm(
+        SUM(
+            CASE 
+                -- Handle decimal values (e.g., "2.00", "4.00")
+                WHEN CHARINDEX(':', HrsReqd) = 0 THEN 
+                    TRY_CAST(HrsReqd AS DECIMAL(10, 2)) * 60 -- Convert hours to minutes
 
--- Procedure to retrieve Labour Hour Summary
-CREATE PROCEDURE [SBCES].[GetLabourHourSummary]
-    @RebuiltPartNumber VARCHAR(30)
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    BEGIN TRY
-        -- Declare variables for LinkCode and LinkType
-        DECLARE @LinkCode VARCHAR(30);
-        DECLARE @LinkType VARCHAR(5);
-
-        -- Retrieve LinkCode and LinkType
-        EXEC [SBCES].[GetLinkCodeAndLinkType] 
-            @RebuiltPartNumber,
-            @LinkCode OUTPUT,
-            @LinkType OUTPUT;
-
-        -- Populate TempLabourList
-        TRUNCATE TABLE dbo.TempLabourList;
-
-        INSERT INTO dbo.TempLabourList (
-            LabourType,
-            CC,
-            Task,
-            Usage,
-            Time,
-            RatePerHour,
-            TotalCost,
-            ExtendedTime,
-            EstimateType,
-            EstimateNumber,
-            WrenchTime
+                -- Handle HH:MM format (e.g., "10:35")
+                ELSE 
+                    TRY_CAST(LEFT(HrsReqd, CHARINDEX(':', HrsReqd) - 1) AS INT) * 60 + -- Hours to minutes
+                    TRY_CAST(SUBSTRING(HrsReqd, CHARINDEX(':', HrsReqd) + 1, LEN(HrsReqd)) AS INT) -- Add minutes
+            END
         )
-        SELECT 
-            EC.LabourDefn AS LabourType,
-            EL.CostCentre AS CC,
-            EL.Task,
-            REPLACE(EL.Usage, ',', '.') AS Usage,
-            EL.HrsReqd AS Time,
-            ES.RatePerHour,
-            ES.RatePerHour * CAST(EL.HrsReqd AS DECIMAL(10, 2)) * CAST(REPLACE(EL.Usage, ',', '.') AS DECIMAL(10, 2)) / 100 AS TotalCost,
-            SBCES.DecimalMinutesToHhmm(EL.AdjHrs) AS ExtendedTime,
-            EL.TypeId AS EstimateType,
-            EL.LinkNumber AS EstimateNumber,
-            EL.AdjHrs AS WrenchTime
-        FROM 
-            SBCES.EmployeeLabour EL
-            JOIN SBCES.EmplClass EC ON EL.LabourType = EC.LabourType
-            JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
-        WHERE 
-            EL.LinkNumber = @LinkCode
-            AND EL.TypeId = @LinkType;
+    ) AS TotalHrsReqdInHhmm
+FROM 
+    SBCES.EmployeeLabour
+WHERE 
+    LinkNumber = @LinkCode
+    AND TypeId = @LinkType
+GROUP BY 
+    CostCentre;
+PRINT 'Labour Hour Summary fetched successfully.';
 
-        -- Retrieve Labour Hour Summary
-        SELECT 
-            CC,
-            SUM(CAST(Time AS DECIMAL(10, 2))) AS LabourHours
-        FROM 
-            dbo.TempLabourList
-        GROUP BY 
-            CC;
+-- Section 3: Material Cost Summary
+PRINT 'Fetching Material Cost Summary...';
+SELECT 
+    ISNULL(C.Name, 'NONE') AS AssemblyArea,
+    ISNULL(A.CostCentre, '0') AS CostCentre,
+    SUM(CAST(A.Cost AS DECIMAL(18, 2))) AS TotalCost,
+    SUM(CAST(A.TaxCost AS DECIMAL(18, 2))) AS TaxableCost
+FROM (
+    -- Stock-coded parts
+   SELECT CostCentre, 
+          (CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL (18,2)) - CAST(SBCES.FinalCost(PercentUsage, QtyReqd, Corecost, 0) AS DECIMAL(18,2)))  AS Cost, 
+           CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS Taxcost 
+    FROM SBCES.ScPartsUsed 
+    WHERE 
+        LinkCode = @LinkCode
+        AND RebuiltPart = 'N'
+        AND LinkType = @LinkType
 
-        -- Truncate TempLabourList after use
-        TRUNCATE TABLE dbo.TempLabourList;
-    END TRY
-    BEGIN CATCH
-        -- Handle exceptions
-        DECLARE @ErrorMessage NVARCHAR(4000);
-        DECLARE @ErrorSeverity INT;
-        DECLARE @ErrorState INT;
+    UNION ALL
 
-        SELECT 
-            @ErrorMessage = ERROR_MESSAGE(),
-            @ErrorSeverity = ERROR_SEVERITY(),
-            @ErrorState = ERROR_STATE();
+    -- Non-stock-coded parts
+	SELECT NSCPartsUsed.CostCentre, 
+          (CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NSCPartsUsed.Cost, 0) AS DECIMAL (18,2)) - CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NSCPartsUsed.Corecost, 0) AS DECIMAL(18,2)))  AS Cost, 
+           CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NSCPartsUsed.Cost, 0) AS DECIMAL(18, 2)) AS Taxcost 
+    FROM SBCES.NSCPartsUsed 
+    
+        JOIN SBCES.NonStockCodedParts ON NSCPartsUsed.Id = NonStockCodedParts.Id
+    WHERE 
+        NSCPartsUsed.LinkCode = @LinkCode
+        AND NSCPartsUsed.LinkType = @LinkType
+) A
+JOIN SBCES.CostCentres C ON A.CostCentre = C.CostCentre
+GROUP BY 
+    A.CostCentre, C.Name;
 
-        RAISERROR (@ErrorMessage, @ErrorSeverity, @ErrorState);
-    END CATCH
-END
-GO
-```
+PRINT 'Material Cost Summary fetched successfully.';
 
----
+-- Section 4: Total Costs Summary
+PRINT 'Fetching Total Costs Summary...';
 
-### **4. Get Material Cost Summary**
-This script retrieves the total material cost for each `CostCentre` (`CC`).
+-- Core cost excl Tax
+DECLARE @CoreCostExclTax DECIMAL(18, 2);
+SELECT @CoreCostExclTax = SUM(CoreCost)
+FROM SBCES.ScPartsUsed
+WHERE LinkCode = @LinkCode AND LinkType = @LinkType;
 
-```sql
-USE [SBCES]
-GO
+-- Material cost
+DECLARE @MaterialCost DECIMAL(18, 2);
+SELECT @MaterialCost = SUM(CAST(TotalCost AS DECIMAL(18,2)))
+FROM SBCES.TempMaterialsList 
+WHERE [RbReference] = @LinkCode;
 
--- Procedure to retrieve Material Cost Summary
-CREATE PROCEDURE [SBCES].[GetMaterialCostSummary]
-    @RebuiltPartNumber VARCHAR(30)
-AS
-BEGIN
-    SET NOCOUNT ON;
+-- Labour cost
+DECLARE @LabourCost DECIMAL(18, 2);
+SELECT @LabourCost = SUM(CAST(TotalCost AS DECIMAL(18,2)))
+FROM SBCES.TempLabourList
+WHERE EstimateNumber = @LinkCode;
 
-    BEGIN TRY
-        -- Declare variables for LinkCode and LinkType
-        DECLARE @LinkCode VARCHAR(30);
-        DECLARE @LinkType VARCHAR(5);
+-- Labour overhead total
+DECLARE @LabourOverheadTotal DECIMAL(18, 2);
+SELECT @LabourOverheadTotal = SUM(CAST(TotalCost AS DECIMAL(18,2)) * CAST(101 AS DECIMAL(18,2))) --ToDo OverHeadCost
+FROM SBCES.TempLabourList
+WHERE EstimateNumber = @LinkCode;
 
-        -- Retrieve LinkCode and LinkType
-        EXEC [SBCES].[GetLinkCodeAndLinkType] 
-            @RebuiltPartNumber,
-            @LinkCode OUTPUT,
-            @LinkType OUTPUT;
+-- Labour Total
+DECLARE @LabourTotal DECIMAL(18, 2);
+SET @LabourTotal = @LabourCost + @LabourOverheadTotal;
 
-        -- Populate TempMaterialsList
-        TRUNCATE TABLE SBCES.TempMaterialsList;
+-- Total rebuilt cost
+DECLARE @TotalRebuiltCost DECIMAL(18, 2);
+SELECT @TotalRebuiltCost = SUM(EstimatedCost)
+FROM SBCES.RbMasterlist
+WHERE RebuiltStockNum = @RebuiltPartNumber;
 
-        INSERT INTO SBCES.TempMaterialsList (
-            AssemblyArea,
-            CostCentre,
-            TotalCost,
-            TaxableCost,
-            RbReference
-        )
-        SELECT 
-            ISNULL(C.Name, 'NONE') AS AssemblyArea,
-            ISNULL(A.CostCentre, '0') AS CostCentre,
-            SUM(CAST(A.Cost AS DECIMAL(18, 2))) AS TotalCost,
-            SUM(CAST(A.TaxCost AS DECIMAL(18, 2))) AS TaxableCost,
-            @LinkCode AS RbReference
-        FROM (
-            -- Stock-coded parts
-            SELECT 
-                CostCentre,
-                CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) - SBCES.FinalCost(PercentUsage, QtyReqd, CoreCost, 0) AS DECIMAL(18, 2)) AS Cost,
-                CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS TaxCost
-            FROM 
-                SBCES.ScPartsUsed
-            WHERE 
-                LinkCode = @LinkCode
-                AND RebuiltPart = 'N'
-                AND LinkType = @LinkType
+-- Tax Total
+DECLARE @TaxTotal DECIMAL(18, 2);
+SELECT @TaxTotal = SUM( CAST (TaxableCost AS DECIMAL(18,2)))
+FROM SBCES.TempMaterialsList
+WHERE RbReference = @LinkCode;
 
-            UNION ALL
+-- Total cost with tax
+DECLARE @TotalCostWithTax DECIMAL(18, 2);
+SET @TotalCostWithTax = @MaterialCost + @LabourTotal + @TaxTotal;
 
-            -- Non-stock-coded parts
-            SELECT 
-                NSCPartsUsed.CostCentre,
-                CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) - SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NSCPartsUsed.CoreCost, 0) AS DECIMAL(18, 2)) AS Cost,
-                CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18, 2)) AS TaxCost
-            FROM 
-                SBCES.NSCPartsUsed
-                JOIN SBCES.NonStockCodedParts ON NSCPartsUsed.Id = NonStockCodedParts.Id
-            WHERE 
-                NSCPartsUsed.LinkCode = @LinkCode
-                AND NSCPartsUsed.LinkType = @LinkType
-        ) A
-        JOIN SBCES.CostCentres C ON A.CostCentre = C.CostCentre
-        GROUP BY 
-            A.CostCentre, C.Name;
+-- Output the results
+SELECT 
+    @CoreCostExclTax AS [Core cost excl Tax],
+    @MaterialCost AS [Material cost],
+    @LabourCost AS [Labour cost],
+    @LabourOverheadTotal AS [Labour overhead total],
+    @LabourTotal AS [Labour Total],
+    @TotalRebuiltCost AS [Total rebuilt cost],
+    @TaxTotal AS [Tax Total],
+    @TotalCostWithTax AS [Total cost with tax];
 
-        -- Retrieve Material Cost Summary
-        SELECT 
-            CostCentre AS CC,
-            SUM(TotalCost) AS TotalCost
-        FROM 
-            SBCES.TempMaterialsList
-        GROUP BY 
-            CostCentre;
+PRINT 'Total Costs Summary fetched successfully.';
 
-        -- Truncate TempMaterialsList after use
-        TRUNCATE TABLE SBCES.TempMaterialsList;
-    END TRY
-    BEGIN CATCH
-        -- Handle exceptions
-        DECLARE @ErrorMessage NVARCHAR(4000);
-        DECLARE @ErrorSeverity INT;
-        DECLARE @ErrorState INT;
+-- Truncate temporary tables after use
+PRINT 'Truncating temporary tables...';
+--TRUNCATE TABLE SBCES.TempLabourList;
+--TRUNCATE TABLE SBCES.TempMaterialsList;
 
-        SELECT 
-            @ErrorMessage = ERROR_MESSAGE(),
-            @ErrorSeverity = ERROR_SEVERITY(),
-            @ErrorState = ERROR_STATE();
+PRINT 'Temporary tables truncated successfully.';
 
-        RAISERROR (@ErrorMessage, @ErrorSeverity, @ErrorState);
-    END CATCH
-END
-GO
-```
 
 ---
-
-### **5. Total Costs Summary**
-This script calculates the total costs including `Core cost excl Tax`, `Material cost`, `Labour cost`, `Labour overhead total`, `Labour Total`, `Total rebuilt cost`, `Tax Total`, and `Total cost with tax`.
-
-```sql
-USE [SBCES]
-GO
-
--- Procedure to retrieve Total Costs Summary
-CREATE PROCEDURE [SBCES].[GetTotalCostsSummary]
-    @RebuiltPartNumber VARCHAR(30)
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    BEGIN TRY
-        -- Declare variables for LinkCode and LinkType
-        DECLARE @LinkCode VARCHAR(30);
-        DECLARE @LinkType VARCHAR(5);
-
-        -- Retrieve LinkCode and LinkType
-        EXEC [SBCES].[GetLinkCodeAndLinkType] 
-            @RebuiltPartNumber,
-            @LinkCode OUTPUT,
-            @LinkType OUTPUT;
-
-        -- Populate TempLabourList and TempMaterialsList
-        EXEC [SBCES].[PopulateTempLabourList] @LinkCode;
-        EXEC [SBCES].[PopulateTempMaterialsList] @LinkCode;
-
-        -- Core cost excl Tax
-        DECLARE @CoreCostExclTax DECIMAL(18, 2);
-        SELECT @CoreCostExclTax = SUM(CoreCost)
-        FROM SBCES.ScPartsUsed
-        WHERE LinkCode = @LinkCode AND LinkType = @LinkType;
-
-        -- Material cost
-        DECLARE @MaterialCost DECIMAL(18, 2);
-        SELECT @MaterialCost = SUM(TotalCost)
-        FROM SBCES.TempMaterialsList
-        WHERE RbReference = @LinkCode;
-
-        -- Labour cost
-        DECLARE @LabourCost DECIMAL(18, 2);
-        SELECT @LabourCost = SUM(TotalCost)
-        FROM dbo.TempLabourList
-        WHERE EstimateNumber = @LinkCode;
-
-        -- Labour overhead total
-        DECLARE @LabourOverheadTotal DECIMAL(18, 2);
-        SELECT @LabourOverheadTotal = SUM(TotalCost * OverheadType)
-        FROM dbo.TempLabourList
-        WHERE EstimateNumber = @LinkCode;
-
-        -- Labour Total
-        DECLARE @LabourTotal DECIMAL(18, 2);
-        SET @LabourTotal = @LabourCost + @LabourOverheadTotal;
-
-        -- Total rebuilt cost
-        DECLARE @TotalRebuiltCost DECIMAL(18, 2);
-        SELECT @TotalRebuiltCost = SUM(EstimatedCost)
-        FROM SBCES.RbMasterlist
-        WHERE RebuiltStockNum = @RebuiltPartNumber;
-
-        -- Tax Total
-        DECLARE @TaxTotal DECIMAL(18, 2);
-        SELECT @TaxTotal = SUM(TaxableCost)
-        FROM SBCES.TempMaterialsList
-        WHERE RbReference = @LinkCode;
-
-        -- Total cost with tax
-        DECLARE @TotalCostWithTax DECIMAL(18, 2);
-        SET @TotalCostWithTax = @MaterialCost + @LabourTotal + @TaxTotal;
-
-        -- Output the results
-        SELECT 
-            @CoreCostExclTax AS [Core cost excl Tax],
-            @MaterialCost AS [Material cost],
-            @LabourCost AS [Labour cost],
-            @LabourOverheadTotal AS [Labour overhead total],
-            @LabourTotal AS [Labour Total],
-            @TotalRebuiltCost AS [Total rebuilt cost],
-            @TaxTotal AS [Tax Total],
-            @TotalCostWithTax AS [Total cost with tax];
-
-        -- Truncate TempLabourList and TempMaterialsList after use
-        TRUNCATE TABLE dbo.TempLabourList;
-        TRUNCATE TABLE SBCES.TempMaterialsList;
-    END TRY
-    BEGIN CATCH
-        -- Handle exceptions
-        DECLARE @ErrorMessage NVARCHAR(4000);
-        DECLARE @ErrorSeverity INT;
-        DECLARE @ErrorState INT;
-
-        SELECT 
-            @ErrorMessage = ERROR_MESSAGE(),
-            @ErrorSeverity = ERROR_SEVERITY(),
-            @ErrorState = ERROR_STATE();
-
-        RAISERROR (@ErrorMessage, @ErrorSeverity, @ErrorState);
-    END CATCH
-END
-GO
-```
-
----
-
-### **Summary**
-1. **Dynamic Retrieval of `LinkCode` and `LinkType`**: The `GetLinkCodeAndLinkType` procedure retrieves `LinkCode` and `LinkType` based on the `RebuiltPartNumber`.
-2. **Labour Details**: The `GetLabourDetails` procedure retrieves labour details using the retrieved `LinkCode` and `LinkType`.
-3. **Labour Hour Summary**: The `GetLabourHourSummary` procedure calculates the total labour hours for each `CostCentre`.
-4. **Material Cost Summary**: The `GetMaterialCostSummary` procedure calculates the total material cost for each `CostCentre`.
-5. **Total Costs Summary**: The `GetTotalCostsSummary` procedure calculates the total costs, including core cost, material cost, labour cost, and tax.
-
-These scripts ensure that the logic is modular, reusable, and adheres to best practices for database operations.
