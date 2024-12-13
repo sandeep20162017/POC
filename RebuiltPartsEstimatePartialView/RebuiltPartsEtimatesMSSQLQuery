@@ -1,7 +1,7 @@
 USE [CES]
 GO
 
-DECLARE @RebuiltPartNumber VARCHAR(30) = '035434'; -- Input RebuiltPartNumber
+DECLARE @RebuiltPartNumber VARCHAR(30) = 'OVIIBR' ;--'035434'; -- Input RebuiltPartNumber
 
 -- Declare variables for LinkCode and LinkType
 DECLARE @LinkCode VARCHAR(30);
@@ -197,6 +197,62 @@ FROM
 	where EL.LinkNumber = @LinkCode
 
 ----------------------------------------------------------------------------------
+-- Populate TempMaterialsList
+INSERT INTO SBCES.TempMaterialsList (
+    AssemblyArea,
+    CostCentre,
+    TotalCost,
+    TaxableCost,
+   RbReference,
+   TotalUnitCost
+)
+
+SELECT 
+    ISNULL(C.Name, 'NONE') AS AssemblyArea,
+    ISNULL(A.CostCentre, '0') AS CostCentre,
+    SUM(CAST(A.Cost AS DECIMAL(18, 2))) AS TotalCost,
+    SUM(CAST(A.TaxCost AS DECIMAL(18, 2))) AS TaxableCost,
+    (@LinkCode) AS RbReference,
+	SUM(CAST(A.TotalUnitCost AS DECIMAL(18, 2))) AS TotalUnitCost
+FROM (
+    -- Stock-coded parts
+    SELECT 
+        CostCentre,
+		----LinkCode,
+		----RebuiltPart,
+		----LinkType,
+        CAST((CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18,2))- CAST(SBCES.FinalCost(PercentUsage, QtyReqd, CoreCost, 0) AS DECIMAL(18,2))) AS DECIMAL(18, 2)) AS Cost,
+        CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS TaxCost,
+		 CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS TotalUnitCost
+    FROM 
+        SBCES.ScPartsUsed
+    WHERE 
+        LinkCode = @LinkCode
+        AND 
+		RebuiltPart = 'N'
+        AND LinkType = @LinkType
+
+    UNION ALL
+
+    -- Non-stock-coded parts
+    SELECT 
+        NSCPartsUsed.CostCentre,
+        CAST(CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18,2)) - CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NSCPartsUsed.CoreCost, 0) AS DECIMAL(18,2)) AS DECIMAL(18, 2)) AS Cost,
+        CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18, 2)) AS TaxCost,
+		CAST(CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18,2)) - CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NSCPartsUsed.CoreCost, 0) AS DECIMAL(18,2)) AS DECIMAL(18, 2))  AS TotalUnitCost
+    FROM 
+        SBCES.NSCPartsUsed
+        JOIN SBCES.NonStockCodedParts ON NSCPartsUsed.Id = NonStockCodedParts.Id
+    WHERE 
+        NSCPartsUsed.LinkCode = @LinkCode
+        AND 
+		NSCPartsUsed.LinkType = @LinkType
+) A
+JOIN SBCES.CostCentres C ON A.CostCentre = C.CostCentre
+GROUP BY 
+    A.CostCentre, C.Name;
+
+----------------------------------------------------------------------------------
 -- Section 4: Total Costs Summary
 PRINT 'Fetching Total Costs Summary...';
 
@@ -208,10 +264,10 @@ WHERE LinkCode = @LinkCode AND LinkType = @LinkType;
 
 -- Material cost
 DECLARE @MaterialCost DECIMAL(18, 2);
-SELECT @MaterialCost = SUM(CAST(TotalCost AS DECIMAL(18,2)))
+SELECT @MaterialCost = CAST(TotalCost AS DECIMAL(18,2)) --SUM(CAST(TotalCost AS DECIMAL(18,2)))
 FROM SBCES.TempMaterialsList 
 WHERE [RbReference] = @LinkCode;
-
+--SELECT @MaterialCost 
 -- Labour cost
 DECLARE @LabourCost DECIMAL(18, 2);
 SELECT @LabourCost = SUM(CAST(TotalCost AS DECIMAL(18,2)))
@@ -259,8 +315,8 @@ PRINT 'Total Costs Summary fetched successfully.';
 
 -- Truncate temporary tables after use
 PRINT 'Truncating temporary tables...';
---TRUNCATE TABLE SBCES.TempLabourList;
---TRUNCATE TABLE SBCES.TempMaterialsList;
+TRUNCATE TABLE SBCES.TempLabourList;
+TRUNCATE TABLE SBCES.TempMaterialsList;
 
 PRINT 'Temporary tables truncated successfully.';
 
