@@ -1,6 +1,8 @@
-Yu are ASP.NET core expert. ASp.NET core version 8.0. Yu have good experience of Telerik UI ASP.NET Core controls.
+You are ASP.NET core expert. ASp.NET core version 8.0. Yu have good experience of Telerik UI ASP.NET Core controls.
 Based on  the following details, I need to call include contents of _LabourDetaialRebuiltParts.cshtml in Kendo  ExpansionPanel.
-I have included all the relevant files scripts beow for yu to make changes.
+I have included all the relevant files scripts beow for you to make changes.
+Ideally I would like to call controller to get thre partial view in Expansion panel - URL.Action("LabourDetailsPartial", "RebuiltParts").
+Index.cshtml calls .ClientDetailTemplateId("template"). I want to call ExpansionPanel() inside .ClientDetailTemplateId("template")
 Kendo Expansion panel eample :
 @(Html.Kendo().ExpansionPanel()
             .Name("brazil")
@@ -55,27 +57,151 @@ _LabourDetaialRebuiltParts.cshtml :
     )
 )
 Index.cshtml, script which calls controller actio to render above partial view :
- <script>
-     $(document).ready(function () {
-         console.log('inside doc ready');
-         var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+@using BCES.Models.Parts
+@using BCES.Models.Common
+@model IEnumerable<BCES.Models.Parts.RebuiltPartsViewModel>
 
-         grid.bind("detailInit", function (e) {
-             // Get the container for the detail template
-             var container = e.detailCell.find("#detail-template-" + e.data.RebuiltStockNum);
-             console.log('e.data.RebuiltStockNum : ');
-             console.log(e.data.RebuiltStockNum);
+@{
+    ViewData["Title"] = "Rebuilt Parts";
+}
 
-             // Load PartialTest1
-             $.get('@Url.Action("LabourDetailsPartial", "RebuiltParts")', function (data) {
-                 console.log(data);
-                 
-                 container.append(data); // Append the content of PartialTest1
-                 console.log(container);
-             });
-         });
-     });
- </script> 
+<h4>Rebuilt Parts</h4>
+
+@(Html.Kendo().Grid<RebuiltPartsViewModel>()
+    .Name("RebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.MmsStockCode).Title("MMS Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.DetailedDesc).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.JobNumber).Title("Job Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CorePartNum).Title("Core Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+      @*   columns.Bound(c => c.VehicleSeries).Title("Vehicle Series")
+            .ClientTemplate("# if (typeof VehicleSeries != 'undefined' && VehicleSeries && VehicleSeries.length > 0) { # #= VehicleSeries.map(VehicleSeries => VehicleSeries.Description).join(', ') # # } else { # Select Vehicle # } #")
+            .EditorTemplateName("RebuiltPartsVehicleSeriesMultiSelect"); *@
+        columns.Bound(c => c.CoreCharge).Title("Core Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Bound(c => c.BuyNewCost).Title("Buy Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Bound(c => c.RemanCost).Title("Remanufactured Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Command(command =>
+        {
+            command.Edit();
+        }).Title("Actions");
+    })
+    .ToolBar(toolbar => { toolbar.Create(); })
+    .Editable(editable => editable.Mode(GridEditMode.InLine))
+    .Pageable()
+    .Sortable()
+    .ClientDetailTemplateId("template")
+    .Resizable(r => r.Columns(true))
+    .Groupable(g => g.ShowFooter(false))
+    .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+    .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.RbMasterlistId);
+            model.Field(c => c.RbMasterlistId);
+            @*  model.Field(c => c.RebuiltStockNum); *@
+            model.Field(c => c.RebuiltStockNum).Editable(true);
+            model.Field(c => c.MmsStockCode).Editable(true);
+              model.Field(c => c.VehicleSeries).DefaultValue(new List<BCES.Models.Common.ListOfBusesModel>()).Editable(true);
+        })
+        .Read(read => read.Url(Url.Action("GetRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("AddRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+    )
+)
+
+@* <div>
+    @await Html.PartialAsync("/Views/Parts/RebuiltParts/_LabourDetailsRebuiltParts.cshtml")
+</div> *@
+
+
+<div id="estimates-container"></div>
+
+@section Scripts {
+   
+    <script>
+        $(document).ready(function () {
+            console.log('inside doc ready');
+            var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+
+            grid.bind("detailInit", function (e) {
+                // Get the container for the detail template
+                var container = e.detailCell.find("#detail-template-" + e.data.RebuiltStockNum);
+                console.log('e.data.RebuiltStockNum : ');
+                console.log(e.data.RebuiltStockNum);
+
+                // Load PartialTest1
+                $.get('@Url.Action("LabourDetailsPartial", "RebuiltParts")', function (data) {
+                    console.log(data);
+                    
+                    container.append(data); // Append the content of PartialTest1
+                    console.log(container);
+                });
+            });
+        });
+    </script> 
+
+    <script>
+        function openEstimates(e) {
+            e.preventDefault();
+            var dataItem = this.dataItem($(e.currentTarget).closest("tr"));
+            var rebuiltStockNum = dataItem.RebuiltStockNum;
+            $.ajax({
+                url: '@Url.Action("GetRebuiltPartEstimates", "RebuiltParts")',
+                type: 'GET',
+                data: { RebuiltStockNum: rebuiltStockNum },
+                success: function (result) {
+                    $('#estimates-container').html(result);
+                },
+                error: function (xhr, status, error) {
+                    console.error('An error occurred: ' + error);
+                }
+            });
+        }
+    </script>
+    <script id="template" type="text/x-kendo-template">
+        <div id="detail-template-#=RebuiltStockNum#"></div>
+    </script>
+
+    <script>
+        function dataBound() {
+            this.expandRow(this.tbody.find("tr.k-master-row").first());
+        }
+    </script>
+
+    <script>
+        function onKeywordChange(e) {
+            console.log("event: onVehicleChange");
+            var selectedVehicles = this.value();
+            console.log("selected vehicles :");
+            console.log(selectedVehicles);
+
+            $.ajax({
+                url: '@Url.Action("GetSelectedVehicles", "RebuiltPartsGrid")',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ vehicles: selectedVehicles }),
+                beforeSend: function (xhr) {
+                    console.log("Sending data :", JSON.stringify({ vehicles: selectedVehicles }));
+                },
+                success: function (data) {
+                    console.log('Success:', data);
+                },
+                error: function (error, data) {
+                    console.log('datasent : ', data);
+                    console.error('Error:', error);
+                }
+            });
+        }
+    </script>
+    
+
+}
+
 RebuiltPartsController.cs :
  public IActionResult LabourDetailsPartial()
  {
