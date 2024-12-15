@@ -53,160 +53,168 @@
 
 <div id="estimates-container"></div>
 
+<!-- Add a placeholder for the notification -->
+<div id="notification"></div>
+
 @section Scripts {
     <script>
         $(document).ready(function () {
             var grid = $("#RebuiltPartsGrid").data("kendoGrid");
 
             // Initialize Kendo Notification for displaying messages
-            var notification = $("#notification").kendoNotification({
-                position: {
-                    pinned: true,
-                    top: 50,
-                    right: 50
-                },
-                autoHideAfter: 5000, // Hide after 5 seconds
-                stacking: "down"
-            }).data("kendoNotification");
+            var notificationElement = $("#notification");
+            if (notificationElement.length === 0) {
+                console.error("Notification element not found in the DOM.");
+            } else {
+                var notification = notificationElement.kendoNotification({
+                    position: {
+                        pinned: true,
+                        top: 50,
+                        right: 50
+                    },
+                    autoHideAfter: 5000, // Hide after 5 seconds
+                    stacking: "down"
+                }).data("kendoNotification");
 
-            grid.bind("detailInit", function (e) {
-                console.log("Detail initialization started for RebuiltStockNum: " + e.data.RebuiltStockNum);
+                grid.bind("detailInit", function (e) {
+                    console.log("Detail initialization started for RebuiltStockNum: " + e.data.RebuiltStockNum);
 
-                // Get the container for the detail template
-                var container = e.detailCell.find("#detail-template-" + e.data.RebuiltStockNum);
+                    // Get the container for the detail template
+                    var container = e.detailCell.find("#detail-template-" + e.data.RebuiltStockNum);
 
-                // Load the TabStrip structure
-                container.html(`
-                    <div id="tabstrip-container-${e.data.RebuiltStockNum}">
-                        <ul>
-                            <li class="k-state-active">Labour Details</li>
-                            <li>Material Details</li>
-                        </ul>
-                        <div id="labour-details-content"></div>
-                        <div id="material-details-content"></div>
-                    </div>
-                    <div class="action-buttons">
-                        <button class="k-button k-button-primary" id="save-button">Save</button>
-                        <button class="k-button k-button-secondary" id="archive-button">Archive</button>
-                        <button class="k-button k-button-secondary" id="cancel-button">Cancel</button>
-                    </div>
-                `);
+                    // Load the TabStrip structure
+                    container.html(`
+                        <div id="tabstrip-container-${e.data.RebuiltStockNum}">
+                            <ul>
+                                <li class="k-state-active">Labour Details</li>
+                                <li>Material Details</li>
+                            </ul>
+                            <div id="labour-details-content"></div>
+                            <div id="material-details-content"></div>
+                        </div>
+                        <div class="action-buttons">
+                            <button class="k-button k-button-primary" id="save-button">Save</button>
+                            <button class="k-button k-button-secondary" id="archive-button">Archive</button>
+                            <button class="k-button k-button-secondary" id="cancel-button">Cancel</button>
+                        </div>
+                    `);
 
-                // Initialize the Kendo TabStrip
-                var tabStrip = $("#tabstrip-container-" + e.data.RebuiltStockNum).kendoTabStrip({
-                    animation: { open: { effects: "fadeIn" } },
-                    select: function (e) {
-                        var tabIndex = $(e.item).index(); // Get the index of the selected tab
+                    // Initialize the Kendo TabStrip
+                    var tabStrip = $("#tabstrip-container-" + e.data.RebuiltStockNum).kendoTabStrip({
+                        animation: { open: { effects: "fadeIn" } },
+                        select: function (e) {
+                            var tabIndex = $(e.item).index(); // Get the index of the selected tab
 
-                        // Check for unsaved changes in the current tab
-                        var currentTabContent = tabStrip.contentElement(tabStrip.select().index());
-                        var currentGrid = $(currentTabContent).find(".k-grid").data("kendoGrid");
+                            // Check for unsaved changes in the current tab
+                            var currentTabContent = tabStrip.contentElement(tabStrip.select().index());
+                            var currentGrid = $(currentTabContent).find(".k-grid").data("kendoGrid");
 
-                        if (currentGrid && (currentGrid.dataSource.hasChanges() || currentGrid.editCell)) {
-                            // Show a warning notification
+                            if (currentGrid && (currentGrid.dataSource.hasChanges() || currentGrid.editCell)) {
+                                // Show a warning notification
+                                if (notification) {
+                                    notification.show("You have unsaved changes. Click on Update or Cancel changes before clicking next tab.", "warning");
+                                } else {
+                                    console.error("Notification is not initialized.");
+                                }
+                                e.preventDefault(); // Prevent the tab switch
+                                return;
+                            }
+
+                            // Load the partial view content for the selected tab
+                            var tabUrl = tabIndex === 0
+                                ? '@Url.Action("LabourDetailsPartial", "RebuiltParts")'
+                                : '@Url.Action("MaterialDetailsPartial", "RebuiltParts")';
+
+                            $.get(tabUrl)
+                                .done(function (data) {
+                                    $(e.contentElement).html(data);
+                                    kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
+                                })
+                                .fail(function (xhr, status, error) {
+                                    console.error("Error loading tab content: ", error);
+                                    if (notification) {
+                                        notification.show("An error occurred while loading the tab content. Please try again.", "error");
+                                    } else {
+                                        console.error("Notification is not initialized.");
+                                    }
+                                });
+                        }
+                    }).data("kendoTabStrip");
+
+                    // Load the first tab's content
+                    $.get('@Url.Action("LabourDetailsPartial", "RebuiltParts")')
+                        .done(function (data) {
+                            $("#labour-details-content").html(data);
+                            kendo.init($("#labour-details-content")); // Reinitialize Kendo widgets
+                        })
+                        .fail(function (xhr, status, error) {
+                            console.error("Error loading initial tab content: ", error);
                             if (notification) {
-                                notification.show("You have unsaved changes. Click on Update or Cancel changes before clicking next tab.", "warning");
+                                notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
                             } else {
                                 console.error("Notification is not initialized.");
                             }
-                            e.preventDefault(); // Prevent the tab switch
-                            return;
-                        }
+                        });
 
-                        // Load the partial view content for the selected tab
-                        var tabUrl = tabIndex === 0
-                            ? '@Url.Action("LabourDetailsPartial", "RebuiltParts")'
-                            : '@Url.Action("MaterialDetailsPartial", "RebuiltParts")';
-
-                        $.get(tabUrl)
+                    // Handle button click events
+                    container.on("click", "#save-button", function () {
+                        $.post('@Url.Action("SaveDetails", "RebuiltParts")')
                             .done(function (data) {
-                                $(e.contentElement).html(data);
-                                kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
+                                if (notification) {
+                                    notification.show("Changes saved successfully!", "success");
+                                } else {
+                                    console.error("Notification is not initialized.");
+                                }
                             })
                             .fail(function (xhr, status, error) {
-                                console.error("Error loading tab content: ", error);
+                                console.error("Error saving changes: ", error);
                                 if (notification) {
-                                    notification.show("An error occurred while loading the tab content. Please try again.", "error");
+                                    notification.show("An error occurred while saving changes. Please try again.", "error");
                                 } else {
                                     console.error("Notification is not initialized.");
                                 }
                             });
-                    }
-                }).data("kendoTabStrip");
-
-                // Load the first tab's content
-                $.get('@Url.Action("LabourDetailsPartial", "RebuiltParts")')
-                    .done(function (data) {
-                        $("#labour-details-content").html(data);
-                        kendo.init($("#labour-details-content")); // Reinitialize Kendo widgets
-                    })
-                    .fail(function (xhr, status, error) {
-                        console.error("Error loading initial tab content: ", error);
-                        if (notification) {
-                            notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
-                        } else {
-                            console.error("Notification is not initialized.");
-                        }
                     });
 
-                // Handle button click events
-                container.on("click", "#save-button", function () {
-                    $.post('@Url.Action("SaveDetails", "RebuiltParts")')
-                        .done(function (data) {
-                            if (notification) {
-                                notification.show("Changes saved successfully!", "success");
-                            } else {
-                                console.error("Notification is not initialized.");
-                            }
-                        })
-                        .fail(function (xhr, status, error) {
-                            console.error("Error saving changes: ", error);
-                            if (notification) {
-                                notification.show("An error occurred while saving changes. Please try again.", "error");
-                            } else {
-                                console.error("Notification is not initialized.");
-                            }
-                        });
-                });
+                    container.on("click", "#archive-button", function () {
+                        $.post('@Url.Action("ArchiveDetails", "RebuiltParts")')
+                            .done(function (data) {
+                                if (notification) {
+                                    notification.show("Record archived successfully!", "success");
+                                } else {
+                                    console.error("Notification is not initialized.");
+                                }
+                            })
+                            .fail(function (xhr, status, error) {
+                                console.error("Error archiving record: ", error);
+                                if (notification) {
+                                    notification.show("An error occurred while archiving the record. Please try again.", "error");
+                                } else {
+                                    console.error("Notification is not initialized.");
+                                }
+                            });
+                    });
 
-                container.on("click", "#archive-button", function () {
-                    $.post('@Url.Action("ArchiveDetails", "RebuiltParts")')
-                        .done(function (data) {
-                            if (notification) {
-                                notification.show("Record archived successfully!", "success");
-                            } else {
-                                console.error("Notification is not initialized.");
-                            }
-                        })
-                        .fail(function (xhr, status, error) {
-                            console.error("Error archiving record: ", error);
-                            if (notification) {
-                                notification.show("An error occurred while archiving the record. Please try again.", "error");
-                            } else {
-                                console.error("Notification is not initialized.");
-                            }
-                        });
+                    container.on("click", "#cancel-button", function () {
+                        $.post('@Url.Action("CancelDetails", "RebuiltParts")')
+                            .done(function (data) {
+                                if (notification) {
+                                    notification.show("Changes discarded!", "info");
+                                } else {
+                                    console.error("Notification is not initialized.");
+                                }
+                            })
+                            .fail(function (xhr, status, error) {
+                                console.error("Error discarding changes: ", error);
+                                if (notification) {
+                                    notification.show("An error occurred while discarding changes. Please try again.", "error");
+                                } else {
+                                    console.error("Notification is not initialized.");
+                                }
+                            });
+                    });
                 });
-
-                container.on("click", "#cancel-button", function () {
-                    $.post('@Url.Action("CancelDetails", "RebuiltParts")')
-                        .done(function (data) {
-                            if (notification) {
-                                notification.show("Changes discarded!", "info");
-                            } else {
-                                console.error("Notification is not initialized.");
-                            }
-                        })
-                        .fail(function (xhr, status, error) {
-                            console.error("Error discarding changes: ", error);
-                            if (notification) {
-                                notification.show("An error occurred while discarding changes. Please try again.", "error");
-                            } else {
-                                console.error("Notification is not initialized.");
-                            }
-                        });
-                });
-            });
+            }
         });
     </script>
 
