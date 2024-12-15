@@ -1,0 +1,156 @@
+To achieve the goal of including the contents of _LabourDetaialRebuiltParts.cshtml in a Kendo ExpansionPanel, you need to modify your Index.cshtml and the LabourDetailsPartial action in your RebuiltPartsController. Here’s how you can do it:
+
+Step 1: Modify Index.cshtml
+You need to update the Index.cshtml to include the Kendo ExpansionPanel and load the partial view inside it.
+
+html
+Copy
+@using BCES.Models.Parts
+@using BCES.Models.Common
+@model IEnumerable<BCES.Models.Parts.RebuiltPartsViewModel>
+
+@{
+    ViewData["Title"] = "Rebuilt Parts";
+}
+
+<h4>Rebuilt Parts</h4>
+
+@(Html.Kendo().Grid<RebuiltPartsViewModel>()
+    .Name("RebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.MmsStockCode).Title("MMS Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.DetailedDesc).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.JobNumber).Title("Job Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CorePartNum).Title("Core Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CoreCharge).Title("Core Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Bound(c => c.BuyNewCost).Title("Buy Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Bound(c => c.RemanCost).Title("Remanufactured Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Command(command =>
+        {
+            command.Edit();
+        }).Title("Actions");
+    })
+    .ToolBar(toolbar => { toolbar.Create(); })
+    .Editable(editable => editable.Mode(GridEditMode.InLine))
+    .Pageable()
+    .Sortable()
+    .ClientDetailTemplateId("template")
+    .Resizable(r => r.Columns(true))
+    .Groupable(g => g.ShowFooter(false))
+    .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+    .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.RbMasterlistId);
+            model.Field(c => c.RbMasterlistId);
+            model.Field(c => c.RebuiltStockNum).Editable(true);
+            model.Field(c => c.MmsStockCode).Editable(true);
+            model.Field(c => c.VehicleSeries).DefaultValue(new List<BCES.Models.Common.ListOfBusesModel>()).Editable(true);
+        })
+        .Read(read => read.Url(Url.Action("GetRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("AddRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+    )
+)
+
+<div id="estimates-container"></div>
+
+@section Scripts {
+    <script>
+        $(document).ready(function () {
+            var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+
+            grid.bind("detailInit", function (e) {
+                var container = e.detailCell.find("#detail-template-" + e.data.RebuiltStockNum);
+                $.get('@Url.Action("LabourDetailsPartial", "RebuiltParts")', function (data) {
+                    container.append(data);
+                });
+            });
+        });
+    </script>
+
+    <script>
+        function openEstimates(e) {
+            e.preventDefault();
+            var dataItem = this.dataItem($(e.currentTarget).closest("tr"));
+            var rebuiltStockNum = dataItem.RebuiltStockNum;
+            $.ajax({
+                url: '@Url.Action("GetRebuiltPartEstimates", "RebuiltParts")',
+                type: 'GET',
+                data: { RebuiltStockNum: rebuiltStockNum },
+                success: function (result) {
+                    $('#estimates-container').html(result);
+                },
+                error: function (xhr, status, error) {
+                    console.error('An error occurred: ' + error);
+                }
+            });
+        }
+    </script>
+
+    <script id="template" type="text/x-kendo-template">
+        @(Html.Kendo().ExpansionPanel()
+            .Name("expansionPanel_#=RebuiltStockNum#")
+            .Title("Labour Details")
+            .SubTitle("View Labour Details")
+            .Expanded(false)
+            .Content("<div id='detail-template-#=RebuiltStockNum#'></div>")
+        )
+    </script>
+
+    <script>
+        function dataBound() {
+            this.expandRow(this.tbody.find("tr.k-master-row").first());
+        }
+    </script>
+
+    <script>
+        function onKeywordChange(e) {
+            console.log("event: onVehicleChange");
+            var selectedVehicles = this.value();
+            console.log("selected vehicles :");
+            console.log(selectedVehicles);
+
+            $.ajax({
+                url: '@Url.Action("GetSelectedVehicles", "RebuiltPartsGrid")',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ vehicles: selectedVehicles }),
+                beforeSend: function (xhr) {
+                    console.log("Sending data :", JSON.stringify({ vehicles: selectedVehicles }));
+                },
+                success: function (data) {
+                    console.log('Success:', data);
+                },
+                error: function (error, data) {
+                    console.log('datasent : ', data);
+                    console.error('Error:', error);
+                }
+            });
+        }
+    </script>
+}
+Run HTML
+Step 2: Update RebuiltPartsController.cs
+Ensure that the LabourDetailsPartial action returns the correct partial view.
+
+csharp
+Copy
+public IActionResult LabourDetailsPartial()
+{
+    var model = new List<LabourDetailsRebuiltPartsViewModel> { };
+    return PartialView("_LabourDetailsRebuiltParts", model);
+}
+Explanation
+Kendo ExpansionPanel: The ExpansionPanel is included inside the ClientDetailTemplateId("template") of the Kendo Grid. The Content of the ExpansionPanel is set to a div that will be populated with the partial view content.
+
+AJAX Call: The detailInit event of the Kendo Grid is used to make an AJAX call to the LabourDetailsPartial action in the RebuiltPartsController. The returned partial view content is then appended to the div inside the ExpansionPanel.
+
+Template: The template script defines the structure of the detail row, including the ExpansionPanel.
+
+This setup ensures that when a row in the Kendo Grid is expanded, the ExpansionPanel is displayed with the content of the _LabourDetailsRebuiltParts.cshtml partial view.
