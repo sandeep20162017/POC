@@ -1,7 +1,40 @@
-All the tabs will have unique gridnames. Clean Index.cshtml. It should hav only two tabs. Labour Details and Material Details.
-Both partial view are CRUD. If User gries to Add, Update to Delete and clicks on any other tab, User must get visible notification example ; Changes will be lost etc.
-If required, remove un-necessary grid reinitialization logic from JavaScript (onLoad). Give me the full index.cshtml file and  if any hange controller file. I prefer server side.
-Controller :
+
+You are ASp.NET core and Telerik UI ASP.NET Core expert.
+For the following code both partial views are rendered correcly and no Javascript errors.
+Can you pls help fix following errors?
+1. Scenario 1 : User is in Labour Details tab. LabourRebuiltPartGrid is rendered. User cliks on Edit on on of the rows. Without clicking on Update or Cancel (Grid action), user clicks on Material Details tab. _TestNscParts and grid is rendered in the tab. NscPartsUsedGrid is rendered. User clicks on NscPartsUsedGrid's Edit grid option changes one of the cell and with out clicking on Grid's action Update or Cancel, user clicks on  Labour Details tab. User then clicks on Material Details tab. At this time following exception is thrown.
+Exception :
+TypeError: Cannot read properties of undefined (reading 'show')
+Call Stack :
+>	init.select [localhost꞉44332/RebuiltPartsIndex꞉90:13] Line 137	JavaScript
+ 	init.trigger [2021.2.511/js/kendo.all.js] Line 164	JavaScript
+ 	init._click [2021.2.511/js/kendo.all.js] Line 92966	JavaScript
+ 	init._itemClick [2021.2.511/js/kendo.all.js] Line 93112	JavaScript
+ 	li#tabstrip-container-SW1042-tab-2.k-item.k-state-default.k-last.k-state-hover.i [code.jquery.com/jquery-3.7.1.min.js] Line 2	JavaScript
+ 	ul.k-tabstrip-items.k-reset.dispatch [code.jquery.com/jquery-3.7.1.min.js] Line 2	JavaScript
+ 	<anonymous> [code.jquery.com/jquery-3.7.1.min.js] Line 2	JavaScript
+
+2. Scenario 2 : User is in Labour Details tab. LabourRebuiltPartGrid is rendered. User cliks on Add grid action. Without clicking on Update or cancel on the Grid, user clicks on Material Details tab/ User again clicks on Labour Details tab. Same exception is thrown.
+
+When making changes also add logic if user clicks on other tab for any of the scenartio above, he should get warning, like in the script :
+<script>
+    // Warn user if they try to navigate away with unsaved changes
+    $(document).on("change", ".k-grid input, .k-grid select", function () {
+        var grid = $(this).closest(".k-grid").data("kendoGrid");
+        if (grid && grid.dataSource.hasChanges()) {
+            window.onbeforeunload = function () {
+                return "You have unsaved changes. Are you sure you want to leave?";
+            };
+        } else {
+            window.onbeforeunload = null;
+        }
+    });
+</script>
+
+In Index.cshtml looks like, you may hav to modify above JS funtion.
+Add additional logic to grt more details for debugging.
+
+RebuiltPartsController.cs :
  public IActionResult LabourDetailsPartial()
  {
      var model = new List<LabourDetailsRebuiltPartsViewModel> { };
@@ -10,36 +43,46 @@ Controller :
          return PartialView("_LabourDetailsRebuiltParts", model);
  }
 
- public IActionResult MaterialDetailsPartial()
+ public IActionResult CCDetailsPartial()
  {
      var model = new List<BCES.Models.Parts.NscPartsUsedViewModel> { };
 
      return PartialView("_TestNscParts", model);
      //return PartialView("_CCDeatilsPartialRebuiltParts", model);
  }
-[HttpPost]
-public IActionResult SaveDetails()
-{
-    // Save logic here
-    return Json(new { success = true });
-}
 
-[HttpPost]
-public IActionResult ArchiveDetails()
-{
-    // Archive logic here
-    return Json(new { success = true });
-}
+ public IActionResult MaterialDetailsPartial()
+ {
+     var model = new List<BCES.Models.Parts.NscPartsUsedViewModel> { };
 
-[HttpPost]
-public IActionResult CancelDetails()
-{
-    // Cancel logic here
-    return Json(new { success = true });
-}
+     return PartialView("_TestNscParts", model);
+
+     // return PartialView("_MaterialDeatilsPartial", model);
+ }
+
+
+ [HttpPost]
+ public IActionResult SaveDetails()
+ {
+     // Save logic here
+     return Json(new { success = true });
+ }
+
+ [HttpPost]
+ public IActionResult ArchiveDetails()
+ {
+     // Archive logic here
+     return Json(new { success = true });
+ }
+
+ [HttpPost]
+ public IActionResult CancelDetails()
+ {
+     // Cancel logic here
+     return Json(new { success = true });
+ }
 
 Index.cshtml :
-
 @using BCES.Models.Parts
 @using BCES.Models.Common
 @model IEnumerable<BCES.Models.Parts.RebuiltPartsViewModel>
@@ -122,12 +165,10 @@ Index.cshtml :
                             <div id="tabstrip-container-${e.data.RebuiltStockNum}">
                                 <ul>
                                     <li class="k-state-active">Labour Details</li>
-                                    <li>CC Details</li>
-                                    <li>Parts Details</li>
+                                    <li>Material Details</li>
                                 </ul>
-                                <div></div>
-                                <div></div>
-                                <div></div>
+                                <div id="labour-details-content"></div>
+                                <div id="material-details-content"></div>
                             </div>
                             <div class="action-buttons">
                                 <button class="k-button k-button-primary" id="save-button">Save</button>
@@ -141,46 +182,26 @@ Index.cshtml :
                     animation: { open: { effects: "fadeIn" } },
                     select: function (e) {
                         var tabIndex = $(e.item).index(); // Get the index of the selected tab
-                        var tabUrl = "";
 
-                        // Determine the URL based on the selected tab
-                        switch (tabIndex) {
-                            case 0:
-                                tabUrl = '@Url.Action("LabourDetailsPartial", "RebuiltParts")';
-                                break;
-                            case 1:
-                                tabUrl = '@Url.Action("CCDetailsPartial", "RebuiltParts")';
-                                break;
-                            case 2:
-                                tabUrl = '@Url.Action("MaterialDetailsPartial", "RebuiltParts")';
-                                break;
+                        // Check for unsaved changes in the current tab
+                        var currentGrid = $(e.contentElement).find(".k-grid").data("kendoGrid");
+                        if (currentGrid && currentGrid.dataSource.hasChanges()) {
+                            notification.show("You have unsaved changes. Switching tabs will discard them.", "warning");
+                            return; // Prevent switching tabs
                         }
 
-                        console.log("Loading tab content for tab index: " + tabIndex + ", URL: " + tabUrl);
-
                         // Load the partial view content for the selected tab
+                        var tabUrl = tabIndex === 0
+                            ? '@Url.Action("LabourDetailsPartial", "RebuiltParts")'
+                            : '@Url.Action("MaterialDetailsPartial", "RebuiltParts")';
+
                         $.get(tabUrl)
                             .done(function (data) {
-                                console.log("Tab content loaded successfully for tab index: " + tabIndex);
-
-                                // Wrap the contentElement in a jQuery object
                                 $(e.contentElement).html(data);
-
-                                // Reinitialize Kendo widgets inside the tab content
-                                kendo.init($(e.contentElement));
-
-                                // Reinitialize the Kendo Grid specifically
-                                var gridId = "LabourRebuiltPartGrid-" + tabIndex; // Generate unique grid ID
-                                var grid = $(e.contentElement).find("#" + gridId).data("kendoGrid");
-                                if (grid) {
-                                    console.log("Grid found and reinitialized for tab index: " + tabIndex);
-                                    grid.dataSource.read(); // Refresh the grid data source
-                                } else {
-                                    console.error("Grid not found or not initialized for tab index: " + tabIndex);
-                                }
+                                kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
                             })
                             .fail(function (xhr, status, error) {
-                                console.error("Error loading tab content for tab index: " + tabIndex + ", Error: " + error);
+                                console.error("Error loading tab content: ", error);
                                 notification.show("An error occurred while loading the tab content. Please try again.", "error");
                             });
                     }
@@ -189,32 +210,16 @@ Index.cshtml :
                 // Load the first tab's content
                 $.get('@Url.Action("LabourDetailsPartial", "RebuiltParts")')
                     .done(function (data) {
-                        console.log("Initial tab content loaded successfully for tab index: 0");
-
-                        // Wrap the contentElement in a jQuery object
-                        $(tabStrip.contentElement(0)).html(data);
-
-                        // Reinitialize Kendo widgets inside the tab content
-                        kendo.init($(tabStrip.contentElement(0)));
-
-                        // Reinitialize the Kendo Grid specifically
-                        var gridId = "LabourRebuiltPartGrid-0"; // Generate unique grid ID
-                        var grid = $(tabStrip.contentElement(0)).find("#" + gridId).data("kendoGrid");
-                        if (grid) {
-                            console.log("Grid found and reinitialized for tab index: 0");
-                            grid.dataSource.read(); // Refresh the grid data source
-                        } else {
-                            console.error("Grid not found or not initialized for tab index: 0");
-                        }
+                        $("#labour-details-content").html(data);
+                        kendo.init($("#labour-details-content")); // Reinitialize Kendo widgets
                     })
                     .fail(function (xhr, status, error) {
-                        console.error("Error loading initial tab content for tab index: 0, Error: " + error);
+                        console.error("Error loading initial tab content: ", error);
                         notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
                     });
 
                 // Handle button click events
                 container.on("click", "#save-button", function () {
-                    // Call the Save action in the controller
                     $.post('@Url.Action("SaveDetails", "RebuiltParts")')
                         .done(function (data) {
                             notification.show("Changes saved successfully!", "success");
@@ -226,7 +231,6 @@ Index.cshtml :
                 });
 
                 container.on("click", "#archive-button", function () {
-                    // Call the Archive action in the controller
                     $.post('@Url.Action("ArchiveDetails", "RebuiltParts")')
                         .done(function (data) {
                             notification.show("Record archived successfully!", "success");
@@ -238,7 +242,6 @@ Index.cshtml :
                 });
 
                 container.on("click", "#cancel-button", function () {
-                    // Call the Cancel action in the controller
                     $.post('@Url.Action("CancelDetails", "RebuiltParts")')
                         .done(function (data) {
                             notification.show("Changes discarded!", "info");
@@ -276,3 +279,113 @@ Index.cshtml :
         });
     </script>
 }
+
+_LabourDetailsRebuiltParts.cshtml :
+@model IEnumerable<CES.Models.Parts.LabourDetailsRebuiltPartsViewModel>
+
+@{
+    ViewData["Title"] = "Labour Details Rebuilt Parts";
+}
+
+<h6>Labour Details Rebuilt Parts</h6>
+
+@(Html.Kendo().Grid<CES.Models.Parts.LabourDetailsRebuiltPartsViewModel>()
+    .Name("LabourRebuiltPartGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.LabourType).Title("Labour Type");
+        columns.Bound(c => c.CC).Title("CC");
+        columns.Bound(c => c.Task).Title("Task");
+        columns.Bound(c => c.Usage).Title("Usage");
+        columns.Bound(c => c.Time).Title("Time").Format("{0:N2}");
+        columns.Bound(c => c.WrenchTime).Title("Wrench Time").Format("{0:N2}");
+        columns.Bound(c => c.DateRevised).Title("Date Revised");
+        columns.Command(command => command.Edit()).Title("Actions");
+    })
+    .ToolBar(toolbar => toolbar.Create())
+    .Editable(editable => editable.Mode(GridEditMode.InLine))
+    .Pageable()
+    .Sortable()
+    .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+    .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.LabourType); // Assuming LabourType is a unique identifier
+            model.Field(c => c.LabourType);
+        })
+        
+
+        .Read(read => read.Url(Url.Action("GetLabourDetails", "LabourDetails")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("CreateLabourDetail", "LabourDetails")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateLabourDetail", "LabourDetails")).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteLabourDetail", "LabourDetails")).Type(HttpVerbs.Post))
+    )
+)
+
+_TestNscParts.cshtml :
+@model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+
+@{
+    ViewData["Title"] = "Non Stock Coded Parts";
+}
+ <h4>Non Stock Coded Parts</h4>
+@(
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+                                .Name("NscPartsUsedGrid")
+                                .Columns(columns =>
+                            {
+                                columns.Bound(p => p.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))); ;
+                                columns.Bound(p => p.OrigSupplierName).Title("Supplier Name").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))); ;
+                                columns.Bound(p => p.KeyWord).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))); ;
+                                columns.Bound(p => p.Description).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))); ;
+                                columns.Bound(p => p.CoreCost).Title("Per Unit Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+                                columns.Command(command => {
+                                if(@ViewBag.RoleId == 1) {
+                                command.Edit();
+                                }
+                                if(@ViewBag.RoleId == 1) {
+                                command.Destroy();
+                                }
+                                }).Width(200);
+                            })
+                    .ToolBar(toolbar =>
+                    {
+                        if (@ViewBag.RoleId == 1)
+                        {
+                            toolbar.Create();
+                        }
+                    })
+                .Editable(editable => editable.Mode(GridEditMode.InLine).TemplateName("NscPartsAddUpdate"))
+                
+                .Pageable()
+                .Sortable()
+                .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+                .DataSource(dataSource => dataSource
+                    .Ajax()
+                    .Model(model =>
+                    {
+                        model.Id(u => u.NscPartsUsedId);
+                                                                       
+                    })
+                   
+                    .Read(read => read.Url(Url.Action("GetNscPartsUsedView", "NscPartsUsed")).Type(HttpVerbs.Get))
+                    .Create(create => create.Url(Url.Action("CreateNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+                    .Update(update => update.Url(Url.Action("UpdateNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+                    .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+                        
+                   )
+                
+            )
+
+  @section Scripts {
+                <script>
+                     
+                </script>
+       
+            }
+
+         
+
+        
