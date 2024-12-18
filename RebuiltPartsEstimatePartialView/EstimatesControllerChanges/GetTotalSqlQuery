@@ -1,0 +1,171 @@
+BEGIN TRY
+    -- Declare variables
+    DECLARE @RebuiltPartNumber VARCHAR(30) = '035434';
+    DECLARE @LinkCode VARCHAR(30) = NULL;
+    DECLARE @LinkType VARCHAR(5) = NULL;
+
+    PRINT 'Retrieving LinkCode and LinkType...';
+
+    -- Retrieve LinkCode and LinkType from ScPartsUsed and NScPartsUsed
+    SELECT TOP 1 @LinkCode = LinkCode, @LinkType = LinkType
+    FROM SBCES.ScPartsUsed
+    WHERE LinkCode = @RebuiltPartNumber;
+
+    IF @LinkCode IS NULL
+    BEGIN
+        SELECT TOP 1 @LinkCode = LinkCode, @LinkType = LinkType
+        FROM SBCES.NScPartsUsed
+        WHERE LinkCode = @RebuiltPartNumber;
+    END
+
+    PRINT 'LinkCode: ' + ISNULL(@LinkCode, 'Not Found');
+    PRINT 'LinkType: ' + ISNULL(@LinkType, 'Not Found');
+
+    -- Check if LinkCode and LinkType were found
+    IF @LinkCode IS NULL OR @LinkType IS NULL
+    BEGIN
+        PRINT 'Error: LinkCode or LinkType not found for RebuiltPartNumber: ' + @RebuiltPartNumber;
+        RETURN;
+    END
+
+    -- Dynamically create temporary tables
+    PRINT 'Creating temporary tables...';
+
+    CREATE TABLE #TempLabourList (
+        LabourType VARCHAR(50),
+        CC VARCHAR(50),
+        Task VARCHAR(50),
+        Usage DECIMAL(18, 2),
+        Time DECIMAL(10, 2),
+        RatePerHour DECIMAL(18, 2),
+        TotalCost DECIMAL(18, 2),
+        ExtendedTime DECIMAL(10, 2),
+        EstimateType VARCHAR(10),
+        EstimateNumber VARCHAR(50),
+        WrenchTime VARCHAR(50)
+    );
+
+    CREATE TABLE #TempMaterialsList (
+        AssemblyArea VARCHAR(100),
+        CostCentre VARCHAR(50),
+        TotalCost DECIMAL(18, 2),
+        TaxableCost DECIMAL(18, 2),
+        RbReference VARCHAR(30),
+        TotalUnitCost DECIMAL(18, 2)
+    );
+
+    -- Populate TempLabourList
+    PRINT 'Populating #TempLabourList...';
+
+    INSERT INTO #TempLabourList
+    SELECT 
+        EL.LabourDefn AS LabourType,
+        EL.CostCentre AS CC,
+        EL.Task,
+        CAST(REPLACE(EL.Usage, ',', '.') AS DECIMAL(18,2)) AS Usage,
+        CASE 
+            WHEN CHARINDEX(':', EL.HrsReqd) = 0 THEN TRY_CAST(EL.HrsReqd AS DECIMAL(10, 2))
+            ELSE TRY_CAST(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1) AS INT) +
+                 TRY_CAST(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)) AS INT) / 60.0
+        END AS Time,
+        CAST(ES.RatePerHour AS DECIMAL(18,2)) AS RatePerHour,
+        CAST(REPLACE(EL.Usage, ',', '.') AS DECIMAL(18, 2)) * CAST(ES.RatePerHour AS DECIMAL(18, 2)) AS TotalCost,
+        NULL AS ExtendedTime, -- Adjust logic if needed
+        EL.TypeId AS EstimateType,
+        EL.LinkNumber AS EstimateNumber,
+        EL.AdjHrs AS WrenchTime
+    FROM 
+        SBCES.EmployeeLabour EL
+    JOIN SBCES.EmplClass EC ON EL.LabourDefn = UPPER(EC.LabourDefn)
+    JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
+    WHERE EL.LinkNumber = @LinkCode;
+
+    -- Populate TempMaterialsList
+    PRINT 'Populating #TempMaterialsList...';
+
+    INSERT INTO #TempMaterialsList
+    SELECT 
+        ISNULL(C.Name, 'NONE') AS AssemblyArea,
+        ISNULL(A.CostCentre, '0') AS CostCentre,
+        SUM(CAST(A.Cost AS DECIMAL(18, 2))) AS TotalCost,
+        SUM(CAST(A.TaxCost AS DECIMAL(18, 2))) AS TaxableCost,
+        @LinkCode AS RbReference,
+        SUM(CAST(A.TotalUnitCost AS DECIMAL(18, 2))) AS TotalUnitCost
+    FROM (
+        -- Stock-coded parts
+        SELECT 
+            CostCentre,
+            CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS Cost,
+            CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS TaxCost,
+            CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS TotalUnitCost
+        FROM SBCES.ScPartsUsed
+        WHERE LinkCode = @LinkCode AND RebuiltPart = 'N' AND LinkType = @LinkType
+
+        UNION ALL
+
+        -- Non-stock-coded parts
+        SELECT 
+            NSCPartsUsed.CostCentre,
+            CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18,2)) AS Cost,
+            CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18, 2)) AS TaxCost,
+            CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18,2)) AS TotalUnitCost
+        FROM SBCES.NSCPartsUsed
+        JOIN SBCES.NonStockCodedParts ON NSCPartsUsed.Id = NonStockCodedParts.Id
+        WHERE NSCPartsUsed.LinkCode = @LinkCode AND NSCPartsUsed.LinkType = @LinkType
+    ) A
+    JOIN SBCES.CostCentres C ON A.CostCentre = C.CostCentre
+    GROUP BY A.CostCentre, C.Name;
+
+    -- Output summaries and calculations (adjust logic as necessary)
+
+    PRINT 'Fetching total costs summary...';
+
+    -- Core cost excl Tax
+    DECLARE @CoreCostExclTax DECIMAL(18, 2) = NULL;
+    SELECT @CoreCostExclTax = SUM(CoreCost)
+    FROM SBCES.ScPartsUsed
+    WHERE LinkCode = @LinkCode AND LinkType = @LinkType;
+
+    -- Material cost
+    DECLARE @MaterialCost DECIMAL(18, 2) = NULL;
+    SELECT @MaterialCost = SUM(TotalCost)
+    FROM #TempMaterialsList;
+
+    -- Labour cost
+    DECLARE @LabourCost DECIMAL(18, 2) = NULL;
+    SELECT @LabourCost = SUM(TotalCost)
+    FROM #TempLabourList;
+
+    -- Labour overhead and total
+    DECLARE @LabourOverheadTotal DECIMAL(18, 2) = @LabourCost * 0.01; -- Example overhead rate
+    DECLARE @LabourTotal DECIMAL(18, 2) = @LabourCost + @LabourOverheadTotal;
+
+    -- Tax total
+    DECLARE @TaxTotal DECIMAL(18, 2) = NULL;
+    SELECT @TaxTotal = SUM(TaxableCost)
+    FROM #TempMaterialsList;
+
+    -- Total cost with tax
+    DECLARE @TotalCostWithTax DECIMAL(18, 2) = @MaterialCost + @LabourTotal + @TaxTotal;
+
+    -- Output the results
+    PRINT 'Outputting results...';
+    SELECT 
+        @CoreCostExclTax AS CoreCostExclTax,
+        @MaterialCost AS MaterialCost,
+        @LabourCost AS LabourCost,
+        @LabourOverheadTotal AS LabourOverheadTotal,
+        @LabourTotal AS LabourTotal,
+        @TaxTotal AS TaxTotal,
+        @TotalCostWithTax AS TotalCostWithTax;
+
+    -- Clean up temporary tables
+    PRINT 'Cleaning up temporary tables...';
+    DROP TABLE #TempLabourList;
+    DROP TABLE #TempMaterialsList;
+
+    PRINT 'Process completed successfully.';
+END TRY
+BEGIN CATCH
+    PRINT 'An error occurred: ' + ERROR_MESSAGE();
+END CATCH;
