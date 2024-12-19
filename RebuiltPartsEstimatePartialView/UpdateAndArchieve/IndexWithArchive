@@ -1,0 +1,90 @@
+@using BCES.Models.Parts
+@using BCES.Models.Common
+@model IEnumerable<BCES.Models.Parts.RebuiltPartsViewModel>
+
+@{
+    ViewData["Title"] = "Rebuilt Parts";
+}
+
+<h4>Rebuilt Parts</h4>
+
+@(Html.Kendo().Grid<RebuiltPartsViewModel>()
+    .Name("RebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.MmsStockCode).Title("MMS Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.DetailedDesc).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.JobNumber).Title("Job Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CorePartNum).Title("Core Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CoreCharge).Title("Core Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Bound(c => c.BuyNewCost).Title("Buy Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Bound(c => c.RemanCost).Title("Remanufactured Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Command(command =>
+        {
+            command.Custom("Archive").Click("onArchiveClick"); // Add a custom "Archive" button
+        }).Title("Actions");
+    })
+    .ToolBar(toolbar => {
+        toolbar.Create();
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InLine))
+    .Pageable()
+    .Sortable()
+    .ClientDetailTemplateId("template")
+    .Resizable(r => r.Columns(true))
+    .Groupable(g => g.ShowFooter(false))
+    .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.RbMasterlistId);
+            model.Field(c => c.RbMasterlistId);
+            model.Field(c => c.RebuiltStockNum).Editable(true);
+            model.Field(c => c.MmsStockCode).Editable(true);
+            model.Field(c => c.VehicleSeries).DefaultValue(new List<BCES.Models.Common.ListOfBusesModel>()).Editable(true);
+        })
+        .Read(read => read.Url(Url.Action("GetRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("AddRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+    )
+)
+
+<div id="estimates-container"></div>
+
+<!-- Add a placeholder for the notification -->
+<div id="notification"></div>
+
+@section Scripts {
+    <script>
+        function onArchiveClick(e) {
+            e.preventDefault(); // Prevent the default action
+
+            // Get the data item for the clicked row
+            var dataItem = this.dataItem($(e.currentTarget).closest("tr"));
+            var rebuiltNumber = dataItem.RebuiltStockNum;
+
+            // Call the controller action
+            $.post('@Url.Action("ArchiveDetails", "RebuiltParts")', { rebuiltPartNum: rebuiltNumber })
+                .done(function (data) {
+                    // Display a Kendo Notification
+                    var notification = $("#notification").kendoNotification({
+                        position: {
+                            pinned: true,
+                            top: 50,
+                            right: 50
+                        },
+                        autoHideAfter: 5000, // Hide after 5 seconds
+                        stacking: "down"
+                    }).data("kendoNotification");
+
+                    notification.show("Archive is clicked.", "info");
+                })
+                .fail(function (xhr, status, error) {
+                    console.error("Error archiving: ", error);
+                });
+        }
+    </script>
+}
