@@ -1,0 +1,837 @@
+When  I decorate 
+[Route("api/[controller]")]
+ public class RebuiltPartsController : BaseController
+ {
+...
+}
+Tabstrip contents are empty, as none of the partilaview function were called.
+Example public IActionResult LabourDetailsPartial([FromQuery] string rebuiltPartNum) was not called.
+When I remove [Route("api/[controller]")], all the partial view functions gets called.
+
+
+RebuiltPartsController.cs
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
+using DataSourceRequest = Kendo.Mvc.UI.DataSourceRequest;
+using BCES.Data;
+using Telerik.SvgIcons;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using BCES.Controllers.Base;
+using BCES.Models.Parts;
+using BCES.Models.Common;
+using BCES.Models.Parts;
+
+using Newtonsoft.Json.Linq;
+using static System.Net.Mime.MediaTypeNames;
+using Azure.Core;
+using BCES.Controllers.Admin;
+//using CES.Views.Shared;
+namespace BCES.Controllers
+{
+   [Route("api/[controller]")]
+    public class RebuiltPartsController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+        public RebuiltPartsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet("RebuiltPartsIndex")]
+        public IActionResult RebuiltPartsIndex()
+        {
+            // return View();
+            return View("~/Views/Parts/RebuiltParts/Index.cshtml");
+        }
+
+        // POST: NscPartsUsed/GetNscPartsUsedView
+        [HttpGet]
+        public async Task<ActionResult> GetRebuiltPartsView([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid (you can use Dapper or any other method)
+            var model = await GetRebuiltPartsData();
+            return Json(model.ToDataSourceResult(request));
+        }
+
+        private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData()
+        {
+            try
+            {
+                var query = @"   
+            SELECT rbm.RbMasterlistId,
+                   rbm.[RebuiltStockNum],
+                   rbm.[MmsStockCode],
+                   rbm.[Keyword],
+                   rbm.JobNumber,
+                   rbm.[CorePartNum],
+                   rbm.[DetailedDesc],
+                   rbm.[CoreCharge],
+                   rbm.[EstimatedCost],
+                   rbm.[BuyNewCost],
+                   rbm.[RemanCost],
+                   rbm.[ExternalCost],
+                   lb.ListId,
+                   lb.Description AS Description
+            FROM [SBCES].[RbMasterlist] rbm
+            INNER JOIN [SBCES].[RbListOfBuses] rlb ON rlb.[RebuiltStockNum] = rbm.[RebuiltStockNum]
+            INNER JOIN [SBCES].[ListOfBuses] lb ON rlb.ListId = lb.ListId";
+
+                var rbParts = _dbConnection.Query<RebuiltPartsViewModel, ListOfBusesModel, RebuiltPartsViewModel>(
+                    query,
+                    (rbPart, vehicle) =>
+                    {
+                        rbPart.VehicleSeries.Add(vehicle);
+                        return rbPart;
+                    },
+                    splitOn: "ListId"
+                ).GroupBy(rbPart => rbPart.RbMasterlistId).Select(g =>
+                {
+                    var groupedRbPart = g.First();
+                    groupedRbPart.VehicleSeries = g.SelectMany(rbPart => rbPart.VehicleSeries).ToList();
+                    return groupedRbPart;
+                }).ToList();
+
+                return rbParts;
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> AddRebuiltPartsView([DataSourceRequest] DataSourceRequest request, RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+            try
+            {
+
+                //if (rebuiltPartsViewModel.RbMasterlistId <= 0)
+                //{
+                //    ModelState.AddModelError("RbMasterlistId", "Please select a valid rebuit part.");
+                //    return Json(new[] { rebuiltPartsViewModel }.ToDataSourceResult(request, ModelState));
+                //}
+                             
+
+                var userId = await AddRebuiltPartAsync(rebuiltPartsViewModel);
+
+
+                return RedirectToAction("Index");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while adding Rebuilt Part.");
+            }
+        }
+
+        private async Task<int> AddRebuiltPartAsync(RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+
+            // Start a transaction
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    //// Insert into Users table
+                    //var insertUserQuery = @"
+                    //                        INSERT INTO SBCES.RbMasterList (UserADId, UserName, RoleId)
+                    //                        VALUES (@UserADId, @UserName,  @RoleId);
+                    //                        SELECT CAST(SCOPE_IDENTITY() as int);";
+
+                    //var userId = await _dbConnection.QuerySingleAsync<int>(insertUserQuery, new
+                    //{
+                    //    UserName = userViewModel.UserName,
+                    //    UserADId = userViewModel.UserADId,
+                    //    RoleId = userViewModel.RoleId,
+                    //}, transaction);
+
+                    //// Insert into UserSites table
+                    //var insertUserSitesQuery = @"
+                    //                            INSERT INTO SBCES.UserSites (UserId, SiteId)
+                    //                            VALUES (@UserId, @SiteId);";
+
+                    //foreach (var site in userViewModel.Sites)
+                    //{
+                    //    await _dbConnection.ExecuteAsync(insertUserSitesQuery, new
+                    //    {
+                    //        UserId = userId,
+                    //        SiteId = site.SiteId
+                    //    }, transaction);
+                    //}
+
+                    //// Commit the transaction
+                    //transaction.Commit();
+
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of any error
+                    transaction.Rollback();
+                    // Handle or log the exception
+                    throw new Exception("Failed to add rebuilt part.", ex);
+                }
+            }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> UpdateRebuiltPartsView([DataSourceRequest] DataSourceRequest request, RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+            try
+            {
+
+                //if (rebuiltPartsViewModel.RbMasterlistId <= 0)
+                //{
+                //    ModelState.AddModelError("RbMasterlistId", "Please select a valid rebuit part.");
+                //    return Json(new[] { rebuiltPartsViewModel }.ToDataSourceResult(request, ModelState));
+                //}
+
+
+                var userId = await UpdateRebuiltPartsView(rebuiltPartsViewModel);
+
+
+                return RedirectToAction("Index");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while adding Rebuilt Part.");
+            }
+        }
+
+        private async Task<int> UpdateRebuiltPartsView(RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+
+            // Start a transaction
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    //// Insert into Users table
+                    //var insertUserQuery = @"
+                    //                        INSERT INTO SBCES.RbMasterList (UserADId, UserName, RoleId)
+                    //                        VALUES (@UserADId, @UserName,  @RoleId);
+                    //                        SELECT CAST(SCOPE_IDENTITY() as int);";
+
+                    //var userId = await _dbConnection.QuerySingleAsync<int>(insertUserQuery, new
+                    //{
+                    //    UserName = userViewModel.UserName,
+                    //    UserADId = userViewModel.UserADId,
+                    //    RoleId = userViewModel.RoleId,
+                    //}, transaction);
+
+                    //// Insert into UserSites table
+                    //var insertUserSitesQuery = @"
+                    //                            INSERT INTO SBCES.UserSites (UserId, SiteId)
+                    //                            VALUES (@UserId, @SiteId);";
+
+                    //foreach (var site in userViewModel.Sites)
+                    //{
+                    //    await _dbConnection.ExecuteAsync(insertUserSitesQuery, new
+                    //    {
+                    //        UserId = userId,
+                    //        SiteId = site.SiteId
+                    //    }, transaction);
+                    //}
+
+                    //// Commit the transaction
+                    //transaction.Commit();
+
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of any error
+                    transaction.Rollback();
+                    // Handle or log the exception
+                    throw new Exception("Failed to add rebuilt part.", ex);
+                }
+            }
+        }
+
+        public IActionResult LabourDetailsPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+
+            var model = new List<LabourDetailsRebuiltPartsViewModel> { };        
+               
+            return PartialView("_LabourDetailsRebuiltParts", model);
+        }
+
+        public IActionResult ScPartsUsedInRbParts([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.StockCodedPartsViewModel> { };
+
+            return PartialView("_ScPartsUsedInRbParts", model);
+           
+        }
+
+        public IActionResult LabourHourSummaryPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel> { };  
+            return PartialView("_LabourHourSummaryRbParts", model);           
+        }
+
+        public IActionResult MaterialCostSummaryPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.MaterialCostSummaryInRbViewModel> { };
+            return PartialView("_MaterialCostSummaryinRbParts", model);
+        }
+        public IActionResult NscDetailsPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.NscPartsUsedViewModel> { };
+
+            return PartialView("_NscPartsUsedInRbParts", model);
+
+        }
+
+        public IActionResult RbDetailsPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.RebuiltPartsViewModel> { };
+            return PartialView("_RbPartsUsedInRbParts", model);
+        }
+
+        public IActionResult TotalCostPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.TotalCostInRbModel> { };
+            return PartialView("_TotalCostInRbParts", model);
+        }
+
+        [HttpPost]
+        public IActionResult SaveDetails()
+        {
+            // Save logic here
+            return Json(new { success = true });
+        }
+
+       
+        [HttpPost]
+        public IActionResult CancelDetails(int rebuiltPartNum)
+        {
+            try
+            {
+                // Return a success response
+                return Json(new { success = true, message = "Changes discarded successfully." });
+            }
+            catch (Exception ex)
+            {
+                // Log the error and return a failure response
+                // Example: Log the error using a logging framework like NLog or Serilog
+                // _logger.LogError(ex, "Error while canceling changes for rebuiltPartNum: {RebuiltPartNum}", rebuiltPartNum);
+
+                return Json(new { success = false, message = "An error occurred while discarding changes. Please try again." });
+            }
+        }
+
+        //[HttpGet]
+        //public async Task<IActionResult> ReadVehicles([DataSourceRequest] DataSourceRequest request)
+        //{
+        //    var sites = await GetVehicles();
+        //    return Json(sites);
+        //}
+
+        //private async Task<IEnumerable<ListOfBusesModel>> GetVehicles()
+        //{
+        //    var query = "SELECT ListId, Description FROM SBCES.ListOfBuses";
+        //    var vehicles = await _dbConnection.QueryAsync<ListOfBusesModel>(query);
+        //    return vehicles.ToList();
+
+        //}
+
+        //[HttpPost]
+        //public async Task<IActionResult> GetSelectedVehicles([FromBody] dynamic data)
+        //{
+        //    var sites = data?.sites?.ToObject<List<string>>() ?? Enumerable.Empty<string>();
+        //   // _selectedSites = sites;
+        //    var viewModel = new UserViewModel { SelectedSites = sites };
+        //    return Json(viewModel);
+        //}
+
+        //[HttpGet]
+        //public async Task<IActionResult> GetRebuiltPartEstimates(string rebuiltNumber)
+        //{
+        //    try
+        //    {
+        //        var model = await GetRebuiltPartEstimatesData(rebuiltNumber);
+        //        return View("~/Views/Parts/RebuiltParts/_RebuiltPartEstimates.cshtml");
+        //       // return PartialView("~/Views/Parts/RebuiltParts/_RebuiltPartEstimates.cshtml", model);
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        throw;
+        //    }
+        //}
+
+        //private async Task<RebuiltPartEstimates> GetRebuiltPartEstimatesData(string rebuiltNumber)
+        //{
+        //    var model = new RebuiltPartEstimates
+        //    {
+        //        JobNumber = "JN001",
+        //        RebuiltStockNum = rebuiltNumber,
+        //        MMSBuyCode = "MMSB001",
+        //        SOPNumber = "SOP001",
+        //        Keyword = "KEY001",
+        //        CoreCode = "CORE001",
+        //        Description = "Sample Description",
+        //        VehicleSeries = "Series A",
+        //        LastModified = "2023-10-01",
+        //        LabourGrid = new List<LabourGridModel>
+        //        {
+        //            new LabourGridModel { Id = 1, LabourCode = "L001", Description = "Labour 1", Hours = 2, Rate = 50, TotalCost = 100 },
+        //            new LabourGridModel { Id = 2, LabourCode = "L002", Description = "Labour 2", Hours = 3, Rate = 50, TotalCost = 150 }
+        //        },
+        //        LabourHourSummary = new List<SummaryGridModel>
+        //        {
+        //            new SummaryGridModel { Category = "Category 1", Amount = 100 },
+        //            new SummaryGridModel { Category = "Category 2", Amount = 200 }
+        //        },
+        //        MaterialCostSummary = new List<SummaryGridModel>
+        //        {
+        //            new SummaryGridModel { Category = "Material 1", Amount = 150 },
+        //            new SummaryGridModel { Category = "Material 2", Amount = 250 }
+        //        },
+        //        CoreCost = 50,
+        //        MaterialsCost = 400,
+        //        LabourCost = 250,
+        //        LabourOverheadCost = 50,
+        //        LabourTotal = 300,
+        //        TotalRebuiltPartCost = 700,
+        //        TaxTotal = 70,
+        //        TotalRebuiltPartWithCost = 770,
+        //        AdditionalInfo1 = "Info 1",
+        //        AdditionalInfo2 = "Info 2"
+        //    };
+        //    return model;
+
+        //}
+
+        //[HttpGet]
+        //public async Task<IActionResult> GetLabour([DataSourceRequest] DataSourceRequest request)
+        //{
+        //    try
+        //    {
+        //        //var model = await GetRebuiltPartsData();
+        //       // return Json(model.ToDataSourceResult(request));
+        //        var model = await GetLabourData(1);
+        //        return Json(model);
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        throw;
+        //    }
+        //}
+        //private async Task<LabourGridModel> GetLabourData(int id)
+        //{
+        //    var model = new LabourGridModel
+        //    {
+        //       Id =1,
+        //       LabourCode = "LC 001",
+        //       Description = "Labor Description",
+        //       Hours = 3,
+        //       Rate= 25,
+        //       TotalCost = 30
+        //    };
+
+        //    return model;
+        //}
+
+        [HttpPost("ArchiveDetails")]
+        public IActionResult ArchiveDetails(string rebuiltPartNum)
+        {
+            try
+            {
+               
+                // Return a success response
+                return Json(new { success = true, message = "Archiving rebuilt part number: {RebuiltPartNum}", rebuiltPartNum });
+            }
+            catch (Exception ex)
+            {                
+                return Json(new { success = false, message = "An error occurred while archiving. Please try again." });
+            }
+        }
+        //[HttpPost]
+        //public IActionResult SaveEstimate()
+        //{
+        //    return Json(new { success = true, message = "Saved" });
+        //}
+
+        //[HttpPost]
+        //public IActionResult UpdateEstimate()
+        //{
+        //    return Json(new { success = true, message = "Updated" });
+        //}
+
+        [HttpPost]
+        public IActionResult ActionHandler(string action)
+        {
+            return Json(new { success = true, message = "{action} button clicked" });
+        }
+        //public IActionResult Index()
+        //{
+        //    var mockData = new List<RebuiltPartsViewModel>
+        //    {
+        //        new RebuiltPartsViewModel
+        //        {
+        //            StockCode = "SC001",
+        //            Description = "Rebuilt Engine",
+        //            Keyword = "Engine",
+        //            JobNumber = "JN123",
+        //            MMSBuyCode = "MMS001",
+        //            CoreCost = 250.00M,
+        //            SOPNumber = "SOP001",
+        //            BuyCost = 300.00M,
+        //            RemanufacturedCost = 400.00M,
+        //            IsActive = true,
+        //            Vehicles = new List<string> { "Toyota", "Ford" }
+        //        }
+        //    };
+
+        //    // return View(mockData);
+        //    return View("~/Views/Parts/RebuiltParts/Index.cshtml", mockData);
+        //}
+
+        //[HttpPost]
+        //public IActionResult Create(RebuiltPartsViewModel model)
+        //{
+        //    //using (var connection = new SqlConnection(_connectionString))
+        //    //{
+        //    //    var sql = @"INSERT INTO RebuiltParts (StockCode, Description, Keyword, JobNumber, MMSBuyCode, CoreCost, SOPNumber, BuyCost, RemanufacturedCost, IsActive) 
+        //    //                VALUES (@StockCode, @Description, @Keyword, @JobNumber, @MMSBuyCode, @CoreCost, @SOPNumber, @BuyCost, @RemanufacturedCost, @IsActive)";
+        //    //    connection.Execute(sql, model);
+        //    //}
+        //    return RedirectToAction("Index");
+        //}
+
+        //[HttpPost]
+        //public IActionResult Update(RebuiltPartsViewModel model)
+        //{
+        //    using (var connection = new SqlConnection(_connectionString))
+        //    {
+        //        //var sql = @"UPDATE RebuiltParts 
+        //        //            SET Description = @Description, Keyword = @Keyword, JobNumber = @JobNumber, MMSBuyCode = @MMSBuyCode,
+        //        //                CoreCost = @CoreCost, SOPNumber = @SOPNumber, BuyCost = @BuyCost, RemanufacturedCost = @RemanufacturedCost, IsActive = @IsActive
+        //        //            WHERE StockCode = @StockCode";
+        //       //connection.Execute(sql, model);
+        //    }
+        //    return RedirectToAction("Index");
+        //}
+
+        //[HttpPost]
+        //public IActionResult Delete(string stockCode)
+        //{
+        //    using (var connection = new SqlConnection(_connectionString))
+        //    {
+        //        //var sql = "DELETE FROM RebuiltParts WHERE StockCode = @StockCode";
+        //        //connection.Execute(sql, new { StockCode = stockCode });
+        //    }
+        //    return RedirectToAction("Index");
+        //}
+    }
+}
+
+Index.cshtml :
+@using BCES.Models.Parts
+@using BCES.Models.Common
+@model IEnumerable<BCES.Models.Parts.RebuiltPartsViewModel>
+
+@{
+    ViewData["Title"] = "Rebuilt Parts";
+}
+
+<h4>Rebuilt Parts</h4>
+
+@(Html.Kendo().Grid<RebuiltPartsViewModel>()
+    .Name("RebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.MmsStockCode).Title("MMS Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.DetailedDesc).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.JobNumber).Title("Job Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CorePartNum).Title("Core Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CoreCharge).Title("Core Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Bound(c => c.BuyNewCost).Title("Buy Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Bound(c => c.RemanCost).Title("Remanufactured Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Command(command =>
+        {
+            command.Edit();
+            command.Custom("Archive").Click("onArchiveClick"); // Add a custom "Archive" button
+        }).Title("Actions");
+    })
+    .ToolBar(toolbar => { toolbar.Create(); })
+    .Editable(editable => editable.Mode(GridEditMode.InLine))
+    .Pageable()
+    .Sortable()
+    .ClientDetailTemplateId("template")
+    .Resizable(r => r.Columns(true))
+//    .Groupable(g => g.ShowFooter(false))
+    .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+   // .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.RbMasterlistId);
+            model.Field(c => c.RbMasterlistId);
+            model.Field(c => c.RebuiltStockNum).Editable(true);
+            model.Field(c => c.MmsStockCode).Editable(true);
+            model.Field(c => c.VehicleSeries).DefaultValue(new List<BCES.Models.Common.ListOfBusesModel>()).Editable(true);
+        })
+        .Read(read => read.Url(Url.Action("GetRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("AddRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+    )
+)
+
+<div id="estimates-container"></div>
+
+<!-- Add a placeholder for the notification -->
+<div id="notification"></div>
+@section Scripts {
+    <script>
+        $(document).ready(function () {
+            var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+
+            // Initialize Kendo Notification for displaying messages
+            var notificationElement = $("#notification");
+            if (notificationElement.length === 0) {
+                console.error("Notification element not found in the DOM.");
+            } else {
+                var notification = notificationElement.kendoNotification({
+                    position: {
+                        pinned: true,
+                        top: 50,
+                        right: 50
+                    },
+                    autoHideAfter: 5000, // Hide after 5 seconds
+                    stacking: "down"
+                }).data("kendoNotification");
+
+                // Bind the Save event for the grid
+                grid.bind("save", function (e) {
+                    // This event is triggered when the user clicks the Update button
+                    $.post('@Url.Action("UpdateDetails", "RebuiltParts")', { rebuiltPartNum: e.model.RebuiltStockNum })
+                        .done(function (data) {
+                            if (notification) {
+                                notification.show("Changes saved successfully!", "success");
+                            } else {
+                                console.error("Notification is not initialized.");
+                            }
+                        })
+                        .fail(function (xhr, status, error) {
+                            console.error("Error saving changes: ", error);
+                            if (notification) {
+                                notification.show("An error occurred while saving changes. Please try again.", "error");
+                            } else {
+                                console.error("Notification is not initialized.");
+                            }
+                        });
+                });
+
+                // Bind the Cancel event for the grid
+                grid.bind("cancel", function (e) {
+                    // This event is triggered when the user clicks the Cancel button
+                    $.post('@Url.Action("CancelDetails", "RebuiltParts")', { rebuiltPartNum: e.model.RebuiltStockNum })
+                        .done(function (data) {
+                            if (notification) {
+                                notification.show("Changes discarded!", "info");
+                            } else {
+                                console.error("Notification is not initialized.");
+                            }
+                        })
+                        .fail(function (xhr, status, error) {
+                            console.error("Error discarding changes: ", error);
+                            if (notification) {
+                                notification.show("An error occurred while discarding changes. Please try again.", "error");
+                            } else {
+                                console.error("Notification is not initialized.");
+                            }
+                        });
+                });
+
+                grid.bind("detailInit", function (e) {
+                    console.log("Detail initialization started for RebuiltStockNum: " + e.data.RebuiltStockNum);
+                    var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabScPartDetail = '@Url.Action("ScPartsUsedInRbParts", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlRbPartDetail = '@Url.Action("RbDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlTotalCost = '@Url.Action("TotalCostPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+
+                    // Get the container for the detail template
+                    var container = e.detailCell.find("#detail-template-" + e.data.RebuiltStockNum);
+
+                    // Load the TabStrip structure
+                    container.html(`
+                                <div id="tabstrip-container-${e.data.RebuiltStockNum}">
+                                    <ul>
+                                        <li class="k-state-active">Labour Details</li>
+                                        <li>Labour Hour</li>
+                                        <li>Material: Cost</li>
+                                        <li>Material: SC Parts</li>
+                                        <li>Material: NSC Parts</li>
+                                        <li>Material: RB Parts</li>
+                                        <li>Total Cost</li>
+                                    </ul>
+                                    <div id="labour-details-content"></div>
+                                    <div id="labour-hour-summary-content"></div>
+                                    <div id="material-cost-summary-content"></div>
+                                    <div id="material-details-content"></div>
+                                    <div id="nsc-details-content"></div>
+                                    <div id="rb-part-details-content"></div>
+                                    <div id="total-cost-content"></div>
+                                </div>
+                                
+                            `);
+
+                    // Initialize the Kendo TabStrip
+                    var tabStrip = $("#tabstrip-container-" + e.data.RebuiltStockNum).kendoTabStrip({
+                        animation: { open: { effects: "fadeIn" } },
+                        select: function (e) {
+                            var tabIndex = $(e.item).index(); // Get the index of the selected tab
+
+                            // Check for unsaved changes in the current tab
+                            var currentTabContent = tabStrip.contentElement(tabStrip.select().index());
+                            var currentGrid = $(currentTabContent).find(".k-grid").data("kendoGrid");
+
+                            if (currentGrid && (currentGrid.dataSource.hasChanges())) {
+                                // Show a warning notification
+                                if (notification) {
+                                    notification.show("You have unsaved changes. Click on Update or Cancel changes before clicking next tab.", "warning");
+                                } else {
+                                    console.error("Notification is not initialized.");
+                                }
+                                e.preventDefault(); // Prevent the tab switch
+                                return;
+                            }
+
+                            // Load the partial view content for the selected tab
+                            var tabUrl = tabIndex == 0 ? tabUrlLabourDetail :
+                                tabIndex == 1 ? tabUrlLabourHourSummary :
+                                    tabIndex == 2 ? tabUrlMaterialCostSummary :
+                                        tabIndex == 3 ? tabScPartDetail :
+                                            tabIndex == 4 ? tabUrlNscDetail :
+                                                tabIndex == 5 ? tabUrlRbPartDetail :
+                                                    tabUrlTotalCost;
+
+                            $.get(tabUrl)
+                                .done(function (data) {
+                                    $(e.contentElement).html(data);
+                                    kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
+
+                                    // Reset the hasChanges() state for read-only tabs
+                                    if (tabIndex === 6) { // Assuming the last tab is the read-only tab
+                                        var totalCostGrid = $(e.contentElement).find(".k-grid").data("kendoGrid");
+                                        notification.show("tabIndex === 6");
+                                        if (totalCostGrid) {
+                                            notification.show("inside totalCostGrid");
+                                            
+                                            totalCostGrid.dataSource.read(); // Refresh the data source
+                                            
+                                        }
+                                    }
+                                })
+                                .fail(function (xhr, status, error) {
+                                    console.error("Error loading tab content: ", error);
+                                    if (notification) {
+                                        notification.show("An error occurred while loading the tab content. Please try again.", "error");
+                                    } else {
+                                        console.error("Notification is not initialized.");
+                                    }
+                                });
+                        }
+                    }).data("kendoTabStrip");
+
+                    // Load the first tab's content
+                    $.get(tabUrlLabourDetail)
+                        .done(function (data) {
+                            $("#labour-details-content").html(data);
+                            kendo.init($("#labour-details-content")); // Reinitialize Kendo widgets
+                        })
+                        .fail(function (xhr, status, error) {
+                            console.error("Error loading initial tab content: ", error);
+                            if (notification) {
+                                notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
+                            } else {
+                                console.error("Notification is not initialized.");
+                            }
+                        });
+                });
+            }
+        });
+    </script>
+
+    <script id="template" type="text/x-kendo-template">
+        <div id="detail-template-#=RebuiltStockNum#"></div>
+    </script>
+
+    <script>
+        function dataBound() {
+            this.expandRow(this.tbody.find("tr.k-master-row").first());
+        }
+    </script>
+    <script>
+        function onArchiveClick(e) {
+            e.preventDefault(); // Prevent the default action
+
+            // Get the data item for the clicked row
+            var dataItem = this.dataItem($(e.currentTarget).closest("tr"));
+            var rebuiltNumber = dataItem.RebuiltStockNum;
+
+            // Call the controller action
+            $.post('@Url.Action("ArchiveDetails", "RebuiltParts")', { rebuiltPartNum: rebuiltNumber })
+                .done(function (data) {
+                    // Display a Kendo Notification
+                    var notification = $("#notification").kendoNotification({
+                        position: {
+                            pinned: true,
+                            top: 50,
+                            right: 50
+                        },
+                        autoHideAfter: 5000, // Hide after 5 seconds
+                        stacking: "down"
+                    }).data("kendoNotification");
+
+                    notification.show("Archive is clicked.", "info");
+                })
+                .fail(function (xhr, status, error) {
+                    console.error("Error archiving: ", error);
+                });
+        }
+    </script>
+}
