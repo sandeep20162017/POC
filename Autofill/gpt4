@@ -1,0 +1,79 @@
+You are Telerik UI ASp.NET Core expert.
+After making above changes in the below script, I am getting 
+console.error("AutoComplete widget not found for column:", columnName);
+Controller did get clled with proper column name and proper search. resultset was good. In UI I am getting no results found.
+Script : 
+<script>
+    // Define the onAdditionalData function
+    function onAdditionalData() {
+        var columnName = "TaskDescription"; // The ID of the input used for the editor
+        var autoCompleteWidget = $("#" + columnName).data("kendoAutoComplete"); // Retrieve the widget instance
+        console.log('autoCompleteWidget :')
+        console.log(autoCompleteWidget);
+        // Check if the widget is initialized and fetch the value
+         if (autoCompleteWidget) {
+            var searchText = autoCompleteWidget.value(); // Use value() to get the current input
+            console.log("Search Text:", searchText);
+            return {
+                columnName: columnName,
+                searchText: searchText
+            };
+        } else {
+            console.error("AutoComplete widget not found for column:", columnName);
+            return null;
+        }
+    }
+
+    // Ensure the AutoComplete widget is initialized
+    function onGridDataBound(e) {
+        // Trigger the onAdditionalData function after the grid is fully loaded
+        var additionalData = onAdditionalData();
+        console.log("Additional Data:", additionalData);
+    }
+</script>
+Controller :
+[HttpGet]
+public IActionResult GetAutoCompleteData(string columnName, string searchText)
+{
+  //  searchText = "AU";
+    // Validate inputs to prevent SQL injection
+    if (string.IsNullOrEmpty(columnName) || string.IsNullOrEmpty(searchText))
+    {
+        return BadRequest("Invalid parameters.");
+    }
+
+    // Combined mapping: Maps grid column names to SQL column names and table names
+    var combinedMapping = new Dictionary<string, (string SqlColumnName, string TableName)>
+    {
+        { "TaskDescription", ("TaskDescription", "[SBCES].[LabourTaskDescriptions]") }, // Grid column: TaskDescription, SQL column: TaskDescription, Table: [SBCES].[LabourTaskDescriptions]
+        { "OrigSupplierName", ("SupplierName", "Suppliers") },
+        { "KeyWord", ("Keyword", "Keywords") },
+        { "Description", ("PartDescription", "Descriptions") }
+    };
+
+    if (!combinedMapping.ContainsKey(columnName))
+    {
+        return BadRequest("Invalid column name.");
+    }
+
+    // Get the SQL column name and table name from the combined mapping
+    var mapping = combinedMapping[columnName];
+    var sqlColumnName = mapping.SqlColumnName;
+    var tableName = mapping.TableName;
+
+    // Example: Use Dapper to fetch data from the database
+    using (var connection = _dbConnection)
+    {
+        connection.Open();
+
+        // Dynamically construct the SQL query
+        var sql = $@"
+            SELECT DISTINCT {sqlColumnName} 
+            FROM {tableName} 
+            WHERE {sqlColumnName} LIKE   '" + searchText + "%' ";
+
+        var results = connection.Query<string>(sql, new { SearchText = searchText });
+        return Json(results.ToList());
+       // return results.Select(x => x.ToString());
+    }
+}
