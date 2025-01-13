@@ -1,0 +1,1993 @@
+You are ASP.NET core 8.0 expert and vast knowledge of Telerik (Kendo) ASP.NET Core controlls. Application is using MVC and dapper direct SQL calls. No services.
+Based on the following files, I want to save all the grid and sub grid details in excel. Make sure to add exception handling and comments in the code you generate. Reuse controoler functions. For SQL calls use transactions.Add additional buttons SAve to Excel and Email estimates along with Edit and Archieve for each row.
+Excel should have grid and subgrid (including Labour Details, Labour Hour, Materail cost, Material SC parts, Material NSC Parts, Material RB Parts, Ttal cost) details. When user clicks on Save Excel button, excel file will be saved for each row. When User clicks on Email estimates button, using company's email exchange server, email is sent to the recepient (my need UI to add recepient names, subject and predefined editable body) with at estimate attachment. Below is the view and mail controller. 
+Index.cshtml :
+@using BCES.Models.Parts
+@using BCES.Models.Common
+@model IEnumerable<BCES.Models.Parts.RebuiltPartsViewModel>
+
+@{
+    ViewData["Title"] = "Rebuilt Parts";
+}
+
+<h4>Rebuilt Parts</h4>
+
+@(Html.Kendo().Grid<RebuiltPartsViewModel>()
+    .Name("RebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.MmsStockCode).Title("MMS Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.DetailedDesc).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.JobNumber).Title("Job Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CorePartNum).Title("Core Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CoreCharge).Title("Core Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Bound(c => c.BuyNewCost).Title("Buy Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Bound(c => c.RemanCost).Title("Remanufactured Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+        columns.Command(command =>
+        {
+            command.Edit();
+            command.Custom("Archive").Click("onArchiveClick"); // Add a custom "Archive" button
+        }).Title("Actions");
+    })
+    .ToolBar(toolbar => { toolbar.Create(); })
+    .Editable(editable => editable.Mode(GridEditMode.InLine))
+    .Pageable()
+    .Sortable()
+    .ClientDetailTemplateId("template")
+    .Resizable(r => r.Columns(true))
+//    .Groupable(g => g.ShowFooter(false))
+    .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+   // .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.RbMasterlistId);
+            model.Field(c => c.RbMasterlistId);
+            model.Field(c => c.RebuiltStockNum).Editable(true);
+            model.Field(c => c.MmsStockCode).Editable(true);
+            model.Field(c => c.VehicleSeries).DefaultValue(new List<BCES.Models.Common.ListOfBusesModel>()).Editable(true);
+            model.Field(c => c.LabourDetailsRebuiltParts).DefaultValue(new List<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel>()).Editable(false);
+        })
+        .Read(read => read.Url(Url.Action("GetRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("AddRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+    )
+)
+
+<div id="estimates-container"></div>
+
+<!-- Add a placeholder for the notification -->
+<div id="notification"></div>
+@section Scripts {
+    <script>
+        $(document).ready(function () {
+            var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+
+            // Initialize Kendo Notification for displaying messages
+            var notificationElement = $("#notification");
+            if (notificationElement.length === 0) {
+                console.error("Notification element not found in the DOM.");
+            } else {
+                var notification = notificationElement.kendoNotification({
+                    position: {
+                        pinned: true,
+                        top: 50,
+                        right: 50
+                    },
+                    autoHideAfter: 5000, // Hide after 5 seconds
+                    stacking: "down"
+                }).data("kendoNotification");
+
+                // Bind the Save event for the grid
+                grid.bind("save", function (e) {
+                    // This event is triggered when the user clicks the Update button
+                    $.post('@Url.Action("UpdateRebuiltPartsView", "RebuiltParts")', { rebuiltPartNum: e.model.RebuiltStockNum })
+                        .done(function (data) {
+                            if (notification) {
+                                notification.show("Changes saved successfully!", "success");
+                            } else {
+                                console.error("Notification is not initialized.");
+                            }
+                        })
+                        .fail(function (xhr, status, error) {
+                            console.error("Error saving changes: ", error);
+                            if (notification) {
+                                notification.show("An error occurred while saving changes. Please try again.", "error");
+                            } else {
+                                console.error("Notification is not initialized.");
+                            }
+                        });
+                });
+
+                // Bind the Cancel event for the grid
+                grid.bind("cancel", function (e) {
+                    // This event is triggered when the user clicks the Cancel button
+                    $.post('@Url.Action("CancelDetails", "RebuiltParts")', { rebuiltPartNum: e.model.RebuiltStockNum })
+                        .done(function (data) {
+                            if (notification) {
+                                notification.show("Changes discarded!", "info");
+                            } else {
+                                console.error("Notification is not initialized.");
+                            }
+                        })
+                        .fail(function (xhr, status, error) {
+                            console.error("Error discarding changes: ", error);
+                            if (notification) {
+                                notification.show("An error occurred while discarding changes. Please try again.", "error");
+                            } else {
+                                console.error("Notification is not initialized.");
+                            }
+                        });
+                });
+
+                grid.bind("detailInit", function (e) {
+                    console.log("Detail initialization started for RebuiltStockNum: " + e.data.RebuiltStockNum);
+                    var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabScPartDetail = '@Url.Action("ScPartsUsedInRbParts", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlRbPartDetail = '@Url.Action("RbDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlTotalCost = '@Url.Action("TotalCostPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+
+                    // Get the container for the detail template
+                    var container = e.detailCell.find("#detail-template-" + e.data.RebuiltStockNum);
+
+                    // Load the TabStrip structure
+                    container.html(`
+                                <div id="tabstrip-container-${e.data.RebuiltStockNum}">
+                                    <ul>
+                                        <li class="k-state-active">Labour Details</li>
+                                        <li>Labour Hour</li>
+                                        <li>Material: Cost</li>
+                                        <li>Material: SC Parts</li>
+                                        <li>Material: NSC Parts</li>
+                                        <li>Material: RB Parts</li>
+                                        <li>Total Cost</li>
+                                    </ul>
+                                    <div id="labour-details-content"></div>
+                                    <div id="labour-hour-summary-content"></div>
+                                    <div id="material-cost-summary-content"></div>
+                                    <div id="material-details-content"></div>
+                                    <div id="nsc-details-content"></div>
+                                    <div id="rb-part-details-content"></div>
+                                    <div id="total-cost-content"></div>
+                                </div>
+                                
+                            `);
+
+                    // Initialize the Kendo TabStrip
+                    var tabStrip = $("#tabstrip-container-" + e.data.RebuiltStockNum).kendoTabStrip({
+                        animation: { open: { effects: "fadeIn" } },
+                        select: function (e) {
+                            var tabIndex = $(e.item).index(); // Get the index of the selected tab
+
+                            // Check for unsaved changes in the current tab
+                            var currentTabContent = tabStrip.contentElement(tabStrip.select().index());
+                            var currentGrid = $(currentTabContent).find(".k-grid").data("kendoGrid");
+
+                            if (currentGrid && (currentGrid.dataSource.hasChanges())) {
+                                // Show a warning notification
+                                if (notification) {
+                                    notification.show("You have unsaved changes. Click on Update or Cancel changes before clicking next tab.", "warning");
+                                } else {
+                                    console.error("Notification is not initialized.");
+                                }
+                                e.preventDefault(); // Prevent the tab switch
+                                return;
+                            }
+
+                            // Load the partial view content for the selected tab
+                            var tabUrl = tabIndex == 0 ? tabUrlLabourDetail :
+                                tabIndex == 1 ? tabUrlLabourHourSummary :
+                                    tabIndex == 2 ? tabUrlMaterialCostSummary :
+                                        tabIndex == 3 ? tabScPartDetail :
+                                            tabIndex == 4 ? tabUrlNscDetail :
+                                                tabIndex == 5 ? tabUrlRbPartDetail :
+                                                    tabUrlTotalCost;
+
+                            $.get(tabUrl)
+                                .done(function (data) {
+                                    $(e.contentElement).html(data);
+                                    kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
+
+                                    // Reset the hasChanges() state for read-only tabs
+                                    if (tabIndex === 6) { // Assuming the last tab is the read-only tab
+                                        var totalCostGrid = $(e.contentElement).find(".k-grid").data("kendoGrid");
+                                        notification.show("tabIndex === 6");
+                                        if (totalCostGrid) {
+                                            notification.show("inside totalCostGrid");
+                                            
+                                            totalCostGrid.dataSource.read(); // Refresh the data source
+                                            
+                                        }
+                                    }
+                                })
+                                .fail(function (xhr, status, error) {
+                                    console.error("Error loading tab content: ", error);
+                                    if (notification) {
+                                        notification.show("An error occurred while loading the tab content. Please try again.", "error");
+                                    } else {
+                                        console.error("Notification is not initialized.");
+                                    }
+                                });
+                        }
+                    }).data("kendoTabStrip");
+
+                    // Load the first tab's content
+                    $.get(tabUrlLabourDetail)
+                        .done(function (data) {
+                            $("#labour-details-content").html(data);
+                            kendo.init($("#labour-details-content")); // Reinitialize Kendo widgets
+                        })
+                        .fail(function (xhr, status, error) {
+                            console.error("Error loading initial tab content: ", error);
+                            if (notification) {
+                                notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
+                            } else {
+                                console.error("Notification is not initialized.");
+                            }
+                        });
+                });
+            }
+        });
+    </script>
+
+    <script id="template" type="text/x-kendo-template">
+        <div id="detail-template-#=RebuiltStockNum#"></div>
+    </script>
+
+    <script>
+        function dataBound() {
+            this.expandRow(this.tbody.find("tr.k-master-row").first());
+        }
+    </script>
+    <script>
+               function onArchiveClick(e) {
+            e.preventDefault(); // Prevent the default action
+
+            // Get the data item for the clicked row
+            var dataItem = this.dataItem($(e.currentTarget).closest("tr"));
+
+            // Call the controller action with the entire dataItem as JSON
+            $.ajax({
+                url: '@Url.Action("ArchiveDetails", "RebuiltParts")',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(dataItem),
+                success: function (data) {
+                    // Display a Kendo Notification
+                    var notification = $("#notification").kendoNotification({
+                        position: {
+                            pinned: true,
+                            top: 50,
+                            right: 50
+                        },
+                        autoHideAfter: 5000, // Hide after 5 seconds
+                        stacking: "down"
+                    }).data("kendoNotification");
+
+                    notification.show("Archive is clicked.", "info");
+                },
+                error: function (xhr, status, error) {
+                    console.error("Error archiving: ", error);
+                }
+            });
+        }
+
+    </script>
+}
+RebuiltPartsController.cs :
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
+using DataSourceRequest = Kendo.Mvc.UI.DataSourceRequest;
+using BCES.Data;
+using Telerik.SvgIcons;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using BCES.Controllers.Base;
+using BCES.Models.Parts;
+using BCES.Models.Common;
+using BCES.Models.Parts;
+
+using Newtonsoft.Json.Linq;
+using static System.Net.Mime.MediaTypeNames;
+using Azure.Core;
+using BCES.Controllers.Admin;
+//using CES.Views.Shared;
+namespace BCES.Controllers
+{
+  // [Route("api/[controller]")]
+    public class RebuiltPartsController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+        public RebuiltPartsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet("RebuiltPartsIndex")]
+        public IActionResult RebuiltPartsIndex()
+        {
+            // return View();
+            return View("~/Views/Parts/RebuiltParts/Index.cshtml");
+        }
+
+        // POST: NscPartsUsed/GetNscPartsUsedView
+        [HttpGet]
+        public async Task<ActionResult> GetRebuiltPartsView([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid (you can use Dapper or any other method)
+            var model = await GetRebuiltPartsData();
+            return Json(model.ToDataSourceResult(request));
+        }
+
+        private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData()
+        {
+            try
+            {
+                var query = @"
+                            SELECT rbm.RbMasterlistId,
+                            rbm.[RebuiltStockNum],
+                            rbm.[MmsStockCode],
+                            rbm.[Keyword],
+                            rbm.JobNumber,
+                            rbm.[CorePartNum],
+                            rbm.[DetailedDesc],
+                            rbm.[CoreCharge],
+                            rbm.[EstimatedCost],
+                            rbm.[BuyNewCost],
+                            rbm.[RemanCost],
+                            rbm.[ExternalCost],
+                            lb.ListId,
+                            lb.Description AS Description,
+		                    EL.LabourDefn AS [LabourType],
+                            el.LinkNumber,
+                            el.[CostCentre] as CC,
+		                    el.[Usage],
+		                    el.[TimeAddition]
+                                FROM [SBCES].[RbMasterlist] rbm
+                                INNER JOIN [SBCES].[RbListOfBuses] rlb ON rlb.[RebuiltStockNum] = rbm.[RebuiltStockNum]
+                                INNER JOIN [SBCES].[ListOfBuses] lb ON rlb.ListId = lb.ListId
+                                left join [SBCES].[EmployeeLabour] el ON el.[LinkNumber] = rbm.[RebuiltStockNum]";
+
+                var rbParts = _dbConnection.Query<RebuiltPartsViewModel, ListOfBusesModel, LabourDetailsRebuiltPartsViewModel, RebuiltPartsViewModel>(
+                    query,
+                    (rbPart, vehicle, labourDetail) =>
+                    {
+                        rbPart.VehicleSeries.Add(vehicle);
+                        if (labourDetail != null)
+                        {
+                            rbPart.LabourDetailsRebuiltParts.Add(labourDetail);
+                        }
+                        return rbPart;
+                    },
+                    splitOn: "ListId,LinkNumber"
+                ).GroupBy(rbPart => rbPart.RbMasterlistId).Select(g =>
+                {
+                    var groupedRbPart = g.First();
+                    groupedRbPart.VehicleSeries = g.SelectMany(rbPart => rbPart.VehicleSeries).Distinct().ToList();
+                    groupedRbPart.LabourDetailsRebuiltParts = g.SelectMany(rbPart => rbPart.LabourDetailsRebuiltParts).Distinct().ToList();
+                    return groupedRbPart;
+                }).ToList();
+
+                return rbParts;
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+
+        //private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData()
+        //{
+        //    try
+        //    {
+        //        var query = @"   
+        //    SELECT rbm.RbMasterlistId,
+        //           rbm.[RebuiltStockNum],
+        //           rbm.[MmsStockCode],
+        //           rbm.[Keyword],
+        //           rbm.JobNumber,
+        //           rbm.[CorePartNum],
+        //           rbm.[DetailedDesc],
+        //           rbm.[CoreCharge],
+        //           rbm.[EstimatedCost],
+        //           rbm.[BuyNewCost],
+        //           rbm.[RemanCost],
+        //           rbm.[ExternalCost],
+        //           lb.ListId,
+        //           lb.Description AS Description,
+        //           el.[LabourDefn]
+        //    FROM [SBCES].[RbMasterlist] rbm
+        //    INNER JOIN [SBCES].[RbListOfBuses] rlb ON rlb.[RebuiltStockNum] = rbm.[RebuiltStockNum]
+        //    INNER JOIN [SBCES].[ListOfBuses] lb ON rlb.ListId = lb.ListId
+        //    left join [SBCES].[EmployeeLabour] el ON el.[LinkNumber] = rbm.[RebuiltStockNum]";
+
+        //        var rbParts = _dbConnection.Query<RebuiltPartsViewModel, ListOfBusesModel, RebuiltPartsViewModel>(
+        //            query,
+        //            (rbPart, vehicle) =>
+        //            {
+        //                rbPart.VehicleSeries.Add(vehicle);
+        //                return rbPart;
+        //            },
+        //            splitOn: "ListId"
+        //        ).GroupBy(rbPart => rbPart.RbMasterlistId).Select(g =>
+        //        {
+        //            var groupedRbPart = g.First();
+        //            groupedRbPart.VehicleSeries = g.SelectMany(rbPart => rbPart.VehicleSeries).ToList();
+        //            return groupedRbPart;
+        //        }).ToList();
+
+        //        return rbParts;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        return null;
+        //    }
+
+        //}
+
+        [HttpPost]
+        public async Task<IActionResult> AddRebuiltPartsView([DataSourceRequest] DataSourceRequest request, RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+            try
+            {
+
+                //if (rebuiltPartsViewModel.RbMasterlistId <= 0)
+                //{
+                //    ModelState.AddModelError("RbMasterlistId", "Please select a valid rebuit part.");
+                //    return Json(new[] { rebuiltPartsViewModel }.ToDataSourceResult(request, ModelState));
+                //}
+                             
+
+                var userId = await AddRebuiltPartAsync(rebuiltPartsViewModel);
+
+
+                return RedirectToAction("Index");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while adding Rebuilt Part.");
+            }
+        }
+
+        private async Task<int> AddRebuiltPartAsync(RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+
+            // Start a transaction
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Commit the transaction
+                    transaction.Commit();
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of any error
+                    transaction.Rollback();
+                    // Handle or log the exception
+                    throw new Exception("Failed to add rebuilt part.", ex);
+                }
+            }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> UpdateRebuiltPartsView([DataSourceRequest] DataSourceRequest request, RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+            try
+            {               
+                var userId = await UpdateRebuiltPartsView(rebuiltPartsViewModel);
+                return RedirectToAction("Index");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while adding Rebuilt Part.");
+            }
+        }
+
+        private async Task<int> UpdateRebuiltPartsView(RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+
+            // Start a transaction
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Commit the transaction
+                    transaction.Commit();
+
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of any error
+                    transaction.Rollback();
+                    // Handle or log the exception
+                    throw new Exception("Failed to update rebuilt part.", ex);
+                }
+            }
+        }
+
+        public IActionResult LabourDetailsPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<LabourDetailsRebuiltPartsViewModel> { };
+            return PartialView("_LabourDetailsRebuiltParts", model);
+        }
+
+        public IActionResult ScPartsUsedInRbParts([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.StockCodedPartsViewModel> { };
+
+            return PartialView("_ScPartsUsedInRbParts", model);
+           
+        }
+
+        public IActionResult LabourHourSummaryPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel> { };  
+            return PartialView("_LabourHourSummaryRbParts", model);           
+        }
+
+        public IActionResult MaterialCostSummaryPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.MaterialCostSummaryInRbViewModel> { };
+            return PartialView("_MaterialCostSummaryinRbParts", model);
+        }
+        public IActionResult NscDetailsPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.NscPartsUsedViewModel> { };
+
+            return PartialView("_NscPartsUsedInRbParts", model);
+
+        }
+
+        public IActionResult RbDetailsPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.RebuiltPartsViewModel> { };
+            return PartialView("_RbPartsUsedInRbParts", model);
+        }
+
+        public IActionResult TotalCostPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.TotalCostInRbModel> { };
+            return PartialView("_TotalCostInRbParts", model);
+        }
+
+        [HttpPost]
+        public IActionResult SaveDetails()
+        {
+            // Save logic here
+            return Json(new { success = true, message = "Save Details successfully." });
+        }
+
+       
+        [HttpPost]
+        public IActionResult CancelDetails(int rebuiltPartNum)
+        {
+            try
+            {
+                // Return a success response
+                return Json(new { success = true, message = "Changes discarded successfully." });
+            }
+            catch (Exception ex)
+            {
+                
+                return Json(new { success = false, message = "An error occurred while discarding changes. Please try again." });
+            }
+        }
+
+        //[HttpGet]
+        //public async Task<IActionResult> ReadVehicles([DataSourceRequest] DataSourceRequest request)
+        //{
+        //    var sites = await GetVehicles();
+        //    return Json(sites);
+        //}
+
+        //private async Task<IEnumerable<ListOfBusesModel>> GetVehicles()
+        //{
+        //    var query = "SELECT ListId, Description FROM SBCES.ListOfBuses";
+        //    var vehicles = await _dbConnection.QueryAsync<ListOfBusesModel>(query);
+        //    return vehicles.ToList();
+
+        //}
+
+        //[HttpPost]
+        //public async Task<IActionResult> GetSelectedVehicles([FromBody] dynamic data)
+        //{
+        //    var sites = data?.sites?.ToObject<List<string>>() ?? Enumerable.Empty<string>();
+        //   // _selectedSites = sites;
+        //    var viewModel = new UserViewModel { SelectedSites = sites };
+        //    return Json(viewModel);
+        //}
+
+        
+
+       
+        [HttpPost("ArchiveDetails")]
+        public IActionResult ArchiveDetails([FromBody] RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+            try
+            {
+               
+                // Return a success response
+                return Json(new { success = true, message = "Archiving rebuilt part number: {RebuiltPartNum}", rebuiltPartsViewModel.RebuiltStockNum });
+            }
+            catch (Exception ex)
+            {                
+                return Json(new { success = false, message = "An error occurred while archiving. Please try again." });
+            }
+        }
+        
+
+        
+
+        //[HttpPost]
+        //public IActionResult Create(RebuiltPartsViewModel model)
+        //{
+        //    //using (var connection = new SqlConnection(_connectionString))
+        //    //{
+        //    //    var sql = @"INSERT INTO RebuiltParts (StockCode, Description, Keyword, JobNumber, MMSBuyCode, CoreCost, SOPNumber, BuyCost, RemanufacturedCost, IsActive) 
+        //    //                VALUES (@StockCode, @Description, @Keyword, @JobNumber, @MMSBuyCode, @CoreCost, @SOPNumber, @BuyCost, @RemanufacturedCost, @IsActive)";
+        //    //    connection.Execute(sql, model);
+        //    //}
+        //    return RedirectToAction("Index");
+        //}
+
+        //[HttpPost]
+        //public IActionResult Update(RebuiltPartsViewModel model)
+        //{
+        //    using (var connection = new SqlConnection(_connectionString))
+        //    {
+        //        //var sql = @"UPDATE RebuiltParts 
+        //        //            SET Description = @Description, Keyword = @Keyword, JobNumber = @JobNumber, MMSBuyCode = @MMSBuyCode,
+        //        //                CoreCost = @CoreCost, SOPNumber = @SOPNumber, BuyCost = @BuyCost, RemanufacturedCost = @RemanufacturedCost, IsActive = @IsActive
+        //        //            WHERE StockCode = @StockCode";
+        //       //connection.Execute(sql, model);
+        //    }
+        //    return RedirectToAction("Index");
+        //}
+
+       
+    }
+}
+LabourDetailsController.cs:
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+
+
+namespace BCES.Controllers.Parts
+{
+    public class LabourDetailsController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public LabourDetailsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult> GetLabourDetails([DataSourceRequest] DataSourceRequest request, [FromQuery] string rebuiltPartNum)
+        {
+            // Fetch data for the grid
+            
+            if (string.IsNullOrEmpty(rebuiltPartNum))
+            {
+                return BadRequest("rebuiltPartNum is required.");
+            }
+
+            // Fetch data for the grid using the rebuiltPartNum
+            var model = await GetLabourDetailsData(rebuiltPartNum);
+            return Json(model.ToDataSourceResult(request));
+          
+        }
+
+        private async Task<IEnumerable<LabourDetailsRebuiltPartsViewModel>> GetLabourDetailsData(string RebuiltPartNum) 
+        {
+            try
+            {
+                var query = @"
+                             DECLARE @RebuiltPartNumber VARCHAR(30) = '"+ RebuiltPartNum + "'" +
+                             @"
+                            -- Declare variables for LinkCode and LinkType
+                            DECLARE @LinkCode VARCHAR(30);
+                            DECLARE @LinkType VARCHAR(5);
+
+                            PRINT @LinkCode
+                            PRINT @LinkType
+                            -- Retrieve LinkCode and LinkType
+                            PRINT 'Retrieving LinkCode and LinkType...';
+                            SELECT DISTINCT 
+                                @LinkCode = LinkCode,
+                                @LinkType = LinkType
+                            FROM 
+                                [SBCES].[ScPartsUsed]
+                            WHERE 
+                                LinkCode = @RebuiltPartNumber;
+
+                            -- If not found in ScPartsUsed, check NScPartsUsed
+                            IF @LinkCode IS NULL
+                            BEGIN
+                                SELECT DISTINCT 
+                                    @LinkCode = LinkCode,
+                                    @LinkType = LinkType
+                                FROM 
+                                    [SBCES].[NScPartsUsed]
+                                WHERE 
+                                    LinkCode = @RebuiltPartNumber;
+                            END
+
+                            PRINT 'LinkCode: ' + ISNULL(@LinkCode, 'Not Found');
+                            PRINT 'LinkType: ' + ISNULL(@LinkType, 'Not Found');
+
+                            -- Check if LinkCode and LinkType were found
+                            IF @LinkCode IS NULL OR @LinkType IS NULL
+                            BEGIN
+                                PRINT 'Error: LinkCode or LinkType not found for RebuiltPartNumber: ' + @RebuiltPartNumber;
+                                RETURN;
+                            END
+
+                            -- Section 1: Labour Details
+                            PRINT 'Fetching Labour Details...';
+                            SELECT 
+                                EL.LabourDefn AS [LabourType],
+                                EL.CostCentre AS [CC],
+                                EL.Task AS [Task],
+                                REPLACE(EL.Usage, ',', '.') AS [Usage],
+                                EL.HrsReqd AS [Time],
+                                ES.RatePerHour AS [RATE PER HOUR],
+                                EL.TimeAddition AS [TIME ADDITION]
+                            FROM 
+                                SBCES.EmployeeLabour EL
+                                JOIN SBCES.EmplClass EC ON EL.LabourDefn = UPPER(EC.LabourDefn)
+                                JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
+                            WHERE 
+                                EL.LinkNumber = @LinkCode
+                                AND EL.TypeId = @LinkType;
+
+                            PRINT 'Labour Details fetched successfully.';
+                                 ";
+
+                return await _dbConnection.QueryAsync<LabourDetailsRebuiltPartsViewModel>(query);               
+               
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+
+            [HttpPost]
+        public IActionResult CreateLabourDetail([DataSourceRequest] DataSourceRequest request, LabourDetailsRebuiltPartsViewModel model)
+        {
+            if (ModelState.IsValid)
+            {
+                model.DateRevised = DateTime.Now; // Example: auto-update the revised date
+               // _data.Add(model);
+            }
+            return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+        }
+
+        [HttpPost]
+        public IActionResult UpdateLabourDetail([DataSourceRequest] DataSourceRequest request, LabourDetailsRebuiltPartsViewModel model)
+        {
+            //if (ModelState.IsValid)
+            //{
+            //    var existing = _data.FirstOrDefault(m => m.LabourType == model.LabourType);
+            //    if (existing != null)
+            //    {
+            //        existing.CC = model.CC;
+            //        existing.Task = model.Task;
+            //        existing.Usage = model.Usage;
+            //        existing.Time = model.Time;
+            //        existing.WrenchTime = model.WrenchTime;
+            //        existing.DateRevised = model.DateRevised;
+            //    }
+            //}
+            //return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+            return null;
+        }
+
+        [HttpPost]
+        public IActionResult DeleteLabourDetail([DataSourceRequest] DataSourceRequest request, LabourDetailsRebuiltPartsViewModel model)
+        {
+            //var existing = _data.FirstOrDefault(m => m.LabourType == model.LabourType);
+            //if (existing != null)
+            //{
+            //    _data.Remove(existing);
+            //}
+            //return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+            return null;
+        }
+    }
+}
+LabourHourSummaryInRbPartsController.cs :
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+
+
+namespace BCES.Controllers.Parts
+{
+    public class LabourHourSummaryInRbPartsController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public LabourHourSummaryInRbPartsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult> GetLabourHourSummaryInRbParts([DataSourceRequest] DataSourceRequest request, [FromQuery] string rebuiltPartNum)
+        {
+            // Fetch data for the grid
+
+            if (string.IsNullOrEmpty(rebuiltPartNum))
+            {
+                return BadRequest("rebuiltPartNum is required.");
+            }
+
+            // Fetch data for the grid using the rebuiltPartNum
+            var model = await GetLabourHourSummaryInRbPartsData(rebuiltPartNum);
+            return Json(model.ToDataSourceResult(request));
+
+        }
+
+        private async Task<IEnumerable<LabourDetailsRebuiltPartsViewModel>> GetLabourHourSummaryInRbPartsData(string RebuiltPartNum)
+        {
+            try
+            {
+
+                var query = @"
+                             DECLARE @RebuiltPartNumber VARCHAR(30) = '" + RebuiltPartNum + "'" +
+                             @"
+                            -- Declare variables for LinkCode and LinkType
+                            DECLARE @LinkCode VARCHAR(30);
+                            DECLARE @LinkType VARCHAR(5);
+
+                            PRINT @LinkCode
+                            PRINT @LinkType
+                            -- Retrieve LinkCode and LinkType
+                            PRINT 'Retrieving LinkCode and LinkType...';
+                            SELECT DISTINCT 
+                                @LinkCode = LinkCode,
+                                @LinkType = LinkType
+                            FROM 
+                                [SBCES].[ScPartsUsed]
+                            WHERE 
+                                LinkCode = @RebuiltPartNumber;
+
+                            -- If not found in ScPartsUsed, check NScPartsUsed
+                            IF @LinkCode IS NULL
+                            BEGIN
+                                SELECT DISTINCT 
+                                    @LinkCode = LinkCode,
+                                    @LinkType = LinkType
+                                FROM 
+                                    [SBCES].[NScPartsUsed]
+                                WHERE 
+                                    LinkCode = @RebuiltPartNumber;
+                            END
+
+                            PRINT 'LinkCode: ' + ISNULL(@LinkCode, 'Not Found');
+                            PRINT 'LinkType: ' + ISNULL(@LinkType, 'Not Found');
+
+                            -- Check if LinkCode and LinkType were found
+                            IF @LinkCode IS NULL OR @LinkType IS NULL
+                            BEGIN
+                                PRINT 'Error: LinkCode or LinkType not found for RebuiltPartNumber: ' + @RebuiltPartNumber;
+                                RETURN;
+                            END
+
+                                SELECT 
+                                    CostCentre AS CC,
+                                    -- Sum of HrsReqd (converted to minutes) and then to HH:MM format
+                                    SBCES.DecimalMinutesToHhmm(
+                                        SUM(
+                                            CASE 
+                                                -- Handle decimal values (e.g., ""2.00"", ""4.00"")
+                                                WHEN CHARINDEX(':', HrsReqd) = 0 THEN 
+                                                    TRY_CAST(HrsReqd AS DECIMAL(10, 2)) * 60 -- Convert hours to minutes
+
+                                                -- Handle HH:MM format (e.g., ""10:35"")
+                                                ELSE 
+                                                    TRY_CAST(LEFT(HrsReqd, CHARINDEX(':', HrsReqd) - 1) AS INT) * 60 + -- Hours to minutes
+                                                    TRY_CAST(SUBSTRING(HrsReqd, CHARINDEX(':', HrsReqd) + 1, LEN(HrsReqd)) AS INT) -- Add minutes
+                                            END
+                                        )
+                                    ) AS LabourHours
+                                FROM 
+                                    SBCES.EmployeeLabour
+                                WHERE 
+                                    LinkNumber = @LinkCode
+                                    AND TypeId = @LinkType
+                                GROUP BY 
+                                    CostCentre;
+
+                                ";
+
+                return await _dbConnection.QueryAsync<LabourDetailsRebuiltPartsViewModel>(query);
+
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+    }
+}
+MaterialCostSummaryInRbPartsController.cs :
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+
+namespace CES.Controllers.Parts
+{
+    public class MaterialCostSummaryInRbPartsController : BaseController
+    {
+        
+            private readonly DapperContext _db;
+            private readonly IDbConnection _dbConnection;
+            private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+            public MaterialCostSummaryInRbPartsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+            {
+                _db = dapper;
+                _dbConnection = _db.CreateConnection();
+
+                _httpContextAccessor = httpContextAccessor;
+            }
+
+            [HttpGet]
+            public async Task<ActionResult> GetMaterialCostSummaryInRbParts([DataSourceRequest] DataSourceRequest request, [FromQuery] string rebuiltPartNum)
+            {
+                // Fetch data for the grid
+                
+                if (string.IsNullOrEmpty(rebuiltPartNum))
+                {
+                    return BadRequest("rebuiltPartNum is required.");
+                }
+
+                // Fetch data for the grid using the rebuiltPartNum
+                var model = await GetMaterialCostSummaryInRbPartsData(rebuiltPartNum);
+                return Json(model.ToDataSourceResult(request));
+                
+            }
+
+            private async Task<IEnumerable<MaterialCostSummaryInRbViewModel>> GetMaterialCostSummaryInRbPartsData(string RebuiltPartNum)
+            {
+                try
+                {
+                    var query = @"
+                             DECLARE @RebuiltPartNumber VARCHAR(30) = '" + RebuiltPartNum + "'" +
+                                 @"
+                            -- Declare variables for LinkCode and LinkType
+                            DECLARE @LinkCode VARCHAR(30);
+                            DECLARE @LinkType VARCHAR(5);
+
+                            PRINT @LinkCode
+                            PRINT @LinkType
+                            -- Retrieve LinkCode and LinkType
+                            PRINT 'Retrieving LinkCode and LinkType...';
+                            SELECT DISTINCT 
+                                @LinkCode = LinkCode,
+                                @LinkType = LinkType
+                            FROM 
+                                [SBCES].[ScPartsUsed]
+                            WHERE 
+                                LinkCode = @RebuiltPartNumber;
+
+                            -- If not found in ScPartsUsed, check NScPartsUsed
+                            IF @LinkCode IS NULL
+                            BEGIN
+                                SELECT DISTINCT 
+                                    @LinkCode = LinkCode,
+                                    @LinkType = LinkType
+                                FROM 
+                                    [SBCES].[NScPartsUsed]
+                                WHERE 
+                                    LinkCode = @RebuiltPartNumber;
+                            END
+
+                            PRINT 'LinkCode: ' + ISNULL(@LinkCode, 'Not Found');
+                            PRINT 'LinkType: ' + ISNULL(@LinkType, 'Not Found');
+
+                            -- Check if LinkCode and LinkType were found
+                            IF @LinkCode IS NULL OR @LinkType IS NULL
+                            BEGIN
+                                PRINT 'Error: LinkCode or LinkType not found for RebuiltPartNumber: ' + @RebuiltPartNumber;
+                                RETURN;
+                            END
+
+                            SELECT 
+                                ISNULL(C.Name, 'NONE') AS AssemblyArea,
+                                ISNULL(A.CostCentre, '0') AS CostCentre,
+                                SUM(CAST(A.Cost AS DECIMAL(18, 2))) AS TotalCost,
+                                SUM(CAST(A.TaxCost AS DECIMAL(18, 2))) AS TaxableCost
+                            FROM (
+                                -- Stock-coded parts
+                               SELECT CostCentre, 
+                                      (CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL (18,2)) - CAST(SBCES.FinalCost(PercentUsage, QtyReqd, Corecost, 0) AS DECIMAL(18,2)))  AS Cost, 
+                                       CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS Taxcost 
+                                FROM SBCES.ScPartsUsed 
+                                WHERE 
+                                    LinkCode = @LinkCode
+                                    AND RebuiltPart = 'N'
+                                    AND LinkType = @LinkType
+
+                                UNION ALL
+
+                                -- Non-stock-coded parts
+	                            SELECT NSCPartsUsed.CostCentre, 
+                                      (CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NSCPartsUsed.Cost, 0) AS DECIMAL (18,2)) - CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NSCPartsUsed.Corecost, 0) AS DECIMAL(18,2)))  AS Cost, 
+                                       CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NSCPartsUsed.Cost, 0) AS DECIMAL(18, 2)) AS Taxcost 
+                                FROM SBCES.NSCPartsUsed 
+    
+                                    JOIN SBCES.NonStockCodedParts ON NSCPartsUsed.Id = NonStockCodedParts.Id
+                                WHERE 
+                                    NSCPartsUsed.LinkCode = @LinkCode
+                                    AND NSCPartsUsed.LinkType = @LinkType
+                            ) A
+                            JOIN SBCES.CostCentres C ON A.CostCentre = C.CostCentre
+                            GROUP BY 
+                                A.CostCentre, C.Name;
+                                 ";
+
+                    return await _dbConnection.QueryAsync<MaterialCostSummaryInRbViewModel>(query);
+
+                }
+                catch (Exception ex)
+                {
+                    return null;
+                }
+            }
+
+        }
+    }
+
+NscPartsUsedController.cs :
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
+using DataSourceRequest = Kendo.Mvc.UI.DataSourceRequest;
+using BCES.Data;
+using Telerik.SvgIcons;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using BCES.Controllers.Base;
+using BCES.Models.Parts;
+using BCES.Models.Common;
+using Newtonsoft.Json.Linq;
+using static System.Net.Mime.MediaTypeNames;
+
+namespace BCES.Controllers.Parts
+{
+
+    //[Route("NscPartsUsed")]
+    public class NscPartsUsedController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public NscPartsUsedController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+        // GET: NscPartsUsed/Index
+        [HttpGet("NscPartsUsedIndex")]
+        public IActionResult NscPartsUsedIndex()
+        {
+          // return View();
+           return View("~/Views/Parts/NonStockCodedParts/Index.cshtml");
+        }
+
+        // POST: NscPartsUsed/GetNscPartsUsedView
+        [HttpGet]
+        public async Task<ActionResult> GetNscPartsUsedView([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid
+            var model = await GetNscPartsUsedData();
+            return Json(model.ToDataSourceResult(request));
+        }
+
+        // POST: NscPartsUsed/CreateNscPartsUsed
+       [HttpPost]
+       
+        public async Task<IActionResult> CreateNscPartsUsed([DataSourceRequest] DataSourceRequest request, [FromForm] NscPartsUsedViewModel nscPartsUsed)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            try
+            {
+                var insertQuery = String.Format(@"
+                INSERT INTO SBCES.NscPartsUsed (OrigSuppNum, OrigSupplierName,CoreCost, Description, Keyword)
+                VALUES ('{0}', '{1}', {2}, '{3}', '{4}')",
+                    nscPartsUsed.OrigSuppNum,
+                                  nscPartsUsed.OrigSupplierName,
+                                  nscPartsUsed.CoreCost,
+                                  nscPartsUsed.Description,
+                                   nscPartsUsed.KeyWord
+                     );
+
+                var tt = insertQuery;
+                await _dbConnection.ExecuteAsync(insertQuery, nscPartsUsed);
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while updating the Non Stock Coded Part.");
+            }
+            
+        }
+
+        
+        [HttpPost]
+        public async Task<IActionResult> UpdateNscPartsUsed([DataSourceRequest] DataSourceRequest request, [FromForm] NscPartsUsedViewModel nscPartsUsed)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+                var tt = nscPartsUsed.KeyWord;
+                var tt2 = nscPartsUsed.NscPartsUsedId;
+                string updateQuery = string.Format(@" UPDATE SBCES.NscPartsUsed 
+                   SET   
+                    OrigSuppNum = '{0}', 
+                    OrigSupplierName = '{1}',
+                    CoreCost= {2},
+                    Description =  '{3}',
+                    Keyword = '{4}'
+                    
+                WHERE 
+                    NscPartsUsedId = {5}", nscPartsUsed.OrigSuppNum, 
+                              nscPartsUsed.OrigSupplierName, 
+                              nscPartsUsed.CoreCost,  
+                              nscPartsUsed.Description, 
+                              @nscPartsUsed.KeyWord, 
+                              nscPartsUsed.NscPartsUsedId
+                              );
+                
+                tt = updateQuery;
+
+                await _dbConnection.ExecuteAsync(updateQuery, nscPartsUsed);
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while updating the Non Stock Coded Part.");
+            }
+            
+        }
+
+        // DELETE: NscPartsUsed/DeleteNscPartsUsed/{id}
+      //  [HttpDelete("{id}")]
+        [HttpPost]
+        public async Task<IActionResult> DeleteNscPartsUsed([DataSourceRequest] DataSourceRequest request, NscPartsUsedViewModel nscPartsUsed)
+        {
+            try
+            {
+                var deleteQuery = String.Format(@"
+                DELETE FROM SCES.NscPartsUsed
+                WHERE NscPartsUsedId  = {0}", nscPartsUsed.NscPartsUsedId);
+
+
+                await _dbConnection.ExecuteAsync(deleteQuery, nscPartsUsed);
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while deleting the Non Stock Coded Part.");
+            }
+           
+        }
+
+        private async Task<IEnumerable<NscPartsUsedViewModel>> GetNscPartsUsedData()
+        {
+            try
+            {
+                var query = @"
+                SELECT 
+                    nspu.NscPartsUsedId,
+                    nspu.OrigSuppNum,
+                    nspu.OrigSupplierName,
+                   
+                    nspu.CoreCost,
+                    nspu.Description,
+                    nspu.Keyword
+                FROM 
+                    SCES.NscPartsUsed nspu;";
+
+
+                return await _dbConnection.QueryAsync<NscPartsUsedViewModel>(query);
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+            
+        }
+
+        //Logic for POP up template        
+        public async Task<ActionResult> GetSupplierNames()
+        {
+            var suppliers = await GetSupplierNamesFromDatabase();
+
+            return Json(suppliers);
+        }
+        private async Task<IEnumerable<AutoCompleteSelectionModel>> GetSupplierNamesFromDatabase()
+       {
+            var query = @"WITH SupplierNamesCTE AS(SELECT DISTINCT[OrigSupplierName]  FROM[SCES].[NscPartsUsed])
+                                ,SupplierNamesWithRowNumber AS( SELECT ROW_NUMBER() OVER(ORDER BY OrigSupplierName) AS Value
+                                , OrigSupplierName AS Text FROM SupplierNamesCTE) SELECT Value, Text FROM SupplierNamesWithRowNumber";
+            
+            var supplierNames =  await  _dbConnection.QueryAsync<AutoCompleteSelectionModel>(query);
+            return supplierNames.ToList();
+            
+        }
+
+        [HttpGet]
+        public async Task<ActionResult> GetSupplierNumbers()
+        {
+            try
+            {
+                var supplierNumbers = await GetSupplierNumbersFromDatabase();
+                return Json(supplierNumbers);
+            }
+            catch (Exception ex)
+            {
+              
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        private async Task<IEnumerable<AutoCompleteSelectionModel>> GetSupplierNumbersFromDatabase()
+        {
+
+            var query = @"WITH SupplierNamesCTE AS(SELECT DISTINCT[OrigSuppNum]  FROM[SCES].[NscPartsUsed])
+                                ,SupplierNamesWithRowNumber AS( SELECT ROW_NUMBER() OVER(ORDER BY OrigSuppNum) AS Value
+                                , OrigSuppNum AS Text FROM SupplierNamesCTE) SELECT Value, Text FROM SupplierNamesWithRowNumber";
+
+            var supplierNumbers = await _dbConnection.QueryAsync<AutoCompleteSelectionModel>(query);
+            return supplierNumbers.ToList();
+           
+
+        }
+
+        [HttpGet]
+        public async Task<ActionResult> GetKeywords()
+        {
+            try
+            {
+                var keywords = await GetKeywordsFromDatabase();
+                return Json(keywords);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        private async Task<IEnumerable<AutoCompleteSelectionModel>> GetKeywordsFromDatabase()
+        {
+            var query = @"WITH SupplierNamesCTE AS(SELECT DISTINCT[KeyWord]  FROM[SCES].[NscPartsUsed])
+                                ,SupplierNamesWithRowNumber AS( SELECT ROW_NUMBER() OVER(ORDER BY KeyWord) AS Value
+                                , KeyWord AS Text FROM SupplierNamesCTE) SELECT Value, Text FROM SupplierNamesWithRowNumber";
+
+            var keywords = await _dbConnection.QueryAsync<AutoCompleteSelectionModel>(query);
+            return keywords.ToList();          
+
+        }
+
+        [HttpGet]
+        public async Task<ActionResult> GetPartDescriptions()
+        {
+            try
+            {
+                var partDescriptions = await GetPartDescriptionsFromDatabase();
+           return Json(partDescriptions);
+            }
+            catch (Exception ex)
+            {
+               
+                return StatusCode(500, "Internal server error");
+            }
+        }  
+        private async Task<IEnumerable<AutoCompleteSelectionModel>> GetPartDescriptionsFromDatabase()
+        {
+
+            var query = @"WITH SupplierNamesCTE AS(SELECT DISTINCT[Description]  FROM[SCES].[NscPartsUsed])
+                                ,SupplierNamesWithRowNumber AS( SELECT ROW_NUMBER() OVER(ORDER BY Description) AS Value
+                                , Description AS Text FROM SupplierNamesCTE) SELECT Value, Text FROM SupplierNamesWithRowNumber";
+
+            var descriptions = await _dbConnection.QueryAsync<AutoCompleteSelectionModel>(query);
+            return descriptions.ToList();           
+            
+        }
+    }
+}
+NscPartsUsedInRbPartsController.cs :
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+
+
+namespace BCES.Controllers.Parts
+{
+    public class NscPartsUsedInRbPartsController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public NscPartsUsedInRbPartsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult> GetNscPartsUsedInRbParts([DataSourceRequest] DataSourceRequest request, [FromQuery] string rebuiltPartNum)
+        {
+            // Fetch data for the grid
+
+            if (string.IsNullOrEmpty(rebuiltPartNum))
+            {
+                return BadRequest("rebuiltPartNum is required.");
+            }
+
+            // Fetch data for the grid using the rebuiltPartNum
+            var model = await GetNscPartsUsedInRbPartsData(rebuiltPartNum);
+            return Json(model.ToDataSourceResult(request));
+
+        }
+
+        private async Task<IEnumerable<NscPartsUsedViewModel>> GetNscPartsUsedInRbPartsData(string RebuiltPartNum)
+        {
+            try
+            {
+
+                var query = @"
+                             DECLARE @RebuiltPartNumber VARCHAR(30) = '" + RebuiltPartNum + "'" +
+                             @"
+                                    -- Declare variables for LinkCode and LinkType
+                                    DECLARE @LinkCode VARCHAR(30);
+                                    DECLARE @LinkType VARCHAR(5);
+
+                                    PRINT @LinkCode
+                                    PRINT @LinkType
+                                    -- Retrieve LinkCode and LinkType
+                                    PRINT 'Retrieving LinkCode and LinkType...';
+                                    SELECT DISTINCT 
+                                        @LinkCode = LinkCode,
+                                        @LinkType = LinkType
+                                    FROM 
+                                        [SBCES].[ScPartsUsed]
+                                    WHERE 
+                                        LinkCode = @RebuiltPartNumber;
+
+                                -- If not found in ScPartsUsed, check NScPartsUsed
+                                IF @LinkCode IS NULL
+                                BEGIN
+                                    SELECT DISTINCT 
+                                        @LinkCode = LinkCode,
+                                        @LinkType = LinkType
+                                    FROM 
+                                        [SBCES].[NScPartsUsed]
+                                    WHERE 
+                                        LinkCode = @RebuiltPartNumber;
+                                END
+
+                                PRINT 'LinkCode: ' + ISNULL(@LinkCode, 'Not Found');
+                                PRINT 'LinkType: ' + ISNULL(@LinkType, 'Not Found');
+
+                                -- Check if LinkCode and LinkType were found
+                                IF @LinkCode IS NULL OR @LinkType IS NULL
+                                BEGIN
+                                    PRINT 'Error: LinkCode or LinkType not found for RebuiltPartNumber: ' + @RebuiltPartNumber;
+                                    RETURN;
+                                END
+                                 SELECT 
+                                    SupplierNumber AS OrigSuppNum,
+                                    SupplierName AS OrigSupplierName,
+                                    UnitCost,
+                                    Qty,
+                                    Percentage,
+                                    CoreCost,
+                                    TotalCost,
+                                    CC,
+                                    Description,
+                                    Keyword
+                                FROM 
+                                    SBCES.NonStockPartUsed
+                                WHERE 
+                                    LinkCode = @LinkCode AND LinkType = @LinkType;
+
+                                ";
+
+                return await _dbConnection.QueryAsync<NscPartsUsedViewModel>(query);
+
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+    }
+}
+RbPartsUsedInRbPartsController.cs :
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+
+
+namespace BCES.Controllers.Parts
+{
+    public class RbPartsUsedInRbPartsController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public RbPartsUsedInRbPartsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult> GetRbPartsUsedInRbParts([DataSourceRequest] DataSourceRequest request, [FromQuery] string rebuiltPartNum)
+        {
+            // Fetch data for the grid
+
+            if (string.IsNullOrEmpty(rebuiltPartNum))
+            {
+                return BadRequest("rebuiltPartNum is required.");
+            }
+
+            // Fetch data for the grid using the rebuiltPartNum
+            var model = await GetRbPartsUsedInRbPartsData(rebuiltPartNum);
+            return Json(model.ToDataSourceResult(request));
+
+        }
+
+        private async Task<IEnumerable<RebuiltPartsViewModel>> GetRbPartsUsedInRbPartsData(string RebuiltPartNum)
+        {
+            try
+            {
+
+                var query = @"
+                             DECLARE @RebuiltPartNumber VARCHAR(30) = '" + RebuiltPartNum + "'" +
+                             @"
+                                    -- Declare variables for LinkCode and LinkType
+                                    DECLARE @LinkCode VARCHAR(30);
+                                    DECLARE @LinkType VARCHAR(5);
+
+                                    PRINT @LinkCode
+                                    PRINT @LinkType
+                                    -- Retrieve LinkCode and LinkType
+                                    PRINT 'Retrieving LinkCode and LinkType...';
+                                    SELECT DISTINCT 
+                                        @LinkCode = LinkCode,
+                                        @LinkType = LinkType
+                                    FROM 
+                                        [SBCES].[ScPartsUsed]
+                                    WHERE 
+                                        LinkCode = @RebuiltPartNumber;
+
+                                -- If not found in ScPartsUsed, check NScPartsUsed
+                                IF @LinkCode IS NULL
+                                BEGIN
+                                    SELECT DISTINCT 
+                                        @LinkCode = LinkCode,
+                                        @LinkType = LinkType
+                                    FROM 
+                                        [SBCES].[NScPartsUsed]
+                                    WHERE 
+                                        LinkCode = @RebuiltPartNumber;
+                                END
+
+                                PRINT 'LinkCode: ' + ISNULL(@LinkCode, 'Not Found');
+                                PRINT 'LinkType: ' + ISNULL(@LinkType, 'Not Found');
+
+                                -- Check if LinkCode and LinkType were found
+                                IF @LinkCode IS NULL OR @LinkType IS NULL
+                                BEGIN
+                                    PRINT 'Error: LinkCode or LinkType not found for RebuiltPartNumber: ' + @RebuiltPartNumber;
+                                    RETURN;
+                                END
+                                SELECT 
+                                    RebuiltNumber AS RebuiltStockNum,
+                                    UnitCost AS CoreCost,
+                                    Qty,
+                                    TotalCost,
+                                    Description AS DetailedDesc,
+                                    Keyword
+                                FROM 
+                                    SBCES.RbpUsed
+                                WHERE 
+                                   LinkCode = @LinkCode AND LinkType = 'RB'  
+                                 and 	Keyword IS NOT NULL;
+
+                                ";
+
+                return await _dbConnection.QueryAsync<RebuiltPartsViewModel>(query);
+
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+    }
+}
+ScPartsUsedInRbPartsController.cs :
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+
+
+namespace BCES.Controllers.Parts
+{
+    public class ScPartsUsedInRbPartsController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public ScPartsUsedInRbPartsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult> GetScPartsUsedInRbParts([DataSourceRequest] DataSourceRequest request, [FromQuery] string rebuiltPartNum)
+        {
+            // Fetch data for the grid
+
+            if (string.IsNullOrEmpty(rebuiltPartNum))
+            {
+                return BadRequest("rebuiltPartNum is required.");
+            }
+
+            // Fetch data for the grid using the rebuiltPartNum
+            var model = await GetScPartsUsedInRbPartsData(rebuiltPartNum);
+            return Json(model.ToDataSourceResult(request));
+
+        }
+
+        private async Task<IEnumerable<StockCodedPartsViewModel>> GetScPartsUsedInRbPartsData(string RebuiltPartNum)
+        {
+            try
+            {
+               
+                    var query = @"
+                             DECLARE @RebuiltPartNumber VARCHAR(30) = '" + RebuiltPartNum + "'" +
+                                 @"
+                                    -- Declare variables for LinkCode and LinkType
+                                    DECLARE @LinkCode VARCHAR(30);
+                                    DECLARE @LinkType VARCHAR(5);
+
+                                    PRINT @LinkCode
+                                    PRINT @LinkType
+                                    -- Retrieve LinkCode and LinkType
+                                    PRINT 'Retrieving LinkCode and LinkType...';
+                                    SELECT DISTINCT 
+                                        @LinkCode = LinkCode,
+                                        @LinkType = LinkType
+                                    FROM 
+                                        [SBCES].[ScPartsUsed]
+                                    WHERE 
+                                        LinkCode = @RebuiltPartNumber;
+
+                                -- If not found in ScPartsUsed, check NScPartsUsed
+                                IF @LinkCode IS NULL
+                                BEGIN
+                                    SELECT DISTINCT 
+                                        @LinkCode = LinkCode,
+                                        @LinkType = LinkType
+                                    FROM 
+                                        [SBCES].[NScPartsUsed]
+                                    WHERE 
+                                        LinkCode = @RebuiltPartNumber;
+                                END
+
+                                PRINT 'LinkCode: ' + ISNULL(@LinkCode, 'Not Found');
+                                PRINT 'LinkType: ' + ISNULL(@LinkType, 'Not Found');
+
+                                -- Check if LinkCode and LinkType were found
+                                IF @LinkCode IS NULL OR @LinkType IS NULL
+                                BEGIN
+                                    PRINT 'Error: LinkCode or LinkType not found for RebuiltPartNumber: ' + @RebuiltPartNumber;
+                                    RETURN;
+                                END
+                                 SELECT 
+                                    StockCode AS MMSStockCode,
+                                    UnitCost,
+                                    Qty,
+                                    Percentage,
+                                    CoreCost,
+                                    TotalCost,
+                                    CC,
+                                    Description  AS DetailedDesc,
+                                    Keyword
+                                FROM 
+                                    SBCES.StockPartUsed
+                                WHERE 
+                                    LinkCode = @LinkCode AND LinkType = @LinkType;
+
+                                ";
+
+                return await _dbConnection.QueryAsync<StockCodedPartsViewModel>(query);
+
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+    }
+}
+TotalCostInRbPartsController.cs :
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+ 
+namespace BCES.Controllers.Parts
+{
+    public class TotalCostInRbPartsController : BaseController
+    {
+        
+            private readonly DapperContext _db;
+            private readonly IDbConnection _dbConnection;
+            private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+            public TotalCostInRbPartsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+            {
+                _db = dapper;
+                _dbConnection = _db.CreateConnection();
+
+                _httpContextAccessor = httpContextAccessor;
+            }
+
+            [HttpGet]
+            public async Task<ActionResult> GetTotalCostInRbParts([DataSourceRequest] DataSourceRequest request, [FromQuery] string rebuiltPartNum)
+            {
+                // Fetch data for the grid
+                
+                if (string.IsNullOrEmpty(rebuiltPartNum))
+                {
+                    return BadRequest("rebuiltPartNum is required.");
+                }
+
+                // Fetch data for the grid using the rebuiltPartNum
+                var model = await GetTotalCostInRbPartsData(rebuiltPartNum);
+                return Json(model.ToDataSourceResult(request));
+                
+            }
+        
+            private async Task<IEnumerable<TotalCostInRbModel>> GetTotalCostInRbPartsData(string RebuiltPartNum)
+            {
+                try
+                {
+                    var query = @"
+                           BEGIN TRY
+                             DECLARE @RebuiltPartNumber VARCHAR(30) = '" + RebuiltPartNum + "'" +
+                                 @"                           
+   
+                                -- Declare variables
+                                --DECLARE @RebuiltPartNumber VARCHAR(30) = '035434';
+                                DECLARE @LinkCode VARCHAR(30) = NULL;
+                                DECLARE @LinkType VARCHAR(5) = NULL;
+
+                                PRINT 'Retrieving LinkCode and LinkType...';
+
+                                -- Retrieve LinkCode and LinkType from ScPartsUsed and NScPartsUsed
+                                SELECT TOP 1 @LinkCode = LinkCode, @LinkType = LinkType
+                                FROM SBCES.ScPartsUsed
+                                WHERE LinkCode = @RebuiltPartNumber;
+
+                                IF @LinkCode IS NULL
+                                BEGIN
+                                    SELECT TOP 1 @LinkCode = LinkCode, @LinkType = LinkType
+                                    FROM SBCES.NScPartsUsed
+                                    WHERE LinkCode = @RebuiltPartNumber;
+                                END
+
+                                PRINT 'LinkCode: ' + ISNULL(@LinkCode, 'Not Found');
+                                PRINT 'LinkType: ' + ISNULL(@LinkType, 'Not Found');
+
+                                -- Check if LinkCode and LinkType were found
+                                IF @LinkCode IS NULL OR @LinkType IS NULL
+                                BEGIN
+                                    PRINT 'Error: LinkCode or LinkType not found for RebuiltPartNumber: ' + @RebuiltPartNumber;
+                                    RETURN;
+                                END
+
+                                -- Dynamically create temporary tables
+                                PRINT 'Creating temporary tables...';
+
+                                CREATE TABLE #TempLabourList (
+                                    LabourType VARCHAR(50),
+                                    CC VARCHAR(50),
+                                    Task VARCHAR(50),
+                                    Usage DECIMAL(18, 2),
+                                    Time DECIMAL(10, 2),
+                                    RatePerHour DECIMAL(18, 2),
+                                    TotalCost DECIMAL(18, 2),
+                                    ExtendedTime DECIMAL(10, 2),
+                                    EstimateType VARCHAR(10),
+                                    EstimateNumber VARCHAR(50),
+                                    WrenchTime VARCHAR(50)
+                                );
+
+                                CREATE TABLE #TempMaterialsList (
+                                    AssemblyArea VARCHAR(100),
+                                    CostCentre VARCHAR(50),
+                                    TotalCost DECIMAL(18, 2),
+                                    TaxableCost DECIMAL(18, 2),
+                                    RbReference VARCHAR(30),
+                                    TotalUnitCost DECIMAL(18, 2)
+                                );
+
+                                -- Populate TempLabourList
+                                PRINT 'Populating #TempLabourList...';
+
+                                INSERT INTO #TempLabourList
+                                SELECT 
+                                    EL.LabourDefn AS LabourType,
+                                    EL.CostCentre AS CC,
+                                    EL.Task,
+                                    CAST(REPLACE(EL.Usage, ',', '.') AS DECIMAL(18,2)) AS Usage,
+                                    CASE 
+                                        WHEN CHARINDEX(':', EL.HrsReqd) = 0 THEN TRY_CAST(EL.HrsReqd AS DECIMAL(10, 2))
+                                        ELSE TRY_CAST(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1) AS INT) +
+                                             TRY_CAST(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)) AS INT) / 60.0
+                                    END AS Time,
+                                    CAST(ES.RatePerHour AS DECIMAL(18,2)) AS RatePerHour,
+                                    CAST(REPLACE(EL.Usage, ',', '.') AS DECIMAL(18, 2)) * CAST(ES.RatePerHour AS DECIMAL(18, 2)) AS TotalCost,
+                                    NULL AS ExtendedTime, -- Adjust logic if needed
+                                    EL.TypeId AS EstimateType,
+                                    EL.LinkNumber AS EstimateNumber,
+                                    EL.AdjHrs AS WrenchTime
+                                FROM 
+                                    SBCES.EmployeeLabour EL
+                                JOIN SBCES.EmplClass EC ON EL.LabourDefn = UPPER(EC.LabourDefn)
+                                JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
+                                WHERE EL.LinkNumber = @LinkCode;
+
+                                -- Populate TempMaterialsList
+                                PRINT 'Populating #TempMaterialsList...';
+
+                                INSERT INTO #TempMaterialsList
+                                SELECT 
+                                    ISNULL(C.Name, 'NONE') AS AssemblyArea,
+                                    ISNULL(A.CostCentre, '0') AS CostCentre,
+                                    SUM(CAST(A.Cost AS DECIMAL(18, 2))) AS TotalCost,
+                                    SUM(CAST(A.TaxCost AS DECIMAL(18, 2))) AS TaxableCost,
+                                    @LinkCode AS RbReference,
+                                    SUM(CAST(A.TotalUnitCost AS DECIMAL(18, 2))) AS TotalUnitCost
+                                FROM (
+                                    -- Stock-coded parts
+                                    SELECT 
+                                        CostCentre,
+                                        CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS Cost,
+                                        CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS TaxCost,
+                                        CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18, 2)) AS TotalUnitCost
+                                    FROM SBCES.ScPartsUsed
+                                    WHERE LinkCode = @LinkCode AND RebuiltPart = 'N' AND LinkType = @LinkType
+
+                                    UNION ALL
+
+                                    -- Non-stock-coded parts
+                                    SELECT 
+                                        NSCPartsUsed.CostCentre,
+                                        CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18,2)) AS Cost,
+                                        CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18, 2)) AS TaxCost,
+                                        CAST(SBCES.FinalCost(NSCPartsUsed.PercentUsage, NSCPartsUsed.QtyReqd, NonStockCodedParts.OemPartCost, 0) AS DECIMAL(18,2)) AS TotalUnitCost
+                                    FROM SBCES.NSCPartsUsed
+                                    JOIN SBCES.NonStockCodedParts ON NSCPartsUsed.Id = NonStockCodedParts.Id
+                                    WHERE NSCPartsUsed.LinkCode = @LinkCode AND NSCPartsUsed.LinkType = @LinkType
+                                ) A
+                                JOIN SBCES.CostCentres C ON A.CostCentre = C.CostCentre
+                                GROUP BY A.CostCentre, C.Name;
+
+                                -- Output summaries and calculations (adjust logic as necessary)
+
+                                PRINT 'Fetching total costs summary...';
+
+                                -- Core cost excl Tax
+                                DECLARE @CoreCostExclTax DECIMAL(18, 2) = NULL;
+                                SELECT @CoreCostExclTax = SUM(CoreCost)
+                                FROM SBCES.ScPartsUsed
+                                WHERE LinkCode = @LinkCode AND LinkType = @LinkType;
+
+                                -- Material cost
+                                DECLARE @MaterialCost DECIMAL(18, 2) = NULL;
+                                SELECT @MaterialCost = SUM(TotalCost)
+                                FROM #TempMaterialsList;
+
+                                -- Labour cost
+                                DECLARE @LabourCost DECIMAL(18, 2) = NULL;
+                                SELECT @LabourCost = SUM(TotalCost)
+                                FROM #TempLabourList;
+
+                                -- Labour overhead and total
+                                DECLARE @LabourOverheadTotal DECIMAL(18, 2) = @LabourCost * 0.01; -- Example overhead rate
+                                DECLARE @LabourTotal DECIMAL(18, 2) = @LabourCost + @LabourOverheadTotal;
+
+                                -- Tax total
+                                DECLARE @TaxTotal DECIMAL(18, 2) = NULL;
+                                SELECT @TaxTotal = SUM(TaxableCost)
+                                FROM #TempMaterialsList;
+
+                                -- Total cost with tax
+                                DECLARE @TotalCostWithTax DECIMAL(18, 2) = @MaterialCost + @LabourTotal + @TaxTotal;
+
+                                -- Output the results
+                                PRINT 'Outputting results...';
+                                SELECT 
+                                    @CoreCostExclTax AS CoreCostExclTax,
+                                    @MaterialCost AS MaterialCost,
+                                    @LabourCost AS LabourCost,
+                                    @LabourOverheadTotal AS LabourOverheadTotal,
+                                    @LabourTotal AS LabourTotal,
+                                    @TaxTotal AS TaxTotal,
+                                    @TotalCostWithTax AS TotalCostWithTax;
+
+                                -- Clean up temporary tables
+                                PRINT 'Cleaning up temporary tables...';
+                                DROP TABLE #TempLabourList;
+                                DROP TABLE #TempMaterialsList;
+
+                                PRINT 'Process completed successfully.';
+                            END TRY
+                            BEGIN CATCH
+                                PRINT 'An error occurred: ' + ERROR_MESSAGE();
+                            END CATCH;
+                                                             ";
+
+                    return await _dbConnection.QueryAsync<TotalCostInRbModel>(query);
+
+                }
+                catch (Exception ex)
+                {
+                    return null;
+                }
+            }
+
+        }
+    }
+
