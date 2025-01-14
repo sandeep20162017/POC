@@ -1,0 +1,84 @@
+I want to call SaveToExcel (perhaps windows.href?) in onEmailEstimateClick function. onEmailEstimateClick must open a window and attach excel file generated in SaveToExcel.
+Index.cshtml :
+
+        function onEmailEstimateClick(e) {
+            e.preventDefault();
+            var dataItem = this.dataItem($(e.currentTarget).closest("tr"));
+            var rebuiltPartNum = dataItem.RebuiltStockNum;
+
+            // Set the subject with the rebuilt number and today's date
+            var today = new Date();
+            var subject = `Rebuilt Part Estimates for ${rebuiltPartNum} - Date ${today.toLocaleDateString()} ${today.toLocaleTimeString()}`;
+
+            // Set the form values
+            $("#to").val("");
+            $("#subject").val(subject);
+            $("#body").val(`Dear Sir/Madam,\nPlease find attached here with Rebuilt Part Estimate for ${rebuiltPartNum}.\n\nThank you`);
+
+            // Open the Kendo Window
+            var window = $("#emailEstimateWindow").data("kendoWindow");            
+            window.center().open();
+           
+        }
+ExportController.cs :
+[HttpGet]
+public async Task<IActionResult> SaveToExcel([FromQuery] string rebuiltPartNum)
+{
+    try
+    {
+        // Fetch data from existing controllers
+      //  var mainGridData = await GetDataFromController<RebuiltPartsViewModel>("RebuiltParts", "GetRebuiltPartsView");
+        var labourDetails = await GetDataFromController<LabourDetailsRebuiltPartsViewModel>("LabourDetails", "GetLabourDetails", new { rebuiltPartNum });
+        var labourHourSummary = await GetDataFromController<LabourDetailsRebuiltPartsViewModel>("LabourHourSummaryInRbParts", "GetLabourHourSummaryInRbParts", new { rebuiltPartNum });
+        var materialCostSummary = await GetDataFromController<MaterialCostSummaryInRbViewModel>("MaterialCostSummaryInRbParts", "GetMaterialCostSummaryInRbParts", new { rebuiltPartNum });
+        var scParts = await GetDataFromController<StockCodedPartsViewModel>("ScPartsUsedInRbParts", "GetScPartsUsedInRbParts", new { rebuiltPartNum });
+        var nscParts = await GetDataFromController<NscPartsUsedViewModel>("NscPartsUsedInRbParts", "GetNscPartsUsedInRbParts", new { rebuiltPartNum });
+        var rbParts = await GetDataFromController<RebuiltPartsViewModel>("RbPartsUsedInRbParts", "GetRbPartsUsedInRbParts", new { rebuiltPartNum });
+        var totalCost = await GetDataFromController<TotalCostInRbModel>("TotalCostInRbParts", "GetTotalCostInRbParts", new { rebuiltPartNum });
+
+        // Create Excel package
+        using (var package = new ExcelPackage())
+        {
+            // Add main grid data
+          //  var mainGridSheet = package.Workbook.Worksheets.Add("Main Grid");
+          //  mainGridSheet.Cells.LoadFromCollection(mainGridData, true);
+
+            // Add subgrid data
+            var labourDetailsSheet = package.Workbook.Worksheets.Add("Labour Details");
+            labourDetailsSheet.Cells.LoadFromCollection(labourDetails, true);
+
+            var labourHourSummarySheet = package.Workbook.Worksheets.Add("Labour Hour Summary");
+            labourHourSummarySheet.Cells.LoadFromCollection(labourHourSummary, true);
+
+            var materialCostSummarySheet = package.Workbook.Worksheets.Add("Material Cost Summary");
+            materialCostSummarySheet.Cells.LoadFromCollection(materialCostSummary, true);
+
+            var scPartsSheet = package.Workbook.Worksheets.Add("SC Parts");
+            scPartsSheet.Cells.LoadFromCollection(scParts, true);
+
+            var nscPartsSheet = package.Workbook.Worksheets.Add("NSC Parts");
+            nscPartsSheet.Cells.LoadFromCollection(nscParts, true);
+
+            var rbPartsSheet = package.Workbook.Worksheets.Add("RB Parts");
+            rbPartsSheet.Cells.LoadFromCollection(rbParts, true);
+
+            var totalCostSheet = package.Workbook.Worksheets.Add("Total Cost");
+            totalCostSheet.Cells.LoadFromCollection(totalCost, true);
+
+            // Save the Excel file to a memory stream
+            var memoryStream = new MemoryStream();
+            package.SaveAs(memoryStream);
+            memoryStream.Position = 0; // Reset the stream position to the beginning
+
+            // Return the file for download
+            return File(memoryStream, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"{rebuiltPartNum}_RebuiltParts_Estimate.xlsx");
+
+            
+        }
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "An error occurred while generating the Excel file.");
+        return StatusCode(500, "An error occurred while generating the Excel file.");
+    }
+}
