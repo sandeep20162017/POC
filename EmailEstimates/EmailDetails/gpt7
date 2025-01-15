@@ -1,0 +1,218 @@
+You are ASP.NET core 8.0 expert and Telerik Kendoo ASP NET UI expert. In the below code, Controller action IActionResult OEMKitIndex() did get called, but public async Task<ActionResult> GetOEMKitView([DataSourceRequest] DataSourceRequest request) never get called.
+Index.cshtml :
+@using BCES.Models.OEMKit
+@using BCES.Models.Common
+@model IEnumerable<BCES.Models.OEMKit.OEMKitModel>
+
+@{
+    ViewData["Title"] = "OEM Kit";
+}
+
+<h4>OEM Kit</h4>
+
+@(Html.Kendo().Grid<OEMKitModel>()
+    .Name("OEMKit")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.PartNumber).Title("Part Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.DetailedDesc).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.EstimatedCost).Title("Estimated Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+       
+    })
+    .ToolBar(toolbar => { toolbar.Create(); })
+    .Editable(editable => editable.Mode(GridEditMode.InLine))
+    .Pageable()
+    .Sortable()
+    .ClientDetailTemplateId("template")
+    .Resizable(r => r.Columns(true))
+    //    .Groupable(g => g.ShowFooter(false))
+    .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+    // .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.PartNumber);
+            model.Field(c => c.Keyword);
+            
+        })
+        .Read(read => read.Url(Url.Action("GetOEMKitView", "OEMKit")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("CreateOEMKit", "OEMKit")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateOEMKit", "OEMKit")).Type(HttpVerbs.Post))
+    )
+)
+
+
+<!-- Add a placeholder for the notification -->
+<div id="notification"></div>
+@section Scripts {
+    <script>
+        $(document).ready(function () {
+      
+        });
+    </script>
+
+    
+}
+
+OEMKitController.cs :
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
+using DataSourceRequest = Kendo.Mvc.UI.DataSourceRequest;
+using BCES.Data;
+using Telerik.SvgIcons;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using BCES.Controllers.Base;
+using BCES.Models.OEMKit;
+
+using Newtonsoft.Json.Linq;
+using static System.Net.Mime.MediaTypeNames;
+
+namespace BCES.Controllers.OEMKit
+{
+
+   // [Route("OEMKit")]
+    public class OEMKitController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public OEMKitController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+            _httpContextAccessor = httpContextAccessor;
+        }
+        // GET: NscPartsUsed/Index
+        [HttpGet("OEMKitIndex")]
+        public IActionResult OEMKitIndex()
+        {
+            // return View();
+            return View("~/Views/OEMKit/Index.cshtml");
+        }
+
+       
+        [HttpGet]
+        public async Task<ActionResult> GetOEMKitView([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid
+            var model = await GetOEMKitData();
+            return Json(model.ToDataSourceResult(request));
+        }
+
+      
+        [HttpPost]
+
+        public async Task<IActionResult> CreateOEMKit([DataSourceRequest] DataSourceRequest request, [FromForm] OEMKitModel oemKit)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            try
+            {
+                var insertQuery = "";
+                //var insertQuery = String.Format(@"
+                //INSERT INTO SBCES.NscPartsUsed (OrigSuppNum, OrigSupplierName,CoreCost, Description, Keyword)
+                //VALUES ('{0}', '{1}', {2}, '{3}', '{4}')",
+                //    nscPartsUsed.OrigSuppNum,
+                //                  nscPartsUsed.OrigSupplierName,
+                //                  nscPartsUsed.CoreCost,
+                //                  nscPartsUsed.Description,
+                //                   nscPartsUsed.KeyWord
+                //     );
+
+                //var tt = insertQuery;
+                await _dbConnection.ExecuteAsync(insertQuery, oemKit);
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while updating the Non Stock Coded Part.");
+            }
+
+        }
+
+
+        [HttpPost]
+        public async Task<IActionResult> UpdateOEMKit([DataSourceRequest] DataSourceRequest request, [FromForm] OEMKitModel oemKit)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                string updateQuery = "";
+               
+
+                await _dbConnection.ExecuteAsync(updateQuery, oemKit);
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while updating the Non Stock Coded Part.");
+            }
+
+        }
+
+       
+        [HttpPost]
+        public async Task<IActionResult> DeleteOEMKit([DataSourceRequest] DataSourceRequest request, OEMKitModel oemKit)
+        {
+            try
+            {
+                var deleteQuery = "";
+                
+                await _dbConnection.ExecuteAsync(deleteQuery, oemKit);
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while deleting the OEM Kit.");
+            }
+
+        }
+
+        private async Task<IEnumerable<OEMKitModel>> GetOEMKitData()
+        {
+            try
+            {
+                var query = @"
+                            SELECT  [PartNumber]
+                                  ,[EstimatedCost]
+                                  ,[Keyword]
+                                  ,[DetailedDesc]
+     
+                              FROM [CES].[SBCES].[KitsMasterlist]
+                             ";
+                
+                return await _dbConnection.QueryAsync<OEMKitModel>(query);
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+
+        }
+
+        
+    }
+}
