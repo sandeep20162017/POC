@@ -1,0 +1,1036 @@
+I would like to call 
+ExportController.cs :
+[HttpGet]
+public async Task<IActionResult> SaveToExcel([FromQuery] string rebuiltPartNum)
+function in 
+RebuiltPartsController.cs :
+ instead of private async Task<MemoryStream> GenerateExcelFile(string rebuiltPartNum)
+SaveToExcel should return memory stream instead of file. This memory stream will be used for attachment.
+Full Files :
+RebuiltPartsController.cs :
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
+using DataSourceRequest = Kendo.Mvc.UI.DataSourceRequest;
+using BCES.Data;
+using Telerik.SvgIcons;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using BCES.Controllers.Base;
+using BCES.Models.Parts;
+using BCES.Models.Common;
+using BCES.Models.Parts;
+using System.Data;
+using OfficeOpenXml;
+using System.IO;
+using MailKit.Net.Smtp;
+using MimeKit;
+using MailKit.Security;
+
+
+
+using Newtonsoft.Json.Linq;
+using static System.Net.Mime.MediaTypeNames;
+using Azure.Core;
+using BCES.Controllers.Admin;
+using System.Net.Mail;
+using Multipart = MimeKit.Multipart;
+using SmtpClient = MailKit.Net.Smtp.SmtpClient;
+//using System.Net.Mime;
+//using CES.Views.Shared;
+namespace BCES.Controllers.Parts
+{
+    // [Route("api/[controller]")]
+    public class RebuiltPartsController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+        public RebuiltPartsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet("RebuiltPartsIndex")]
+        public IActionResult RebuiltPartsIndex()
+        {
+            // return View();
+            return View("~/Views/Parts/RebuiltParts/Index.cshtml");
+        }
+
+        // POST: NscPartsUsed/GetNscPartsUsedView
+        [HttpGet]
+        public async Task<JsonResult> GetRebuiltPartsView([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid (you can use Dapper or any other method)
+            var model = await GetRebuiltPartsData();
+            return Json(model.ToDataSourceResult(request));
+        }
+
+        private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData()
+        {
+            try
+            {
+                var query = @"
+                            SELECT rbm.RbMasterlistId,
+                            rbm.[RebuiltStockNum],
+                            rbm.[MmsStockCode],
+                            rbm.[Keyword],
+                            rbm.JobNumber,
+                            rbm.[CorePartNum],
+                            rbm.[DetailedDesc],
+                            rbm.[CoreCharge],
+                            rbm.[EstimatedCost],
+                            rbm.[BuyNewCost],
+                            rbm.[RemanCost],
+                            rbm.[ExternalCost],
+                            lb.ListId,
+                            lb.Description AS Description,
+		                    EL.LabourDefn AS [LabourType],
+                            el.LinkNumber,
+                            el.[CostCentre] as CC,
+		                    el.[Usage],
+		                    el.[TimeAddition]
+                                FROM [SBCES].[RbMasterlist] rbm
+                                INNER JOIN [SBCES].[RbListOfBuses] rlb ON rlb.[RebuiltStockNum] = rbm.[RebuiltStockNum]
+                                INNER JOIN [SBCES].[ListOfBuses] lb ON rlb.ListId = lb.ListId
+                                left join [SBCES].[EmployeeLabour] el ON el.[LinkNumber] = rbm.[RebuiltStockNum]";
+
+                var rbParts = _dbConnection.Query<RebuiltPartsViewModel, ListOfBusesModel, LabourDetailsRebuiltPartsViewModel, RebuiltPartsViewModel>(
+                    query,
+                    (rbPart, vehicle, labourDetail) =>
+                    {
+                        rbPart.VehicleSeries.Add(vehicle);
+                        if (labourDetail != null)
+                        {
+                            rbPart.LabourDetailsRebuiltParts.Add(labourDetail);
+                        }
+                        return rbPart;
+                    },
+                    splitOn: "ListId,LinkNumber"
+                ).GroupBy(rbPart => rbPart.RbMasterlistId).Select(g =>
+                {
+                    var groupedRbPart = g.First();
+                    groupedRbPart.VehicleSeries = g.SelectMany(rbPart => rbPart.VehicleSeries).Distinct().ToList();
+                    groupedRbPart.LabourDetailsRebuiltParts = g.SelectMany(rbPart => rbPart.LabourDetailsRebuiltParts).Distinct().ToList();
+                    return groupedRbPart;
+                }).ToList();
+
+                return rbParts;
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+
+        //private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData()
+        //{
+        //    try
+        //    {
+        //        var query = @"   
+        //    SELECT rbm.RbMasterlistId,
+        //           rbm.[RebuiltStockNum],
+        //           rbm.[MmsStockCode],
+        //           rbm.[Keyword],
+        //           rbm.JobNumber,
+        //           rbm.[CorePartNum],
+        //           rbm.[DetailedDesc],
+        //           rbm.[CoreCharge],
+        //           rbm.[EstimatedCost],
+        //           rbm.[BuyNewCost],
+        //           rbm.[RemanCost],
+        //           rbm.[ExternalCost],
+        //           lb.ListId,
+        //           lb.Description AS Description,
+        //           el.[LabourDefn]
+        //    FROM [SBCES].[RbMasterlist] rbm
+        //    INNER JOIN [SBCES].[RbListOfBuses] rlb ON rlb.[RebuiltStockNum] = rbm.[RebuiltStockNum]
+        //    INNER JOIN [SBCES].[ListOfBuses] lb ON rlb.ListId = lb.ListId
+        //    left join [SBCES].[EmployeeLabour] el ON el.[LinkNumber] = rbm.[RebuiltStockNum]";
+
+        //        var rbParts = _dbConnection.Query<RebuiltPartsViewModel, ListOfBusesModel, RebuiltPartsViewModel>(
+        //            query,
+        //            (rbPart, vehicle) =>
+        //            {
+        //                rbPart.VehicleSeries.Add(vehicle);
+        //                return rbPart;
+        //            },
+        //            splitOn: "ListId"
+        //        ).GroupBy(rbPart => rbPart.RbMasterlistId).Select(g =>
+        //        {
+        //            var groupedRbPart = g.First();
+        //            groupedRbPart.VehicleSeries = g.SelectMany(rbPart => rbPart.VehicleSeries).ToList();
+        //            return groupedRbPart;
+        //        }).ToList();
+
+        //        return rbParts;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        return null;
+        //    }
+
+        //}
+
+        [HttpPost]
+        public async Task<IActionResult> AddRebuiltPartsView([DataSourceRequest] DataSourceRequest request, RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+            try
+            {
+
+                //if (rebuiltPartsViewModel.RbMasterlistId <= 0)
+                //{
+                //    ModelState.AddModelError("RbMasterlistId", "Please select a valid rebuit part.");
+                //    return Json(new[] { rebuiltPartsViewModel }.ToDataSourceResult(request, ModelState));
+                //}
+
+
+                var userId = await AddRebuiltPartAsync(rebuiltPartsViewModel);
+
+
+                return RedirectToAction("Index");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while adding Rebuilt Part.");
+            }
+        }
+
+        private async Task<int> AddRebuiltPartAsync(RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+
+            // Start a transaction
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Commit the transaction
+                    transaction.Commit();
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of any error
+                    transaction.Rollback();
+                    // Handle or log the exception
+                    throw new Exception("Failed to add rebuilt part.", ex);
+                }
+            }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> UpdateRebuiltPartsView([DataSourceRequest] DataSourceRequest request, RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+            try
+            {
+                var userId = await UpdateRebuiltPartsView(rebuiltPartsViewModel);
+                return RedirectToAction("Index");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while adding Rebuilt Part.");
+            }
+        }
+
+        private async Task<int> UpdateRebuiltPartsView(RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+
+            // Start a transaction
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Commit the transaction
+                    transaction.Commit();
+
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of any error
+                    transaction.Rollback();
+                    // Handle or log the exception
+                    throw new Exception("Failed to update rebuilt part.", ex);
+                }
+            }
+        }
+
+        public IActionResult LabourDetailsPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<LabourDetailsRebuiltPartsViewModel> { };
+            return PartialView("_LabourDetailsRebuiltParts", model);
+        }
+
+        public IActionResult ScPartsUsedInRbParts([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.StockCodedPartsViewModel> { };
+
+            return PartialView("_ScPartsUsedInRbParts", model);
+
+        }
+
+        public IActionResult LabourHourSummaryPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel> { };
+            return PartialView("_LabourHourSummaryRbParts", model);
+        }
+
+        public IActionResult MaterialCostSummaryPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.MaterialCostSummaryInRbViewModel> { };
+            return PartialView("_MaterialCostSummaryinRbParts", model);
+        }
+        public IActionResult NscDetailsPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.NscPartsUsedViewModel> { };
+
+            return PartialView("_NscPartsUsedInRbParts", model);
+
+        }
+
+        public IActionResult RbDetailsPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.RebuiltPartsViewModel> { };
+            return PartialView("_RbPartsUsedInRbParts", model);
+        }
+
+        public IActionResult TotalCostPartial([FromQuery] string rebuiltPartNum)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.RebuiltPartNum = rebuiltPartNum;
+            var model = new List<BCES.Models.Parts.TotalCostInRbModel> { };
+            return PartialView("_TotalCostInRbParts", model);
+        }
+
+        [HttpPost]
+        public IActionResult SaveDetails()
+        {
+            // Save logic here
+            return Json(new { success = true, message = "Saved Details successfully." });
+        }
+
+
+        [HttpPost]
+        public IActionResult CancelDetails(int rebuiltPartNum)
+        {
+            try
+            {
+                // Return a success response
+                return Json(new { success = true, message = "Changes discarded successfully." });
+            }
+            catch (Exception ex)
+            {
+
+                return Json(new { success = false, message = "An error occurred while discarding changes. Please try again." });
+            }
+        }
+
+        //[HttpGet]
+        //public async Task<IActionResult> ReadVehicles([DataSourceRequest] DataSourceRequest request)
+        //{
+        //    var sites = await GetVehicles();
+        //    return Json(sites);
+        //}
+
+        //private async Task<IEnumerable<ListOfBusesModel>> GetVehicles()
+        //{
+        //    var query = "SELECT ListId, Description FROM SBCES.ListOfBuses";
+        //    var vehicles = await _dbConnection.QueryAsync<ListOfBusesModel>(query);
+        //    return vehicles.ToList();
+
+        //}
+
+        //[HttpPost]
+        //public async Task<IActionResult> GetSelectedVehicles([FromBody] dynamic data)
+        //{
+        //    var sites = data?.sites?.ToObject<List<string>>() ?? Enumerable.Empty<string>();
+        //   // _selectedSites = sites;
+        //    var viewModel = new UserViewModel { SelectedSites = sites };
+        //    return Json(viewModel);
+        //}
+
+
+
+
+        [HttpPost("ArchiveDetails")]
+        public IActionResult ArchiveDetails([FromBody] RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+            try
+            {
+
+                // Return a success response
+                return Json(new { success = true, message = "Archiving rebuilt part number: {RebuiltPartNum}", rebuiltPartsViewModel.RebuiltStockNum });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "An error occurred while archiving. Please try again." });
+            }
+        }
+        [HttpPost]
+        public async Task<IActionResult> SendEmail(string to, string subject, string body, string rebuiltPartNum)
+        {
+            try
+            {
+                // Generate the Excel file in memory
+                var memoryStream = await GenerateExcelFile(rebuiltPartNum);
+
+                // Send the email with the attached Excel file
+                var message = new MimeMessage();
+                message.From.Add(new MailboxAddress("Your Name", "your-email@example.com"));
+                message.To.Add(new MailboxAddress("", to));
+                message.Subject = subject;
+                message.Body = new TextPart("plain") { Text = body };
+
+                var attachment = new MimePart("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                {
+                    Content = new MimeContent(memoryStream),
+                    ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+                    ContentTransferEncoding = ContentEncoding.Base64,
+                    FileName = $"{rebuiltPartNum}_RebuiltParts_Estimate.xlsx"
+                };
+
+                var multipart = new Multipart("mixed");
+                multipart.Add(message.Body);
+                multipart.Add(attachment);
+                message.Body = multipart;
+
+                using (var client = new SmtpClient())
+                {
+                    await client.ConnectAsync("smtp.example.com", 587, SecureSocketOptions.StartTls);
+                    await client.AuthenticateAsync("your-email@example.com", "your-email-password");
+                    await client.SendAsync(message);
+                    await client.DisconnectAsync(true);
+                }
+
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                // Log the exception 
+                Console.WriteLine($"Error sending email: {ex.Message}");
+
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        private async Task<MemoryStream> GenerateExcelFile(string rebuiltPartNum)
+        {
+            var memoryStream = new MemoryStream();
+            using (var package = new ExcelPackage(memoryStream))
+            {
+                // Add your logic to generate the Excel file
+                var worksheet = package.Workbook.Worksheets.Add("Sheet1");
+                worksheet.Cells["A1"].Value = "Rebuilt Part Number";
+                worksheet.Cells["B1"].Value = rebuiltPartNum;
+
+                // Save the Excel package to the memory stream
+                package.Save();
+            }
+
+            memoryStream.Position = 0; // Reset the stream position to the beginning
+            return memoryStream;
+        }
+
+        //[HttpPost]
+        //public async Task<IActionResult> SendEmail(string to, string subject, string body, string rebuiltPartNum)
+        //{
+        //    try
+        //    {
+        //        // Generate the Excel file by calling SaveToExcel
+        //        var filePath = Path.Combine(Path.GetTempPath(), $"{rebuiltPartNum}_RebuiltParts_Estimate.xlsx");
+
+
+        //        // Send the email with the attached Excel file
+        //        var message = new MimeMessage();
+        //        message.From.Add(new MailboxAddress("Your Name", "your-email@example.com"));
+        //        message.To.Add(new MailboxAddress("", to));
+        //        message.Subject = subject;
+        //        message.Body = new TextPart("plain") { Text = body };
+
+        //        var attachment = new MimePart("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        //        {
+        //            Content = new MimeContent(System.IO.File.OpenRead(filePath)),
+        //            ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+        //            ContentTransferEncoding = ContentEncoding.Base64,
+        //            FileName = Path.GetFileName(filePath)
+        //        };
+
+        //        var multipart = new Multipart("mixed");
+        //        multipart.Add(message.Body);
+        //        multipart.Add(attachment);
+        //        message.Body = multipart;
+
+        //        using (var client = new SmtpClient())
+        //        {
+        //            await client.ConnectAsync("smtp.example.com", 587, SecureSocketOptions.StartTls);
+        //            await client.AuthenticateAsync("your-email@example.com", "your-email-password");
+        //            await client.SendAsync(message);
+        //            await client.DisconnectAsync(true);
+        //        }
+
+        //        return Json(new { success = true });
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        // Log the exception (you can use a logging framework like Serilog or NLog)
+        //        Console.WriteLine($"Error sending email: {ex.Message}");
+
+        //        return Json(new { success = false, message = ex.Message });
+        //    }
+        //}
+
+        /// /////////////////////////////////////////Start Save to Excel
+
+        //[HttpPost]
+        //public async Task<IActionResult> ExportToExcel(string rebuiltPartNum)
+        //{
+        //    try
+        //    {
+        //        // Fetch data for the main grid
+        //        var mainGridData = await GetRebuiltPartsData();
+
+        //        // Fetch data for the subgrids
+        //        var labourDetails = await GetLabourDetails(rebuiltPartNum);
+        //        var labourHourSummary = await GetLabourHourSummary(rebuiltPartNum);
+        //        var materialCostSummary = await GetMaterialCostSummary(rebuiltPartNum);
+        //        var scParts = await GetScParts(rebuiltPartNum);
+        //        var nscParts = await GetNscParts(rebuiltPartNum);
+        //        var rbParts = await GetRbParts(rebuiltPartNum);
+        //        var totalCost = await GetTotalCost(rebuiltPartNum);
+
+        //        // Create Excel package
+        //        using (var package = new ExcelPackage())
+        //        {
+        //            // Add main grid data to the first sheet
+        //            var mainGridSheet = package.Workbook.Worksheets.Add("Main Grid");
+        //            mainGridSheet.Cells.LoadFromCollection(mainGridData, true);
+
+        //            // Add subgrid data to subsequent sheets
+        //            AddSheet(package, "Labour Details", labourDetails);
+        //            AddSheet(package, "Labour Hour Summary", labourHourSummary);
+        //            AddSheet(package, "Material Cost Summary", materialCostSummary);
+        //            AddSheet(package, "SC Parts", scParts);
+        //            AddSheet(package, "NSC Parts", nscParts);
+        //            AddSheet(package, "RB Parts", rbParts);
+        //            AddSheet(package, "Total Cost", totalCost);
+
+        //            // Save the Excel file to a temporary location
+        //            var filePath = Path.Combine(Path.GetTempPath(), $"{rebuiltPartNum}_Estimate.xlsx");
+        //            package.SaveAs(new FileInfo(filePath));
+
+        //            // Return the file URL for download
+        //            return Json(new { fileUrl = Url.Action("DownloadExcel", new { filePath = filePath }) });
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        return StatusCode(500, "An error occurred while exporting to Excel.");
+        //    }
+        //}
+
+        //private void AddSheet(ExcelPackage package, string sheetName, IEnumerable<object> data)
+        //{
+        //    if (data != null && data.Any())
+        //    {
+        //        var sheet = package.Workbook.Worksheets.Add(sheetName);
+        //        sheet.Cells.LoadFromCollection(data, true);
+        //    }
+        //}
+
+        public IActionResult DownloadExcel(string filePath)
+        {
+            var fileBytes = System.IO.File.ReadAllBytes(filePath);
+            return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Path.GetFileName(filePath));
+        }
+
+     //   private async Task<IEnumerable<LabourDetailsRebuiltPartsViewModel>> GetLabourDetails(string rebuiltPartNum)
+     //   {
+     //       var query = @"
+     //                        DECLARE @RebuiltPartNumber VARCHAR(30) = '" + rebuiltPartNum + "'" +
+     //                        @"
+     //                       -- Declare variables for LinkCode and LinkType
+     //                       DECLARE @LinkCode VARCHAR(30);
+     //                       DECLARE @LinkType VARCHAR(5);
+
+     //                       PRINT @LinkCode
+     //                       PRINT @LinkType
+     //                       -- Retrieve LinkCode and LinkType
+     //                       PRINT 'Retrieving LinkCode and LinkType...';
+     //                       SELECT DISTINCT 
+     //                           @LinkCode = LinkCode,
+     //                           @LinkType = LinkType
+     //                       FROM 
+     //                           [SBCES].[ScPartsUsed]
+     //                       WHERE 
+     //                           LinkCode = @RebuiltPartNumber;
+
+     //                       -- If not found in ScPartsUsed, check NScPartsUsed
+     //                       IF @LinkCode IS NULL
+     //                       BEGIN
+     //                           SELECT DISTINCT 
+     //                               @LinkCode = LinkCode,
+     //                               @LinkType = LinkType
+     //                           FROM 
+     //                               [SBCES].[NScPartsUsed]
+     //                           WHERE 
+     //                               LinkCode = @RebuiltPartNumber;
+     //                       END
+
+     //                       PRINT 'LinkCode: ' + ISNULL(@LinkCode, 'Not Found');
+     //                       PRINT 'LinkType: ' + ISNULL(@LinkType, 'Not Found');
+
+     //                       -- Check if LinkCode and LinkType were found
+     //                       IF @LinkCode IS NULL OR @LinkType IS NULL
+     //                       BEGIN
+     //                           PRINT 'Error: LinkCode or LinkType not found for RebuiltPartNumber: ' + @RebuiltPartNumber;
+     //                           RETURN;
+     //                       END
+
+     //                       -- Section 1: Labour Details
+     //                       PRINT 'Fetching Labour Details...';
+     //                       SELECT 
+     //                           EL.LabourDefn AS [LabourType],
+     //                           EL.CostCentre AS [CC],
+     //                           EL.Task AS [Task],
+     //                           REPLACE(EL.Usage, ',', '.') AS [Usage],
+     //                           EL.HrsReqd AS [Time],
+     //                           ES.RatePerHour AS [RATE PER HOUR],
+     //                           EL.TimeAddition AS [TIME ADDITION]
+     //                       FROM 
+     //                           SBCES.EmployeeLabour EL
+     //                           JOIN SBCES.EmplClass EC ON EL.LabourDefn = UPPER(EC.LabourDefn)
+     //                           JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
+     //                       WHERE 
+     //                           EL.LinkNumber = @LinkCode
+     //                           AND EL.TypeId = @LinkType;
+
+     //                       PRINT 'Labour Details fetched successfully.';
+     //                            ";
+
+     //       return await _dbConnection.QueryAsync<LabourDetailsRebuiltPartsViewModel>(query, new { RebuiltPartNum = rebuiltPartNum });
+     //   }
+
+     //   private async Task<IEnumerable<LabourDetailsRebuiltPartsViewModel>> GetLabourHourSummary(string rebuiltPartNum)
+     //   { 
+     //       try {
+     //               var query = @"
+     //            SELECT rbm.RbMasterlistId,
+     //           rbm.[RebuiltStockNum],
+     //           rbm.[MmsStockCode],
+     //           rbm.[Keyword],
+     //           rbm.JobNumber,
+     //           rbm.[CorePartNum],
+     //           rbm.[DetailedDesc],
+     //           rbm.[CoreCharge],
+     //           rbm.[EstimatedCost],
+     //           rbm.[BuyNewCost],
+     //           rbm.[RemanCost],
+     //           rbm.[ExternalCost],
+     //           lb.ListId,
+     //           lb.Description AS Description,
+		   //     el.[LabourDefn] as labourType
+		
+     //    FROM [SBCES].[RbMasterlist] rbm
+     //    INNER JOIN [SBCES].[RbListOfBuses] rlb ON rlb.[RebuiltStockNum] = rbm.[RebuiltStockNum]
+     //    INNER JOIN [SBCES].[ListOfBuses] lb ON rlb.ListId = lb.ListId
+     //    left join [SBCES].[EmployeeLabour] el ON el.[LinkNumber] = rbm.[RebuiltStockNum]
+     //    JOIN SBCES.EmplClass EC ON EL.LabourDefn = UPPER(EC.LabourDefn)
+     //   JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
+     //   where rlb.[RebuiltStockNum]  = @RebuiltPartNum";
+     //           return await _dbConnection.QueryAsync<LabourDetailsRebuiltPartsViewModel>(query, new { RebuiltPartNum = rebuiltPartNum });
+     //       }
+     //catch (Exception ex)
+     //   {
+     //   }
+     //       // return await _dbConnection.QueryAsync<LabourDetailsRebuiltPartsViewModel>(query, new { RebuiltPartNum = rebuiltPartNum });
+     //       return null;
+     //  }
+
+     //   private async Task<IEnumerable<MaterialCostSummaryInRbViewModel>> GetMaterialCostSummary(string rebuiltPartNum)
+     //   {
+     //       var query = @"
+     //   SELECT * FROM [SBCES].[MaterialCostSummary]
+     //   WHERE RebuiltStockNum = @RebuiltPartNum";
+     //       return await _dbConnection.QueryAsync<MaterialCostSummaryInRbViewModel>(query, new { RebuiltPartNum = rebuiltPartNum });
+     //   }
+
+     //   private async Task<IEnumerable<StockCodedPartsViewModel>> GetScParts(string rebuiltPartNum)
+     //   {
+     //       var query = @"
+     //   SELECT * FROM [SBCES].[ScPartsUsedInRbParts]
+     //   WHERE RebuiltStockNum = @RebuiltPartNum";
+     //       return await _dbConnection.QueryAsync<StockCodedPartsViewModel>(query, new { RebuiltPartNum = rebuiltPartNum });
+     //   }
+
+     //   private async Task<IEnumerable<NscPartsUsedViewModel>> GetNscParts(string rebuiltPartNum)
+     //   {
+     //       var query = @"
+     //   SELECT * FROM [SBCES].[NscPartsUsedInRbParts]
+     //   WHERE RebuiltStockNum = @RebuiltPartNum";
+     //       return await _dbConnection.QueryAsync<NscPartsUsedViewModel>(query, new { RebuiltPartNum = rebuiltPartNum });
+     //   }
+
+     //   private async Task<IEnumerable<RebuiltPartsViewModel>> GetRbParts(string rebuiltPartNum)
+     //   {
+     //       var query = @"
+     //   SELECT * FROM [SBCES].[RbPartsUsedInRbParts]
+     //   WHERE RebuiltStockNum = @RebuiltPartNum";
+     //       return await _dbConnection.QueryAsync<RebuiltPartsViewModel>(query, new { RebuiltPartNum = rebuiltPartNum });
+     //   }
+
+     //   private async Task<IEnumerable<TotalCostInRbModel>> GetTotalCost(string rebuiltPartNum)
+     //   {
+     //       var query = @"
+     //   SELECT * FROM [SBCES].[TotalCostInRbParts]
+     //   WHERE RebuiltStockNum = @RebuiltPartNum";
+     //       return await _dbConnection.QueryAsync<TotalCostInRbModel>(query, new { RebuiltPartNum = rebuiltPartNum });
+     //   }
+     //   /// /////////////////////////////////////////End Save to Excel
+
+
+        //////////////////////////////////////////// Start Email 
+        //[HttpPost]
+        //public async Task<IActionResult> SendEmail(string to, string subject, string body, string rebuiltPartNum)
+        //{
+        //    try
+        //    {
+        //        // Generate the Excel file
+        //        var filePath = Path.Combine(Path.GetTempPath(), $"{rebuiltPartNum}_Estimate.xlsx");
+        //       // await ExportToExcel(rebuiltPartNum);
+
+        //        // Send the email with the attached Excel file
+        //        var message = new MimeMessage();
+        //        message.From.Add(new MailboxAddress("Your Name", "your-email@example.com"));
+        //        message.To.Add(new MailboxAddress("", to));
+        //        message.Subject = subject;
+        //        message.Body = new TextPart("plain") { Text = body };
+
+        //        var attachment = new MimePart("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        //        {
+        //            Content = new MimeContent(System.IO.File.OpenRead(filePath)),
+        //            ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+        //            ContentTransferEncoding = ContentEncoding.Base64,
+        //            FileName = Path.GetFileName(filePath)
+        //        };
+
+        //        var multipart = new Multipart("mixed");
+        //        multipart.Add(message.Body);
+        //        multipart.Add(attachment);
+        //        message.Body = multipart;
+
+        //        using (var client = new SmtpClient())
+        //        {
+        //            await client.ConnectAsync("smtp.example.com", 587, SecureSocketOptions.StartTls);
+        //            await client.AuthenticateAsync("your-email@example.com", "your-email-password");
+        //            await client.SendAsync(message);
+        //            await client.DisconnectAsync(true);
+        //        }
+
+        //        return Json(new { success = true });
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        // Log the exception (you can use a logging framework like Serilog or NLog)
+        //        Console.WriteLine($"Error sending email: {ex.Message}");
+
+        //        return Json(new { success = false, message = ex.Message });
+        //    }
+        //}
+
+        /////////////////////////////////////////// End Email
+
+        //[HttpPost]
+        //public IActionResult Create(RebuiltPartsViewModel model)
+        //{
+        //    //using (var connection = new SqlConnection(_connectionString))
+        //    //{
+        //    //    var sql = @"INSERT INTO RebuiltParts (StockCode, Description, Keyword, JobNumber, MMSBuyCode, CoreCost, SOPNumber, BuyCost, RemanufacturedCost, IsActive) 
+        //    //                VALUES (@StockCode, @Description, @Keyword, @JobNumber, @MMSBuyCode, @CoreCost, @SOPNumber, @BuyCost, @RemanufacturedCost, @IsActive)";
+        //    //    connection.Execute(sql, model);
+        //    //}
+        //    return RedirectToAction("Index");
+        //}
+
+        //[HttpPost]
+        //public IActionResult Update(RebuiltPartsViewModel model)
+        //{
+        //    using (var connection = new SqlConnection(_connectionString))
+        //    {
+        //        //var sql = @"UPDATE RebuiltParts 
+        //        //            SET Description = @Description, Keyword = @Keyword, JobNumber = @JobNumber, MMSBuyCode = @MMSBuyCode,
+        //        //                CoreCost = @CoreCost, SOPNumber = @SOPNumber, BuyCost = @BuyCost, RemanufacturedCost = @RemanufacturedCost, IsActive = @IsActive
+        //        //            WHERE StockCode = @StockCode";
+        //       //connection.Execute(sql, model);
+        //    }
+        //    return RedirectToAction("Index");
+        //}
+
+
+    }
+}
+ExportController.cs :
+using Microsoft.AspNetCore.Mvc;
+using OfficeOpenXml;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading.Tasks;
+using BCES.Models.Parts;
+using Microsoft.Extensions.Logging;
+using BCES.Data;
+using Microsoft.AspNetCore.Http;
+using System;
+using Kendo.Mvc.UI;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace BCES.Controllers.Parts
+{
+    public class ExportController : Controller
+    {
+        private readonly ILogger<ExportController> _logger;
+        private readonly DapperContext _dapperContext;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+        public ExportController(
+            ILogger<ExportController> logger,
+            DapperContext dapperContext,
+            IHttpContextAccessor httpContextAccessor)
+        {
+            _logger = logger;
+            _dapperContext = dapperContext;
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> SaveToExcel([FromQuery] string rebuiltPartNum)
+        {
+            try
+            {
+                // Fetch data from existing controllers
+              //  var mainGridData = await GetDataFromController<RebuiltPartsViewModel>("RebuiltParts", "GetRebuiltPartsView");
+                var labourDetails = await GetDataFromController<LabourDetailsRebuiltPartsViewModel>("LabourDetails", "GetLabourDetails", new { rebuiltPartNum });
+                var labourHourSummary = await GetDataFromController<LabourDetailsRebuiltPartsViewModel>("LabourHourSummaryInRbParts", "GetLabourHourSummaryInRbParts", new { rebuiltPartNum });
+                var materialCostSummary = await GetDataFromController<MaterialCostSummaryInRbViewModel>("MaterialCostSummaryInRbParts", "GetMaterialCostSummaryInRbParts", new { rebuiltPartNum });
+                var scParts = await GetDataFromController<StockCodedPartsViewModel>("ScPartsUsedInRbParts", "GetScPartsUsedInRbParts", new { rebuiltPartNum });
+                var nscParts = await GetDataFromController<NscPartsUsedViewModel>("NscPartsUsedInRbParts", "GetNscPartsUsedInRbParts", new { rebuiltPartNum });
+                var rbParts = await GetDataFromController<RebuiltPartsViewModel>("RbPartsUsedInRbParts", "GetRbPartsUsedInRbParts", new { rebuiltPartNum });
+                var totalCost = await GetDataFromController<TotalCostInRbModel>("TotalCostInRbParts", "GetTotalCostInRbParts", new { rebuiltPartNum });
+
+                // Create Excel package
+                using (var package = new ExcelPackage())
+                {
+                    // Add main grid data
+                  //  var mainGridSheet = package.Workbook.Worksheets.Add("Main Grid");
+                  //  mainGridSheet.Cells.LoadFromCollection(mainGridData, true);
+
+                    // Add subgrid data
+                    var labourDetailsSheet = package.Workbook.Worksheets.Add("Labour Details");
+                    labourDetailsSheet.Cells.LoadFromCollection(labourDetails, true);
+
+                    var labourHourSummarySheet = package.Workbook.Worksheets.Add("Labour Hour Summary");
+                    labourHourSummarySheet.Cells.LoadFromCollection(labourHourSummary, true);
+
+                    var materialCostSummarySheet = package.Workbook.Worksheets.Add("Material Cost Summary");
+                    materialCostSummarySheet.Cells.LoadFromCollection(materialCostSummary, true);
+
+                    var scPartsSheet = package.Workbook.Worksheets.Add("SC Parts");
+                    scPartsSheet.Cells.LoadFromCollection(scParts, true);
+
+                    var nscPartsSheet = package.Workbook.Worksheets.Add("NSC Parts");
+                    nscPartsSheet.Cells.LoadFromCollection(nscParts, true);
+
+                    var rbPartsSheet = package.Workbook.Worksheets.Add("RB Parts");
+                    rbPartsSheet.Cells.LoadFromCollection(rbParts, true);
+
+                    var totalCostSheet = package.Workbook.Worksheets.Add("Total Cost");
+                    totalCostSheet.Cells.LoadFromCollection(totalCost, true);
+
+                    // Save the Excel file to a memory stream
+                    var memoryStream = new MemoryStream();
+                    package.SaveAs(memoryStream);
+                    memoryStream.Position = 0; // Reset the stream position to the beginning
+
+                    // Return the file for download
+                    return File(memoryStream, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"{rebuiltPartNum}_RebuiltParts_Estimate.xlsx");
+
+                    
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An error occurred while generating the Excel file.");
+                return StatusCode(500, "An error occurred while generating the Excel file.");
+            }
+        }
+        private async Task<IEnumerable<T>> GetDataFromController<T>(string controllerName, string actionName, object routeValues = null)
+        {
+            try
+            {
+                // Resolve the controller type
+                var controllerType = Type.GetType($"BCES.Controllers.Parts.{controllerName}Controller");
+                if (controllerType == null)
+                {
+                    throw new InvalidOperationException($"Controller {controllerName} not found.");
+                }
+
+                // Create an instance of the controller using dependency injection            
+                 var controller = ActivatorUtilities.CreateInstance(HttpContext.RequestServices, controllerType);
+               
+                // Get the action method
+                var methodInfo = controllerType.GetMethod(actionName);
+                if (methodInfo == null)
+                {
+                    throw new InvalidOperationException($"Action {actionName} not found in controller {controllerName}.");
+                }
+
+                // Prepare parameters for the action method
+                var parameters = methodInfo.GetParameters();
+                var arguments = new object[parameters.Length];
+
+                for (int i = 0; i < parameters.Length; i++)
+                {
+                    var parameter = parameters[i];
+
+                    if (parameter.ParameterType == typeof(DataSourceRequest))
+                    {
+                        // Create a default DataSourceRequest for actions that require it
+                        arguments[i] = new DataSourceRequest();
+                    }
+                    else if (routeValues != null && parameter.Name == "rebuiltPartNum")
+                    {
+                        // Pass the rebuiltPartNum parameter
+                        arguments[i] = ((dynamic)routeValues).rebuiltPartNum;
+                    }
+                    else
+                    {
+                        // Pass null for other parameters (if applicable)
+                        arguments[i] = null;
+                    }
+                }
+
+                // Invoke the action method with the prepared arguments
+                var result = methodInfo.Invoke(controller, arguments);
+
+                // Handle the result based on its type
+                if (result is Task taskResult)
+                {
+                    // Await the task to get the actual result
+                    await taskResult;
+
+                    // Use reflection to get the Result property of the Task
+                    var resultProperty = taskResult.GetType().GetProperty("Result");
+                    if (resultProperty != null)
+                    {
+                        var actionResult = resultProperty.GetValue(taskResult);
+
+                        if (actionResult is JsonResult jsonResult)
+                        {
+                            // Check if the JsonResult.Value is a DataSourceResult
+                            if (jsonResult.Value is DataSourceResult dataSourceResult)
+                            {
+                                // Return the Data property as IEnumerable<T>
+                                return (IEnumerable<T>)dataSourceResult.Data;
+                            }
+                            else
+                            {
+                                throw new InvalidOperationException($"Action {actionName} returned an unexpected result type: {jsonResult.Value.GetType().Name}.");
+                            }
+                        }
+                        else if (actionResult is IActionResult)
+                        {
+                            throw new InvalidOperationException($"Action {actionName} returned an unexpected result type: {actionResult.GetType().Name}.");
+                        }
+                    }
+                }
+
+                throw new InvalidOperationException($"Action {actionName} did not return a valid JSON result.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"An error occurred while fetching data from {controllerName}.{actionName}.");
+                throw;
+            }
+        }
+
+        [HttpPost]
+        public IActionResult TestExcel()
+        {
+            using (var package = new ExcelPackage())
+            {
+                var sheet = package.Workbook.Worksheets.Add("Test Sheet");
+                sheet.Cells["A1"].Value = "Hello";
+                sheet.Cells["B1"].Value = "World";
+
+                var memoryStream = new MemoryStream();
+                package.SaveAs(memoryStream);
+                memoryStream.Position = 0;
+
+                return File(memoryStream, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Test.xlsx");
+            }
+        }
+
+        [HttpGet]
+        public IActionResult TestExcel([FromQuery]string rebuiltPartNum)
+        {
+            try
+            {
+                using (var package = new ExcelPackage())
+                {
+                    var sheet = package.Workbook.Worksheets.Add("Test Sheet");
+                    sheet.Cells["A1"].Value = "Hello";
+                    sheet.Cells["B1"].Value = "World";
+
+                    var memoryStream = new MemoryStream();
+                    package.SaveAs(memoryStream);
+                    memoryStream.Position = 0;
+
+                    // Return the file for download
+                    return File(memoryStream, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"{rebuiltPartNum}_Test.xlsx");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An error occurred while generating the Excel file.");
+                return StatusCode(500, "An error occurred while generating the Excel file.");
+            }
+        }
+
+
+
+    }
+}
+
+
+
+    
+
+
