@@ -1,0 +1,93 @@
+
+You are ASP.NET Core 8.0 and Kendo ASp NET Core expert.
+Task 1 : In  RebuiltPartsController.cs, I want to keep all the columns I am using FROM [SBCES].[RbMasterlist] rbm.
+For  lb.ListId, lb.Description AS Description I would like to call a new controller BusesController.cs (GetBusDetails). BusesModel.cs should be created using following schema
+CREATE TABLE [SBCES].[RbListOfBuses](
+	[RebuiltStockNum] [varchar](30) NOT NULL,
+	[ListId] [int] NOT NULL
+) ON [PRIMARY]
+CREATE TABLE [SBCES].[ListOfBuses](
+	[ListId] [int] NOT NULL,
+	[Description] [varchar](75) NULL,
+ CONSTRAINT [ListId] PRIMARY KEY CLUSTERED 
+RebuiltPartsViewModel in RebuiltPartsController.cs (function private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData() below) should call GetBusDetails in BusesController.cs to get lb.ListId,   lb.Description AS Description in function GetRebuiltPartsData().
+
+
+Task 2 : To populate EL.LINKNUMBER,
+                   EL.LabourDefn AS [LabourType],
+                       EL.LabourDefn AS [LabourType],
+                      EL.CostCentre AS [CC],
+                      EL.Task AS [Task],
+                      REPLACE(EL.Usage, ',', '.') AS [Usage],
+                      EL.HrsReqd AS [Time],
+                      ES.RatePerHour AS [RATE PER HOUR],
+                      EL.TimeAddition AS [TIME ADDITION] in GetRebuiltPartsData(), you should call private async Task<IEnumerable<LabourDetailsRebuiltPartsViewModel>> GetLabourDetailsData(string RebuiltPartNum) function in LabourDetailsController.cs. This function is already implemented.
+
+
+Need your help to rewrite the logic and applicable changes for above in RebuiltPartsController.cs (GetRebuiltPartsData()). Also give me complete BusesModel.cs and BusesController.cs (GetBusDetails).
+
+RebuitPartsController.cs
+  private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData()
+  {
+      try
+      {
+          var query = @"
+                      SELECT rbm.RbMasterlistId,
+                      rbm.[RebuiltStockNum],
+                      rbm.[MmsStockCode],
+                      rbm.[Keyword],
+                      rbm.JobNumber,
+                      rbm.[CorePartNum],
+                      rbm.[DetailedDesc],
+                      rbm.[CoreCharge],
+                      rbm.[EstimatedCost],
+                      rbm.[BuyNewCost],
+                      rbm.[RemanCost],
+                      rbm.[ExternalCost],
+                      lb.ListId,
+                      lb.Description AS Description,
+                      EL.LINKNUMBER,
+                   EL.LabourDefn AS [LabourType],
+                       EL.LabourDefn AS [LabourType],
+                      EL.CostCentre AS [CC],
+                      EL.Task AS [Task],
+                      REPLACE(EL.Usage, ',', '.') AS [Usage],
+                      EL.HrsReqd AS [Time],
+                      ES.RatePerHour AS [RATE PER HOUR],
+                      EL.TimeAddition AS [TIME ADDITION]
+                      
+                          FROM [SBCES].[RbMasterlist] rbm
+                          INNER JOIN [SBCES].[RbListOfBuses] rlb ON rlb.[RebuiltStockNum] = rbm.[RebuiltStockNum]
+                          INNER JOIN [SBCES].[ListOfBuses] lb ON rlb.ListId = lb.ListId
+                          left join [SBCES].[EmployeeLabour] el ON el.[LinkNumber] = rbm.[RebuiltStockNum]
+                          JOIN SBCES.EmplClass EC ON EL.LabourDefn = UPPER(EC.LabourDefn)
+                          JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
+                          ";
+
+          var rbParts = _dbConnection.Query<RebuiltPartsViewModel, ListOfBusesModel, LabourDetailsRebuiltPartsViewModel, RebuiltPartsViewModel>(
+              query,
+              (rbPart, vehicle, labourDetail) =>
+              {
+                  rbPart.VehicleSeries.Add(vehicle);
+                  if (labourDetail != null)
+                  {
+                      rbPart.LabourDetailsRebuiltParts.Add(labourDetail);
+                  }
+                  return rbPart;
+              },
+              splitOn: "ListId,LinkNumber"
+          ).GroupBy(rbPart => rbPart.RbMasterlistId).Select(g =>
+          {
+              var groupedRbPart = g.First();
+              groupedRbPart.VehicleSeries = g.SelectMany(rbPart => rbPart.VehicleSeries).Distinct().ToList();
+              groupedRbPart.LabourDetailsRebuiltParts = g.SelectMany(rbPart => rbPart.LabourDetailsRebuiltParts).Distinct().ToList();
+              return groupedRbPart;
+          }).ToList();
+
+          return rbParts;
+      }
+      catch (Exception ex)
+      {
+          return null;
+      }
+  }
