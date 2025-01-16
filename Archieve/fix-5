@@ -1,0 +1,69 @@
+private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData()
+{
+    try
+    {
+        // Base query for rebuilt parts
+        var rebuiltPartsQuery = @"
+        SELECT rbm.RbMasterlistId,
+               rbm.[RebuiltStockNum],
+               rbm.[MmsStockCode],
+               rbm.[Keyword],
+               rbm.JobNumber,
+               rbm.[CorePartNum],
+               rbm.[DetailedDesc],
+               rbm.[CoreCharge],
+               rbm.[EstimatedCost],
+               rbm.[BuyNewCost],
+               rbm.[RemanCost],
+               rbm.[ExternalCost]
+        FROM [SBCES].[RbMasterlist] rbm";
+
+        var rebuiltParts = (await _dbConnection.QueryAsync<RebuiltPartsViewModel>(rebuiltPartsQuery)).ToList();
+
+        if (!rebuiltParts.Any())
+        {
+            return rebuiltParts;
+        }
+
+        // Process parts in parallel using separate connections
+        var tasks = rebuiltParts.Select(async part =>
+        {
+            // Use a new connection for bus details
+            using (var connection1 = new SqlConnection(_dbConnection.ConnectionString))
+            {
+                await connection1.OpenAsync();
+
+                // Fetch bus details
+                var busDetails = await _busesController.GetBusDetails(part.RebuiltStockNum);
+                part.VehicleSeries = busDetails.Select(bus => new BusesModel
+                {
+                    ListId = bus.ListId,
+                    Description = bus.Description
+                }).ToList();
+            }
+
+            // Use a new connection for labour details
+            using (var connection2 = new SqlConnection(_dbConnection.ConnectionString))
+            {
+                await connection2.OpenAsync();
+
+                // Fetch labour details
+                var labourDetails = await _labourDetailsController.GetLabourDetailsData(part.RebuiltStockNum);
+                part.LabourDetailsRebuiltParts = labourDetails.ToList();
+            }
+
+            return part;
+        });
+
+        // Await all tasks
+        var completedParts = await Task.WhenAll(tasks);
+
+        return completedParts;
+    }
+    catch (Exception ex)
+    {
+        // Handle exceptions
+        Console.WriteLine($"Error: {ex.Message}");
+        return null;
+    }
+}
