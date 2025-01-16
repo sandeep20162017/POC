@@ -1,0 +1,69 @@
+private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData()
+{
+    try
+    {
+        // Base query for rebuilt parts data
+        var rebuiltPartsQuery = @"
+        SELECT rbm.RbMasterlistId,
+               rbm.[RebuiltStockNum],
+               rbm.[MmsStockCode],
+               rbm.[Keyword],
+               rbm.JobNumber,
+               rbm.[CorePartNum],
+               rbm.[DetailedDesc],
+               rbm.[CoreCharge],
+               rbm.[EstimatedCost],
+               rbm.[BuyNewCost],
+               rbm.[RemanCost],
+               rbm.[ExternalCost]
+        FROM [SBCES].[RbMasterlist] rbm";
+
+        // Step 1: Get all rebuilt parts
+        var rebuiltParts = (await _dbConnection.QueryAsync<RebuiltPartsViewModel>(rebuiltPartsQuery)).ToList();
+
+        if (!rebuiltParts.Any())
+        {
+            return rebuiltParts;
+        }
+
+        // Step 2: Process parts in parallel
+        var tasks = rebuiltParts.Select(async part =>
+        {
+            // Clone _dbConnection for parallel execution
+            using (var dbConnection1 = CreateNewConnection())
+            {
+                await dbConnection1.OpenAsync();
+                var busDetails = await _busesController.GetBusDetails(part.RebuiltStockNum);
+                part.VehicleSeries = busDetails.Select(bus => new BusesModel
+                {
+                    ListId = bus.ListId,
+                    Description = bus.Description
+                }).ToList();
+            }
+
+            using (var dbConnection2 = CreateNewConnection())
+            {
+                await dbConnection2.OpenAsync();
+                var labourDetails = await _labourDetailsController.GetLabourDetailsData(part.RebuiltStockNum);
+                part.LabourDetailsRebuiltParts = labourDetails.ToList();
+            }
+
+            return part;
+        });
+
+        var completedParts = await Task.WhenAll(tasks);
+        return completedParts;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error: {ex.Message}");
+        return null;
+    }
+}
+
+private IDbConnection CreateNewConnection()
+{
+    // Ensure this matches the connection type you are using (e.g., SqlConnection)
+    var connection = new SqlConnection(_dbConnection.ConnectionString);
+    return connection;
+}
