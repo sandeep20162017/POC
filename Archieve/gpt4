@@ -1,0 +1,49 @@
+
+You are ASP.NET Core 8.0 and Kendo ASp NET Core expert.
+In the following code, foreach (var part in rebuiltParts) loop is taking time to load. How to improve performance?
+private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData()
+{
+    try
+    {
+        // Base query for rebuilt parts data
+        var rebuiltPartsQuery = @"
+        SELECT rbm.RbMasterlistId,
+               rbm.[RebuiltStockNum],
+               rbm.[MmsStockCode],
+               rbm.[Keyword],
+               rbm.JobNumber,
+               rbm.[CorePartNum],
+               rbm.[DetailedDesc],
+               rbm.[CoreCharge],
+               rbm.[EstimatedCost],
+               rbm.[BuyNewCost],
+               rbm.[RemanCost],
+               rbm.[ExternalCost]
+        FROM [SBCES].[RbMasterlist] rbm";
+
+        var rebuiltParts = (await _dbConnection.QueryAsync<RebuiltPartsViewModel>(rebuiltPartsQuery)).ToList();
+
+        foreach (var part in rebuiltParts)
+        {
+            // Call the BusesController method to get bus details
+            var busDetails = await _busesController.GetBusDetails(part.RebuiltStockNum);
+            part.VehicleSeries = busDetails.Select(bus => new BusesModel
+            {
+                ListId = bus.ListId,
+                Description = bus.Description
+            }).ToList();
+
+           // Call the LabourDetailsController method to get labour details
+            var labourDetails = await _labourDetailsController.GetLabourDetailsData(part.RebuiltStockNum);
+            part.LabourDetailsRebuiltParts = labourDetails.ToList();
+        }
+
+        return rebuiltParts;
+    }
+    catch (Exception ex)
+    {
+        // Handle errors gracefully
+        return null;
+    }
+}
+    
