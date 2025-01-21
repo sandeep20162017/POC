@@ -1,0 +1,939 @@
+You are ASP.Net core and telerik ASp.NET Core expert.
+I have web application (ASP.NET core) qwoking fine on IIS express, but when deployed to Azure, I am getting blank page (500 from https). I don't have access to Azure logs.
+Based n the following article, how can I add cutomerror handling to get more details?
+Tried Chrome dev tools, no erros.
+arcticle :
+This article covers common approaches to handling errors in ASP.NET Core web apps. See also Handle errors in ASP.NET Core controller-based web APIs and Handle errors in minimal APIs.
+
+For Blazor error handling guidance, which adds to or supersedes the guidance in this article, see Handle errors in ASP.NET Core Blazor apps.
+
+Developer exception page
+The Developer Exception Page displays detailed information about unhandled request exceptions. It uses DeveloperExceptionPageMiddleware to capture synchronous and asynchronous exceptions from the HTTP pipeline and to generate error responses. The developer exception page runs early in the middleware pipeline, so that it can catch unhandled exceptions thrown in middleware that follows.
+
+ASP.NET Core apps enable the developer exception page by default when both:
+
+Running in the Development environment.
+The app was created with the current templates, that is, by using WebApplication.CreateBuilder.
+Apps created using earlier templates, that is, by using WebHost.CreateDefaultBuilder, can enable the developer exception page by calling app.UseDeveloperExceptionPage.
+
+ Warning
+
+Don't enable the Developer Exception Page unless the app is running in the Development environment. Don't share detailed exception information publicly when the app runs in production. For more information on configuring environments, see Use multiple environments in ASP.NET Core.
+
+The Developer Exception Page can include the following information about the exception and the request:
+
+Stack trace
+Query string parameters, if any
+Cookies, if any
+Headers
+Endpoint metadata, if any
+The Developer Exception Page isn't guaranteed to provide any information. Use Logging for complete error information.
+
+The following image shows a sample developer exception page with animation to show the tabs and the information displayed:
+
+Developer exception page animated to show each tab selected.
+
+In response to a request with an Accept: text/plain header, the Developer Exception Page returns plain text instead of HTML. For example:
+
+text
+
+Copy
+Status: 500 Internal Server Error
+Time: 9.39 msSize: 480 bytes
+FormattedRawHeadersRequest
+Body
+text/plain; charset=utf-8, 480 bytes
+System.InvalidOperationException: Sample Exception
+   at WebApplicationMinimal.Program.<>c.<Main>b__0_0() in C:\Source\WebApplicationMinimal\Program.cs:line 12
+   at lambda_method1(Closure, Object, HttpContext)
+   at Microsoft.AspNetCore.Diagnostics.DeveloperExceptionPageMiddlewareImpl.Invoke(HttpContext context)
+
+HEADERS
+=======
+Accept: text/plain
+Host: localhost:7267
+traceparent: 00-0eab195ea19d07b90a46cd7d6bf2f
+Exception handler page
+To configure a custom error handling page for the Production environment, call UseExceptionHandler. This exception handling middleware:
+
+Catches and logs unhandled exceptions.
+Re-executes the request in an alternate pipeline using the path indicated. The request isn't re-executed if the response has started. The template-generated code re-executes the request using the /Error path.
+ Warning
+
+If the alternate pipeline throws an exception of its own, Exception Handling Middleware rethrows the original exception.
+
+Since this middleware can re-execute the request pipeline:
+
+Middlewares need to handle reentrancy with the same request. This normally means either cleaning up their state after calling _next or caching their processing on the HttpContext to avoid redoing it. When dealing with the request body, this either means buffering or caching the results like the Form reader.
+For the UseExceptionHandler(IApplicationBuilder, String) overload that is used in templates, only the request path is modified, and the route data is cleared. Request data such as headers, method, and items are all reused as-is.
+Scoped services remain the same.
+In the following example, UseExceptionHandler adds the exception handling middleware in non-Development environments:
+
+C#
+
+Copy
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+    app.UseHsts();
+}
+The Razor Pages app template provides an Error page (.cshtml) and PageModel class (ErrorModel) in the Pages folder. For an MVC app, the project template includes an Error action method and an Error view for the Home controller.
+
+The exception handling middleware re-executes the request using the original HTTP method. If an error handler endpoint is restricted to a specific set of HTTP methods, it runs only for those HTTP methods. For example, an MVC controller action that uses the [HttpGet] attribute runs only for GET requests. To ensure that all requests reach the custom error handling page, don't restrict them to a specific set of HTTP methods.
+
+To handle exceptions differently based on the original HTTP method:
+
+For Razor Pages, create multiple handler methods. For example, use OnGet to handle GET exceptions and use OnPost to handle POST exceptions.
+For MVC, apply HTTP verb attributes to multiple actions. For example, use [HttpGet] to handle GET exceptions and use [HttpPost] to handle POST exceptions.
+To allow unauthenticated users to view the custom error handling page, ensure that it supports anonymous access.
+
+Access the exception
+Use IExceptionHandlerPathFeature to access the exception and the original request path in an error handler. The following example uses IExceptionHandlerPathFeature to get more information about the exception that was thrown:
+
+C#
+
+Copy
+[ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+[IgnoreAntiforgeryToken]
+public class ErrorModel : PageModel
+{
+    public string? RequestId { get; set; }
+
+    public bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    public string? ExceptionMessage { get; set; }
+
+    public void OnGet()
+    {
+        RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier;
+
+        var exceptionHandlerPathFeature =
+            HttpContext.Features.Get<IExceptionHandlerPathFeature>();
+
+        if (exceptionHandlerPathFeature?.Error is FileNotFoundException)
+        {
+            ExceptionMessage = "The file was not found.";
+        }
+
+        if (exceptionHandlerPathFeature?.Path == "/")
+        {
+            ExceptionMessage ??= string.Empty;
+            ExceptionMessage += " Page: Home.";
+        }
+    }
+}
+ Warning
+
+Do not serve sensitive error information to clients. Serving errors is a security risk.
+
+Exception handler lambda
+An alternative to a custom exception handler page is to provide a lambda to UseExceptionHandler. Using a lambda allows access to the error before returning the response.
+
+The following code uses a lambda for exception handling:
+
+C#
+
+Copy
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler(exceptionHandlerApp =>
+    {
+        exceptionHandlerApp.Run(async context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+
+            // using static System.Net.Mime.MediaTypeNames;
+            context.Response.ContentType = Text.Plain;
+
+            await context.Response.WriteAsync("An exception was thrown.");
+
+            var exceptionHandlerPathFeature =
+                context.Features.Get<IExceptionHandlerPathFeature>();
+
+            if (exceptionHandlerPathFeature?.Error is FileNotFoundException)
+            {
+                await context.Response.WriteAsync(" The file was not found.");
+            }
+
+            if (exceptionHandlerPathFeature?.Path == "/")
+            {
+                await context.Response.WriteAsync(" Page: Home.");
+            }
+        });
+    });
+
+    app.UseHsts();
+}
+Another way to use a lambda is to set the status code based on the exception type, as in the following example:
+
+C#
+
+Copy
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddProblemDetails();
+var app = builder.Build();
+if (app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler(new ExceptionHandlerOptions
+    {
+        StatusCodeSelector = ex => ex is TimeoutException
+            ? StatusCodes.Status503ServiceUnavailable
+            : StatusCodes.Status500InternalServerError
+    });
+}
+ Warning
+
+Do not serve sensitive error information to clients. Serving errors is a security risk.
+
+IExceptionHandler
+IExceptionHandler is an interface that gives the developer a callback for handling known exceptions in a central location.
+
+IExceptionHandler implementations are registered by calling IServiceCollection.AddExceptionHandler<T>. The lifetime of an IExceptionHandler instance is singleton. Multiple implementations can be added, and they're called in the order registered.
+
+If an exception handler handles a request, it can return true to stop processing. If an exception isn't handled by any exception handler, then control falls back to the default behavior and options from the middleware. Different metrics and logs are emitted for handled versus unhandled exceptions.
+
+The following example shows an IExceptionHandler implementation:
+
+C#
+
+Copy
+using Microsoft.AspNetCore.Diagnostics;
+
+namespace ErrorHandlingSample
+{
+    public class CustomExceptionHandler : IExceptionHandler
+    {
+        private readonly ILogger<CustomExceptionHandler> logger;
+        public CustomExceptionHandler(ILogger<CustomExceptionHandler> logger)
+        {
+            this.logger = logger;
+        }
+        public ValueTask<bool> TryHandleAsync(
+            HttpContext httpContext,
+            Exception exception,
+            CancellationToken cancellationToken)
+        {
+            var exceptionMessage = exception.Message;
+            logger.LogError(
+                "Error Message: {exceptionMessage}, Time of occurrence {time}",
+                exceptionMessage, DateTime.UtcNow);
+            // Return false to continue with the default behavior
+            // - or - return true to signal that this exception is handled
+            return ValueTask.FromResult(false);
+        }
+    }
+}
+The following example shows how to register an IExceptionHandler implementation for dependency injection:
+
+C#
+
+Copy
+using ErrorHandlingSample;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddDatabaseDeveloperPageExceptionFilter();
+builder.Services.AddRazorPages();
+builder.Services.AddExceptionHandler<CustomExceptionHandler>();
+
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+    app.UseHsts();
+}
+
+// Remaining Program.cs code omitted for brevity
+When the preceding code runs in the Development environment:
+
+The CustomExceptionHandler is called first to handle an exception.
+After logging the exception, the TryHandleAsync method returns false, so the developer exception page is shown.
+In other environments:
+
+The CustomExceptionHandler is called first to handle an exception.
+After logging the exception, the TryHandleAsync method returns false, so the /Error page is shown.
+
+UseStatusCodePages
+By default, an ASP.NET Core app doesn't provide a status code page for HTTP error status codes, such as 404 - Not Found. When the app sets an HTTP 400-599 error status code that doesn't have a body, it returns the status code and an empty response body. To enable default text-only handlers for common error status codes, call UseStatusCodePages in Program.cs:
+
+C#
+
+Copy
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+    app.UseHsts();
+}
+
+app.UseStatusCodePages();
+Call UseStatusCodePages before request handling middleware. For example, call UseStatusCodePages before the Static File Middleware and the Endpoints Middleware.
+
+When UseStatusCodePages isn't used, navigating to a URL without an endpoint returns a browser-dependent error message indicating the endpoint can't be found. When UseStatusCodePages is called, the browser returns the following response:
+
+Console
+
+Copy
+Status Code: 404; Not Found
+UseStatusCodePages isn't typically used in production because it returns a message that isn't useful to users.
+
+ Note
+
+The status code pages middleware does not catch exceptions. To provide a custom error handling page, use the exception handler page.
+
+UseStatusCodePages with format string
+To customize the response content type and text, use the overload of UseStatusCodePages that takes a content type and format string:
+
+C#
+
+Copy
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+    app.UseHsts();
+}
+
+// using static System.Net.Mime.MediaTypeNames;
+app.UseStatusCodePages(Text.Plain, "Status Code Page: {0}");
+In the preceding code, {0} is a placeholder for the error code.
+
+UseStatusCodePages with a format string isn't typically used in production because it returns a message that isn't useful to users.
+
+UseStatusCodePages with lambda
+To specify custom error-handling and response-writing code, use the overload of UseStatusCodePages that takes a lambda expression:
+
+C#
+
+Copy
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+    app.UseHsts();
+}
+
+app.UseStatusCodePages(async statusCodeContext =>
+{
+    // using static System.Net.Mime.MediaTypeNames;
+    statusCodeContext.HttpContext.Response.ContentType = Text.Plain;
+
+    await statusCodeContext.HttpContext.Response.WriteAsync(
+        $"Status Code Page: {statusCodeContext.HttpContext.Response.StatusCode}");
+});
+UseStatusCodePages with a lambda isn't typically used in production because it returns a message that isn't useful to users.
+
+UseStatusCodePagesWithRedirects
+The UseStatusCodePagesWithRedirects extension method:
+
+Sends a 302 - Found status code to the client.
+Redirects the client to the error handling endpoint provided in the URL template. The error handling endpoint typically displays error information and returns HTTP 200.
+C#
+
+Copy
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+    app.UseHsts();
+}
+
+app.UseStatusCodePagesWithRedirects("/StatusCode/{0}");
+The URL template can include a {0} placeholder for the status code, as shown in the preceding code. If the URL template starts with ~ (tilde), the ~ is replaced by the app's PathBase. When specifying an endpoint in the app, create an MVC view or Razor page for the endpoint.
+
+This method is commonly used when the app:
+
+Should redirect the client to a different endpoint, usually in cases where a different app processes the error. For web apps, the client's browser address bar reflects the redirected endpoint.
+Shouldn't preserve and return the original status code with the initial redirect response.
+UseStatusCodePagesWithReExecute
+The UseStatusCodePagesWithReExecute extension method:
+
+Generates the response body by re-executing the request pipeline using an alternate path.
+Does not alter the status code before or after re-executing the pipeline.
+The new pipeline execution may alter the response's status code, as the new pipeline has full control of the status code. If the new pipeline does not alter the status code, the original status code will be sent to the client.
+
+C#
+
+Copy
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+    app.UseHsts();
+}
+
+app.UseStatusCodePagesWithReExecute("/StatusCode/{0}");
+If an endpoint within the app is specified, create an MVC view or Razor page for the endpoint.
+
+This method is commonly used when the app should:
+
+Process the request without redirecting to a different endpoint. For web apps, the client's browser address bar reflects the originally requested endpoint.
+Preserve and return the original status code with the response.
+The URL template must start with / and may include a placeholder {0} for the status code. To pass the status code as a query-string parameter, pass a second argument into UseStatusCodePagesWithReExecute. For example:
+
+C#
+
+Copy
+var app = builder.Build();  
+app.UseStatusCodePagesWithReExecute("/StatusCode", "?statusCode={0}");
+The endpoint that processes the error can get the original URL that generated the error, as shown in the following example:
+
+C#
+
+Copy
+[ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+public class StatusCodeModel : PageModel
+{
+    public int OriginalStatusCode { get; set; }
+
+    public string? OriginalPathAndQuery { get; set; }
+
+    public void OnGet(int statusCode)
+    {
+        OriginalStatusCode = statusCode;
+
+        var statusCodeReExecuteFeature =
+            HttpContext.Features.Get<IStatusCodeReExecuteFeature>();
+
+        if (statusCodeReExecuteFeature is not null)
+        {
+            OriginalPathAndQuery = $"{statusCodeReExecuteFeature.OriginalPathBase}"
+                                    + $"{statusCodeReExecuteFeature.OriginalPath}"
+                                    + $"{statusCodeReExecuteFeature.OriginalQueryString}";
+
+        }
+    }
+}
+Since this middleware can re-execute the request pipeline:
+
+Middlewares need to handle reentrancy with the same request. This normally means either cleaning up their state after calling _next or caching their processing on the HttpContext to avoid redoing it. When dealing with the request body, this either means buffering or caching the results like the Form reader.
+Scoped services remain the same.
+Disable status code pages
+To disable status code pages for an MVC controller or action method, use the [SkipStatusCodePages] attribute.
+
+To disable status code pages for specific requests in a Razor Pages handler method or in an MVC controller, use IStatusCodePagesFeature:
+
+C#
+
+Copy
+public void OnGet()
+{
+    var statusCodePagesFeature =
+        HttpContext.Features.Get<IStatusCodePagesFeature>();
+
+    if (statusCodePagesFeature is not null)
+    {
+        statusCodePagesFeature.Enabled = false;
+    }
+}
+Exception-handling code
+Code in exception handling pages can also throw exceptions. Production error pages should be tested thoroughly and take extra care to avoid throwing exceptions of their own.
+
+Response headers
+Once the headers for a response are sent:
+
+The app can't change the response's status code.
+Any exception pages or handlers can't run. The response must be completed or the connection aborted.
+Server exception handling
+In addition to the exception handling logic in an app, the HTTP server implementation can handle some exceptions. If the server catches an exception before response headers are sent, the server sends a 500 - Internal Server Error response without a response body. If the server catches an exception after response headers are sent, the server closes the connection. Requests that aren't handled by the app are handled by the server. Any exception that occurs when the server is handling the request is handled by the server's exception handling. The app's custom error pages, exception handling middleware, and filters don't affect this behavior.
+
+Startup exception handling
+Only the hosting layer can handle exceptions that take place during app startup. The host can be configured to capture startup errors and capture detailed errors.
+
+The hosting layer can show an error page for a captured startup error only if the error occurs after host address/port binding. If binding fails:
+
+The hosting layer logs a critical exception.
+The dotnet process crashes.
+No error page is displayed when the HTTP server is Kestrel.
+When running on IIS (or Azure App Service) or IIS Express, a 502.5 - Process Failure is returned by the ASP.NET Core Module if the process can't start. For more information, see Troubleshoot ASP.NET Core on Azure App Service and IIS.
+
+Database error page
+The Database developer page exception filter AddDatabaseDeveloperPageExceptionFilter captures database-related exceptions that can be resolved by using Entity Framework Core migrations. When these exceptions occur, an HTML response is generated with details of possible actions to resolve the issue. This page is enabled only in the Development environment. The following code adds the Database developer page exception filter:
+
+C#
+
+Copy
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddDatabaseDeveloperPageExceptionFilter();
+builder.Services.AddRazorPages();
+Exception filters
+In MVC apps, exception filters can be configured globally or on a per-controller or per-action basis. In Razor Pages apps, they can be configured globally or per page model. These filters handle any unhandled exceptions that occur during the execution of a controller action or another filter. For more information, see Filters in ASP.NET Core.
+
+Exception filters are useful for trapping exceptions that occur within MVC actions, but they're not as flexible as the built-in exception handling middleware, UseExceptionHandler. We recommend using UseExceptionHandler, unless you need to perform error handling differently based on which MVC action is chosen.
+
+Model state errors
+For information about how to handle model state errors, see Model binding and Model validation.
+
+
+Problem details
+Problem Details are not the only response format to describe an HTTP API error, however, they are commonly used to report errors for HTTP APIs.
+
+The problem details service implements the IProblemDetailsService interface, which supports creating problem details in ASP.NET Core. The AddProblemDetails(IServiceCollection) extension method on IServiceCollection registers the default IProblemDetailsService implementation.
+
+In ASP.NET Core apps, the following middleware generates problem details HTTP responses when AddProblemDetails is called, except when the Accept request HTTP header doesn't include one of the content types supported by the registered IProblemDetailsWriter (default: application/json):
+
+ExceptionHandlerMiddleware: Generates a problem details response when a custom handler is not defined.
+StatusCodePagesMiddleware: Generates a problem details response by default.
+DeveloperExceptionPageMiddleware: Generates a problem details response in development when the Accept request HTTP header doesn't include text/html.
+The following code configures the app to generate a problem details response for all HTTP client and server error responses that don't have body content yet:
+
+C#
+
+Copy
+builder.Services.AddProblemDetails();
+
+var app = builder.Build();        
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler();
+    app.UseHsts();
+}
+
+app.UseStatusCodePages();
+The next section shows how to customize the problem details response body.
+
+
+Customize problem details
+The automatic creation of a ProblemDetails can be customized using any of the following options:
+
+Use ProblemDetailsOptions.CustomizeProblemDetails
+Use a custom IProblemDetailsWriter
+Call the IProblemDetailsService in a middleware
+CustomizeProblemDetails operation
+The generated problem details can be customized using CustomizeProblemDetails, and the customizations are applied to all auto-generated problem details.
+
+The following code uses ProblemDetailsOptions to set CustomizeProblemDetails:
+
+C#
+
+Copy
+builder.Services.AddProblemDetails(options =>
+    options.CustomizeProblemDetails = ctx =>
+            ctx.ProblemDetails.Extensions.Add("nodeId", Environment.MachineName));
+
+var app = builder.Build();        
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler();
+    app.UseHsts();
+}
+
+app.UseStatusCodePages();
+For example, an HTTP Status 400 Bad Request endpoint result produces the following problem details response body:
+
+JSON
+
+Copy
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+  "title": "Bad Request",
+  "status": 400,
+  "nodeId": "my-machine-name"
+}
+Custom IProblemDetailsWriter
+An IProblemDetailsWriter implementation can be created for advanced customizations.
+
+C#
+
+Copy
+public class SampleProblemDetailsWriter : IProblemDetailsWriter
+{
+    // Indicates that only responses with StatusCode == 400
+    // are handled by this writer. All others are
+    // handled by different registered writers if available.
+    public bool CanWrite(ProblemDetailsContext context)
+        => context.HttpContext.Response.StatusCode == 400;
+
+    public ValueTask WriteAsync(ProblemDetailsContext context)
+    {
+        // Additional customizations.
+
+        // Write to the response.
+        var response = context.HttpContext.Response;
+        return new ValueTask(response.WriteAsJsonAsync(context.ProblemDetails));
+    }
+}
+Note: When using a custom IProblemDetailsWriter, the custom IProblemDetailsWriter must be registered before calling AddRazorPages, AddControllers, AddControllersWithViews, or AddMvc:
+
+C#
+
+Copy
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddTransient<IProblemDetailsWriter, SampleProblemDetailsWriter>();
+
+var app = builder.Build();
+
+// Middleware to handle writing problem details to the response.
+app.Use(async (context, next) =>
+{
+    await next(context);
+    var mathErrorFeature = context.Features.Get<MathErrorFeature>();
+    if (mathErrorFeature is not null)
+    {
+        if (context.RequestServices.GetService<IProblemDetailsWriter>() is
+            { } problemDetailsService)
+        {
+
+            if (problemDetailsService.CanWrite(new ProblemDetailsContext() { HttpContext = context }))
+            {
+                (string Detail, string Type) details = mathErrorFeature.MathError switch
+                {
+                    MathErrorType.DivisionByZeroError => ("Divison by zero is not defined.",
+                        "https://en.wikipedia.org/wiki/Division_by_zero"),
+                    _ => ("Negative or complex numbers are not valid input.",
+                        "https://en.wikipedia.org/wiki/Square_root")
+                };
+
+                await problemDetailsService.WriteAsync(new ProblemDetailsContext
+                {
+                    HttpContext = context,
+                    ProblemDetails =
+                    {
+                        Title = "Bad Input",
+                        Detail = details.Detail,
+                        Type = details.Type
+                    }
+                });
+            }
+        }
+    }
+});
+
+// /divide?numerator=2&denominator=4
+app.MapGet("/divide", (HttpContext context, double numerator, double denominator) =>
+{
+    if (denominator == 0)
+    {
+        var errorType = new MathErrorFeature
+        {
+            MathError = MathErrorType.DivisionByZeroError
+        };
+        context.Features.Set(errorType);
+        return Results.BadRequest();
+    }
+
+    return Results.Ok(numerator / denominator);
+});
+
+// /squareroot?radicand=16
+app.MapGet("/squareroot", (HttpContext context, double radicand) =>
+{
+    if (radicand < 0)
+    {
+        var errorType = new MathErrorFeature
+        {
+            MathError = MathErrorType.NegativeRadicandError
+        };
+        context.Features.Set(errorType);
+        return Results.BadRequest();
+    }
+
+    return Results.Ok(Math.Sqrt(radicand));
+});
+
+app.Run();
+Problem details from Middleware
+An alternative approach to using ProblemDetailsOptions with CustomizeProblemDetails is to set the ProblemDetails in middleware. A problem details response can be written by calling IProblemDetailsService.WriteAsync:
+
+C#
+
+Copy
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllers();
+
+builder.Services.AddProblemDetails();
+
+var app = builder.Build();
+
+app.UseHttpsRedirection();
+app.UseStatusCodePages();
+
+// Middleware to handle writing problem details to the response.
+app.Use(async (context, next) =>
+{
+    await next(context);
+    var mathErrorFeature = context.Features.Get<MathErrorFeature>();
+    if (mathErrorFeature is not null)
+    {
+        if (context.RequestServices.GetService<IProblemDetailsService>() is
+                                                           { } problemDetailsService)
+        {
+            (string Detail, string Type) details = mathErrorFeature.MathError switch
+            {
+                MathErrorType.DivisionByZeroError => ("Divison by zero is not defined.",
+                "https://en.wikipedia.org/wiki/Division_by_zero"),
+                _ => ("Negative or complex numbers are not valid input.", 
+                "https://en.wikipedia.org/wiki/Square_root")
+            };
+
+            await problemDetailsService.WriteAsync(new ProblemDetailsContext
+            {
+                HttpContext = context,
+                ProblemDetails =
+                {
+                    Title = "Bad Input",
+                    Detail = details.Detail,
+                    Type = details.Type
+                }
+            });
+        }
+    }
+});
+
+// /divide?numerator=2&denominator=4
+app.MapGet("/divide", (HttpContext context, double numerator, double denominator) =>
+{
+    if (denominator == 0)
+    {
+        var errorType = new MathErrorFeature { MathError =
+                                               MathErrorType.DivisionByZeroError };
+        context.Features.Set(errorType);
+        return Results.BadRequest();
+    }
+
+    return Results.Ok(numerator / denominator);
+});
+
+// /squareroot?radicand=16
+app.MapGet("/squareroot", (HttpContext context, double radicand) =>
+{
+    if (radicand < 0)
+    {
+        var errorType = new MathErrorFeature { MathError =
+                                               MathErrorType.NegativeRadicandError };
+        context.Features.Set(errorType);
+        return Results.BadRequest();
+    }
+
+    return Results.Ok(Math.Sqrt(radicand));
+});
+
+app.MapControllers();
+
+app.Run();
+In the preceding code, the minimal API endpoints /divide and /squareroot return the expected custom problem response on error input.
+
+The API controller endpoints return the default problem response on error input, not the custom problem response. The default problem response is returned because the API controller has written to the response stream, Problem details for error status codes, before IProblemDetailsService.WriteAsync is called and the response is not written again.
+
+The following ValuesController returns BadRequestResult, which writes to the response stream and therefore prevents the custom problem response from being returned.
+
+C#
+
+Copy
+[Route("api/[controller]/[action]")]
+[ApiController]
+public class ValuesController : ControllerBase
+{
+    // /api/values/divide/1/2
+    [HttpGet("{Numerator}/{Denominator}")]
+    public IActionResult Divide(double Numerator, double Denominator)
+    {
+        if (Denominator == 0)
+        {
+            var errorType = new MathErrorFeature
+            {
+                MathError = MathErrorType.DivisionByZeroError
+            };
+            HttpContext.Features.Set(errorType);
+            return BadRequest();
+        }
+
+        return Ok(Numerator / Denominator);
+    }
+
+    // /api/values/squareroot/4
+    [HttpGet("{radicand}")]
+    public IActionResult Squareroot(double radicand)
+    {
+        if (radicand < 0)
+        {
+            var errorType = new MathErrorFeature
+            {
+                MathError = MathErrorType.NegativeRadicandError
+            };
+            HttpContext.Features.Set(errorType);
+            return BadRequest();
+        }
+
+        return Ok(Math.Sqrt(radicand));
+    }
+
+}
+The following Values3Controller returns ControllerBase.Problem so the expected custom problem result is returned:
+
+C#
+
+Copy
+[Route("api/[controller]/[action]")]
+[ApiController]
+public class Values3Controller : ControllerBase
+{
+    // /api/values3/divide/1/2
+    [HttpGet("{Numerator}/{Denominator}")]
+    public IActionResult Divide(double Numerator, double Denominator)
+    {
+        if (Denominator == 0)
+        {
+            var errorType = new MathErrorFeature
+            {
+                MathError = MathErrorType.DivisionByZeroError
+            };
+            HttpContext.Features.Set(errorType);
+            return Problem(
+                title: "Bad Input",
+                detail: "Divison by zero is not defined.",
+                type: "https://en.wikipedia.org/wiki/Division_by_zero",
+                statusCode: StatusCodes.Status400BadRequest
+                );
+        }
+
+        return Ok(Numerator / Denominator);
+    }
+
+    // /api/values3/squareroot/4
+    [HttpGet("{radicand}")]
+    public IActionResult Squareroot(double radicand)
+    {
+        if (radicand < 0)
+        {
+            var errorType = new MathErrorFeature
+            {
+                MathError = MathErrorType.NegativeRadicandError
+            };
+            HttpContext.Features.Set(errorType);
+            return Problem(
+                title: "Bad Input",
+                detail: "Negative or complex numbers are not valid input.",
+                type: "https://en.wikipedia.org/wiki/Square_root",
+                statusCode: StatusCodes.Status400BadRequest
+                );
+        }
+
+        return Ok(Math.Sqrt(radicand));
+    }
+
+}
+Produce a ProblemDetails payload for exceptions
+Consider the following app:
+
+C#
+
+Copy
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllers();
+builder.Services.AddProblemDetails();
+
+var app = builder.Build();
+
+app.UseExceptionHandler();
+app.UseStatusCodePages();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage();
+}
+
+app.MapControllers();
+app.Run();
+In non-development environments, when an exception occurs, the following is a standard ProblemDetails response that is returned to the client:
+
+JSON
+
+Copy
+{
+"type":"https://tools.ietf.org/html/rfc7231#section-6.6.1",
+"title":"An error occurred while processing your request.",
+"status":500,"traceId":"00-b644<snip>-00"
+}
+For most apps, the preceding code is all that's needed for exceptions. However, the following section shows how to get more detailed problem responses.
+
+An alternative to a custom exception handler page is to provide a lambda to UseExceptionHandler. Using a lambda allows access to the error and writing a problem details response with IProblemDetailsService.WriteAsync:
+
+C#
+
+Copy
+using Microsoft.AspNetCore.Diagnostics;
+using static System.Net.Mime.MediaTypeNames;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllers();
+builder.Services.AddProblemDetails();
+
+var app = builder.Build();
+
+app.UseExceptionHandler();
+app.UseStatusCodePages();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage();
+}
+else
+{
+    app.UseExceptionHandler(exceptionHandlerApp =>
+    {
+        exceptionHandlerApp.Run(async context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            context.Response.ContentType = Text.Plain;
+
+            var title = "Bad Input";
+            var detail = "Invalid input";
+            var type = "https://errors.example.com/badInput";
+
+            if (context.RequestServices.GetService<IProblemDetailsService>() is
+                { } problemDetailsService)
+            {
+                var exceptionHandlerFeature =
+               context.Features.Get<IExceptionHandlerFeature>();
+
+                var exceptionType = exceptionHandlerFeature?.Error;
+                if (exceptionType != null &&
+                   exceptionType.Message.Contains("infinity"))
+                {
+                    title = "Argument exception";
+                    detail = "Invalid input";
+                    type = "https://errors.example.com/argumentException";
+                }
+
+                await problemDetailsService.WriteAsync(new ProblemDetailsContext
+                {
+                    HttpContext = context,
+                    ProblemDetails =
+                {
+                    Title = title,
+                    Detail = detail,
+                    Type = type
+                }
+                });
+            }
+        });
+    });
+}
+
+app.MapControllers();
+app.Run();
+ Warning
+
+Do not serve sensitive error information to clients. Serving errors is a security risk.
+
+An alternative approach to generate problem details is to use the third-party NuGet package Hellang.Middleware.ProblemDetails that can be used to map exceptions and client errors to problem details.
+
+Additional resources
