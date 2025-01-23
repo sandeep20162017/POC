@@ -1,0 +1,3466 @@
+create or replace PACKAGE BODY ces_inquiry AS
+--The package body PCTS_INQUIRY Purpose is to get user input from ASP and DLL
+--and retrieve  and pass (active recordset) data from PCTS tables:
+--
+-- MODIFICATION HISTORY
+-- Person      Date    Comments
+-- ---------   ------  ----------------------------------------
+-- Anthony C   5/25/04 Created procedures SEARCH_NSC_RBPARTLIST
+-- Anthony C   5/27/04 Created procedures SEARCH_NSC_PART
+-- Scott B     8/13/04 Created procedures SEARCH_SC_PART
+-- Dhaksayan S 4/30/09 Created procedures RPT_COST_VARIANCE_2
+
+--  Search the incident table when given the
+--  input parameters declared in the Procedure
+
+PROCEDURE SEARCH_NSC_RBPARTLIST
+   (vi_orig_supplier_num IN NSC_PARTS_USED.orig_supp_num%TYPE,
+    vi_oem_part_cost IN NON_STOCK_CODED_PARTS.oem_part_cost%TYPE,
+    vi_description IN NON_STOCK_CODED_PARTS.detailed_desc%TYPE,
+    vi_cost_comparetype IN INTEGER,
+    vo_Cursor OUT query_cur) IS
+BEGIN
+    IF (vi_cost_comparetype = 0) THEN
+        OPEN vo_cursor FOR SELECT
+            UPPER(RB_MASTERLIST.rebuilt_stock_num) AS "REBUILT NUMBER",
+            UPPER(RB_MASTERLIST.mms_stock_code) AS "MMS STOCK CODE",
+            UPPER(RB_MASTERLIST.keyword) AS "KEYWORD",
+            UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+            RB_MASTERLIST.rowid
+            /*UPPER(RB_MASTERLIST.rebuilt_stock_num) AS "REBUILT NUMBER",
+            UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+            UPPER(RB_MASTERLIST.mms_stock_code) AS "MMS STOCK CODE",
+            RB_MASTERLIST.rowid */
+        FROM
+            NSC_PARTS_USED,
+            NON_STOCK_CODED_PARTS,
+            RB_MASTERLIST
+        WHERE
+            NVL(NSC_PARTS_USED.orig_supp_num,' ') LIKE
+                TRIM(vi_orig_supplier_num) AND
+            UPPER(NVL(NON_STOCK_CODED_PARTS.detailed_desc, ' ')) LIKE
+                '%'||TRIM(UPPER(vi_description))||'%' AND
+            NSC_PARTS_USED.orig_supp_num = NON_STOCK_CODED_PARTS.orig_supplier_num AND
+            NSC_PARTS_USED.link_code = RB_MASTERLIST.rebuilt_stock_num AND
+            NON_STOCK_CODED_PARTS.oem_part_cost <= vi_oem_part_cost AND
+            NSC_PARTS_USED.link_type = 'RB';
+    ELSIF (vi_cost_comparetype = 1) THEN
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(RB_MASTERLIST.rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(RB_MASTERLIST.mms_stock_code) AS "MMS STOCK CODE",
+                UPPER(RB_MASTERLIST.keyword) AS "KEYWORD",
+                UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+                RB_MASTERLIST.rowid
+                /* UPPER(RB_MASTERLIST.rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+                UPPER(RB_MASTERLIST.mms_stock_code) AS "MMS STOCK CODE",
+                RB_MASTERLIST.rowid */
+            FROM
+                NSC_PARTS_USED,
+                NON_STOCK_CODED_PARTS,
+                RB_MASTERLIST
+            WHERE
+                NVL(NSC_PARTS_USED.orig_supp_num,' ') LIKE
+                    TRIM(vi_orig_supplier_num) AND
+                UPPER(NVL(NON_STOCK_CODED_PARTS.detailed_desc, ' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                NSC_PARTS_USED.orig_supp_num = NON_STOCK_CODED_PARTS.orig_supplier_num AND
+                NSC_PARTS_USED.link_code  = RB_MASTERLIST.rebuilt_stock_num AND
+                NON_STOCK_CODED_PARTS.oem_part_cost = vi_oem_part_cost AND
+                NSC_PARTS_USED.link_type = 'RB';
+    ELSIF (vi_cost_comparetype = 2) THEN
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(RB_MASTERLIST.rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(RB_MASTERLIST.mms_stock_code) AS "MMS STOCK CODE",
+                UPPER(RB_MASTERLIST.keyword) AS "KEYWORD",
+                UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+                RB_MASTERLIST.rowid
+            /*
+                UPPER(RB_MASTERLIST.rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+                UPPER(RB_MASTERLIST.mms_stock_code) AS "MMS STOCK CODE",
+                RB_MASTERLIST.rowid */
+            FROM
+                NSC_PARTS_USED,
+                NON_STOCK_CODED_PARTS,
+                RB_MASTERLIST
+            WHERE
+                NVL(NSC_PARTS_USED.orig_supp_num,' ') LIKE
+                    TRIM(vi_orig_supplier_num) AND
+                UPPER(NVL(NON_STOCK_CODED_PARTS.detailed_desc, ' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                NSC_PARTS_USED.orig_supp_num = NON_STOCK_CODED_PARTS.orig_supplier_num AND
+                NSC_PARTS_USED.link_code  = RB_MASTERLIST.rebuilt_stock_num AND
+                NON_STOCK_CODED_PARTS.oem_part_cost >= vi_oem_part_cost AND
+                NSC_PARTS_USED.link_type = 'RB';
+    END IF;
+END SEARCH_NSC_RBPARTLIST;
+
+-- Search / Retreive any part by input criteria in all non
+-- stock coded parts.  Return the non-stock coded part satisfying the search criteria.
+PROCEDURE SEARCH_NSC_PART
+   (vi_orig_supplier_num IN NON_STOCK_CODED_PARTS.orig_supplier_num%TYPE,
+    vi_oem_part_cost IN NON_STOCK_CODED_PARTS.oem_part_cost%TYPE,
+    vi_description IN NON_STOCK_CODED_PARTS.detailed_desc%TYPE,
+    vi_keyword IN NON_STOCK_CODED_PARTS.keyword%TYPE,
+    vi_cost_comparetype IN INTEGER,
+    vo_Cursor OUT query_cur) IS
+BEGIN
+     IF (vi_cost_comparetype = 0) THEN
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(orig_supplier_num) AS "SUPPLIER NUMBER",
+                UPPER(NVL(orig_supplier_name, ' ')) AS "SUPPLIER NAME",
+                UPPER(NVL(detailed_desc, ' ')) AS "DESCRIPTION",
+                NVL(oem_part_cost, 0) AS "PRICE",
+                NVL(keyword, ' ') AS "KEYWORD",
+                last_modified_date AS "LAST MODIFIED DATE",
+                ID AS "ID",
+                ROWID
+            FROM
+                NON_STOCK_CODED_PARTS
+            WHERE
+                NVL(orig_supplier_num,' ') LIKE
+                    vi_orig_supplier_num||'%' AND
+                UPPER(NVL(detailed_desc,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                UPPER(NVL(keyword, ' ')) LIKE
+                    '%'||TRIM(UPPER(vi_keyword))||'%' AND
+            oem_part_cost <= vi_oem_part_cost order by orig_supplier_num asc;
+    ELSIF (vi_cost_comparetype = 1) THEN
+        OPEN vo_cursor FOR
+            SELECT
+               UPPER(orig_supplier_num) AS "SUPPLIER NUMBER",
+                UPPER(NVL(orig_supplier_name, ' ')) AS "SUPPLIER NAME",
+                UPPER(NVL(detailed_desc, ' ')) AS "DESCRIPTION",
+                NVL(oem_part_cost, 0) AS "PRICE",
+                NVL(keyword, ' ') AS "KEYWORD",
+                last_modified_date AS "LAST MODIFIED DATE",
+                ID AS "ID",
+                ROWID
+            FROM
+                NON_STOCK_CODED_PARTS
+            WHERE
+                NVL(orig_supplier_num,' ') LIKE
+                    vi_orig_supplier_num||'%' AND
+                UPPER(NVL(detailed_desc,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                UPPER(NVL(keyword, ' ')) LIKE
+                    '%'||TRIM(UPPER(vi_keyword))||'%' AND
+                oem_part_cost = vi_oem_part_cost order by orig_supplier_num asc;
+    ELSIF (vi_cost_comparetype = 2) THEN
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(orig_supplier_num) AS "SUPPLIER NUMBER",
+                UPPER(NVL(orig_supplier_name, ' ')) AS "SUPPLIER NAME",
+                UPPER(NVL(detailed_desc, ' ')) AS "DESCRIPTION",
+                NVL(oem_part_cost, 0) AS "PRICE",
+                NVL(keyword, ' ') AS "KEYWORD",
+                last_modified_date AS "LAST MODIFIED DATE",
+                ID AS "ID",
+                ROWID
+            FROM
+                NON_STOCK_CODED_PARTS
+            WHERE
+                NVL(orig_supplier_num,' ') LIKE
+                    vi_orig_supplier_num||'%' AND
+                UPPER(NVL(detailed_desc,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                UPPER(NVL(keyword, ' ')) LIKE
+                    '%'||TRIM(UPPER(vi_keyword))||'%' AND
+                oem_part_cost >= vi_oem_part_cost order by orig_supplier_num asc;
+    END IF;
+END SEARCH_NSC_PART;
+
+-- Search / Retreive any part by input criteria in all
+-- stock coded parts.  Return the stock coded part satisfying the search criteria.
+PROCEDURE SEARCH_SC_PART
+   (vi_orig_supplier_num IN STOCK_CODED_PARTS.mms_stock_code%TYPE,
+    vi_oem_part_cost IN STOCK_CODED_PARTS.oem_part_cost%TYPE,
+    vi_description IN STOCK_CODED_PARTS.detailed_desc%TYPE,
+    vi_keyword IN STOCK_CODED_PARTS.part_type%TYPE,
+    vi_cost_comparetype IN INTEGER,
+    vo_Cursor OUT query_cur) IS
+BEGIN
+    IF (vi_cost_comparetype = 0) THEN
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(mms_stock_code) AS "STOCK CODE",
+                UPPER(NVL(detailed_desc, ' ')) AS "DESCRIPTION",
+                NVL(oem_part_cost,0) AS "OEM_PART_COST",
+                NVL(mms_new_cost,0) AS "PRICE",
+                UPPER(NVL(part_type, ' ')) AS "KEYWORD",
+                last_modified_date AS "LAST MODIFIED DATE",
+                ROWID
+            FROM
+                STOCK_CODED_PARTS
+            WHERE
+                NVL(mms_stock_code,' ') LIKE
+                    '%'||TRIM(vi_orig_supplier_num)||'%' AND
+                UPPER(NVL(detailed_desc,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                UPPER(NVL(part_type, ' ')) LIKE
+                    '%'||TRIM(UPPER(vi_keyword))||'%' AND
+                mms_new_cost <= vi_oem_part_cost
+            ORDER BY mms_stock_code;
+    ELSIF (vi_cost_comparetype = 1) THEN
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(mms_stock_code) AS "STOCK CODE",
+                UPPER(NVL(detailed_desc, ' ')) AS "DESCRIPTION",
+                NVL(oem_part_cost,0) AS "OEM_PART_COST",
+                NVL(mms_new_cost,0) AS "PRICE",
+                UPPER(NVL(part_type, ' ')) AS "KEYWORD",
+                last_modified_date AS "LAST MODIFIED DATE",
+                ROWID
+            FROM
+                STOCK_CODED_PARTS
+            WHERE
+                NVL(mms_stock_code,' ') LIKE
+                    '%'||TRIM(vi_orig_supplier_num)||'%' AND
+                UPPER(NVL(detailed_desc,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                UPPER(NVL(part_type, ' ')) LIKE
+                    '%'||TRIM(UPPER(vi_keyword))||'%' AND
+                mms_new_cost = vi_oem_part_cost
+            ORDER BY mms_stock_code;
+    ELSIF (vi_cost_comparetype = 2) THEN
+       OPEN vo_cursor FOR
+            SELECT
+                UPPER(mms_stock_code) AS "STOCK CODE",
+                UPPER(NVL(detailed_desc, ' ')) AS "DESCRIPTION",
+                NVL(oem_part_cost,0) AS "OEM_PART_COST",
+                NVL(mms_new_cost,0) AS "PRICE",
+                UPPER(NVL(part_type, ' ')) AS "KEYWORD",
+                last_modified_date AS "LAST MODIFIED DATE",
+                ROWID
+            FROM
+                STOCK_CODED_PARTS
+            WHERE
+                NVL(mms_stock_code,' ') LIKE
+                    '%'||TRIM(vi_orig_supplier_num)||'%' AND
+                UPPER(NVL(detailed_desc,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                UPPER(NVL(part_type, ' ')) LIKE
+                    '%'||TRIM(UPPER(vi_keyword))||'%' AND
+                (mms_new_cost >= vi_oem_part_cost OR mms_new_cost IS NULL)
+            ORDER BY mms_stock_code;
+    END IF;
+
+END SEARCH_SC_PART;
+
+-- Return the rebuilt part satisfying the search criteria.
+PROCEDURE SEARCH_RBPART
+   (vi_orig_supplier_num IN RB_MASTERLIST.rebuilt_stock_num%TYPE,
+    vi_oem_part_cost IN RB_MASTERLIST.estimated_cost%TYPE,
+    vi_description IN RB_MASTERLIST.detailed_desc%TYPE,
+    vi_keyword IN RB_MASTERLIST.keyword%TYPE,
+    vi_cost_comparetype IN INTEGER,
+    vo_Cursor OUT query_cur) IS
+BEGIN
+    IF (vi_cost_comparetype = 0) THEN
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(mms_stock_code) AS "MMS STOCK CODE",
+                UPPER(keyword) AS "KEYWORD",
+                UPPER(detailed_desc) AS "DESCRIPTION",
+                ROWID
+            FROM
+                RB_MASTERLIST
+            WHERE
+                UPPER(NVL(rebuilt_stock_num,' ')) LIKE
+                    '%'||TRIM(vi_orig_supplier_num)||'%' AND
+                UPPER(NVL(detailed_desc,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                UPPER(NVL(keyword,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_keyword))||'%' AND
+                estimated_cost <= vi_oem_part_cost;
+    ELSIF (vi_cost_comparetype = 1) THEN
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(mms_stock_code) AS "MMS STOCK CODE",
+                UPPER(keyword) AS "KEYWORD",
+                UPPER(detailed_desc) AS "DESCRIPTION",
+                ROWID
+            FROM
+                RB_MASTERLIST
+            WHERE
+                UPPER(NVL(rebuilt_stock_num,' ')) LIKE
+                    '%'||TRIM(vi_orig_supplier_num)||'%' AND
+                UPPER(NVL(detailed_desc,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                UPPER(NVL(keyword,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_keyword))||'%' AND
+                estimated_cost = vi_oem_part_cost;
+    ELSIF (vi_cost_comparetype = 2) THEN
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(mms_stock_code) AS "MMS STOCK CODE",
+                UPPER(keyword) AS "KEYWORD",
+                UPPER(detailed_desc) AS "DESCRIPTION",
+                ROWID
+            FROM
+                RB_MASTERLIST
+            WHERE
+                UPPER(NVL(rebuilt_stock_num,' ')) LIKE
+                    '%'||TRIM(vi_orig_supplier_num)||'%' AND
+                UPPER(NVL(detailed_desc,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                UPPER(NVL(keyword,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_keyword))||'%' AND
+                estimated_cost >= vi_oem_part_cost;
+    END IF;
+END SEARCH_RBPART;
+
+--
+-- Return the stock coded part satisfying the search criteria.
+PROCEDURE SEARCH_SC_RBPARTLIST
+   (vi_orig_supplier_num IN SC_PARTS_USED.mms_stock_code%TYPE,
+    vi_oem_part_cost IN STOCK_CODED_PARTS.oem_part_cost%TYPE,
+    vi_description IN STOCK_CODED_PARTS.detailed_desc%TYPE,
+    vi_cost_comparetype IN INTEGER,
+    vo_Cursor OUT query_cur) IS
+BEGIN
+    IF (vi_cost_comparetype = 0) THEN
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(RB_MASTERLIST.rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(RB_MASTERLIST.mms_stock_code) AS "MMS STOCK CODE",
+                UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+                RB_MASTERLIST.rowid
+            FROM
+                SC_PARTS_USED,
+                STOCK_CODED_PARTS,
+                RB_MASTERLIST
+            WHERE
+                NVL(SC_PARTS_USED.mms_stock_code,' ') LIKE
+                    '%'||TRIM(vi_orig_supplier_num)||'%' AND
+                UPPER(STOCK_CODED_PARTS.detailed_desc) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                SC_PARTS_USED.mms_stock_code = STOCK_CODED_PARTS.mms_stock_code AND
+                SC_PARTS_USED.link_code = RB_MASTERLIST.rebuilt_stock_num AND
+                STOCK_CODED_PARTS.oem_part_cost <= vi_oem_part_cost AND
+                SC_PARTS_USED.link_type = 'RB';
+    ELSIF (vi_cost_comparetype = 1) THEN
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(RB_MASTERLIST.rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(RB_MASTERLIST.mms_stock_code) AS "MMS STOCK CODE",
+                UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+                RB_MASTERLIST.rowid
+            FROM
+                SC_PARTS_USED,
+                STOCK_CODED_PARTS,
+                RB_MASTERLIST
+            WHERE
+                NVL(SC_PARTS_USED.mms_stock_code,' ') LIKE
+                    '%'||TRIM(vi_orig_supplier_num)||'%' AND
+                UPPER(STOCK_CODED_PARTS.detailed_desc) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                SC_PARTS_USED.mms_stock_code = STOCK_CODED_PARTS.mms_stock_code AND
+                SC_PARTS_USED.link_code = RB_MASTERLIST.rebuilt_stock_num AND
+                STOCK_CODED_PARTS.oem_part_cost = vi_oem_part_cost AND
+                SC_PARTS_USED.link_type = 'RB';
+    ELSIF (vi_cost_comparetype = 2) THEN
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(RB_MASTERLIST.rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(RB_MASTERLIST.mms_stock_code) AS "MMS STOCK CODE",
+                UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+                RB_MASTERLIST.rowid
+            FROM
+                SC_PARTS_USED,
+                STOCK_CODED_PARTS,
+                RB_MASTERLIST
+            WHERE
+                NVL(SC_PARTS_USED.mms_stock_code,' ') LIKE
+                    '%'||TRIM(vi_orig_supplier_num)||'%' AND
+                UPPER(STOCK_CODED_PARTS.detailed_desc) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%' AND
+                SC_PARTS_USED.mms_stock_code = STOCK_CODED_PARTS.mms_stock_code AND
+                SC_PARTS_USED.link_code = RB_MASTERLIST.rebuilt_stock_num AND
+                STOCK_CODED_PARTS.oem_part_cost >= vi_oem_part_cost AND
+                SC_PARTS_USED.link_type = 'RB';
+    END IF;
+END SEARCH_SC_RBPARTLIST;
+
+PROCEDURE POPULATE_SC_COMBOXES
+    (vi_cost_comparetype IN INTEGER,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    IF (vi_cost_comparetype = 1) THEN
+        OPEN vo_cursor FOR
+            SELECT DISTINCT
+                UPPER(mms_stock_code) AS mms_stock_code,
+                UPPER(mms_sync_date) AS mms_sync_date
+            FROM
+                STOCK_CODED_PARTS;
+    ELSIF (vi_cost_comparetype = 2) THEN
+        OPEN vo_cursor FOR
+            SELECT DISTINCT
+                UPPER(part_type) AS part_type
+            FROM
+                STOCK_CODED_PARTS;
+    ELSIF (vi_cost_comparetype = 3) THEN
+        OPEN vo_cursor FOR
+            SELECT DISTINCT
+                UPPER(detailed_desc) AS detailed_desc
+            FROM
+                STOCK_CODED_PARTS;
+    END IF;
+END POPULATE_SC_COMBOXES;
+
+PROCEDURE POPULATE_RB_COMBOXES
+    (vi_cost_comparetype IN INTEGER,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    IF (vi_cost_comparetype = 1) THEN
+        OPEN vo_cursor FOR
+            SELECT DISTINCT
+                UPPER(rebuilt_stock_num) AS rebuilt_stock_num
+            FROM
+                RB_MASTERLIST;
+    ELSIF (vi_cost_comparetype = 2) THEN
+        OPEN vo_cursor FOR
+            SELECT DISTINCT
+                UPPER(keyword) AS keyword
+            FROM
+                RB_MASTERLIST;
+    ELSIF (vi_cost_comparetype = 3) THEN
+        OPEN vo_cursor FOR
+            SELECT DISTINCT
+                UPPER(detailed_desc) AS detailed_desc
+            FROM
+                RB_MASTERLIST;
+    END IF;
+END POPULATE_RB_COMBOXES;
+
+PROCEDURE POPULATE_NSC_COMBOXES
+    (vi_cost_comparetype IN INTEGER,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    IF (vi_cost_comparetype = 0) THEN
+        OPEN vo_cursor FOR
+            SELECT DISTINCT
+                UPPER(orig_supplier_name) AS orig_supplier_name
+            FROM
+                NON_STOCK_CODED_PARTS;
+    ELSIF (vi_cost_comparetype = 1) THEN
+        OPEN vo_cursor FOR
+            SELECT DISTINCT
+                UPPER(orig_supplier_num) AS orig_supplier_num
+            FROM
+                NON_STOCK_CODED_PARTS;
+    ELSIF (vi_cost_comparetype = 2) THEN
+        OPEN vo_cursor FOR
+            SELECT DISTINCT
+                UPPER(keyword) AS keyword
+            FROM
+                NON_STOCK_CODED_PARTS;
+    ELSIF (vi_cost_comparetype = 3) THEN
+        OPEN vo_cursor FOR
+            SELECT DISTINCT
+                UPPER(detailed_desc) AS detailed_desc
+            FROM
+                NON_STOCK_CODED_PARTS;
+    END IF;
+END POPULATE_NSC_COMBOXES;
+
+PROCEDURE RETRIEVE_VEHICLE_TYPES
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(make) AS make,
+            UPPER(model) AS model,
+            UPPER(year) AS year,
+            ROWID
+        FROM
+            TYPE_OF_VEHICLE;
+END RETRIEVE_VEHICLE_TYPES;
+
+PROCEDURE RETRIEVE_VEHICLE_ESTIMATES
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(vehicle_list_id) AS vehicle_list_id,
+            UPPER(veh_series_code) AS veh_series_code,
+            UPPER(num_of_vehicles) AS num_of_vehicles,
+            UPPER(proj_desc) AS proj_desc,
+            UPPER(date_entered) AS date_entered,
+            UPPER(entered_by) AS entered_by,
+            UPPER(modified_last_by) AS modified_last_by,
+            UPPER(modified_last_date) AS modified_last_date,
+            UPPER(make) AS make,
+            UPPER(model) AS model,
+            UPPER(year) AS year,
+            UPPER(engine) AS engine,
+            UPPER(transmission) AS transmission,
+            UPPER(differential) AS differential,
+            UPPER(sopnumber) AS sopnumber,
+            ROWID
+        FROM
+            VEHICLE_LIST A;
+END RETRIEVE_VEHICLE_ESTIMATES;
+
+PROCEDURE RETRIEVE_ENGINES
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(ENGINES.name) AS name,
+            ROWID
+        FROM
+            ENGINES;
+END RETRIEVE_ENGINES;
+
+PROCEDURE RETRIEVE_TRANSMISSIONS
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(TRANSMISSIONS.name) AS name,
+            ROWID
+        FROM
+            TRANSMISSIONS;
+END RETRIEVE_TRANSMISSIONS;
+
+PROCEDURE RETRIEVE_DIFFERENTIALS
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(DIFFERENTIAL.name) AS name,
+            ROWID
+        FROM
+            DIFFERENTIAL;
+END RETRIEVE_DIFFERENTIALS;
+
+PROCEDURE SEARCH_VEHICLE_ESTIMATE
+    (vi_veh_series IN VEHICLE_LIST.veh_series_code %TYPE,
+     vi_proj_desc IN VEHICLE_LIST.proj_desc%TYPE,
+     vi_make IN VEHICLE_LIST.make%TYPE,
+     vi_model IN VEHICLE_LIST.model%TYPE,
+     vi_year IN VEHICLE_LIST.year%TYPE,
+     vi_engine IN ENGINES.name%TYPE,
+     vi_trans IN TRANSMISSIONS.name%TYPE,
+     vi_diff IN DIFFERENTIAL.name%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            vehicle_list_id AS "ESTIMATE #",
+            UPPER(veh_series_code) AS "VEHICLE SERIES CODE",
+            UPPER(num_of_vehicles) AS "NUMBER OF VEHICLES",
+            UPPER(proj_desc) AS "PROJECT DESCRIPTION",
+            UPPER(make) AS "MAKE",
+            UPPER(model) AS "MODEL",
+            UPPER(year) AS "YEAR",
+            UPPER(engine) AS "ENGINE",
+            UPPER(transmission) AS "TRANSMISSION",
+            UPPER(differential) AS "DIFFERENTIAL",
+            UPPER(sopnumber) AS "SOPNUMBER",
+            ROWID
+        FROM
+            VEHICLE_LIST
+        WHERE
+            upper(NVL(veh_series_code,' ')) LIKE
+                '%'||TRIM(upper(vi_veh_series))||'%' AND
+            UPPER(NVL(proj_desc,' ')) LIKE
+                '%'||TRIM(UPPER(vi_proj_desc))||'%' AND
+            UPPER(NVL(make, ' ')) LIKE
+                '%'||TRIM(UPPER(vi_make))||'%' AND
+            UPPER(NVL(model,' ')) LIKE
+                '%'||TRIM(UPPER(vi_model))||'%' AND
+            UPPER(NVL(year, ' ')) LIKE
+                '%'||TRIM(UPPER(vi_year))||'%' AND
+            UPPER(NVL(engine, ' ')) LIKE
+                '%'||TRIM(UPPER(vi_engine))||'%' AND
+            UPPER(NVL(transmission,' ')) LIKE
+                '%'||TRIM(UPPER(vi_trans))||'%' AND
+            UPPER(NVL(differential, ' ')) LIKE
+                '%'||TRIM(UPPER(vi_diff))||'%'
+         order by vehicle_list_id asc;
+END SEARCH_VEHICLE_ESTIMATE;
+
+PROCEDURE RETRIEVE_RB_ESTIMATES
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(mms_stock_code) AS mms_stock_code,
+            UPPER(rebuilt_stock_num) AS rebuilt_stock_num,
+            UPPER(job_number) AS job_number,
+            UPPER(keyword) AS keyword,
+            UPPER(detailed_desc) AS detailed_desc,
+            UPPER(core_charge) AS core_charge,
+            UPPER(rebuilt_stock_num) AS rebuilt_stock_num,
+            UPPER(core_part_num) AS core_part_num,
+            UPPER(mms_stock_code) AS mms_stock_code,
+            UPPER(sop_number) AS sop_number,
+            UPPER(buy_new_cost) AS buy_new_cost,
+            UPPER(reman_cost) AS reman_cost,
+            UPPER(external_cost) AS external_cost,
+            active as Active,
+            ROWID
+        FROM
+            RB_MASTERLIST;
+END RETRIEVE_RB_ESTIMATES;
+
+PROCEDURE SEARCH_MB
+    (vi_mb_num IN MB_LIST.mb_number%TYPE,
+     vi_rebuild_code IN MB_LIST.rebuild_code%TYPE,
+     vi_keyword IN MB_LIST.keyword%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(mb_number) AS "MB NUMBER",
+            UPPER(keyword) AS "KEYWORD",
+            UPPER(description) AS "DESCRIPTION",
+            UPPER(bus_type) AS "BUS TYPE",
+            UPPER(num_bus_comp) AS "# BUSES USING COMP",
+            UPPER(vendor_part_num) AS "VENDOR PART #",
+            UPPER(buy_code) AS "BUY CODE",
+            UPPER(rebuild_code) AS "REBUILT CODE",
+            UPPER(core_code) AS "CORE CODE",
+            UPPER(annual_usage) AS "ANNUAL USAGE",
+            UPPER(bench_number) AS "BENCH NUMBER",
+            UPPER(sample_provided) AS "SAMPLE PROVIDED",
+            UPPER(recommendation) AS "RECOMMENDATION",
+            UPPER(reman_cost) AS "REMAN EX COST",
+            UPPER(external_cost) AS "EXTERNAL COST",
+            UPPER(buy_new_cost) AS "NEW COST",
+            UPPER(internal_cost) AS "INTERNAL COST",
+            UPPER(sop_number) AS "SOP NUMBER",
+            UPPER(core_cost) AS "CORE COST",
+            UPPER(job_number) AS "JOB NUMBER",
+            DATE_OPENED AS "DATE OPENED",
+            ROWID
+        FROM
+            MB_LIST
+        WHERE
+            upper(NVL(mb_number,' ')) LIKE
+                '%'||TRIM(upper(vi_mb_num))||'%' AND
+            UPPER(NVL(rebuild_code,' ')) LIKE
+                '%'||TRIM(upper(vi_rebuild_code))||'%' AND
+            UPPER(NVL(keyword,' ')) LIKE
+                '%'||TRIM(upper(vi_keyword))||'%' order by mb_number desc;
+END SEARCH_MB;
+
+PROCEDURE RETRIEVE_MB
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(mb_number) AS mb_number,
+            UPPER(keyword) AS keyword,
+            UPPER(description) AS description,
+            UPPER(bus_type) AS bus_type,
+            UPPER(num_bus_comp) AS num_bus_comp,
+            UPPER(vendor_part_num) AS vendor_part_num,
+            UPPER(buy_code) AS buy_code,
+            UPPER(rebuild_code) AS rebuild_code,
+            UPPER(core_code) AS core_code,
+            UPPER(annual_usage) AS annual_usage,
+            UPPER(bench_number) AS bench_number,
+            UPPER(sample_provided) AS sample_provided,
+            UPPER(recommendation) AS recommendation,
+            UPPER(reman_cost) AS reman_cost,
+            UPPER(external_cost) AS external_cost,
+            UPPER(buy_new_cost) AS buy_new_cost,
+            UPPER(internal_cost) AS internal_cost,
+            UPPER(sop_number) AS sop_number,
+            UPPER(core_cost) AS core_cost,
+            UPPER(job_number) AS job_number,
+            NVL(readmanualnewprice,0) as manualprice,
+            ROWID
+        FROM
+            MB_LIST;
+END RETRIEVE_MB;
+
+PROCEDURE RETRIEVE_RB
+    (vo_Cursor IN OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(rebuilt_stock_num) AS "rebuilt_stock_num",
+            mms_stock_code,
+            keyword,
+            detailed_desc,
+            NVL(sop_number,' ') AS "sop_number",
+            NVL(job_number,' ') AS "job_number",
+            core_part_num,
+            core_charge,
+            estimated_cost,
+            date_modified,
+            active,
+            ROWID
+        FROM
+            RB_MASTERLIST;
+END RETRIEVE_RB;
+
+PROCEDURE RETRIEVE_MB_LABOUR
+    (vi_idnum IN MB_LIST.MB_NUMBER%TYPE,
+     vi_type IN VARCHAR,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            EMPLOYEE_LABOUR.labour_defn AS "LABOUR TYPE",
+            EMPLOYEE_LABOUR.costcentre AS "CC",
+            EMPLOYEE_LABOUR.task AS "TASK",
+            REPLACE(EMPLOYEE_LABOUR.usage,',','.') AS "USAGE",
+            EMPLOYEE_LABOUR.hrs_reqd AS "TIME",
+            EMPLOYEE_LABOUR.adj_hrs AS "WRENCH TIME",
+            EMPLOYEE_LABOUR.date_revised AS "DATE REVISED",
+            EMPLOYEE_LABOUR.time_addition AS "TIME ADDITION",
+            CES_SETTINGS.value AS "VALUE",
+            EMPLOYEE_LABOUR.ROWID
+        FROM
+            EMPLOYEE_LABOUR,
+            (SELECT
+                CES_SETTINGS.value
+             FROM
+                CES_SETTINGS
+             WHERE
+                CES_SETTINGS.parameter = 'NON_PRODUCTIVE_ADJUSTMENT') CES_SETTINGS
+        WHERE
+            EMPLOYEE_LABOUR.link_number = vi_idnum AND
+            EMPLOYEE_LABOUR.typeid = vi_type
+        ORDER BY
+            EMPLOYEE_LABOUR.costcentre;
+END RETRIEVE_MB_LABOUR;
+
+PROCEDURE RETRIEVE_LABOUR_WITH_TOTALS
+    (vi_idnum IN MB_LIST.MB_NUMBER%TYPE,
+     vi_type IN VARCHAR,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            EMPLOYEE_LABOUR.labour_defn AS "LABOUR TYPE",
+            EMPLOYEE_LABOUR.costcentre AS "CC",
+            EMPLOYEE_LABOUR.task AS "TASK",
+            REPLACE(EMPLOYEE_LABOUR.usage,',','.') AS "USAGE",
+            EMPLOYEE_LABOUR.hrs_reqd AS "TIME",
+            EMPLOYEE_LABOUR.adj_hrs AS "WRENCH TIME",
+            EMPLOYEE_SALARIES.rate_per_hour AS "RATE PER HOUR"
+        FROM
+            EMPLOYEE_LABOUR,
+            EMPLOYEE_SALARIES,
+            EMPL_CLASS
+        WHERE
+            EMPLOYEE_LABOUR.labour_defn = UPPER(EMPL_CLASS.labour_defn) AND
+            EMPLOYEE_SALARIES.wage_group = EMPL_CLASS.wage_group AND
+            EMPLOYEE_LABOUR.link_number = vi_idnum AND
+            EMPLOYEE_LABOUR.typeid = vi_type;
+END RETRIEVE_LABOUR_WITH_TOTALS;
+
+PROCEDURE RETRIEVE_USERS
+    (vi_username IN USERS.username%TYPE,
+     vi_password IN USERS.password%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            pswd_change_date AS pswd_change_date,
+            UPPER(access_level) AS access_level,
+            UPPER(previous_access_level) AS previous_access_level,
+            date_changed_back AS date_changed_back,
+            use_overhead_fringe AS use_overhead_fringe,
+            ROWID
+        FROM
+            USERS
+        WHERE
+            TRIM(UPPER(username)) = trim(upper(vi_username)) AND
+            TRIM(UPPER(password)) = trim(upper(vi_password));
+END RETRIEVE_USERS;
+
+PROCEDURE RPT_COST_VARIANCE
+    (vo_Cursor OUT query_cur) IS
+
+
+BEGIN
+    INTERNAL_RB_PRICE;
+
+
+    OPEN vo_cursor FOR
+        SELECT
+            *
+        FROM
+            TEMP_RBP_COST;
+END RPT_COST_VARIANCE;
+
+--After CES 10g upgrade, NLS_LANGUAGE has been set to ENGLISH
+PROCEDURE RPT_COST_VARIANCE_2
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    --execute immediate 'ALTER SESSION SET NLS_LANGUAGE  = "ENGLISH"';
+    --execute immediate 'ALTER SESSION SET NLS_TERRITORY  = "CANADA"';
+    INTERNAL_RB_PRICE;
+    OPEN vo_cursor FOR
+        SELECT
+            TOTAL_COST, RB_NUMBER, DETAILED_DESC, EXTERNAL_COST, ACTIVE, KEYWORD, DECODE(to_number(replace(NVL(EXTERNAL_COST,'0'),',','.')), 0,0,nvl(TOTAL_COST,0)/to_number(replace(NVL(EXTERNAL_COST,'0'),',','.'))) AS COST_VARIANCE
+        FROM
+            TEMP_RBP_COST
+        ORDER BY ACTIVE DESC, COST_VARIANCE DESC, RB_NUMBER;
+END RPT_COST_VARIANCE_2;
+
+PROCEDURE RETRIEVE_TASK_DESCRIPTION
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            task_id,
+            UPPER(task_description) AS "TASK DESCRIPTION"
+        FROM
+            LABOUR_TASK_DESCRIPTIONS
+        ORDER BY
+            TASK_DESCRIPTION ASC;
+END RETRIEVE_TASK_DESCRIPTION;
+
+PROCEDURE RETRIEVE_LABOUR_POSITION
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(labour_defn) AS labour_defn
+        FROM
+            EMPL_CLASS
+        ORDER BY
+            labour_defn;
+END RETRIEVE_LABOUR_POSITION;
+
+PROCEDURE RETRIEVE_COST_CENTRES
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(cost_centre) AS cost_centre
+        FROM
+            COST_CENTRES
+        ORDER BY
+            COST_CENTRE;
+END RETRIEVE_COST_CENTRES;
+
+PROCEDURE RETRIEVE_MB_ALL_LABOUR
+    (vo_Cursor OUT query_cur,
+     vi_RowID IN string) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(hrs_reqd) AS hrs_reqd,
+            UPPER(usage) AS usage,
+            UPPER(task) AS task,
+            UPPER(costcentre) AS costcentre,
+            UPPER(labour_defn) AS labour_defn,
+            ROWID
+        FROM
+            EMPLOYEE_LABOUR
+        WHERE
+            ROWID = vi_RowID
+        ORDER BY
+            costcentre;
+END RETRIEVE_MB_ALL_LABOUR;
+
+PROCEDURE RETRIEVE_MB_CC_LAB
+    (vi_mb_num IN EMPLOYEE_LABOUR.link_number%TYPE,
+     vi_typeid IN EMPLOYEE_LABOUR.typeid%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            temptable.labour_defn AS "LABOUR TYPE",
+            temptable.costcentre AS "CC",
+            temptable.WAGE_GROUP AS "WAGE GROUP",
+            temptable.rate_per_hour AS "RATE PER HOUR",
+            SUM(total_cost) AS "TOTAL COST",
+            SUM(time_addition) AS "TIME ADDITION"
+        FROM
+            (SELECT
+                EMPLOYEE_LABOUR.labour_defn,
+                EMPLOYEE_LABOUR.costcentre,
+                B.WAGE_GROUP,
+                B.rate_per_hour,
+                ROUND((EMPLOYEE_LABOUR.time_addition * B.rate_per_hour * (EMPLOYEE_LABOUR.usage/100)),2) AS Total_Cost,
+                EMPLOYEE_LABOUR.time_addition
+            FROM
+                EMPLOYEE_LABOUR,
+                EMPLOYEE_SALARIES B,
+                EMPL_CLASS C
+            WHERE
+                EMPLOYEE_LABOUR.labour_defn = upper(C.labour_defn) AND
+                B.wage_group = C.wage_group AND
+                EMPLOYEE_LABOUR.link_number = vi_mb_num AND
+                EMPLOYEE_LABOUR.typeid = vi_typeid) tempTable
+        GROUP BY
+            tempTable.labour_defn,
+            tempTable.costcentre,
+            tempTable.WAGE_GROUP,
+            tempTable.rate_per_hour
+        ORDER BY
+            costcentre;
+END RETRIEVE_MB_CC_LAB;
+
+PROCEDURE RETRIEVE_NSCP_USED
+    (vi_idnum IN NSC_PARTS_USED.link_code%TYPE,
+     vi_link_type IN NSC_PARTS_USED.link_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+
+        SELECT
+            UPPER(NON_STOCK_CODED_PARTS.orig_supplier_num) AS "SUPPLIER NUMBER",
+            UPPER(NON_STOCK_CODED_PARTS.orig_supplier_name) AS "SUPPLIER NAME",
+
+            NON_STOCK_CODED_PARTS.oem_part_cost AS "UNIT COST",
+            UPPER(NSC_PARTS_USED.qty_reqd) AS "QTY",
+            REPLACE(NSC_PARTS_USED.percent_usage,',','.') AS "%",
+            REPLACE(FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd,NSC_PARTS_USED.corecost,0),',','.') AS "CORE COST",
+            REPLACE(FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0),',','.') AS "TOTAL COST",
+            UPPER(NSC_PARTS_USED.cost_centre) AS "CC",
+            NVL(UPPER(NON_STOCK_CODED_PARTS.detailed_desc),'') AS "DESCRIPTION",
+            NVL(UPPER(NON_STOCK_CODED_PARTS.keyword), '' ) AS "KEYWORD",
+            UPPER(NSC_PARTS_USED.id) AS "ID",
+            UPPER(NSC_PARTS_USED.last_modified_date) AS "LAST MODIFIED DATE",
+            NSC_PARTS_USED.ROWID
+        FROM
+            NSC_PARTS_USED NSC_PARTS_USED,
+            NON_STOCK_CODED_PARTS NON_STOCK_CODED_PARTS
+        WHERE
+            NSC_PARTS_USED.link_code = vi_idnum AND
+            NSC_PARTS_USED.link_type = vi_link_type AND
+            NON_STOCK_CODED_PARTS.id (+)= NSC_PARTS_USED.id
+        ORDER BY
+            NON_STOCK_CODED_PARTS.orig_supplier_num;
+
+            /* not used
+                SELECT
+            UPPER(NSC_PARTS_USED.orig_supp_num) AS "SUPPLIER NUMBER",
+            UPPER(NSC_PARTS_USED.orig_supplier_name) AS "SUPPLIER NAME",
+            UPPER(NSC_PARTS_USED.cost_centre) AS "CC",
+            UPPER(NSC_PARTS_USED.qty_reqd) AS "QTY",
+            REPLACE(NSC_PARTS_USED.percent_usage,',','.') AS "%",
+            NSC_PARTS_USED.cost AS "UNIT COST",
+            REPLACE(FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd,NSC_PARTS_USED.corecost,0),',','.') AS "CORE COST",
+            UPPER(NSC_PARTS_USED.id) AS "ID",
+            REPLACE(FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NSC_PARTS_USED.cost, 0),',','.') AS "TOTAL COST",
+            NVL(UPPER(NON_STOCK_CODED_PARTS.detailed_desc),'') AS "DESCRIPTION",
+            NVL(UPPER(NON_STOCK_CODED_PARTS.keyword), '' ) AS "KEYWORD",
+            UPPER(NSC_PARTS_USED.last_modified_date) AS "LAST MODIFIED DATE",
+            NSC_PARTS_USED.ROWID
+        FROM
+            NSC_PARTS_USED_prod NSC_PARTS_USED,
+            NON_STOCK_CODED_PARTS_prod NON_STOCK_CODED_PARTS
+        WHERE
+            NSC_PARTS_USED.link_code = vi_idnum AND
+            NSC_PARTS_USED.link_type = vi_link_type AND
+            NON_STOCK_CODED_PARTS.id (+)= NSC_PARTS_USED.id
+        ORDER BY
+            NSC_PARTS_USED.orig_supp_num;  */
+
+END RETRIEVE_NSCP_USED;
+/*  Not used
+PROCEDURE RETRIEVE_NSCP_USED_COPY
+    (vi_idnum IN NSC_PARTS_USED.link_code%TYPE,
+     vi_link_type IN NSC_PARTS_USED.link_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(NSC_PARTS_USED.orig_supp_num) AS "SUPPLIER NUMBER",
+            UPPER(NSC_PARTS_USED.orig_supplier_name) AS "SUPPLIER NAME",
+            UPPER(NSC_PARTS_USED.cost_centre) AS "CC",
+            UPPER(NSC_PARTS_USED.qty_reqd) AS "QTY",
+            REPLACE(NSC_PARTS_USED.percent_usage,',','.') AS "%",
+            NSC_PARTS_USED.cost AS "UNIT COST",
+            NSC_PARTS_USED.corecost AS "CORE COST",
+            UPPER(NSC_PARTS_USED.id) AS "ID",
+            REPLACE(FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NSC_PARTS_USED.cost, 0),',','.') AS "TOTAL COST",
+            NVL(UPPER(NON_STOCK_CODED_PARTS.detailed_desc),'') AS "DESCRIPTION",
+            NVL(UPPER(NON_STOCK_CODED_PARTS.keyword), '' ) AS "KEYWORD",
+            UPPER(NSC_PARTS_USED.last_modified_date) AS "LAST MODIFIED DATE",
+            NSC_PARTS_USED.ROWID
+        FROM
+            NSC_PARTS_USED,
+            NON_STOCK_CODED_PARTS
+        WHERE
+            NSC_PARTS_USED.link_code = vi_idnum AND
+            NSC_PARTS_USED.link_type = vi_link_type AND
+            NON_STOCK_CODED_PARTS.id (+)= NSC_PARTS_USED.id
+        ORDER BY
+            NSC_PARTS_USED.orig_supp_num;
+END RETRIEVE_NSCP_USED_COPY;
+*/
+
+/* invalid not used
+PROCEDURE RETRIEVE_ALL_NSCP_USED
+    (vi_idnum IN NSC_PARTS_USED.link_code%TYPE,
+     vi_link_type IN NSC_PARTS_USED.link_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            A.*,
+            REPLACE(FINAL_COST(A.percent_usage, A.qty_reqd, A.cost, 0),',','.') AS final_cost,
+            A.rowid
+        FROM
+            NSC_PARTS_USED A
+        WHERE
+            A.link_code = vi_idnum and
+            A.link_type = vi_link_type;
+END RETRIEVE_ALL_NSCP_USED;
+*/
+PROCEDURE RETRIEVE_SCP_USED
+    (vi_link_code IN SC_PARTS_USED.LINK_CODE%TYPE,
+     vi_rebuilt_part_choice IN VARCHAR,
+     vi_link_type IN SC_PARTS_USED.LINK_TYPE%TYPE,
+     vo_Cursor OUT query_cur) IS
+
+begin
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(SC_PARTS_USED.mms_stock_code) AS "STOCK CODE",
+            NVL(SC_PARTS_USED.mms_cost,0) AS "UNIT COST",
+            UPPER(SC_PARTS_USED.qty_reqd) AS "QTY",
+            REPLACE(SC_PARTS_USED.percent_usage,',','.') AS "%",
+            replace(FINAL_COST(SC_PARTS_USED.percent_usage, SC_PARTS_USED.qty_reqd,SC_PARTS_USED.corecost,0),',','.') AS "CORE COST",
+            REPLACE(FINAL_COST(SC_PARTS_USED.percent_usage, SC_PARTS_USED.qty_reqd, SC_PARTS_USED.mms_cost, 0),',','.') AS "TOTAL COST",
+            UPPER(SC_PARTS_USED.cost_centre) AS "CC",
+            NVL(UPPER(STOCK_CODED_PARTS.detailed_desc),'') AS "DESCRIPTION",
+            NVL(UPPER(STOCK_CODED_PARTS.part_type),'') AS "KEYWORD",
+            SC_PARTS_USED.oem_cost AS "OEM COST",
+            SC_PARTS_USED.mms_rebuilt_code AS "MMS REBUILT CODE",
+            SC_PARTS_USED.reb_part_cost AS "REBUILT PART COST",
+            UPPER(SC_PARTS_USED.rebuilt_part) AS "REBUILT PART",
+            SC_PARTS_USED.rowid
+        FROM
+            SC_PARTS_USED,
+            STOCK_CODED_PARTS
+        WHERE
+            SC_PARTS_USED.link_code = vi_link_code AND
+            SC_PARTS_USED.rebuilt_part = vi_rebuilt_part_choice AND
+            SC_PARTS_USED.link_type = vi_link_type AND
+            STOCK_CODED_PARTS.mms_stock_code (+)= SC_PARTS_USED.mms_stock_code
+        ORDER BY
+            SC_PARTS_USED.mms_stock_code;
+END RETRIEVE_SCP_USED;
+
+
+PROCEDURE RETRIEVE_SCP_USED_COPY
+    (vi_link_code IN SC_PARTS_USED.LINK_CODE%TYPE,
+     vi_rebuilt_part_choice IN VARCHAR,
+     vi_link_type IN SC_PARTS_USED.LINK_TYPE%TYPE,
+     vo_Cursor OUT query_cur) IS
+
+begin
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(SC_PARTS_USED.mms_stock_code) AS "STOCK CODE",
+            NVL(SC_PARTS_USED.mms_cost,0) AS "UNIT COST",
+            UPPER(SC_PARTS_USED.cost_centre) AS "CC",
+            UPPER(SC_PARTS_USED.qty_reqd) AS "QTY",
+            REPLACE(SC_PARTS_USED.percent_usage,',','.') AS "%",
+            SC_PARTS_USED.corecost AS "CORE COST",
+            REPLACE(FINAL_COST(SC_PARTS_USED.percent_usage, SC_PARTS_USED.qty_reqd, SC_PARTS_USED.mms_cost, 0),',','.') AS "TOTAL COST",
+            NVL(UPPER(STOCK_CODED_PARTS.detailed_desc),'') AS "DESCRIPTION",
+            NVL(UPPER(STOCK_CODED_PARTS.part_type),'') AS "KEYWORD",
+            SC_PARTS_USED.oem_cost AS "OEM COST",
+            SC_PARTS_USED.mms_rebuilt_code AS "MMS REBUILT CODE",
+            SC_PARTS_USED.reb_part_cost AS "REBUILT PART COST",
+            UPPER(SC_PARTS_USED.rebuilt_part) AS "REBUILT PART",
+            SC_PARTS_USED.rowid
+        FROM
+            SC_PARTS_USED,
+            STOCK_CODED_PARTS
+        WHERE
+            SC_PARTS_USED.link_code = vi_link_code AND
+            SC_PARTS_USED.rebuilt_part = vi_rebuilt_part_choice AND
+            SC_PARTS_USED.link_type = vi_link_type AND
+            STOCK_CODED_PARTS.mms_stock_code (+)= SC_PARTS_USED.mms_stock_code
+        ORDER BY
+            SC_PARTS_USED.mms_stock_code;
+END RETRIEVE_SCP_USED_COPY;
+
+PROCEDURE RETRIEVE_RBP_USED
+    (vi_idnum IN SC_PARTS_USED.LINK_CODE%TYPE,
+     vi_link_type IN SC_PARTS_USED.LINK_TYPE%TYPE,
+     vo_Cursor OUT query_cur) IS
+V_PRICE number (20,10);
+BEGIN
+
+V_PRICE := get_material_cost(vi_idnum,vi_link_type);
+    OPEN vo_cursor FOR
+
+        SELECT
+
+
+            UPPER(SC_PARTS_USED.mms_rebuilt_code) AS "REBUILT NUMBER",
+            nvl(A.RB_UNIT_COST,0) AS "UNIT COST",
+            UPPER(SC_PARTS_USED.cost_centre) AS "CC",
+            UPPER(SC_PARTS_USED.qty_reqd) AS "QTY",
+            REPLACE(SC_PARTS_USED.percent_usage,',','.') AS "%",
+            SC_PARTS_USED.corecost AS "CORE COST",
+            nvl(A.RB_COST,0) AS "TOTAL COST",
+            UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+            UPPER(RB_MASTERLIST.keyword) AS "KEYWORD",
+            SC_PARTS_USED.rowid
+        FROM
+            SC_PARTS_USED,
+            RB_MASTERLIST,
+            (SELECT
+            round(sum(total_cost),2) as RB_COST, round(sum(total_unit_cost),2) as RB_UNIT_COST , rb_reference
+        FROM
+            TEMP_materials_list
+        group by
+            rb_reference) A
+        WHERE
+            SC_PARTS_USED.link_code = vi_idnum AND
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = vi_link_type AND
+            RB_MASTERLIST.rebuilt_stock_num(+)= SC_PARTS_USED.mms_rebuilt_code AND
+            rb_reference (+)= SC_PARTS_USED.mms_rebuilt_code
+        ORDER BY
+            SC_PARTS_USED.mms_rebuilt_code;
+END RETRIEVE_RBP_USED;
+
+
+/*
+PROCEDURE RETRIEVE_CC_TOTALS
+    (vi_idnum IN MB_LIST.MB_NUMBER%TYPE,
+     vi_link_type IN SC_PARTS_USED.link_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            nvl(C.name,'NONE') AS "ASSEMBLY AREA",
+            nvl(A.cost_centre, 0) AS "CC",
+            nvl(sum(A.cost),0) AS "TOTAL COST",
+            nvl(sum(A.taxcost), 0 )AS "TAXABLE COST"
+
+        FROM
+            (SELECT
+                cost_centre,
+                (FINAL_COST(percent_usage, qty_reqd, mms_cost, corecost)- FINAL_COST(percent_usage, qty_reqd, corecost, 0)) AS cost,
+                FINAL_COST(percent_usage, qty_reqd, mms_cost, 0) AS taxcost
+             FROM
+                SC_PARTS_USED
+             WHERE
+                link_code = vi_idnum AND
+                rebuilt_part = 'N' AND
+                link_type =vi_link_type
+             UNION ALL */ /*
+                SELECT
+                    cost_centre,
+                    FINAL_COST(percent_usage, qty_reqd, reb_part_cost, corecost) as cost,
+                    FINAL_COST(percent_usage, qty_reqd, reb_part_cost, 0) AS taxcost
+                FROM
+                    SC_PARTS_USED
+                WHERE
+                    link_code = vi_idnum AND
+                    rebuilt_part = 'Y' AND
+                    link_type =vi_link_type
+                UNION ALL */ /*
+                     SELECT
+                        NSC_PARTS_USED.cost_centre,
+                        FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0) as cost,
+                        FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0) AS taxcost
+                    FROM
+                        NSC_PARTS_USED NSC_PARTS_USED, NON_STOCK_CODED_PARTS NON_STOCK_CODED_PARTS
+                    WHERE
+                        link_code = upper(vi_IDnum) AND
+                        link_type = UPPER(vi_link_type) AND
+                        NON_STOCK_CODED_PARTS.ID (+)= NSC_PARTS_USED.ID) A,
+            cost_centres C
+        WHERE
+            C.cost_centre = A.cost_centre
+        GROUP BY
+            A.cost_centre,
+            C.name;
+END RETRIEVE_CC_TOTALS;
+*/
+
+--new procedure for request #232922
+PROCEDURE RETRIEVE_RBP_USED_NUM
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            DISTINCT(mms_rebuilt_code) AS mms_rebuilt_code
+            FROM
+                SC_PARTS_USED
+            WHERE
+                SC_PARTS_USED.rebuilt_part = 'Y';
+END RETRIEVE_RBP_USED_NUM;
+
+PROCEDURE RETRIEVE_SC_ORIG_SUPPLIER_NUM
+    (vi_osn IN STOCK_CODED_PARTS.ORIG_SUPPLIER_NUM%TYPE,
+    vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+    SELECT
+        UPPER(mms_stock_code) AS mms_stock_code,
+        replace(UPPER(mms_new_cost), ',','.') AS mms_new_cost
+    FROM
+        STOCK_CODED_PARTS
+    WHERE rtrim(orig_supplier_num) = rtrim(vi_osn);
+END RETRIEVE_SC_ORIG_SUPPLIER_NUM;
+
+PROCEDURE RETRIEVE_USER_BY_USERNAME
+    (vi_username IN USERS.username%TYPE,
+    vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+    SELECT
+        UPPER(username) AS username,
+        UPPER(date_changed) AS date_changed,
+        UPPER(password) AS password,
+        UPPER(pswd_change_date) AS pswd_change_date,
+        UPPER(access_level) AS access_level,
+        UPPER(previous_access_level) AS previous_access_level,
+        UPPER(date_changed_back) AS date_changed_back,
+        ROWID
+    FROM
+        USERS
+    WHERE
+        TRIM(UPPER(username)) = trim(upper(vi_username));
+END RETRIEVE_USER_BY_USERNAME;
+
+PROCEDURE RETRIEVE_ALL_USERS
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+    SELECT
+        username AS "USER NAME",
+        date_changed AS "DATE CHANGED",
+        access_level AS "ACCESS LEVEL",
+        date_changed_back AS "DATE CHANGED BACK",
+        previous_access_level AS "PREV ACCESS LEVEL"
+    FROM
+        USERS;
+END RETRIEVE_ALL_USERS;
+
+PROCEDURE RETRIEVE_PASSWORD
+    (vi_username in USERS.username%TYPE,
+    vo_Cursor OUT query_cur) is
+BEGIN
+    open vo_Cursor for
+    select
+        password
+    from
+        USERS
+    where
+        username = vi_username;
+END RETRIEVE_PASSWORD;
+
+PROCEDURE RETRIEVE_LIST_OF_BUSES
+    (vo_Cursor IN OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+    SELECT
+        list_id,
+        UPPER(description) AS description
+    FROM
+        LIST_OF_BUSES
+    ORDER BY
+        description;
+END RETRIEVE_LIST_OF_BUSES;
+
+PROCEDURE MB_LIST_BUSES
+    (vi_mb_number IN MB_LIST_OF_BUSES.mb_number%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+    SELECT
+        MB_LIST_OF_BUSES.list_id AS list_id,
+        UPPER(LIST_OF_BUSES.description) AS description
+    FROM
+        MB_LIST_OF_BUSES,
+        LIST_OF_BUSES
+    WHERE
+        MB_LIST_OF_BUSES.mb_number = vi_mb_number AND
+        MB_LIST_OF_BUSES.list_id = LIST_OF_BUSES.list_id;
+END MB_LIST_BUSES;
+
+PROCEDURE RETRIEVE_MB_LIST_BY_MB_NUMBER
+    (vi_mb_number IN MB_LIST.mb_number%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+    SELECT
+        UPPER(rebuild_code) AS rebuild_code,
+        UPPER(description) AS description,
+        UPPER(keyword) AS keyword,
+        UPPER(core_code) AS core_code,
+        UPPER(bench_number) AS bench_number,
+        UPPER(sop_number) AS sop_number,
+        UPPER(buy_new_cost) AS buy_new_cost,
+        UPPER(external_cost) AS external_cost,
+        UPPER(reman_cost) AS reman_cost,
+        UPPER(job_number) AS job_number,
+        UPPER(core_cost) AS core_charge
+
+    FROM
+        MB_LIST
+    WHERE
+        mb_number = vi_mb_number;
+END RETRIEVE_MB_LIST_BY_MB_NUMBER;
+
+PROCEDURE RETRIEVE_EMPLOYEE_LABOUR
+    (vi_link_number IN EMPLOYEE_LABOUR.link_number%TYPE,
+     vi_typeid IN EMPLOYEE_LABOUR.typeid%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+    SELECT
+        UPPER(labour_defn) AS labour_defn,
+        UPPER(costcentre) AS costcentre,
+        UPPER(task) AS task,
+        UPPER(labour_type) AS labour_type,
+        UPPER(usage) AS usage,
+        UPPER(hrs_reqd) AS hrs_reqd,
+        UPPER(adj_hrs) AS adj_hrs,
+        UPPER(time_addition) AS time_addition,
+        UPPER(rebuilt_part_num) AS rebuilt_part_num
+    FROM
+        EMPLOYEE_LABOUR
+    WHERE
+        link_number = vi_link_number AND
+        typeid = vi_typeid;
+END RETRIEVE_EMPLOYEE_LABOUR;
+
+PROCEDURE RETRIEVE_BUS_DESCRIPTION
+    (vi_description IN LIST_OF_BUSES.description%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            list_id,
+            description
+        FROM
+            LIST_OF_BUSES
+        WHERE
+            description = vi_description;
+
+END RETRIEVE_BUS_DESCRIPTION;
+
+PROCEDURE GET_MB_LIST_OF_BUSES_BY_LISTID
+    (vi_list_id IN MB_LIST_OF_BUSES.list_id%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(mb_number) AS mb_number,
+            UPPER(list_id) AS list_id
+        FROM
+            MB_LIST_OF_BUSES
+        WHERE
+            list_id = vi_list_id;
+END GET_MB_LIST_OF_BUSES_BY_LISTID;
+
+PROCEDURE RETRIEVE_ACCESS_LEVELS
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(access_level_id) AS access_level_id
+        FROM
+            ACCESS_LEVEL;
+END RETRIEVE_ACCESS_LEVELS;
+
+PROCEDURE FIND_TASK_DESCRIPTION
+    (vi_task_description IN LABOUR_TASK_DESCRIPTIONS.task_description%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(task_id) AS task_id,
+            UPPER(task_description) AS task_description
+        FROM
+            LABOUR_TASK_DESCRIPTIONS
+        WHERE
+            task_description = vi_task_description;
+END FIND_TASK_DESCRIPTION;
+
+PROCEDURE RETRIEVE_EMPL_CLASS
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            EMPL_CLASS.labour_type AS "LABOUR TYPE ID",
+            EMPL_CLASS.labour_defn AS "LABOUR TYPE",
+            EMPL_CLASS.wage_group AS "WAGE GROUP",
+            EMPLOYEE_SALARIES.rate_per_hour AS "RATE PER HOUR",
+            EMPL_CLASS.hrs_per_week AS "HRS PER WEEK",
+            EMPL_CLASS.overheadtype AS "OVERHEAD TYPE"
+        FROM
+            EMPL_CLASS,
+            EMPLOYEE_SALARIES
+        WHERE
+            EMPL_CLASS.wage_group = EMPLOYEE_SALARIES.wage_group;
+
+END RETRIEVE_EMPL_CLASS;
+
+PROCEDURE RETRIEVE_EMPLOYEE_SALARIES
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            wage_group AS "WAGE GROUP",
+            rate_per_hour AS "RATE PER HOUR"
+        FROM
+            EMPLOYEE_SALARIES;
+END RETRIEVE_EMPLOYEE_SALARIES;
+
+PROCEDURE SEARCH_EMPLOYEE_SALARIES
+    (vi_rate_per_hour in EMPLOYEE_SALARIES.rate_per_hour%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            wage_group,
+            rate_per_hour,
+            date_entered
+        FROM
+            EMPLOYEE_SALARIES
+        WHERE
+            rate_per_hour = vi_rate_per_hour;
+END SEARCH_EMPLOYEE_SALARIES;
+
+PROCEDURE SEARCH_EMPL_CLASS_WAGE_GROUP
+    (vi_wage_group IN EMPL_CLASS.wage_group%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            labour_type,
+            labour_defn,
+            wage_group,
+            hrs_per_week,
+            date_entered,
+            overheadtype
+        FROM
+            EMPL_CLASS
+        WHERE
+            wage_group = vi_wage_group;
+END SEARCH_EMPL_CLASS_WAGE_GROUP;
+
+PROCEDURE SEARCH_EMPL_CLASS_LABOUR_DEFN
+    (vi_labour_defn IN EMPL_CLASS.labour_defn%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(labour_type) AS labour_type,
+            UPPER(labour_defn) AS labour_defn,
+            UPPER(wage_group) AS wage_group,
+            UPPER(hrs_per_week) AS hrs_per_week,
+            UPPER(date_entered) AS date_entered,
+            UPPER(overheadtype) AS overheadtype
+        FROM
+            EMPL_CLASS
+        WHERE
+            labour_defn = vi_labour_defn;
+END SEARCH_EMPL_CLASS_LABOUR_DEFN;
+
+PROCEDURE SEARCH_WAGE_GROUP
+    (vi_wage_group IN EMPLOYEE_SALARIES.wage_group%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(wage_group) AS wage_group,
+            UPPER(rate_per_hour) AS rate_per_hour,
+            UPPER(date_entered) AS date_entered
+        FROM
+            EMPLOYEE_SALARIES
+        WHERE
+            wage_group = vi_wage_group;
+END SEARCH_WAGE_GROUP;
+
+PROCEDURE SEARCH_OEM_KITS
+    (vi_part_number IN KITS_MASTERLIST.part_number%TYPE,
+     vi_description IN KITS_MASTERLIST.detailed_desc%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+    SELECT
+        part_number AS "PART NUMBER",
+        detailed_desc AS "DESCRIPTION",
+        keyword AS "KEYWORD",
+        'YESDELETE' AS "ID",
+        estimated_cost
+    FROM
+        KITS_MASTERLIST
+    WHERE
+        UPPER(NVL(part_number,' ')) LIKE '%'||TRIM(upper(vi_part_number))||'%' AND
+        UPPER(NVL(detailed_desc,' ')) LIKE  '%'||TRIM(upper(vi_description))||'%';
+END SEARCH_OEM_KITS;
+
+PROCEDURE RETRIEVE_OEMKITS_ATTACHED
+    (vi_link_code IN KITS_USED.link_code%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(part_number) AS part_number
+        FROM
+            KITS_USED
+        WHERE
+            link_code = vi_link_code;
+
+END RETRIEVE_OEMKITS_ATTACHED;
+
+PROCEDURE RETRIEVE_SC_KIT_DATA
+    (vi_mms_stock_code in SC_OEMKITS_TEXT_DATA.mms_new_code%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(text_data) AS text_data
+        FROM
+            SC_OEMKITS_TEXT_DATA
+        WHERE mms_new_code = vi_mms_stock_code;
+
+END RETRIEVE_SC_KIT_DATA;
+
+PROCEDURE RETRIEVE_ARCH_RB
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            ARCH_RB_MASTERLIST_ID,
+            MMS_STOCK_CODE AS "MMS Stock Code",
+            DETAILED_DESC AS "Detailed Description",
+            KEYWORD AS "Keyword",
+            DATE_ARCHIVED AS "Date Archived",
+            ESTIMATED_COST AS "Estimated Cost"
+        FROM
+            ARCH_RB_MASTERLIST;
+END RETRIEVE_ARCH_RB;
+
+PROCEDURE GET_ARCH_RB_MASTERLIST
+    (vi_mms_stock_code IN ARCH_RB_MASTERLIST.mms_stock_code%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            *
+        FROM
+            ARCH_RB_MASTERLIST
+        WHERE
+            mms_stock_code = vi_mms_stock_code;
+END GET_ARCH_RB_MASTERLIST;
+
+PROCEDURE GET_ARCH_RB_EMPLOYEE_LABOUR
+    (vi_arch_rb_masterlist_id IN ARCH_RB_EMPLOYEE_LABOUR.arch_rb_masterlist_id%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+             labour_defn AS "Labour Type",
+             costcentre AS "CC",
+             task AS "Task",
+             usage AS "Usage",
+             hrs_reqd AS "Time",
+             adj_hrs AS "Actual Time"
+        FROM
+            ARCH_RB_EMPLOYEE_LABOUR
+        WHERE
+            arch_rb_masterlist_id = vi_arch_rb_masterlist_id;
+END GET_ARCH_RB_EMPLOYEE_LABOUR;
+
+PROCEDURE GET_ARCH_RB_LABOUR_CC_TOTAL
+    (vi_arch_rb_masterlist_id IN ARCH_RB_LABOUR_CC_TOTAL.arch_rb_masterlist_id%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            cost_centre AS "Cost Centre",
+            total_hours AS "Total Cost"
+        FROM
+            ARCH_RB_LABOUR_CC_TOTAL
+        WHERE
+            arch_rb_masterlist_id = vi_arch_rb_masterlist_id;
+END GET_ARCH_RB_LABOUR_CC_TOTAL;
+
+PROCEDURE GET_ARCH_RB_MATERIALS_CC_TOTAL
+    (vi_arch_rb_masterlist_id IN ARCH_RB_MATERIALS_CC_TOTAL.arch_rb_masterlist_id%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            cost_centre AS "Cost Centre",
+            total_cost AS "Total Cost"
+        FROM
+            ARCH_RB_MATERIALS_CC_TOTAL
+        WHERE
+            arch_rb_masterlist_id = vi_arch_rb_masterlist_id;
+END GET_ARCH_RB_MATERIALS_CC_TOTAL;
+
+PROCEDURE GET_ARCH_RB_SC_PARTS_USED
+    (vi_arch_rb_masterlist_id IN ARCH_RB_SC_PARTS_USED.arch_rb_masterlist_id%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            *
+        FROM
+            ARCH_RB_SC_PARTS_USED
+        WHERE
+            arch_rb_masterlist_id = vi_arch_rb_masterlist_id;
+END GET_ARCH_RB_SC_PARTS_USED;
+
+PROCEDURE SEARCH_MB_BY_BUS
+    (vi_bus_id IN LIST_OF_BUSES.list_id%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(MB_LIST.mb_number) AS "MB NUMBER",
+            UPPER(MB_LIST.keyword) AS "KEYWORD",
+            UPPER(MB_LIST.description) AS "DESCRIPTION",
+            UPPER(MB_LIST.bus_type) AS "BUS TYPE",
+            UPPER(MB_LIST.num_bus_comp) AS "# BUSES USING COMP",
+            UPPER(MB_LIST.vendor_part_num) AS "VENDOR PART #",
+            UPPER(MB_LIST.buy_code) AS "BUY CODE",
+            UPPER(MB_LIST.rebuild_code) AS "REBUILT CODE",
+            UPPER(MB_LIST.core_code) AS "CORE CODE",
+            UPPER(MB_LIST.annual_usage) AS "ANNUAL USAGE",
+            UPPER(MB_LIST.bench_number) AS "BENCH NUMBER",
+            UPPER(MB_LIST.sample_provided) AS "SAMPLE PROVIDED",
+            UPPER(MB_LIST.recommendation) AS "RECOMMENDATION",
+            UPPER(MB_LIST.reman_cost) AS "REMAN EX COST",
+            UPPER(MB_LIST.external_cost) AS "EXTERNAL COST",
+            UPPER(MB_LIST.buy_new_cost) AS "NEW COST",
+            UPPER(MB_LIST.internal_cost) AS "INTERNAL COST",
+            UPPER(MB_LIST.sop_number) AS "SOP NUMBER",
+            UPPER(MB_LIST.core_cost) AS "CORE COST",
+            UPPER(MB_LIST.job_number) AS "JOB NUMBER",
+            DATE_OPENED AS "DATE OPENED",
+            MB_LIST.ROWID
+        FROM
+            MB_LIST,
+            MB_LIST_OF_BUSES
+        WHERE
+            MB_LIST.mb_number = MB_LIST_OF_BUSES.mb_number AND
+            MB_LIST_OF_BUSES.list_id = vi_bus_id;
+END SEARCH_MB_BY_BUS;
+
+PROCEDURE RETRIEVE_CES_SETTI
+    (vi_parameter IN CES_SETTINGS.parameter%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            ces_settings_id,
+            value
+        FROM
+            CES_SETTINGS
+        WHERE
+            parameter = vi_parameter;
+END RETRIEVE_CES_SETTI;
+
+PROCEDURE SERCH_KIT_BY_NUMBER
+    (vi_part_number KITS_MASTERLIST.part_number%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(estimated_cost) AS estimated_cost,
+            UPPER(keyword) AS keyword,
+            UPPER(detailed_desc) AS detailed_desc,
+            UPPER(modified_last_by) AS modified_last_by,
+            UPPER(modified_last_date) AS modified_last_date,
+            UPPER(date_entered) AS date_entered,
+            UPPER(part_number) AS part_number
+        FROM
+            KITS_MASTERLIST
+        WHERE
+            part_number = vi_part_number;
+
+END SERCH_KIT_BY_NUMBER;
+
+PROCEDURE SERACH_NSCP_BY_ORIG_SUPPL_NUM
+    (vi_orig_supplier_num NON_STOCK_CODED_PARTS.orig_supplier_num%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(orig_supplier_num) AS orig_supplier_num,
+            UPPER(orig_supplier_name) AS orig_supplier_name,
+            UPPER(date_entered) AS date_entered,
+            UPPER(oem_part_cost) AS oem_part_cost,
+            UPPER(detailed_desc) AS detailed_desc,
+            UPPER(part_added_by) AS part_added_by,
+            UPPER(last_modified_by) AS last_modified_by,
+            UPPER(last_modified_date) AS last_modified_date,
+            UPPER(keyword) AS keyword,
+            UPPER(id) AS id
+        FROM
+            NON_STOCK_CODED_PARTS
+        WHERE
+            orig_supplier_num = vi_orig_supplier_num;
+END SERACH_NSCP_BY_ORIG_SUPPL_NUM;
+
+PROCEDURE SERCH_ENGINE_BY_NAME
+    (vi_name ENGINES.name%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(ENGINES.name) AS name
+        FROM
+            ENGINES
+        WHERE
+            ENGINES.name = vi_name;
+END SERCH_ENGINE_BY_NAME;
+
+PROCEDURE SERCH_DIFFERENTIAL_BY_NAME
+    (vi_name DIFFERENTIAL.name%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(DIFFERENTIAL.name) AS name
+        FROM
+            DIFFERENTIAL
+        WHERE
+            DIFFERENTIAL.name = vi_name;
+END SERCH_DIFFERENTIAL_BY_NAME;
+
+PROCEDURE SERCH_TRANSMISSION_BY_NAME
+    (vi_name TRANSMISSIONS.name%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(TRANSMISSIONS.name)AS name
+        FROM
+            TRANSMISSIONS
+        WHERE
+            TRANSMISSIONS.name = vi_name;
+END SERCH_TRANSMISSION_BY_NAME;
+
+PROCEDURE SEARCH_VEH_TYPE_BY_KEY
+    (vi_make TYPE_OF_VEHICLE.make%TYPE,
+     vi_model TYPE_OF_VEHICLE.model%TYPE,
+     vi_year TYPE_OF_VEHICLE.year%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            make,
+            model,
+            year
+        FROM
+            TYPE_OF_VEHICLE
+        WHERE
+            make = vi_make AND
+            model = vi_model AND
+            year = vi_year;
+END SEARCH_VEH_TYPE_BY_KEY;
+
+PROCEDURE RB_LIST_BUSES
+    (vi_rebuilt_stock_num IN RB_LIST_OF_BUSES.rebuilt_stock_num%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+    SELECT
+        RB_LIST_OF_BUSES.list_id,
+        LIST_OF_BUSES.description
+    FROM
+        RB_LIST_OF_BUSES,
+        LIST_OF_BUSES
+    WHERE
+        RB_LIST_OF_BUSES.rebuilt_stock_num = vi_rebuilt_stock_num AND
+        RB_LIST_OF_BUSES.list_id = LIST_OF_BUSES.list_id;
+END RB_LIST_BUSES;
+
+PROCEDURE GET_ALL_NSCP
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            NON_STOCK_CODED_PARTS;
+END GET_ALL_NSCP;
+
+PROCEDURE SEARCH_NSCP_PART_BY_2_FIELDS
+    (vi_orig_supplier_num IN NON_STOCK_CODED_PARTS.orig_supplier_num%TYPE,
+     vi_orig_supplier_name IN NON_STOCK_CODED_PARTS.orig_supplier_name%TYPE,
+     vo_Cursor OUT query_cur) IS
+ position varchar2(500);
+ name varchar(500)   ;
+
+BEGIN
+
+
+ position := INSTR(vi_orig_supplier_name,' Price:',1,1);
+ if position > 0 then
+    name := substr (vi_orig_supplier_name,1,(position -1));
+ else
+    name := vi_orig_supplier_name;
+ end if;
+    OPEN vo_Cursor FOR
+        SELECT
+            nvl(keyword, ' ') AS "KEYWORD",
+            nvl(detailed_desc, ' ') AS "DESCRIPTION",
+            nvl(oem_part_cost, 0) AS "PRICE",
+            last_modified_date AS "LAST MODIFIED DATE",
+            id AS "ID",
+            rowid AS "ROWID"
+        FROM
+            NON_STOCK_CODED_PARTS
+        WHERE
+            orig_supplier_num = vi_orig_supplier_num AND
+            orig_supplier_name = name;
+END SEARCH_NSCP_PART_BY_2_FIELDS;
+
+PROCEDURE FIND_SUPPLIER_NAME_BY_NUMBER
+    (vi_orig_supplier_num IN NON_STOCK_CODED_PARTS.orig_supplier_num%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            nvl(orig_supplier_name, ' ') || ' Price: $' || nvl(oem_part_cost, 0 ) as orig_supplier_name
+        FROM
+            NON_STOCK_CODED_PARTS
+        WHERE
+            orig_supplier_num = vi_orig_supplier_num;
+END FIND_SUPPLIER_NAME_BY_NUMBER;
+
+PROCEDURE RETRIEVE_RBP_USED_DISTINCT
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            DISTINCT(mms_rebuilt_code) AS mms_rebuilt_code
+        FROM
+        (
+            SELECT
+                SC_PARTS_USED.mms_rebuilt_code
+            FROM
+                SC_PARTS_USED
+            WHERE
+                SC_PARTS_USED.rebuilt_part = 'Y' AND
+                SC_PARTS_USED.link_type = 'RB'
+        UNION
+            SELECT
+                SC_PARTS_USED.link_code
+            FROM
+                SC_PARTS_USED
+            WHERE
+                SC_PARTS_USED.rebuilt_part = 'Y' AND
+                SC_PARTS_USED.link_type = 'RB'
+        );
+END RETRIEVE_RBP_USED_DISTINCT;
+
+PROCEDURE RETRIEVE_RBP_USED_LINKS
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            SC_PARTS_USED.mms_rebuilt_code AS mms_rebuilt_code,
+            SC_PARTS_USED.link_code AS link_code
+        FROM
+            SC_PARTS_USED
+        WHERE
+                SC_PARTS_USED.rebuilt_part = 'Y' AND
+                SC_PARTS_USED.link_type = 'RB';
+END RETRIEVE_RBP_USED_LINKS;
+
+PROCEDURE RETRIEVE_RBP_TO_PROPAGATE_RB
+    (vi_idnum IN SC_PARTS_USED.mms_rebuilt_code%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(SC_PARTS_USED.link_code) AS mms_rebuilt_code
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            SC_PARTS_USED.mms_rebuilt_code = vi_idnum;
+END RETRIEVE_RBP_TO_PROPAGATE_RB;
+
+PROCEDURE RETRIEVE_RBP_TO_PROPAGATE_NSC
+    (vi_idnum IN NSC_PARTS_USED.id%TYPE,
+     vo_Cursor OUT query_cur)IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(NSC_PARTS_USED.link_code) AS mms_rebuilt_code
+        FROM
+            NSC_PARTS_USED
+        WHERE
+            NSC_PARTS_USED.link_type = 'RB' AND
+            NSC_PARTS_USED.id = vi_idnum;
+END RETRIEVE_RBP_TO_PROPAGATE_NSC;
+
+PROCEDURE RETRIEVE_RBP_TO_PROPAGATE_SAL
+    (vi_idnum IN EMPL_CLASS.wage_group%TYPE,
+     vo_Cursor OUT query_cur)IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(EMPLOYEE_LABOUR.link_number) AS mms_rebuilt_code
+        FROM
+            EMPLOYEE_LABOUR,
+            EMPL_CLASS
+        WHERE
+            EMPLOYEE_LABOUR.typeid = 'RB' AND
+            EMPLOYEE_LABOUR.labour_defn = UPPER(EMPL_CLASS.labour_defn) AND
+            EMPL_CLASS.wage_group = vi_idnum;
+END RETRIEVE_RBP_TO_PROPAGATE_SAL;
+
+PROCEDURE RETRIEVE_RBP_TO_PROPAGATE_LAB
+    (vi_idnum IN EMPLOYEE_LABOUR.labour_defn%TYPE,
+     vo_Cursor OUT query_cur)IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(EMPLOYEE_LABOUR.link_number) AS mms_rebuilt_code
+        FROM
+            EMPLOYEE_LABOUR
+        WHERE
+            EMPLOYEE_LABOUR.typeid = 'RB' AND
+            EMPLOYEE_LABOUR.labour_defn = UPPER(vi_idnum);
+END RETRIEVE_RBP_TO_PROPAGATE_LAB;
+
+PROCEDURE RETRIEVE_KIT_TO_PROPAGATE_NSC
+    (vi_idnum IN NSC_PARTS_USED.id%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(NSC_PARTS_USED.link_code) AS part_number
+        FROM
+            NSC_PARTS_USED
+        WHERE
+            NSC_PARTS_USED.link_type = 'KIT' AND
+            NSC_PARTS_USED.id = vi_idnum;
+END RETRIEVE_KIT_TO_PROPAGATE_NSC;
+
+PROCEDURE RETRIEVE_EST_TO_PROPAGATE_RB
+    (vi_idnum IN SC_PARTS_USED.mms_rebuilt_code%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(SC_PARTS_USED.link_code) AS "link_code",
+            UPPER(SC_PARTS_USED.link_type) AS "link_type"
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.mms_rebuilt_code = vi_idnum;
+END RETRIEVE_EST_TO_PROPAGATE_RB;
+/*
+FUNCTION RETRIEVE_RBP_TOTAL_COST
+    (vi_rbnum IN RB_MASTERLIST.rebuilt_stock_num%TYPE,
+     vi_link_type IN SC_PARTS_USED.link_type%TYPE,
+     vo_total_cost OUT NUMBER) RETURN NUMBER IS
+     labour_subtotal NUMBER;
+     labour_overhead NUMBER;
+     labour_total NUMBER;
+     nscp_total NUMBER;
+     scp_total NUMBER;
+     rbp_total NUMBER;
+     materials_total NUMBER;
+     core_cost_str VARCHAR2(25);
+     core_cost NUMBER;
+BEGIN
+    -- Calculate the Labour Subtotal
+    SELECT
+        NVL(SUM(ROUND(EMPLOYEE_LABOUR.time_addition * EMPLOYEE_SALARIES.rate_per_hour * (EMPLOYEE_LABOUR.usage/100), 2)), 0)
+    INTO
+        labour_subtotal
+    FROM
+        EMPLOYEE_LABOUR,
+        EMPLOYEE_SALARIES,
+        EMPL_CLASS
+    WHERE
+        EMPLOYEE_LABOUR.labour_defn = UPPER(EMPL_CLASS.labour_defn) AND
+        EMPLOYEE_SALARIES.wage_group = EMPL_CLASS.wage_group AND
+        EMPLOYEE_LABOUR.link_number = vi_rbnum AND
+        EMPLOYEE_LABOUR.typeid = vi_link_type;
+    -- Calculate the Labour Overhead
+    SELECT
+        (MAX(CES_SETTINGS.value) * labour_subtotal)
+    INTO
+        labour_overhead
+    FROM
+        CES_SETTINGS
+    WHERE
+        CES_SETTINGS.parameter = 'OVERHEAD';
+    -- Calculate the Labour Total
+    labour_total := labour_subtotal + labour_overhead;
+    -- Calculate the Non-Stock Coded Parts Total
+    SELECT
+        NVL(SUM(FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NSC_PARTS_USED.cost, 0) - NSC_PARTS_USED.corecost), 0)
+    INTO
+        nscp_total
+    FROM
+        NSC_PARTS_USED
+    WHERE
+        NSC_PARTS_USED.link_code = vi_rbnum AND
+        NSC_PARTS_USED.link_type = vi_link_type;
+    -- Calculate the Stock Coded Parts Total
+    SELECT
+        NVL(SUM(FINAL_COST(SC_PARTS_USED.percent_usage, SC_PARTS_USED.qty_reqd, SC_PARTS_USED.mms_cost, 0) - SC_PARTS_USED.corecost), 0)
+    INTO
+        scp_total
+    FROM
+        SC_PARTS_USED
+    WHERE
+        SC_PARTS_USED.link_code = vi_rbnum AND
+        SC_PARTS_USED.link_type = vi_link_type AND
+        SC_PARTS_USED.rebuilt_part = 'N';
+    -- Calculate the Rebult Parts Total
+    SELECT
+        NVL(SUM(FINAL_COST(SC_PARTS_USED.percent_usage, SC_PARTS_USED.qty_reqd, SC_PARTS_USED.reb_part_cost, 0) - SC_PARTS_USED.corecost), 0)
+    INTO
+        rbp_total
+    FROM
+        SC_PARTS_USED
+    WHERE
+        SC_PARTS_USED.link_code = vi_rbnum AND
+        SC_PARTS_USED.link_type = vi_link_type AND
+        SC_PARTS_USED.rebuilt_part = 'Y';
+    -- Calculate the Materials Total
+    materials_total := nscp_total + scp_total + rbp_total;
+    -- Calculate the Core Cost
+    SELECT
+        core_charge
+    INTO
+        core_cost_str
+    FROM
+        RB_MASTERLIST
+    WHERE
+        UPPER(RB_MASTERLIST.rebuilt_stock_num) = vi_rbnum;
+    -- Convert the Core Cost into a number
+    IF core_cost_str = '' OR core_cost_str = ' ' OR core_cost_str IS NULL THEN
+        core_cost := 0;
+    ELSE
+        core_cost := CAST(REPLACE(core_cost_str, '.', ',') AS NUMBER);
+    END IF;
+    -- Calculate the Total Cost
+    vo_total_cost := materials_total - core_cost;
+    RETURN 0;
+END RETRIEVE_RBP_TOTAL_COST;  */
+
+
+
+/*Retrieves the complete cost minus tax of a rebuilt part estimate.  Input the rebuilt part number and
+the type RB,BUS,MB Used in cost variance report*/
+
+
+FUNCTION RPT_RBP_COST
+    (vi_rbnum  IN RB_MASTERLIST.rebuilt_stock_num%TYPE,
+     vi_link_type IN SC_PARTS_USED.link_type%TYPE) RETURN NUMBER IS
+
+     emesg varchar2(30);
+     vo_total_cost_ret NUMBER(20,10);
+     labour_subtotal NUMBER(20,10);
+     labour_overhead NUMBER(20,10);
+     labour_total NUMBER(20,10);
+     nscp_total NUMBER(20,10);
+     scp_total NUMBER(20,10);
+     rbp_total NUMBER(20,10);
+     materials_total NUMBER(20,10);
+     core_cost_str VARCHAR2(30);
+     core_cost NUMBER(20,10);
+     V_PRICE number (20,10);
+
+BEGIN
+
+--Get the total material cost
+    V_PRICE := NVL(get_material_cost(vi_rbnum,vi_link_type),0);
+
+      SELECT
+        NVL(SUM(TOTAL_COST),0) AS "TOTAL COST"
+      INTO
+        MATERIALS_TOTAL
+      FROM
+        TEMP_MATERIALS_LIST;
+
+--get the total labour costs
+    V_PRICE := NVL(get_labour_cost(vi_rbnum,vi_link_type),0);
+
+
+        SELECT
+           NVL(SUM(TOTAL_COST),0) AS "TOTAL COST"
+        INTO
+            labour_subtotal
+        FROM
+            TEMP_LABOUR_LIST;
+
+--retrieve the labour overhead amount
+    SELECT
+        nvl( (MAX( to_number(replace(CES_SETTINGS.value,',','.'))) * labour_subtotal),0)
+    INTO
+        labour_overhead
+    FROM
+        CES_SETTINGS
+    WHERE
+        CES_SETTINGS.parameter = 'OVERHEAD';
+
+    -- Calculate the Labour Total with overhead
+
+    labour_total := labour_subtotal + labour_overhead;
+
+    SELECT
+        nvl(core_charge,'0')
+    INTO
+        core_cost_str
+    FROM
+        RB_MASTERLIST
+    WHERE
+        UPPER(RB_MASTERLIST.rebuilt_stock_num) = vi_rbnum;
+
+    -- Convert the Core Cost into a number
+    -- vhou 2010-06-07 Add replace function to get rid of '$' synbol in the data
+    IF core_cost_str = '' OR core_cost_str = ' ' OR core_cost_str IS NULL THEN
+        core_cost := 0;
+    ELSE
+        core_cost := to_number(REPLACE(REPLACE(core_cost_str, ',', '.'),'$',''));
+    END IF;
+
+    -- Calculate the Total Cost of the rebuilt part
+    V_PRICE:= round(nvl(((materials_total - core_cost + labour_total )),0), 2) ;
+
+    RETURN nvl(V_PRICE,0);
+
+END RPT_RBP_COST;
+
+
+PROCEDURE RETRIEVE_RBP_TOTAL_COST2
+    (vi_idnum IN RB_MASTERLIST.rebuilt_stock_num%TYPE,
+     vi_type IN SC_PARTS_USED.link_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+
+V_LINK_CODE VARCHAR2(30);
+V_PRICE number (20,10);
+V_RET_VAL VARCHAR2(25);
+
+CURSOR C_RB_LIST_To_Prop (vi_IDnum IN varchar2)
+IS
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS "link_code",
+                SC_PARTS_USED.qty_reqd AS "QTY",
+                SC_PARTS_USED.percent_usage AS "%",
+                SC_PARTS_USED.mms_rebuilt_code AS "Rebuilt Code"
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = vi_type AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_IDnum);
+
+cur_RBRec C_RB_LIST_To_Prop%ROWTYPE;
+/*
+
+  CURSOR cur_Material (vi_IDnum IN varchar)
+IS
+
+       SELECT
+            nvl(C.name,'NONE') AS "ASSEMBLY AREA",
+            nvl(A.cost_centre, '0') AS "CC",
+            nvl(sum(A.cost), '0') AS "TOTAL COST",
+            nvl(sum(A.taxcost), '0')AS "TAXABLE COST"
+        FROM
+            (SELECT
+                cost_centre,
+                FINAL_COST(percent_usage, qty_reqd, mms_cost, corecost) AS cost,
+                FINAL_COST(percent_usage, qty_reqd, mms_cost, 0) AS taxcost
+             FROM
+                SC_PARTS_USED
+             WHERE
+                link_code = upper(vi_idnum) AND
+                rebuilt_part = 'N' AND
+                link_type =upper(vi_type)
+             UNION ALL
+                    SELECT
+                        cost_centre,
+                        FINAL_COST(percent_usage, qty_reqd, cost, corecost) as cost,
+                        FINAL_COST(percent_usage, qty_reqd, cost, 0) AS taxcost
+                    FROM
+                        NSC_PARTS_USED
+                    WHERE
+                        link_code = upper(vi_IDnum) AND
+                        link_type = UPPER(vi_type)) A,
+            cost_centres C
+        WHERE
+            C.cost_centre = A.cost_centre
+        GROUP BY
+            A.cost_centre,
+            C.name;
+
+cur_MaterialRec cur_Material%ROWTYPE;
+V_PRICE number (20,10);
+*/
+
+BEGIN
+
+V_PRICE := get_material_cost(vi_idnum,vi_type);
+
+/*
+open cur_Material(upper(vi_idnum));
+LOOP
+    FETCH cur_Material
+    INTO cur_MaterialRec;
+    EXIT WHEN cur_Material%NOTFOUND;
+
+    insert into TEMP_MATERIALS_LIST values  (cur_MaterialRec."ASSEMBLY AREA",cur_MaterialRec."CC" ,cur_MaterialRec."TOTAL COST",cur_MaterialRec."TAXABLE COST",vi_IDnum,cur_MaterialRec."TOTAL COST");
+
+END LOOP;
+CLOSE cur_Material;
+
+--checks to see how many rebuilt parts are attached to the rebuilt part number
+-- inputted(rb_num) into this procedure
+SELECT count(*) INTO V_PRICE FROM SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = UPPER(vi_type) AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_idnum);
+--commit;
+
+--if this current rebuilt part (rb_num) in this procedure resides
+--in any other rebuilt parts update the prices of those rebuilt parts as well.
+if V_PRICE > 0 then
+
+open C_RB_LIST_To_Prop(upper(vi_idnum));
+LOOP
+
+    FETCH C_RB_LIST_To_Prop
+    INTO cur_RBRec;
+    EXIT WHEN C_RB_LIST_To_Prop%NOTFOUND;
+
+    WRITE_MATERIALS (cur_RBRec."Rebuilt Code",cur_RBRec."QTY" * cur_RBRec."%"/100 , upper(vi_IDnum) );
+
+END LOOP;
+CLOSE C_RB_LIST_To_Prop;
+end if; */
+
+ OPEN vo_Cursor FOR
+        SELECT
+            COST_CENTRE AS "CC",
+            SUM(TOTAL_COST) AS "TOTAL COST",
+            SUM(TAXABLE_COST)AS "TAXABLE COST"
+        FROM
+            TEMP_MATERIALS_LIST
+        GROUP BY
+            COST_CENTRE
+        ORDER BY
+            COST_CENTRE ASC;
+/*
+    EXCEPTION
+        WHEN others THEN
+            ROLLBACK;
+ */
+END RETRIEVE_RBP_TOTAL_COST2;
+
+
+
+
+
+
+FUNCTION RETRIEVE_KIT_TOTAL_COST
+    (vi_idnum IN SC_PARTS_USED.link_code%TYPE,
+     vo_total_cost OUT NUMBER) RETURN NUMBER IS
+     nscp_total NUMBER;
+     scp_total NUMBER;
+BEGIN
+    -- Calculate the Non-Stock Coded Part Cost
+    SELECT
+        NVL(SUM(FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NSC_PARTS_USED.cost, 0) - NSC_PARTS_USED.corecost), 0)
+    INTO
+        nscp_total
+    FROM
+        NSC_PARTS_USED
+    WHERE
+        NSC_PARTS_USED.link_code = vi_idnum AND
+        NSC_PARTS_USED.link_type = 'KIT';
+    -- Calculate the Stock Coded Part Cost
+    SELECT
+        NVL(SUM(FINAL_COST(SC_PARTS_USED.percent_usage, SC_PARTS_USED.qty_reqd, SC_PARTS_USED.mms_cost, 0) - SC_PARTS_USED.corecost), 0)
+    INTO
+        scp_total
+    FROM
+        SC_PARTS_USED
+    WHERE
+        SC_PARTS_USED.link_code = vi_idnum AND
+        SC_PARTS_USED.link_type = 'KIT' AND
+        SC_PARTS_USED.rebuilt_part = 'N';
+    -- Calculate the Total Cost
+    vo_total_cost := nscp_total + scp_total;
+    RETURN 0;
+END RETRIEVE_KIT_TOTAL_COST;
+
+PROCEDURE GET_NSC_PARTS_USED_BY_SUPPLIER
+    (vi_orig_supp_num IN NSC_PARTS_USED.orig_supp_num%TYPE,
+     vi_orig_supplier_name IN NSC_PARTS_USED.orig_supplier_name%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            NSC_PARTS_USED.link_code AS "LINK CODE",
+            NSC_PARTS_USED.link_type AS "LINK TYPE"
+        FROM
+            NSC_PARTS_USED NSC_PARTS_USED
+       WHERE
+            NSC_PARTS_USED.orig_supp_num = vi_orig_supp_num AND
+            NSC_PARTS_USED.orig_supplier_name = vi_orig_supplier_name;
+
+END GET_NSC_PARTS_USED_BY_SUPPLIER;
+
+PROCEDURE RETRIEVE_BUS_FROM_KITS_USED
+    (vi_kit_number IN KITS_USED.part_number%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            link_code
+        FROM
+            KITS_USED
+        WHERE
+            part_number = vi_kit_number;
+END RETRIEVE_BUS_FROM_KITS_USED;
+
+-- Next procedure is called from the frmViewAudit screen when:
+-- optAllEsimate is checked
+-- cboUserName has data "ALL USERS"
+-- chkAndDate is unchecked
+PROCEDURE RETRIEVE_AUDIT_1
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            ESTIMATE_TYPE IN
+                ('MB','RB','BUS','KIT','NSCP')
+        ORDER BY
+            date_changed DESC;
+END RETRIEVE_AUDIT_1;
+
+-- Next procedure is called from the frmViewAudit screen when:
+-- optAllEsimate is checked
+-- cboUserName has data "ALL USERS"
+-- chkAndDate is checked
+-- data in the txtDateFrom is not empty
+-- data in the txtDateTo is not empty
+PROCEDURE RETRIEVE_AUDIT_2
+    (vi_date_from IN VARCHAR,
+     vi_date_to IN VARCHAR,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            date_changed >= TO_DATE(vi_date_from) AND
+            date_changed <= TO_DATE(vi_date_to) AND
+            ESTIMATE_TYPE IN
+                ('MB','RB','BUS','KIT','NSCP')
+        ORDER BY
+            date_changed DESC;
+END RETRIEVE_AUDIT_2;
+
+-- Next procedure is called from the frmViewAudit screen when:
+-- optEsimate is checked
+-- User choosed some data from the cboEstimateType combo-box.
+-- In this moment we will fill cboEstimate combo-box from this procedure.
+PROCEDURE RETRIEVE_AUDIT_3
+    (vi_estimate_type IN AUDIT_MODIFY_HISTORY.estimate_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+        OPEN vo_Cursor FOR
+            SELECT DISTINCT
+                estimate_number
+            FROM
+                AUDIT_MODIFY_HISTORY
+            WHERE
+                estimate_type = vi_estimate_type;
+END RETRIEVE_AUDIT_3;
+
+-- Next procedure is called from the frmViewAudit screen when:
+-- optAllEsimate is checked
+-- cboUserName has data other than "ALL USERS"
+-- chkAndDate is unchecked
+PROCEDURE RETRIEVE_AUDIT_4
+    (vi_user_name IN AUDIT_MODIFY_HISTORY.user_name%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            user_name = vi_user_name AND
+            ESTIMATE_TYPE IN
+                ('MB','RB','BUS','KIT','NSCP')
+        ORDER BY
+            date_changed DESC;
+END RETRIEVE_AUDIT_4;
+
+-- Next procedure is called from the frmViewAudit screen when:
+-- optAllEsimate is checked
+-- cboUserName has data other than "ALL USERS"
+-- chkAndDate is checked
+-- data in the txtDateFrom is not empty
+-- data in the txtDateTo is not empty
+PROCEDURE RETRIEVE_AUDIT_5
+    (vi_user_name IN AUDIT_MODIFY_HISTORY.user_name%TYPE,
+     vi_date_from IN VARCHAR,
+     vi_date_to IN VARCHAR,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            user_name = vi_user_name AND
+            date_changed >= TO_DATE(vi_date_from) AND
+            date_changed <= TO_DATE(vi_date_to) AND
+            ESTIMATE_TYPE IN
+                ('MB','RB','BUS','KIT','NSCP')
+        ORDER BY
+            date_changed DESC;
+END RETRIEVE_AUDIT_5;
+
+-- Next procedure is called from the frmViewAudit screen when:
+-- optEsimate or optCurrentEsimate is checked
+-- data from the cboEstimateType combo-box is not empty
+-- data from the cboEstimate combo-box is not empty
+-- cboUserName has data "ALL USERS"
+-- chkAndDate is unchecked
+-- NOTE. The same procedure is called from the frmMakeBuyEstimate,
+--       frmRebuiltPartsMain, frmVehCostEstimateMain screens to fill
+--       the cboChangesMadeBy combo-boxes.
+PROCEDURE RETRIEVE_AUDIT_6
+    (vi_estimate_number IN AUDIT_MODIFY_HISTORY.estimate_number%TYPE,
+     vi_estimate_type IN AUDIT_MODIFY_HISTORY.estimate_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+
+
+
+        IF (vi_estimate_number = '*') THEN
+        OPEN vo_Cursor FOR
+            SELECT
+            *
+            FROM
+                AUDIT_MODIFY_HISTORY
+            WHERE
+                estimate_number like '%%' AND
+                estimate_type = vi_estimate_type AND
+                ESTIMATE_TYPE IN
+                    ('MB','RB','BUS','KIT','NSCP')
+            ORDER BY
+                date_changed DESC;
+
+        else
+        OPEN vo_Cursor FOR
+            SELECT
+            *
+            FROM
+                AUDIT_MODIFY_HISTORY
+            WHERE
+                estimate_number = vi_estimate_number AND
+                estimate_type = vi_estimate_type AND
+                ESTIMATE_TYPE IN
+                    ('MB','RB','BUS','KIT','NSCP')
+            ORDER BY
+              date_changed DESC;
+        end if;
+
+END RETRIEVE_AUDIT_6;
+
+-- Next procedure is called from the frmViewAudit screen when:
+-- optEsimate or optCurrentEsimate is checked
+-- data from the cboEstimateType combo-box is not empty
+-- data from the cboEstimate combo-box is not empty
+-- cboUserName has data "ALL USERS"
+-- chkAndDate is checked
+-- data in the txtDateFrom is not empty
+-- data in the txtDateTo is not empty
+PROCEDURE RETRIEVE_AUDIT_7
+    (vi_estimate_number IN AUDIT_MODIFY_HISTORY.estimate_number%TYPE,
+     vi_estimate_type IN AUDIT_MODIFY_HISTORY.estimate_type%TYPE,
+     vi_date_from IN VARCHAR,
+     vi_date_to IN VARCHAR,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+
+
+
+    IF (vi_estimate_number = '*') THEN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            estimate_number like '%%' AND
+            estimate_type = vi_estimate_type AND
+            date_changed >= TO_DATE(vi_date_from) AND
+            date_changed <= TO_DATE(vi_date_to) AND
+            ESTIMATE_TYPE IN
+                ('MB','RB','BUS','KIT','NSCP')
+        ORDER BY
+            date_changed DESC;
+     else
+        OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            estimate_number = vi_estimate_number AND
+            estimate_type = vi_estimate_type AND
+            date_changed >= TO_DATE(vi_date_from) AND
+            date_changed <= TO_DATE(vi_date_to) AND
+            ESTIMATE_TYPE IN
+                ('MB','RB','BUS','KIT','NSCP')
+        ORDER BY
+            date_changed DESC;
+      end if;
+
+END RETRIEVE_AUDIT_7;
+
+-- Next procedure is called from the frmViewAudit screen when:
+-- optEsimate or optCurrentEsimate is checked
+-- data from the cboEstimateType combo-box is not empty
+-- data from the cboEstimate combo-box is not empty
+-- cboUserName has data other than "ALL USERS"
+-- chkAndDate is unchecked
+PROCEDURE RETRIEVE_AUDIT_8
+    (vi_estimate_number IN AUDIT_MODIFY_HISTORY.estimate_number%TYPE,
+     vi_estimate_type IN AUDIT_MODIFY_HISTORY.estimate_type%TYPE,
+     vi_user_name IN AUDIT_MODIFY_HISTORY.user_name%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+
+    IF (vi_estimate_number = '*') then
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            user_name = vi_user_name AND
+            estimate_number like '%%' AND
+            estimate_type = vi_estimate_type AND
+            ESTIMATE_TYPE IN
+                ('MB','RB','BUS','KIT','NSCP')
+        ORDER BY
+            date_changed DESC;
+      else
+       OPEN vo_Cursor FOR
+         SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            user_name = vi_user_name AND
+            estimate_number = vi_estimate_number AND
+            estimate_type = vi_estimate_type AND
+            ESTIMATE_TYPE IN
+                ('MB','RB','BUS','KIT','NSCP')
+        ORDER BY
+            date_changed DESC;
+
+      end if;
+
+END RETRIEVE_AUDIT_8;
+
+-- Next procedure is called from the frmViewAudit screen when:
+-- optEsimate or optCurrentEsimate is checked
+-- data from the cboEstimateType combo-box is not empty
+-- data from the cboEstimate combo-box is not empty
+-- cboUserName has data other than "ALL USERS"
+-- chkAndDate is checked
+-- data in the txtDateFrom is not empty
+-- data in the txtDateTo is not empty
+PROCEDURE RETRIEVE_AUDIT_9
+    (vi_estimate_number IN AUDIT_MODIFY_HISTORY.estimate_number%TYPE,
+     vi_estimate_type IN AUDIT_MODIFY_HISTORY.estimate_type%TYPE,
+     vi_user_name IN AUDIT_MODIFY_HISTORY.user_name%TYPE,
+     vi_date_from IN VARCHAR,
+     vi_date_to IN VARCHAR,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+
+
+      IF (vi_estimate_number = '*') then
+        OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            estimate_type = vi_estimate_type AND
+            estimate_number like '%%' AND
+            user_name = vi_user_name AND
+            date_changed >= TO_DATE(vi_date_from) AND
+            date_changed <= TO_DATE(vi_date_to) AND
+            ESTIMATE_TYPE IN
+                ('MB','RB','BUS','KIT','NSCP')
+            ORDER BY
+                date_changed DESC;
+       else
+       OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            estimate_type = vi_estimate_type AND
+            estimate_number = vi_estimate_number AND
+            user_name = vi_user_name AND
+            date_changed >= TO_DATE(vi_date_from) AND
+            date_changed <= TO_DATE(vi_date_to) AND
+            ESTIMATE_TYPE IN
+                ('MB','RB','BUS','KIT','NSCP')
+            ORDER BY
+                date_changed DESC;
+        end if;
+
+
+
+END;
+
+-- Next procedure is called from the frmViewSettingsHistoryLog screen when:
+-- optAllEsimate is checked
+-- cboUserName has data "ALL USERS"
+-- chkAndDate is unchecked
+PROCEDURE RETRIEVE_AUDIT_10
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            ESTIMATE_TYPE IN
+                ('LTD','LT','SR','ETD','MVI','UAA','CP','MLB','CS')
+        ORDER BY
+            date_changed DESC;
+END RETRIEVE_AUDIT_10;
+
+-- Next procedure is called from the frmViewSettingsHistoryLog screen when:
+-- optAllEsimate is checked
+-- cboUserName has data "ALL USERS"
+-- chkAndDate is checked
+-- data in the txtDateFrom is not empty
+-- data in the txtDateTo is not empty
+PROCEDURE RETRIEVE_AUDIT_11
+    (vi_date_from IN VARCHAR,
+     vi_date_to IN VARCHAR,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            date_changed >= TO_DATE(vi_date_from) AND
+            date_changed <= TO_DATE(vi_date_to) AND
+            ESTIMATE_TYPE IN
+                ('LTD','LT','SR','ETD','MVI','UAA','CP','MLB','CS')
+        ORDER BY
+            date_changed DESC;
+END RETRIEVE_AUDIT_11;
+
+-- Next procedure is called from the frmViewSettingsHistoryLog screen when:
+-- optAllEsimate is checked
+-- cboUserName has data other than "ALL USERS"
+-- chkAndDate is unchecked
+PROCEDURE RETRIEVE_AUDIT_12
+    (vi_user_name IN AUDIT_MODIFY_HISTORY.user_name%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            user_name = vi_user_name AND
+            ESTIMATE_TYPE IN
+                ('LTD','LT','SR','ETD','MVI','UAA','CP','MLB','CS')
+        ORDER BY
+            date_changed DESC;
+END RETRIEVE_AUDIT_12;
+
+-- Next procedure is called from the frmViewSettingsHistoryLog screen when:
+-- optAllEsimate is checked
+-- cboUserName has data other than "ALL USERS"
+-- chkAndDate is checked
+-- data in the txtDateFrom is not empty
+-- data in the txtDateTo is not empty
+PROCEDURE RETRIEVE_AUDIT_13
+    (vi_user_name IN AUDIT_MODIFY_HISTORY.user_name%TYPE,
+     vi_date_from IN VARCHAR,
+     vi_date_to IN VARCHAR,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            user_name = vi_user_name AND
+            date_changed >= TO_DATE(vi_date_from) AND
+            date_changed <= TO_DATE(vi_date_to) AND
+            ESTIMATE_TYPE IN
+                ('LTD','LT','SR','ETD','MVI','UAA','CP','MLB','CS')
+        ORDER BY
+            date_changed DESC;
+END RETRIEVE_AUDIT_13;
+
+-- Next procedure is called from the frmViewSettingsHistoryLog screen when:
+-- optSettings is checked
+-- data from the cboSettings combo-box is not empty
+-- cboUserName has data "ALL USERS"
+-- chkAndDate is unchecked
+PROCEDURE RETRIEVE_AUDIT_14
+    (vi_estimate_type IN AUDIT_MODIFY_HISTORY.estimate_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            estimate_type = vi_estimate_type AND
+            ESTIMATE_TYPE IN
+                ('LTD','LT','SR','ETD','MVI','UAA','CP','MLB','CS')
+        ORDER BY
+            date_changed DESC;
+END RETRIEVE_AUDIT_14;
+
+-- Next procedure is called from the frmViewSettingsHistoryLog screen when:
+-- optSettings is checked
+-- data from the cboSettings combo-box is not empty
+-- cboUserName has data "ALL USERS"
+-- chkAndDate is checked
+-- data in the txtDateFrom is not empty
+-- data in the txtDateTo is not empty
+PROCEDURE RETRIEVE_AUDIT_15
+    (vi_estimate_type IN AUDIT_MODIFY_HISTORY.estimate_type%TYPE,
+     vi_date_from IN VARCHAR,
+     vi_date_to IN VARCHAR,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            estimate_type = vi_estimate_type AND
+            date_changed >= TO_DATE(vi_date_from) AND
+            date_changed <= TO_DATE(vi_date_to) AND
+            ESTIMATE_TYPE IN
+                ('LTD','LT','SR','ETD','MVI','UAA','CP','MLB','CS')
+        ORDER BY
+            date_changed DESC;
+END RETRIEVE_AUDIT_15;
+
+-- Next procedure is called from the frmViewSettingsHistoryLog screen when:
+-- optSettings is checked
+-- data from the cboSettings combo-box is not empty
+-- cboUserName has data other than "ALL USERS"
+-- chkAndDate is unchecked
+PROCEDURE RETRIEVE_AUDIT_16
+    (vi_estimate_type IN AUDIT_MODIFY_HISTORY.estimate_type%TYPE,
+     vi_user_name IN AUDIT_MODIFY_HISTORY.user_name%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            estimate_type = vi_estimate_type AND
+            user_name = vi_user_name AND
+            ESTIMATE_TYPE IN
+                ('LTD','LT','SR','ETD','MVI','UAA','CP','MLB','CS')
+        ORDER BY
+            date_changed DESC;
+END RETRIEVE_AUDIT_16;
+
+-- Next procedure is called from the frmViewSettingsHistoryLog screen when:
+-- optSettings is checked
+-- data from the cboSettings combo-box is not empty
+-- cboUserName has data other than "ALL USERS"
+-- chkAndDate is checked
+-- data in the txtDateFrom is not empty
+-- data in the txtDateTo is not empty
+PROCEDURE RETRIEVE_AUDIT_17
+    (vi_estimate_type IN AUDIT_MODIFY_HISTORY.estimate_type%TYPE,
+     vi_user_name IN AUDIT_MODIFY_HISTORY.user_name%TYPE,
+     vi_date_from IN VARCHAR,
+     vi_date_to IN VARCHAR,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            estimate_type = vi_estimate_type AND
+            user_name = vi_user_name AND
+            date_changed >= TO_DATE(vi_date_from) AND
+            date_changed <= TO_DATE(vi_date_to) AND
+            ESTIMATE_TYPE IN
+                ('LTD','LT','SR','ETD','MVI','UAA','CP','MLB','CS')
+        ORDER BY
+            date_changed DESC;
+END RETRIEVE_AUDIT_17;
+
+PROCEDURE RETRIEVE_ALL_LABOUR_SUMMARY
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            LABOUR_TYPE AS "LABOUR TYPE",
+            CC AS "CC",
+            TASK AS "TASK",
+            USAGE AS "USAGE",
+            DECIMAL_MINUTES_TO_HHMM(TIME) AS "TIME",
+            DECIMAL_MINUTES_TO_HHMM(WRENCH_TIME) AS "WRENCH TIME",
+            RATE_PER_HOUR AS "RATE PER HOUR",
+            TOTAL_COST AS "TOTAL COST",
+            DECIMAL_MINUTES_TO_HHMM(round(EXTENDED_TIME)) AS "EXTENDED TIME",
+            ESTIMATE_TYPE AS "ESTIMATE TYPE",
+            ESTIMATE_NUMBER AS "ESTIMATE NUMBER"
+        FROM
+            TEMP_LABOUR_LIST
+        ORDER BY
+            CC ASC, TASK ASC;
+END RETRIEVE_ALL_LABOUR_SUMMARY;
+
+PROCEDURE RETRIEVE_ALL_MATERIAL_SUMMARY
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            COST_CENTRE AS "CC",
+            SUM(TOTAL_COST)AS "TOTAL COST",
+            SUM(TAXABLE_COST)AS "TAXABLE COST"
+        FROM
+            TEMP_MATERIALS_LIST
+        GROUP BY
+            COST_CENTRE
+        ORDER BY
+            COST_CENTRE ASC;
+END RETRIEVE_ALL_MATERIAL_SUMMARY;
+
+PROCEDURE RETRIEVE_ALL_RB
+    (vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            round(sum(total_cost),2) as RB_PRICE, rb_reference
+        FROM
+            all_material_summary
+        group by
+            rb_reference;
+END RETRIEVE_ALL_RB;
+
+
+PROCEDURE REPORT_LABOUR_SUM
+    (vi_idnum IN varchar2,
+     vi_type IN SC_PARTS_USED.link_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+
+  V_PRICE NUMBER(20,2);
+BEGIN
+
+V_PRICE := get_labour_cost(vi_idnum,vi_type);
+
+ OPEN vo_Cursor FOR
+       SELECT
+            CC AS "COST CENTRE",
+            SUM(extended_time) AS "LABOUR HRS",
+            SUM(TOTAL_COST) AS "TOTAL COST"
+        FROM
+            TEMP_LABOUR_LIST
+        GROUP BY
+            CC
+        ORDER BY
+            CC ASC;
+    EXCEPTION
+        WHEN others THEN
+            ROLLBACK;
+
+END REPORT_LABOUR_SUM;
+
+PROCEDURE REPORT_MAT_SUM
+    (vi_idnum IN RB_MASTERLIST.rebuilt_stock_num%TYPE,
+     vi_type IN SC_PARTS_USED.link_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+   V_PRICE NUMBER(20,2);
+
+BEGIN
+
+V_PRICE := get_material_cost(vi_idnum,vi_type);
+
+ OPEN vo_Cursor FOR
+        SELECT
+            COST_CENTRE AS "CC",
+            SUM(TOTAL_COST) AS "TOTAL COST",
+            SUM(TAXABLE_COST)AS "TAXABLE COST"
+        FROM
+            TEMP_MATERIALS_LIST
+        GROUP BY
+            COST_CENTRE
+        ORDER BY
+            COST_CENTRE ASC;
+END REPORT_MAT_SUM;
+
+
+
+PROCEDURE R_MAT_SUM
+    (vi_idnum IN RB_MASTERLIST.rebuilt_stock_num%TYPE,
+     vi_type IN SC_PARTS_USED.link_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+   V_PRICE NUMBER(20,2);
+
+BEGIN
+
+V_PRICE := get_material_cost(vi_idnum,vi_type);
+
+ OPEN vo_Cursor FOR
+        SELECT
+            COST_CENTRE AS "CC",
+            SUM(TOTAL_COST) AS "TOTAL COST",
+            SUM(TAXABLE_COST)AS "TAXABLE COST"
+        FROM
+            TEMP_MATERIALS_LIST
+        GROUP BY
+            COST_CENTRE
+        ORDER BY
+            COST_CENTRE ASC;
+END R_MAT_SUM;
+
+PROCEDURE RETRIEVE_ALL_LABOUR
+    (vi_idnum IN varchar2,
+     vi_type IN SC_PARTS_USED.link_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+     V_PRICE NUMBER(20,2);
+BEGIN
+
+V_PRICE := get_labour_cost(vi_idnum,vi_type);
+
+ OPEN vo_Cursor FOR
+       SELECT
+            CC AS "COST CENTRE",
+            DECIMAL_MINUTES_TO_HHMM(SUM(extended_time)) AS "LABOUR HRS",
+            SUM(TOTAL_COST) AS "TOTAL COST"
+        FROM
+            TEMP_LABOUR_LIST
+        GROUP BY
+            CC
+        ORDER BY
+            CC ASC;
+    EXCEPTION
+        WHEN others THEN
+            ROLLBACK;
+
+END RETRIEVE_ALL_LABOUR;
+
+
+procedure RETRIEVE_ONE_SCP_USED
+    (vi_rowid IN string,
+    vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+    select * FROM
+        sc_parts_used
+    WHERE
+        ROWID = vi_rowid;
+
+END RETRIEVE_ONE_SCP_USED;
+
+procedure RETRIEVE_ONE_NSCP_USED
+    (vi_rowid IN string,
+    vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+    select *  FROM
+        nsc_parts_used
+    WHERE
+        ROWID = vi_rowid;
+
+END RETRIEVE_ONE_NSCP_USED;
+
+PROCEDURE FIND_BUS_DESCRIPTION
+    (vi_bus_description IN LIST_OF_BUSES.description%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(LIST_OF_BUSES.list_id) AS list_id,
+            UPPER(LIST_OF_BUSES.description) AS bus_description
+        FROM
+            LIST_OF_BUSES
+        WHERE
+            description = vi_bus_description;
+END FIND_BUS_DESCRIPTION;
+
+PROCEDURE GET_KIT_PARTS
+    (vi_link_code IN VARCHAR,
+     vi_link_type IN VARCHAR,
+     vi_rebuilt_part_choice IN VARCHAR,
+     vo_cursor OUT query_cur) IS
+BEGIN
+    EXECUTE IMMEDIATE 'TRUNCATE TABLE TEMP_KIT_PARTS';
+    INSERT INTO TEMP_KIT_PARTS
+    (
+        TEMP_KIT_PARTS.part_type,
+        TEMP_KIT_PARTS.supplier_number,
+        TEMP_KIT_PARTS.supplier_name,
+        TEMP_KIT_PARTS.stock_code,
+        TEMP_KIT_PARTS.cost_centre,
+        TEMP_KIT_PARTS.qty,
+        TEMP_KIT_PARTS.percent_usage,
+        TEMP_KIT_PARTS.unit_cost,
+        TEMP_KIT_PARTS.core_cost,
+        TEMP_KIT_PARTS.cost,
+        TEMP_KIT_PARTS.description,
+        TEMP_KIT_PARTS.keyword,
+        TEMP_KIT_PARTS.last_modified_date,
+        TEMP_KIT_PARTS.row_id
+    )
+    SELECT
+        'NSC',
+        NSC_PARTS_USED.orig_supp_num,
+        NSC_PARTS_USED.orig_supplier_name,
+        ' ',
+        NSC_PARTS_USED.cost_centre,
+        NSC_PARTS_USED.qty_reqd,
+        NSC_PARTS_USED.percent_usage,
+        NSC_PARTS_USED.cost,
+        NSC_PARTS_USED.corecost,
+        NSC_PARTS_USED.cost,
+        NON_STOCK_CODED_PARTS.detailed_desc,
+        NON_STOCK_CODED_PARTS.keyword,
+        NSC_PARTS_USED.last_modified_date,
+        NSC_PARTS_USED.ROWID
+    FROM
+        NSC_PARTS_USED,
+        NON_STOCK_CODED_PARTS
+    WHERE
+        NSC_PARTS_USED.link_code = vi_link_code AND
+        NSC_PARTS_USED.link_type = vi_link_type AND
+        NON_STOCK_CODED_PARTS.id (+)= NSC_PARTS_USED.id;
+
+    INSERT INTO TEMP_KIT_PARTS
+    (
+        TEMP_KIT_PARTS.part_type,
+        TEMP_KIT_PARTS.supplier_number,
+        TEMP_KIT_PARTS.supplier_name,
+        TEMP_KIT_PARTS.stock_code,
+        TEMP_KIT_PARTS.cost_centre,
+        TEMP_KIT_PARTS.qty,
+        TEMP_KIT_PARTS.percent_usage,
+        TEMP_KIT_PARTS.unit_cost,
+        TEMP_KIT_PARTS.core_cost,
+        TEMP_KIT_PARTS.cost,
+        TEMP_KIT_PARTS.description,
+        TEMP_KIT_PARTS.keyword,
+        TEMP_KIT_PARTS.last_modified_date,
+        TEMP_KIT_PARTS.row_id
+    )
+    SELECT
+        'SC',
+        SC_PARTS_USED.orig_sup_num,
+        SC_PARTS_USED.orig_supplier_name,
+        SC_PARTS_USED.mms_stock_code,
+        SC_PARTS_USED.cost_centre,
+        SC_PARTS_USED.qty_reqd,
+        SC_PARTS_USED.percent_usage,
+        SC_PARTS_USED.mms_cost,
+        SC_PARTS_USED.corecost,
+        SC_PARTS_USED.mms_cost,
+        STOCK_CODED_PARTS.detailed_desc,
+        STOCK_CODED_PARTS.part_type,
+        SC_PARTS_USED.last_modified_date,
+        SC_PARTS_USED.ROWID
+    FROM
+        SC_PARTS_USED,
+        STOCK_CODED_PARTS
+    WHERE
+        SC_PARTS_USED.link_code = vi_link_code AND
+        SC_PARTS_USED.rebuilt_part = vi_rebuilt_part_choice AND
+        STOCK_CODED_PARTS.mms_stock_code (+)= SC_PARTS_USED.mms_stock_code;
+
+    OPEN vo_Cursor FOR
+        SELECT
+            NVL(UPPER(TEMP_KIT_PARTS.part_type),' ') AS "PART TYPE",
+            NVL(UPPER(TEMP_KIT_PARTS.supplier_number),' ') AS "SUPPLIER NUMBER",
+            NVL(UPPER(TEMP_KIT_PARTS.supplier_name),' ') AS "SUPPLIER NAME",
+            NVL(UPPER(TEMP_KIT_PARTS.stock_code),' ') AS "STOCK CODE",
+            NVL(UPPER(TEMP_KIT_PARTS.cost_centre),' ') AS "CC",
+            UPPER(TEMP_KIT_PARTS.qty) AS "QTY",
+            REPLACE(TEMP_KIT_PARTS.percent_usage,',','.') AS "%",
+            TEMP_KIT_PARTS.unit_cost AS "UNIT COST",
+            REPLACE(FINAL_COST(TEMP_KIT_PARTS.percent_usage, TEMP_KIT_PARTS.qty, TEMP_KIT_PARTS.core_cost,0),',','.') AS "CORE COST",
+            REPLACE(FINAL_COST(TEMP_KIT_PARTS.percent_usage, TEMP_KIT_PARTS.qty, TEMP_KIT_PARTS.cost,0),',','.') AS "TOTAL COST",
+            NVL(UPPER(TEMP_KIT_PARTS.description),' ') AS "DESCRIPTION",
+            NVL(UPPER(TEMP_KIT_PARTS.keyword),' ') AS "KEYWORD",
+            TEMP_KIT_PARTS.last_modified_date AS "LAST MODIFIED DATE",
+            TEMP_KIT_PARTS.row_id AS "ROWID"
+        FROM
+            TEMP_KIT_PARTS
+        ORDER BY
+            TEMP_KIT_PARTS.supplier_number,
+            TEMP_KIT_PARTS.stock_code;
+END GET_KIT_PARTS;
+
+PROCEDURE GET_SUB_KITS
+    (vi_kit_part_number IN SUB_KITS.kit_part_number%TYPE,
+     vo_cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(SUB_KITS.sub_kit_letter) AS "REF #",
+            UPPER(SUB_KITS.stock_code) AS "TTC CODE",
+            UPPER(SUB_KITS.supplier_name) AS "OEM",
+            SUB_KITS.qty AS "QTY",
+            UPPER(SUB_KITS.supplier_number) AS "OEM #",
+            UPPER(SUB_KITS.description) AS "DESCRIPTION",
+            UPPER(SUB_KITS.kit_part_number) AS "KIT NUMBER",
+            UPPER(SUB_KITS.part_type) AS "PART TYPE",
+            SUB_KITS.sequence AS "SEQUENCE"
+        FROM
+            SUB_KITS
+        WHERE
+            SUB_KITS.kit_part_number = vi_kit_part_number
+        ORDER BY
+            SUB_KITS.sequence;
+END GET_SUB_KITS;
+
+PROCEDURE GET_ALL_FROM_SUB_KITS
+    (vo_cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(SUB_KITS.sub_kit_letter) AS "REF #",
+            UPPER(SUB_KITS.stock_code) AS "TTC CODE",
+            UPPER(SUB_KITS.supplier_name) AS "OEM",
+            SUB_KITS.qty AS "QTY",
+            UPPER(SUB_KITS.supplier_number) AS "OEM #",
+            UPPER(SUB_KITS.description) AS "DESCRIPTION",
+            UPPER(SUB_KITS.kit_part_number) AS "KIT NUMBER",
+            UPPER(SUB_KITS.part_type) AS "PART TYPE",
+            SUB_KITS.sequence AS "SEQUENCE"
+        FROM
+            SUB_KITS
+        ORDER BY
+            SUB_KITS.sequence;
+
+END GET_ALL_FROM_SUB_KITS;
+
+PROCEDURE GET_NSCP_CLEAN_1
+    (vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NSC_PARTS_USED WHERE ORIG_SUPP_NUM IS NULL;
+END GET_NSCP_CLEAN_1;
+
+PROCEDURE GET_NSCP_CLEAN_2
+    (vi_orig_supp_num IN NSC_PARTS_USED.orig_supp_num%TYPE,
+     vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NSC_PARTS_USED where orig_supp_num = vi_orig_supp_num;
+END GET_NSCP_CLEAN_2;
+
+PROCEDURE GET_NSCP_CLEAN_3
+    (vo_cursor OUT query_cur)  IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NSC_PARTS_USED WHERE ORIG_SUPPLIER_NAME IS NULL;
+END GET_NSCP_CLEAN_3;
+
+PROCEDURE GET_NSCP_CLEAN_4
+    (vi_orig_supplier_name IN NSC_PARTS_USED.orig_supplier_name%TYPE,
+     vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NSC_PARTS_USED WHERE orig_supplier_name = vi_orig_supplier_name;
+END GET_NSCP_CLEAN_4;
+
+PROCEDURE GET_NSCP_CLEAN_5
+    (vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NSC_PARTS_USED ORDER BY ROWID;
+END GET_NSCP_CLEAN_5;
+
+PROCEDURE GET_NSCP_CLEAN_6
+    (vi_id IN NON_STOCK_CODED_PARTS.id%TYPE,
+     vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT *
+        FROM NON_STOCK_CODED_PARTS_TEMP
+        WHERE id = vi_id;
+END GET_NSCP_CLEAN_6;
+
+PROCEDURE GET_NSCP_CLEAN_7
+    (vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NON_STOCK_CODED_PARTS;
+END GET_NSCP_CLEAN_7;
+
+PROCEDURE GET_NSCP_CLEAN_8
+    (vi_orig_supplier_num IN NON_STOCK_CODED_PARTS_TEMP.orig_supplier_num%TYPE,
+     vi_orig_supplier_name IN NON_STOCK_CODED_PARTS_TEMP.orig_supplier_name%TYPE,
+     vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT
+            *
+        FROM
+            NON_STOCK_CODED_PARTS_TEMP
+        WHERE
+            orig_supplier_num = vi_orig_supplier_num AND
+            orig_supplier_name = vi_orig_supplier_name;
+END GET_NSCP_CLEAN_8;
+
+PROCEDURE GET_NSCP_CLEAN_9
+    (vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NSC_PARTS_USED WHERE id IS NULL;
+END GET_NSCP_CLEAN_9;
+
+PROCEDURE GET_NSCP_CLEAN_10
+    (vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NON_STOCK_CODED_PARTS WHERE id IS NULL;
+END GET_NSCP_CLEAN_10;
+
+PROCEDURE GET_NSCP_CLEAN_11
+    (vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NSC_PARTS_USED WHERE ORIG_SUPP_NUM IS NULL;
+END GET_NSCP_CLEAN_11;
+
+PROCEDURE GET_NSCP_CLEAN_12
+    (vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NON_STOCK_CODED_PARTS WHERE ORIG_SUPPLIER_NUM IS NULL;
+END GET_NSCP_CLEAN_12;
+
+PROCEDURE GET_NSCP_CLEAN_13
+    (vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NON_STOCK_CODED_PARTS WHERE ORIG_SUPPLIER_NAME IS NULL;
+END GET_NSCP_CLEAN_13;
+
+PROCEDURE GET_NSCP_CLEAN_14
+    (vi_orig_supp_num IN NSC_PARTS_USED.orig_supp_num%TYPE,
+     vi_orig_supplier_name IN NSC_PARTS_USED.orig_supplier_name%TYPE,
+     vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NSC_PARTS_USED WHERE
+        orig_supp_num = vi_orig_supp_num AND orig_supplier_name = vi_orig_supplier_name;
+END GET_NSCP_CLEAN_14;
+
+PROCEDURE GET_NSCP_CLEAN_15
+    (vi_orig_supplier_num IN NON_STOCK_CODED_PARTS.orig_supplier_num%TYPE,
+     vi_orig_supplier_name IN NON_STOCK_CODED_PARTS.orig_supplier_name%TYPE,
+     vo_cursor OUT query_cur) IS
+BEGIN
+    -- Current stored procedure is used for cleaning the NON_STOCK_CODED_PARTS and
+    -- NSC_PARTS_USED tables only. Please do not use it somewhere else.
+    OPEN vo_Cursor FOR
+        SELECT * FROM NON_STOCK_CODED_PARTS WHERE
+        orig_supplier_num = vi_orig_supplier_num AND
+        orig_supplier_name = vi_orig_supplier_name;
+END GET_NSCP_CLEAN_15;
+
+--Retrieves the last user to modifify the specified estimate.  Only one entry is returned
+PROCEDURE LAST_MOD_DATE
+    (vi_estimate_number IN AUDIT_MODIFY_HISTORY.estimate_number%TYPE,
+     vi_estimate_type IN AUDIT_MODIFY_HISTORY.estimate_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        select * from (SELECT date_changed, user_name, estimate_type, estimate_number
+        FROM
+            AUDIT_MODIFY_HISTORY
+        WHERE
+            estimate_number = vi_estimate_number AND
+            estimate_type = vi_estimate_type order by date_changed desc) where rownum = 1;
+END LAST_MOD_DATE;
+
+
+PROCEDURE SEARCH_RBPART_BUS_SERIES
+    (vi_rebuilt_num IN RB_MASTERLIST.rebuilt_stock_num%TYPE,
+     vi_description IN RB_MASTERLIST.detailed_desc%TYPE,
+     vi_keyword IN RB_MASTERLIST.keyword%TYPE,
+     vi_bus_series_id IN INTEGER,
+     vi_search_option IN INTEGER,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+
+    IF (vi_search_option = 1) THEN
+        -- Search for ALL Bus series
+        OPEN vo_cursor FOR
+            SELECT DISTINCT
+                UPPER(RB_MASTERLIST.rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(RB_MASTERLIST.mms_stock_code) AS "MMS STOCK CODE",
+                UPPER(RB_MASTERLIST.keyword) AS "KEYWORD",
+                UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+                RB_MASTERLIST.ROWID
+            FROM
+                RB_MASTERLIST,
+                RB_LIST_OF_BUSES
+            WHERE
+                RB_MASTERLIST.rebuilt_stock_num = RB_LIST_OF_BUSES.rebuilt_stock_num
+                AND  UPPER(NVL(RB_MASTERLIST.rebuilt_stock_num,' ')) LIKE
+                    '%'||TRIM(vi_rebuilt_num)||'%'
+                AND UPPER(NVL(RB_MASTERLIST.detailed_desc,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%'
+                AND UPPER(NVL(RB_MASTERLIST.keyword,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_keyword))||'%';
+    ELSIF (vi_search_option = 2) THEN
+        -- Search for Not Attached Bus series
+        OPEN vo_cursor FOR
+            SELECT DISTINCT
+                UPPER(RB_MASTERLIST.rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(RB_MASTERLIST.mms_stock_code) AS "MMS STOCK CODE",
+                UPPER(RB_MASTERLIST.keyword) AS "KEYWORD",
+                UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+                RB_MASTERLIST.ROWID
+            FROM
+                RB_MASTERLIST,
+                RB_LIST_OF_BUSES
+            WHERE
+                RB_MASTERLIST.rebuilt_stock_num NOT IN
+                    (select RB_LIST_OF_BUSES.rebuilt_stock_num from RB_LIST_OF_BUSES)
+                AND NVL(RB_MASTERLIST.rebuilt_stock_num,' ') LIKE
+                    '%'||TRIM(vi_rebuilt_num)||'%'
+                AND UPPER(NVL(RB_MASTERLIST.detailed_desc,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%'
+                AND UPPER(NVL(RB_MASTERLIST.keyword,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_keyword))||'%';
+
+    ELSIF (vi_search_option = 3) THEN
+        -- Search for Particular one Bus series
+        OPEN vo_cursor FOR
+            SELECT
+                UPPER(RB_MASTERLIST.rebuilt_stock_num) AS "REBUILT NUMBER",
+                UPPER(RB_MASTERLIST.mms_stock_code) AS "MMS STOCK CODE",
+                UPPER(RB_MASTERLIST.keyword) AS "KEYWORD",
+                UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+                RB_MASTERLIST.ROWID
+            FROM
+                RB_MASTERLIST,
+                RB_LIST_OF_BUSES
+            WHERE
+                RB_LIST_OF_BUSES.rebuilt_stock_num = RB_MASTERLIST.rebuilt_stock_num
+                AND RB_LIST_OF_BUSES.list_id = vi_bus_series_id
+                AND NVL(RB_MASTERLIST.rebuilt_stock_num,' ') LIKE
+                    '%'||TRIM(vi_rebuilt_num)||'%'
+                AND UPPER(NVL(RB_MASTERLIST.detailed_desc,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_description))||'%'
+                AND UPPER(NVL(RB_MASTERLIST.keyword,' ')) LIKE
+                    '%'||TRIM(UPPER(vi_keyword))||'%';
+    END IF;
+END SEARCH_RBPART_BUS_SERIES;
+
+PROCEDURE RETRIEVE_NSCP_USED_COPY
+    (vi_idnum IN NSC_PARTS_USED.link_code%TYPE,
+     vi_link_type IN NSC_PARTS_USED.link_type%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+         SELECT
+            UPPER(NON_STOCK_CODED_PARTS.orig_supplier_name) AS "SUPPLIER NAME",
+            UPPER(NON_STOCK_CODED_PARTS.orig_supplier_num) AS "SUPPLIER NUMBER",
+            UPPER(NSC_PARTS_USED.cost_centre) AS "CC",
+            UPPER(NSC_PARTS_USED.qty_reqd) AS "QTY",
+            REPLACE(NSC_PARTS_USED.percent_usage,',','.') AS "%",
+            NON_STOCK_CODED_PARTS.oem_part_cost AS "UNIT COST",
+            REPLACE(FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd,NSC_PARTS_USED.corecost,0),',','.') AS "CORE COST",
+            UPPER(NSC_PARTS_USED.id) AS "ID",
+            REPLACE(FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NSC_PARTS_USED.cost, 0),',','.') AS "TOTAL COST",
+            NVL(UPPER(NON_STOCK_CODED_PARTS.detailed_desc),'') AS "DESCRIPTION",
+            NVL(UPPER(NON_STOCK_CODED_PARTS.keyword), '' ) AS "KEYWORD",
+            UPPER(NSC_PARTS_USED.last_modified_date) AS "LAST MODIFIED DATE",
+            NSC_PARTS_USED.ROWID
+        FROM
+            NSC_PARTS_USED,
+            NON_STOCK_CODED_PARTS
+        WHERE
+            NSC_PARTS_USED.link_code = vi_idnum AND
+            NSC_PARTS_USED.link_type = vi_link_type AND
+            NON_STOCK_CODED_PARTS.id (+)= NSC_PARTS_USED.id
+        ORDER BY
+            NSC_PARTS_USED.orig_supp_num;
+END RETRIEVE_NSCP_USED_COPY;
+END CES_INQUIRY;
