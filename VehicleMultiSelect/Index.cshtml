@@ -33,7 +33,7 @@
                             columns.Bound(c => c.RemanCost).Title("Remanufactured Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
                             columns.Bound(c => c.VehicleSeries).Title("Vehicle Series")
                                 .ClientTemplate("#=VehicleSeries.map(function(item) { return item.Description; }).join(', ') #")
-                                .EditorTemplateName("VehicleSeriesEditor");
+                                .EditorTemplateName("VehicleSeriesEditor"); // Use MultiSelect editor template
                             columns.Command(command =>
                             {
                                 command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
@@ -255,6 +255,105 @@
                 });
             }
         });
+
+        // Original JavaScript functions from your file
+        function onArchiveClick(e) {
+            e.preventDefault();
+            var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+
+            // Call the controller action with the entire dataItem as JSON
+            $.ajax({
+                url: '@Url.Action("ArchiveDetails", "RebuiltParts")',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(dataItem),
+                success: function (data) {
+                    // Display a Kendo Notification
+                    var notification = $("#notification").kendoNotification({
+                        position: {
+                            pinned: true,
+                            top: 50,
+                            right: 50
+                        },
+                        autoHideAfter: 5000, // Hide after 5 seconds
+                        stacking: "down"
+                    }).data("kendoNotification");
+
+                    notification.show("Archive is clicked.", "info");
+                },
+                error: function (xhr, status, error) {
+                    console.error("Error archiving: ", error);
+                }
+            });
+        }
+
+        function onEmailEstimateClick(e) {
+            e.preventDefault();
+            var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var rebuiltPartNum = dataItem.RebuiltStockNum;
+
+            // Show the email estimate container
+            $("#email-estimate-container").show();
+
+            // Generate the Excel file by calling SaveToExcel via AJAX
+            $.ajax({
+                url: '@Url.Action("SaveToExcel", "Export")',
+                type: 'GET',
+                data: { rebuiltPartNum: rebuiltPartNum },
+                xhrFields: {
+                    responseType: 'blob' // Ensure the response is treated as a binary file
+                },
+                success: function (data) {
+                    // Create a link element to trigger the file download
+                    var link = document.createElement('a');
+                    link.href = window.URL.createObjectURL(data);
+                    link.download = `${rebuiltPartNum}_RebuiltParts_Estimate.xlsx`;
+                    link.click();
+
+                    // Set the subject with the rebuilt number and today's date
+                    var today = new Date();
+                    var subject = `Rebuilt Part Estimates for ${rebuiltPartNum} - Date ${today.toLocaleDateString()} ${today.toLocaleTimeString()}`;
+
+                    // Set the form values
+                    $("#to").val("");
+                    $("#subject").val(subject);
+                    $("#body").val(`Dear Sir/Madam,\nPlease find attached here with Rebuilt Part Estimate for ${rebuiltPartNum}.\n\nThank you`);
+
+                    // Open the Kendo Window
+                    var kendoWindow = $("#emailEstimateWindow").data("kendoWindow");
+                    if (kendoWindow) {
+                        kendoWindow.center().open();
+                    } else {
+                        console.error("Kendo Window not found.");
+                    }
+                },
+                error: function (xhr, status, error) {
+                    console.error("Error downloading Excel file:", error);
+                }
+            });
+        }
+
+        function onSaveToExcelClick(e) {
+            e.preventDefault();
+            var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var rebuiltPartNum = dataItem.RebuiltStockNum;
+
+            // Directly trigger the file download
+            window.location.href = '@Url.Action("SaveToExcel", "Export")' + '?rebuiltPartNum=' + rebuiltPartNum;
+        }
+
+        function onCancelEmailClick() {
+            // Close the Kendo Window
+            var window = $("#emailEstimateWindow").data("kendoWindow");
+            window.close();
+
+            // Show a notification
+            var notification = $("#notification").data("kendoNotification");
+            notification.show("Email Request Cancelled", "info");
+        }
     </script>
 
     <script id="template" type="text/x-kendo-template">
