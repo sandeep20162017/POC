@@ -1,0 +1,205 @@
+My Program.cs file :
+using Microsoft.AspNetCore;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace BCES
+{
+    public class Program
+    {
+        public static void Main(string[] args)
+        {
+            CreateHostBuilder(args).Build().Run();
+        }
+       
+        public static IHostBuilder CreateHostBuilder(string[] args) =>
+            Host.CreateDefaultBuilder(args)
+                .ConfigureWebHostDefaults(webBuilder =>
+                {
+                    webBuilder.UseStartup<Startup>();
+                });
+    }
+}
+startup.cs :
+using BCES.Data;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Cors.Infrastructure;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Serialization;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using BCES.MiddleWare;
+using Telerik.Reporting.Cache.File;
+using Telerik.Reporting.Services;
+using Telerik.Reporting.Services.Engine;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Telerik.Reporting.Cache.File;
+using Telerik.Reporting.Services;
+using Telerik.Reporting.Services.AspNetCore;
+using Telerik.Reporting;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using BCES.Controllers.Parts;
+using BCES.Controllers.Base;
+
+namespace BCES
+{
+    public class Startup
+    {
+        public Startup(IConfiguration configuration)
+        {
+            Configuration = configuration;
+        }
+
+        public IConfiguration Configuration { get; }
+       
+        // This method gets called by the runtime. Use this method to add services to the container.
+        public void ConfigureServices(IServiceCollection services)
+        {
+            // Add CORS support
+            services.AddCors(options =>
+            {
+                options.AddPolicy("AllowAll", policy =>
+                {
+                    policy.AllowAnyOrigin()
+                          .AllowAnyMethod()
+                          .AllowAnyHeader();
+                });
+            });
+           
+
+        // Add framework services.
+        services
+            .AddControllersWithViews()
+                
+                .AddRazorOptions(options =>
+                {
+                    options.ViewLocationFormats.Add("Views/Admin/{0}.cshtml");
+                })
+                // Maintain property names during serialization. See:
+                // https://github.com/aspnet/Announcements/issues/194
+                .AddNewtonsoftJson(options => options.SerializerSettings.ContractResolver = new DefaultContractResolver()); 
+            services.AddScoped<ContextApplicationDB>();
+            services.AddSingleton<DapperContext>();
+
+           
+            services.AddLogging();
+            services.AddScoped<DapperContext>(); // Register DapperContext
+
+            // Add Kendo UI services to the services container
+            services.AddKendo();
+            ////
+            services.AddRazorPages().AddNewtonsoftJson();
+
+            var reportsPath = Path.Combine(Directory.GetCurrentDirectory(), "Reports");
+
+            //Reports
+            // Configure dependencies for ReportsController.
+            services.TryAddSingleton<IReportServiceConfiguration>(sp =>
+            new ReportServiceConfiguration
+            {
+                ReportingEngineConfiguration = sp.GetService<IConfiguration>(),
+                HostAppId = "Html5DemoAppCore",
+                Storage = new FileStorage(),
+                ReportSourceResolver = new UriReportSourceResolver(
+                    System.IO.Path.Combine(sp.GetService<IWebHostEnvironment>().ContentRootPath, "Reports")),
+               
+            });
+
+            //Add Session
+            services.AddSession(options =>
+            {
+                options.IdleTimeout = TimeSpan.FromMinutes(30); // Set session timeout
+                options.Cookie.HttpOnly = true; // Ensure the cookie is accessible only through HTTP
+                options.Cookie.IsEssential = true; // Make the session cookie essential
+                options.Cookie.SameSite = SameSiteMode.Lax;
+            });
+
+            // Add IHttpContextAccessor
+            services.AddHttpContextAccessor();
+
+            //Add Transient controllers
+            services.AddTransient<ExportController>();
+            services.AddTransient<RebuiltPartsController>();
+            services.AddTransient<BusesController>();
+            services.AddTransient<LabourDetailsController>();
+
+
+            services.AddDistributedMemoryCache(); //ssk
+        }
+
+        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+
+                
+            }
+            else
+            {
+                app.UseExceptionHandler("/Home/Error");
+                // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
+                app.UseHsts();
+            }
+
+
+            app.UseSession();
+
+            // Use custom middleware to set session variables
+           // app.UseMiddleware<RoleSessionMiddleware>();
+
+            app.UseHttpsRedirection();
+            app.UseStaticFiles();
+
+            app.UseRouting();
+            
+            app.UseAuthorization();
+
+            // Apply CORS
+            app.UseCors("AllowAll");
+
+            app.UseTelerikReporting();
+
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllers();
+               
+                endpoints.MapControllerRoute(
+                    name: "default",
+                    pattern: "{controller=Home}/{action=Index}/{id?}");
+            });
+        }
+        //static class ConfigurationHelper
+        //{
+        //    public static IConfiguration ResolveConfiguration(IWebHostEnvironment environment)
+        //    {
+        //        var reportingConfigFileName = System.IO.Path.Combine(environment.ContentRootPath, "appsettings.json");
+        //        return new ConfigurationBuilder()
+        //            .AddJsonFile(reportingConfigFileName, true)
+        //            .Build();
+        //    }
+        //}
+
+
+    }
+}
