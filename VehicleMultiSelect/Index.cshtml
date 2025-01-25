@@ -30,17 +30,20 @@
                             columns.Bound(c => c.CorePartNum).Title("Core Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
                             columns.Bound(c => c.CoreCharge).Title("Core Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
                             columns.Bound(c => c.BuyNewCost).Title("Buy Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
-                            columns.Bound(c => c.RemanCost).Title("Remanufactured Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
-                            columns.Bound(c => c.VehicleSeries).Title("Vehicle Series")
-                                .ClientTemplate("#=VehicleSeries.map(function(item) { return item.Description; }).join(', ') #")
-                                .EditorTemplateName("VehicleSeriesEditor"); // Use MultiSelect editor template
+
+                            // Add Telerik Multiselect column
+                            columns.Bound(c => c.Buses)
+                                .Title("Vehicle Series")
+                                .ClientTemplate("#= getBusesDescription(Buses) #")
+                                .EditorTemplateName("VehicleSeriesEditor");
+
                             columns.Command(command =>
                             {
-                                command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
-                                command.Custom("Archive").Text(" ").IconClass("k-icon k-i-folder").Click("onArchiveClick").HtmlAttributes(new { title = "Archive" }); // Archive button with tooltip
-                                command.Custom("Save to Excel").Text(" ").IconClass("k-icon k-i-file-excel").Click("onSaveToExcelClick").HtmlAttributes(new { title = "Save to Excel" }); // Save to Excel button with tooltip
-                                command.Custom("Email Estimate").Text(" ").IconClass("k-icon k-i-email").Click("onEmailEstimateClick").HtmlAttributes(new { title = "Email Estimate" }); // Email Estimate button with tooltip
-                            }).Title("Actions").Width(200).HtmlAttributes(new { @class = "action-buttons" }); // Set a fixed width for the Actions column
+                                command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" });
+                                command.Custom("Archive").Text(" ").IconClass("k-icon k-i-folder").Click("onArchiveClick").HtmlAttributes(new { title = "Archive" });
+                                command.Custom("Save to Excel").Text(" ").IconClass("k-icon k-i-file-excel").Click("onSaveToExcelClick").HtmlAttributes(new { title = "Save to Excel" });
+                                command.Custom("Email Estimate").Text(" ").IconClass("k-icon k-i-email").Click("onEmailEstimateClick").HtmlAttributes(new { title = "Email Estimate" });
+                            }).Title("Actions").Width(200).HtmlAttributes(new { @class = "action-buttons" });
                         })
                         .ToolBar(toolbar => { toolbar.Create(); })
                         .Editable(editable => editable.Mode(GridEditMode.InLine))
@@ -57,8 +60,8 @@
                                 model.Field(c => c.RbMasterlistId);
                                 model.Field(c => c.RebuiltStockNum).Editable(true);
                                 model.Field(c => c.MmsStockCode).Editable(true);
-                                model.Field(c => c.VehicleSeries).DefaultValue(new List<BCES.Models.Parts.BusesModel>()).Editable(true);
                                 model.Field(c => c.LabourDetailsRebuiltParts).DefaultValue(new List<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel>()).Editable(false);
+                                model.Field(u => u.Buses).DefaultValue(new List<BCES.Models.Parts.BusesModel>()).Editable(false);
                             })
                             .Read(read => read.Url(Url.Action("GetRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Get))
                             .Create(create => create.Url(Url.Action("AddRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
@@ -90,12 +93,16 @@
 <div id="email-estimate-container" style="display: none;">
     @Html.Partial("_EmailEstimatePopup")
     <div id="estimates-container"></div>
-    <div id="notification"></div>
+    <div id="notification"></div>    
 </div>
 
 @section Scripts {
     <script>
         $(document).ready(function () {
+            /////////////////////////////////////////////////
+            $("#email-estimate-container").hide();
+            $("#archived-email-estimate-container").hide();
+
             var grid = $("#RebuiltPartsGrid").data("kendoGrid");
 
             // Initialize Kendo Notification for displaying messages
@@ -157,14 +164,20 @@
 
                 grid.bind("detailInit", function (e) {
                     console.log("Detail initialization started for RebuiltStockNum: " + e.data.RebuiltStockNum);
+                    var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabScPartDetail = '@Url.Action("ScPartsUsedInRbParts", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlRbPartDetail = '@Url.Action("RbDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlTotalCost = '@Url.Action("TotalCostPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
 
-                    // Create a unique container for the TabStrip
-                    var containerId = "tabstrip-container-" + e.data.RebuiltStockNum;
+                    // Get the container for the detail template
                     var container = e.detailCell.find("#detail-template-" + e.data.RebuiltStockNum);
 
-                    // Render the TabStrip structure
+                    // Load the TabStrip structure
                     container.html(`
-                        <div id="${containerId}">
+                        <div id="tabstrip-container-${e.data.RebuiltStockNum}">
                             <ul>
                                 <li class="k-state-active">Labour Details</li>
                                 <li>Labour Hour</li>
@@ -185,7 +198,7 @@
                     `);
 
                     // Initialize the Kendo TabStrip
-                    var tabStrip = $("#" + containerId).kendoTabStrip({
+                    var tabStrip = $("#tabstrip-container-" + e.data.RebuiltStockNum).kendoTabStrip({
                         animation: { open: { effects: "fadeIn" } },
                         select: function (e) {
                             var tabIndex = $(e.item).index(); // Get the index of the selected tab
@@ -222,7 +235,9 @@
                                     // Reset the hasChanges() state for read-only tabs
                                     if (tabIndex === 6) { // Assuming the last tab is the read-only tab
                                         var totalCostGrid = $(e.contentElement).find(".k-grid").data("kendoGrid");
+                                        notification.show("tabIndex === 6");
                                         if (totalCostGrid) {
+                                            notification.show("inside totalCostGrid");
                                             totalCostGrid.dataSource.read(); // Refresh the data source
                                         }
                                     }
@@ -254,9 +269,110 @@
                         });
                 });
             }
+            //archived --------------------------------------------
+            var grid = $("#ArchivedRebuiltPartsGrid").data("kendoGrid");
+
+            // Initialize Kendo Notification for displaying messages
+            var notificationElement = $("#archived-notification");
+            if (notificationElement.length === 0) {
+                console.error("Notification element not found in the DOM.");
+            } else {
+                var notification = notificationElement.kendoNotification({
+                    position: {
+                        pinned: true,
+                        top: 50,
+                        right: 50
+                    },
+                    autoHideAfter: 5000, // Hide after 5 seconds
+                    stacking: "down"
+                }).data("kendoNotification");
+
+                // Bind the detailInit event for the grid
+                grid.bind("detailInit", function (e) {
+                    console.log("Detail initialization started for RebuiltStockNum: " + e.data.RebuiltStockNum);
+                    var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabScPartDetail = '@Url.Action("ScPartsUsedInRbParts", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlRbPartDetail = '@Url.Action("RbDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                    var tabUrlTotalCost = '@Url.Action("TotalCostPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+
+                    // Get the container for the detail template
+                    var container = e.detailCell.find("#archived-detail-template-" + e.data.RebuiltStockNum);
+
+                    // Load the TabStrip structure
+                    container.html(`
+                        <div id="archived-tabstrip-container-${e.data.RebuiltStockNum}">
+                            <ul>
+                                <li class="k-state-active">Labour Details</li>
+                                <li>Labour Hour</li>
+                                <li>Material: Cost</li>
+                                <li>Material: SC Parts</li>
+                                <li>Material: NSC Parts</li>
+                                <li>Material: RB Parts</li>
+                                <li>Total Cost</li>
+                            </ul>
+                            <div id="archived-labour-details-content"></div>
+                            <div id="archived-labour-hour-summary-content"></div>
+                            <div id="archived-material-cost-summary-content"></div>
+                            <div id="archived-material-details-content"></div>
+                            <div id="archived-nsc-details-content"></div>
+                            <div id="archived-rb-part-details-content"></div>
+                            <div id="archived-total-cost-content"></div>
+                        </div>
+                    `);
+
+                    // Initialize the Kendo TabStrip
+                    var tabStrip = $("#archived-tabstrip-container-" + e.data.RebuiltStockNum).kendoTabStrip({
+                        animation: { open: { effects: "fadeIn" } },
+                        select: function (e) {
+                            var tabIndex = $(e.item).index(); // Get the index of the selected tab
+
+                            // Load the partial view content for the selected tab
+                            var tabUrl = tabIndex == 0 ? tabUrlLabourDetail :
+                                tabIndex == 1 ? tabUrlLabourHourSummary :
+                                    tabIndex == 2 ? tabUrlMaterialCostSummary :
+                                        tabIndex == 3 ? tabScPartDetail :
+                                            tabIndex == 4 ? tabUrlNscDetail :
+                                                tabIndex == 5 ? tabUrlRbPartDetail :
+                                                    tabUrlTotalCost;
+
+                            $.get(tabUrl)
+                                .done(function (data) {
+                                    $(e.contentElement).html(data);
+                                    kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
+                                })
+                                .fail(function (xhr, status, error) {
+                                    console.error("Error loading tab content: ", error);
+                                    if (notification) {
+                                        notification.show("An error occurred while loading the tab content. Please try again.", "error");
+                                    } else {
+                                        console.error("Notification is not initialized.");
+                                    }
+                                });
+                        }
+                    }).data("kendoTabStrip");
+
+                    // Load the first tab's content
+                    $.get(tabUrlLabourDetail)
+                        .done(function (data) {
+                            $("#archived-labour-details-content").html(data);
+                            kendo.init($("#archived-labour-details-content")); // Reinitialize Kendo widgets
+                        })
+                        .fail(function (xhr, status, error) {
+                            console.error("Error loading initial tab content: ", error);
+                            if (notification) {
+                                notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
+                            } else {
+                                console.error("Notification is not initialized.");
+                            }
+                        });
+                });
+            }
+            //archived end  ----------------------------------------
         });
 
-        // Original JavaScript functions from your file
         function onArchiveClick(e) {
             e.preventDefault();
             var grid = $("#RebuiltPartsGrid").data("kendoGrid");
@@ -354,9 +470,44 @@
             var notification = $("#notification").data("kendoNotification");
             notification.show("Email Request Cancelled", "info");
         }
+
+        function getBusesDescription(buses) {
+            if (buses && buses.length > 0) {
+                return buses.map(function(bus) {
+                    return bus.Description;
+                }).join(", ");
+            }
+            return "";
+        }
+
+        function onBusChange(e) {
+            var selectedBuses = this.value();
+            console.log("Selected buses:", selectedBuses);
+
+            $.ajax({
+                url: '@Url.Action("GetSelectedBuses", "RebuiltParts")',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ buses: selectedBuses }),
+                success: function (data) {
+                    console.log('Success:', data);
+                },
+                error: function (error) {
+                    console.error('Error:', error);
+                }
+            });
+        }
+
+        function onBusDataBound() {
+            console.log("event: busdataBound");
+        }
     </script>
 
     <script id="template" type="text/x-kendo-template">
         <div id="detail-template-#=RebuiltStockNum#"></div>
+    </script>
+
+    <script id="archived-template" type="text/x-kendo-template">
+        <div id="archived-detail-template-#=RebuiltStockNum#"></div>
     </script>
 }
