@@ -1,0 +1,38 @@
+
+Fix Index.cshtml based on the below controller actions.  Specially :
+columns.Bound(p => p.Buses)
+                           .ClientTemplate("#= Buses.map(function(bus) { return bus.Description; }).join(', ') #")
+                           .Title("Buses").Width(300);
+...
+.Read(read => read.Url(Url.Action("GetRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Get))
+Question : "," logic is already implemented in the dapper SQL call do we need it in column as as well?
+Controller actions :
+ public async Task<JsonResult> GetRebuiltPartsView([DataSourceRequest] DataSourceRequest request)
+ {
+     // Fetch data for the grid (you can use Dapper or any other method)
+     var model = await GetRebuiltPartsData();
+     return Json(model.ToDataSourceResult(request));
+ }
+private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData()
+{
+    try
+    {
+        var query = @"
+    SELECT rbm.RebuiltStockNum, rbm.Keyword, 
+         STRING_AGG(lb.Description, ', ') AS Description
+    FROM SBCES.RbMasterlist rbm
+    LEFT JOIN SBCES.RBLISTOFBUSES rbl ON rbm.RebuiltStockNum = rbl.RebuiltStockNum
+    LEFT JOIN SBCES.LISTOFBUSES lb ON rbl.ListId = lb.ListId
+    where rbm.RebuiltStockNum='056395'
+    GROUP BY rbm.RebuiltStockNum, rbm.Keyword"
+        ;
+        var rebuiltParts = (await _dbConnection.QueryAsync<RebuiltPartsViewModel>(query)).ToList();
+
+        return rebuiltParts;
+    }
+    catch (Exception ex)
+    {
+        return null;
+    }
+
+}
