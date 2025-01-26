@@ -1,0 +1,51 @@
+public async Task<JsonResult> GetRebuiltPartsView([DataSourceRequest] DataSourceRequest request)
+{
+    try
+    {
+        var query = @"
+            SELECT 
+                rbm.RebuiltStockNum, 
+                rbm.Keyword, 
+                rbl.ListId, 
+                lb.Description
+            FROM SBCES.RbMasterlist rbm
+            LEFT JOIN SBCES.RBLISTOFBUSES rbl ON rbm.RebuiltStockNum = rbl.RebuiltStockNum
+            LEFT JOIN SBCES.LISTOFBUSES lb ON rbl.ListId = lb.ListId";
+
+        var rebuiltPartsDict = new Dictionary<string, RebuiltPartsViewModel>();
+
+        var data = await _dbConnection.QueryAsync<RebuiltPartsViewModel, BusesModel, RebuiltPartsViewModel>(
+            query,
+            (part, bus) =>
+            {
+                if (!rebuiltPartsDict.TryGetValue(part.RebuiltStockNum, out var rebuiltPart))
+                {
+                    rebuiltPart = part;
+                    rebuiltPart.Buses = new List<BusesModel>(); // Initialize the buses list
+                    rebuiltPartsDict.Add(rebuiltPart.RebuiltStockNum, rebuiltPart);
+                }
+
+                if (bus != null && bus.ListId > 0) // Ensure bus is not null and has a valid ListId
+                {
+                    rebuiltPart.Buses.Add(bus);
+                }
+
+                return rebuiltPart;
+            },
+            splitOn: "ListId"
+        );
+
+        // Ensure all parts have a non-null Buses list
+        var result = rebuiltPartsDict.Values.Select(part =>
+        {
+            part.Buses = part.Buses ?? new List<BusesModel>(); // Ensure Buses is never null
+            return part;
+        });
+
+        return Json(result.ToDataSourceResult(request));
+    }
+    catch (Exception ex)
+    {
+        return Json(new DataSourceResult { Errors = "Error occurred while fetching rebuilt parts." });
+    }
+}
