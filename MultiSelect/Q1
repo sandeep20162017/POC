@@ -1,0 +1,125 @@
+You are ASP.NET Coe v 8.0 and Telerik ASp .NET Core expert.
+I want to implement new multiselect VehicleSeries column in the Telerik grid.
+1. Modify GetRebuiltPartsData() to populate RebuiltPartsViewModel (ListOfBus )
+2. Modify GetVehicleSeries()
+3. Modify Index.cshtml List of Bus Description should be displayed as comma seperated
+4. Each row has Update/delete functionality passing RebuiltPartsViewModel to controller
+5.Modify Multiselect controller as per the requirements
+Pls add exception handling and comments. I prefer Server side logic, avoid using javascript. 
+Shared/VehicleSeriesEditor.cshtml (multi select)
+@model BCES.Models.Parts.BusesModel
+@(Html.Kendo().MultiSelectFor(m => m.ListId)
+    .Name("VehicleSeries")
+    .DataTextField("Description")
+    .DataValueField("ListId")
+    .Placeholder("Select vehicle ...")
+    .Filter("contains")
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            source.Read(read => read.Url(Url.Action("GetVehicleSeries", "RebuiltParts")).Type(HttpVerbs.Get));
+            
+        })
+        .ServerFiltering(false);
+    })    
+)
+index.cshtml :
+ @(Html.Kendo().Grid<RebuiltPartsViewModel>()
+     .Name("RebuiltPartsGrid")
+     .Columns(columns =>
+     {
+         columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+   ...other cols
+       //Add new Telerik multiselect for Vehicle series
+         columns.Bound(u => u.ListOfBus).Title("Vehicle")
+         .ClientTemplate("# if (typeof Buses != 'undefined' && Buses && Buses.length > 0) { # #= Buses.map(bus =>                 bus.BusName).join(', ') # # } else { # Select Bus # } #")
+        .EditorTemplateName("VehicleSeriesEditor");
+...
+.Read(read => read.Url(Url.Action("GetRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Get))
+})
+BusesModel.cs :
+namespace BCES.Models.Parts
+{
+    public class BusesModel
+    {
+        public int ListId { get; set; }
+        public string Description { get; set; }
+       
+    }
+}
+RebuiltPartsViewModel.cs :
+namespace BCES.Models.Parts
+{
+    public class RebuiltPartsViewModel
+    {
+        public string RebuiltStockNum { get; set; }
+        public List<BusesModel> ListOfBus { get; set; } = new List<BusesModel>();
+}}
+Controller :
+public async Task<IActionResult> GetVehicleSeries()
+{
+    try
+    {
+        var sql = @"
+        SELECT
+            RBLISTOFBUSES.listid AS ListId,
+            LISTOFBUSES.description AS Description
+        FROM
+            SBCES.RBLISTOFBUSES
+        INNER JOIN
+            SBCES.LISTOFBUSES ON RBLISTOFBUSES.listid = LISTOFBUSES.listid";
+
+        var vehicleSeries = await _dbConnection.QueryAsync<BusesModel>(sql);
+        return Json(vehicleSeries);
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, "Internal server error: " + ex.Message);
+    }
+}
+
+[HttpGet]
+public async Task<JsonResult> GetRebuiltPartsView([DataSourceRequest] DataSourceRequest request)
+{
+    // Fetch data for the grid (you can use Dapper or any other method)
+    var model = await GetRebuiltPartsData();
+    return Json(model.ToDataSourceResult(request));
+}
+ private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData()
+ {
+     try
+     {
+         var rebuiltPartsQuery = @"
+                                  SELECT rbm.RbMasterlistId,
+                                    rbm.[RebuiltStockNum],
+                                    rbm.[MmsStockCode],
+                                    rbm.[Keyword],
+                                    rbm.JobNumber,
+                                    rbm.[CorePartNum],
+                                    rbm.[DetailedDesc],
+                                    rbm.[CoreCharge],
+                                    rbm.[EstimatedCost],
+                                    rbm.[BuyNewCost],
+                                    rbm.[RemanCost],
+                                    rbm.[ExternalCost],
+                                    rbl.listid,
+                                     lb.description
+                                   FROM [SBCES].[RbMasterlist] rbm
+                                   join SBCES.RBLISTOFBUSES rbl on rbm.RebuiltStockNum = rbl.RebuiltStockNum  
+                                   join SBCES.LISTOFBUSES lb on rbl.listid = lb.listid
+	  
+         ";
+        
+
+         var rebuiltParts = (await _dbConnection.QueryAsync<RebuiltPartsViewModel>(rebuiltPartsQuery)).ToList();
+
+       
+         return rebuiltParts;
+     }
+     catch (Exception ex)
+     {
+         // Handle errors gracefully
+         return null;
+     }
+ }
