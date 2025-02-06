@@ -1,0 +1,138 @@
+You are ASp.NET Core (v8) and Telerik ASP.NET core expert.
+I want autocomplte functionality on grid column (example TaskDescription column) for Create and update. Getting error :
+AutoComplete widget not found for column, pls help fix. Using inline edit. Is it possible to get the comumn name dynamically rather than hardcoding?
+Is there any recommendations to simplify the autocomplete logic? In oother grids I will have multiple columns and would like to have autocomplte (during Edit and Add) for each column.
+LabourTask.cshtml :
+Grid :
+Html.Kendo().Grid<BCES.Models.Admin.TaskModel>()
+    .Name("TaskGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(p => p.TaskId).Title("Task Id").Hidden(true);
+        columns.Bound(p => p.TaskDescription).Title("Task Description")
+            .EditorTemplateName("AutoCompleteEditor")
+...
+  .Events(events => events
+    .Edit("onGridEdit")
+ ..
+)
+JS :
+function onGridEdit(e) {
+    // Ensure the AutoComplete widget is initialized when the inline edit form is opened
+    var columnName = "TaskDescription"; // The column name
+    var inputElement = e.container.find("input[name='" + columnName + "']"); // Find the input element for the column
+    if (inputElement.length > 0) {
+        var autoCompleteWidget = inputElement.data("kendoAutoComplete");
+        if (!autoCompleteWidget) {
+            console.error("AutoComplete widget not found for column:", columnName);
+        } else {
+            console.log("AutoComplete widget initialized for column:", columnName);
+        }
+    }
+}
+AutocompleteEditorController.cs :
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+
+
+namespace BCES.Controllers.Common
+{
+    public class AutoCompleteController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public AutoCompleteController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+        
+        [HttpGet]
+        public IActionResult GetAutoCompleteData(string columnName, string searchText)
+        {
+          //  searchText = "AU";
+            // Validate inputs to prevent SQL injection
+           // if (string.IsNullOrEmpty(columnName) || string.IsNullOrEmpty(searchText))
+                if (string.IsNullOrEmpty(columnName))
+            {
+            return BadRequest("Invalid parameters.");
+            }
+
+            // Combined mapping: Maps grid column names to SQL column names and table names
+            var combinedMapping = new Dictionary<string, (string SqlColumnName, string TableName)>
+            {
+                { "TaskDescription", ("TaskDescription", "[SBCES].[LabourTaskDescriptions]") } // Grid column: TaskDescription, SQL column: TaskDescription, Table: [SBCES].[LabourTaskDescriptions]
+                //{ "OrigSupplierName", ("SupplierName", "Suppliers") },
+                //{ "KeyWord", ("Keyword", "Keywords") },
+                //{ "Description", ("PartDescription", "Descriptions") }
+            };
+
+            if (!combinedMapping.ContainsKey(columnName))
+            {
+                return BadRequest("Invalid column name.");
+            }
+
+            // Get the SQL column name and table name from the combined mapping
+            var mapping = combinedMapping[columnName];
+           var sqlColumnName = mapping.SqlColumnName;
+            var tableName = mapping.TableName;
+
+            // Example: Use Dapper to fetch data from the database
+            using (var connection = _dbConnection)
+            {
+                connection.Open();
+
+                // Dynamically construct the SQL query
+                var sql = $@"
+                    SELECT DISTINCT {sqlColumnName} 
+                    FROM {tableName} 
+                    WHERE {sqlColumnName} LIKE   '" + searchText + "%' ";
+
+                var results = connection.Query<string>(sql, new { SearchText = searchText });
+                return Json(new { data = results.ToList() });
+               // return results.Select(x => x.ToString());
+            }
+        }
+
+    }
+
+}
+AutocompleteEditor.cshtml :
+@model object
+
+@(Html.Kendo().AutoComplete()
+    .Name("TaskDescription") // Dynamic name based on the field
+    .DataTextField("Text")
+    .Filter("contains")
+    .Placeholder("Type to search...")
+    .HtmlAttributes(new { id = ViewData.TemplateInfo.HtmlFieldPrefix })
+    
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+           .Type(HttpVerbs.Get)
+           .Data("onAdditionalData")           
+           ; // Pass additional data (e.g., column name)
+        })
+        ;
+        
+    })
+)
+@section Scripts {
+   
+}
+
+    
