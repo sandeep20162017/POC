@@ -1,0 +1,110 @@
+You are ASP.NET core V8.0 and Telerik ASP.NET Core expert.
+In the following code, I have autocomplete logic for each column. Autocomplete logic is working fine, but when I click on create, I see  mutiple 
+models gets inserted. I only need to insert or update the columns selected by autocomplte (one in the TR). Perhaps it has go something with the 
+{FromForm} or any logic missing in selcton and updating model for create and update in the code? Pls help fix. Using Telerik INlineEdit
+Index.cshtml :
+@model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+
+@{
+    ViewData["Title"] = "Non Stock Coded Parts";
+}
+ <h4>Non Stock Coded Parts</h4>
+@(
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+                                .Name("NscPartsUsedGrid")
+                                .Columns(columns =>
+                            {
+                                columns.Bound(p => p.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+                                columns.Bound(p => p.OrigSupplierName).Title("Supplier Name").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+                                columns.Bound(p => p.KeyWord).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+                                columns.Bound(p => p.Description).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+                                columns.Bound(p => p.OemPartCost).Title("OEM Part Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+                                columns.Command(command => {
+                                if(@ViewBag.RoleId == 1) {
+                                        command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+                                }
+                                if(@ViewBag.RoleId == 1) {
+                               
+                                        command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Edit button with tooltip
+                                }
+                                }).Width(200);
+                            })
+                    .ToolBar(toolbar =>
+                    {
+                        if (@ViewBag.RoleId == 1)
+                        {
+                            toolbar.Create();
+                        }
+                    })
+                .Editable(editable => editable.Mode(GridEditMode.InLine).TemplateName("NscPartsAddUpdate"))
+                
+                .Pageable()
+                .Sortable()
+                .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+                .DataSource(dataSource => dataSource
+                    .Ajax()
+                    .Model(model =>
+                    {
+                        model.Id(u => u.NscPartsUsedId);
+                                                                       
+                    })
+                   
+                    .Read(read => read.Url(Url.Action("GetNscPartsUsedView", "NscPartsUsed")).Type(HttpVerbs.Get))
+                    .Create(create => create.Url(Url.Action("CreateNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+                    .Update(update => update.Url(Url.Action("UpdateNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+                    .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+                        
+                   )
+                
+            )
+
+  @section Scripts {
+    <script>
+        function getAutoCompleteParams() {
+            var input = $("input[data-role='autocomplete']:focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || "" // Handle empty search text
+            };
+        }
+    </script>
+
+       
+            }
+
+NSCPartsController.cs :
+    [HttpPost]
+ [AllowAnonymous]
+    //Following function gets called multiple times. I only need to call it once for the selected TR column values. Pls help fix
+ public async Task<IActionResult> CreateNscPartsUsed([DataSourceRequest] DataSourceRequest request, [FromForm] NscPartsUsedViewModel nscPartsUsed)
+ {
+     //if (!ModelState.IsValid)
+     //{
+     //    return BadRequest(ModelState);
+     //}
+     try
+     {
+         var insertQuery = String.Format(@"
+         INSERT INTO SBCES.NonStockCodedParts (OrigSupplierNum, OrigSupplierName,OemPartCost, DetailedDesc, Keyword, LastModifiedDate)
+         VALUES ('{0}', '{1}', {2}, '{3}', '{4}', '{5}')",
+             nscPartsUsed.OrigSuppNum,
+                           nscPartsUsed.OrigSupplierName,
+                           nscPartsUsed.OemPartCost,
+                           nscPartsUsed.Description,
+                            nscPartsUsed.KeyWord,
+                            DateTime.Now
+              );
+
+         var tt = insertQuery;
+         await _dbConnection.ExecuteAsync(insertQuery, nscPartsUsed);
+         return Ok();
+     }
+     catch (Exception ex)
+     {
+         return StatusCode(500, "An error occurred while updating the Non Stock Coded Part.");
+     }
+     
+ }
+
+
+        
