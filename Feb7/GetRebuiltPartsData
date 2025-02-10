@@ -1,0 +1,61 @@
+[AllowAnonymous]
+private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData()
+{
+    try
+    {
+        var query = @"
+            SELECT 
+                rbm.RbMasterlistId,
+                rbm.RebuiltStockNum,
+                rbm.MmsStockCode,
+                rbm.Keyword,
+                rbm.JobNumber,
+                rbm.CorePartNum,
+                rbm.DetailedDesc,
+                rbm.CoreCharge,
+                rbm.EstimatedCost,
+                rbm.BuyNewCost,
+                rbm.RemanCost,
+                lb.ListId,
+                lb.Description
+            FROM SBCES.RbMasterlist rbm
+            LEFT JOIN SBCES.RbListOfBuses rbl ON rbm.RebuiltStockNum = rbl.RebuiltStockNum
+            LEFT JOIN SBCES.ListOfBuses lb ON rbl.ListId = lb.ListId
+            WHERE rbm.IsActive = 1";
+
+        var result = await _dbConnection.QueryAsync<RebuiltPartsViewModel, BusesModel, RebuiltPartsViewModel>(
+            query,
+            (rebuiltPart, bus) =>
+            {
+                if (bus?.ListId != null)
+                {
+                    rebuiltPart.ListOfBus ??= new List<BusesModel>();
+                    rebuiltPart.ListOfBus.Add(bus);
+                }
+                return rebuiltPart;
+            },
+            splitOn: "ListId"
+        );
+
+        // Group by RbMasterlistId to aggregate buses
+        var groupedData = result
+            .GroupBy(r => r.RbMasterlistId)
+            .Select(g =>
+            {
+                var mainRecord = g.First();
+                mainRecord.ListOfBus = g.SelectMany(r => r.ListOfBus)
+                                      .DistinctBy(b => b.ListId)
+                                      .ToList();
+                return mainRecord;
+            })
+            .ToList();
+
+        return groupedData;
+    }
+    catch (Exception ex)
+    {
+        // Log error (you should implement proper logging here)
+        Console.WriteLine($"Error fetching rebuilt parts: {ex.Message}");
+        return new List<RebuiltPartsViewModel>();
+    }
+}
