@@ -1,8 +1,7 @@
 You are ASP.NET core (v 8.0) and Telerik ASp.NET core expert
-In RebuiltPartsController.cs, function  AddRebuiltPartsView, rebuiltPartsViewModel - ListOfBus and ListOfBusIds are null. Other columns are fine.
-ListOfBuses uses muti select.
-But, In function UpdateRebuiltPartsView, rebuiltPartsViewModel, ListOfBuses is populated correctly. 
-Also pls help complete AddRebuiltPartsView (insert function). refer to UpdateRebuiltPartsView as UpdateRebuiltPartsView is working as expected.
+When user clicks on 'Create a new record' and then selects multiple bus values (multiselect), in column Vehicle Series, and then clicks on save (update)
+In RebuiltPartsController.cs, function  AddRebuiltPartsView is called. In this function  rebuiltPartsViewModel - is always null. Other columns are fine.
+Pls verify the logic in update as well. It has the similar issue.
 RebuiltPartsController.cs :
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
@@ -598,19 +597,87 @@ namespace BCES.Controllers.Parts
 
         [HttpPost]
         [AllowAnonymous]
-        public async Task<IActionResult> AddRebuiltPartsView([DataSourceRequest] DataSourceRequest request, [FromForm] RebuiltPartsViewModel rebuiltPartsViewModel)
+        public async Task<IActionResult> AddRebuiltPartsView(
+        [DataSourceRequest] DataSourceRequest request,
+        [FromForm] RebuiltPartsViewModel rebuiltPartsViewModel,
+        [FromForm] string listOfBusIds) // Add this parameter to capture the MultiSelect values
         {
             try
             {
-                return Ok();
-               // var userId = await AddRebuiltPartAsync(rebuiltPartsViewModel);
-                return RedirectToAction("Index");
+                if (rebuiltPartsViewModel == null)
+                {
+                    return BadRequest("Invalid data.");
+                }
+
+                // Parse the comma-separated string of selected bus IDs
+                if (!string.IsNullOrEmpty(listOfBusIds))
+                {
+                    rebuiltPartsViewModel.ListOfBusIds = listOfBusIds
+                        .Split(',')
+                        .Select(id => int.TryParse(id, out var parsedId) ? parsedId : (int?)null)
+                        .ToList();
+                }
+
+                // Ensure ListOfBus is initialized (if needed)
+                rebuiltPartsViewModel.ListOfBus ??= new List<BusesModel>();
+
+                // Insert the rebuilt part into the database
+                var insertPartSql = @"
+            INSERT INTO SBCES.RbMasterlist 
+            (
+                RebuiltStockNum, MmsStockCode, Keyword, JobNumber, CorePartNum, 
+                DetailedDesc, CoreCharge, EstimatedCost, BuyNewCost, RemanCost, 
+                ExternalCost, LastModifiedBy, DateEntered, IsActive
+            )
+            VALUES 
+            (
+                @RebuiltStockNum, @MmsStockCode, @Keyword, @JobNumber, @CorePartNum, 
+                @DetailedDesc, @CoreCharge, @EstimatedCost, @BuyNewCost, @RemanCost, 
+                @ExternalCost, @LastModifiedBy, GETDATE(), @IsActive
+            )";
+
+                await _dbConnection.ExecuteAsync(insertPartSql, new
+                {
+                    rebuiltPartsViewModel.RebuiltStockNum,
+                    rebuiltPartsViewModel.MmsStockCode,
+                    rebuiltPartsViewModel.Keyword,
+                    rebuiltPartsViewModel.JobNumber,
+                    rebuiltPartsViewModel.CorePartNum,
+                    rebuiltPartsViewModel.DetailedDesc,
+                    rebuiltPartsViewModel.CoreCharge,
+                    rebuiltPartsViewModel.EstimatedCost,
+                    rebuiltPartsViewModel.BuyNewCost,
+                    rebuiltPartsViewModel.RemanCost,
+                    ExternalCost = "", // Adjust as needed
+                    LastModifiedBy = User.Identity.Name, // Or your logic
+                    IsActive = rebuiltPartsViewModel.IsActive ? 1 : 0
+                });
+
+                // Insert associated buses
+                if (rebuiltPartsViewModel.ListOfBusIds?.Any() == true)
+                {
+                    var insertBusesSql = @"
+                INSERT INTO SBCES.RbListOfBuses (RebuiltStockNum, ListId)
+                VALUES (@RebuiltStockNum, @ListId)";
+
+                    foreach (var listId in rebuiltPartsViewModel.ListOfBusIds.Where(id => id.HasValue))
+                    {
+                        await _dbConnection.ExecuteAsync(insertBusesSql, new
+                        {
+                            rebuiltPartsViewModel.RebuiltStockNum,
+                            ListId = listId.Value
+                        });
+                    }
+                }
+
+                return Json(new { success = true });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, "An error occurred while adding Rebuilt Part.");
+                return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
+
 
         private async Task<int> AddRebuiltPartAsync(RebuiltPartsViewModel rebuiltPartsViewModel)
         {
@@ -825,607 +892,71 @@ namespace BCES.Controllers.Parts
 
     }
 }
+RebuiltPartsViewModel.cs :
+using BCES.Models.Common;
 
-Index.cshtml :
-@using BCES.Models.Parts
-@using BCES.Models.Common
-@model IEnumerable<BCES.Models.Parts.RebuiltPartsViewModel>
-
-@{
-    ViewData["Title"] = "Rebuilt Parts";
-}
-
-<h4>Rebuilt Parts</h4>
-
-@(Html.Kendo().TabStrip()
-    .Name("rebuildPartsTabStrip")
-    .Animation(animation => animation.Open(effect => effect.Fade(FadeDirection.In)))
-    .Items(tabstrip =>
+namespace BCES.Models.Parts
+{
+    public class RebuiltPartsViewModel
     {
-        tabstrip.Add().Text("Rebuilt Parts")
-            .Selected(true) // Ensure the first tab is selected by default
-            .Content(@<text>
-                @try
-                {
-                    @(Html.Kendo().Grid<RebuiltPartsViewModel>()
-                        .Name("RebuiltPartsGrid")
-                        .Columns(columns =>
-                        {
-                            columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
-                            columns.Bound(c => c.MmsStockCode).Title("MMS Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
-                            columns.Bound(c => c.DetailedDesc).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
-                            columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
-                            @* columns.Bound(c => c.JobNumber).Title("Job Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))); *@
-                            columns.Bound(c => c.CorePartNum).Title("Core Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
-                           @*  columns.Bound(c => c.CoreCharge).Title("Core Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency"); *@
-                            columns.Bound(c => c.Percentage).Title("Percentage");
-                            columns.Bound(c => c.BuyNewCost).Title("Buy Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
-                            columns.Bound(c => c.RemanCost).Title("Reman. Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
-                           @*  columns.Bound(c => c.ExternalCost).Title("External Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency"); *@
-                            columns.Bound(c => c.EstimatedCost).Title("Estimated Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
-                            @* columns.Bound(c => c.TotalRebuiltPartCost).Title("Total Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency"); *@
-
-                            //multiselect
-                           @*  columns.Bound(c => c.ListOfBus)
-                            .Title("Vehicle Series")
-                            .ClientTemplate("# if (ListOfBus && ListOfBus.length > 0) { # #= ListOfBus.map(bus => bus.Description).join(', ') # # } else { # - # } #"); *@
-
-                            columns.Bound(c => c.ListOfBusIds).Title("Vehicle Series")
-                          //  .Hidden(true) // Keep this column hidden from the grid view
-                            .Filterable(false) // Explicitly disable filtering for this column
-                            .ClientTemplate("# if (ListOfBus && ListOfBus.length > 0) { # #= ListOfBus.map(bus => bus.Description).join(', ') # # } else { # - # } #")
-                            .EditorTemplateName("VehicleSeriesEditor");
-
-
-                            columns.Command(command =>
-                            {
-                                command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
-                                command.Custom("Archive").Text(" ").IconClass("k-icon k-i-folder").Click("onArchiveClick").HtmlAttributes(new { title = "Archive" }); // Archive button with tooltip
-                                command.Custom("Save to Excel").Text(" ").IconClass("k-icon k-i-file-excel").Click("onSaveToExcelClick").HtmlAttributes(new { title = "Save to Excel" }); // Save to Excel button with tooltip
-                                command.Custom("Email Estimate").Text(" ").IconClass("k-icon k-i-email").Click("onEmailEstimateClick").HtmlAttributes(new { title = "Email Estimate" }); // Email Estimate button with tooltip
-                            }).Title("Actions").Width(200).HtmlAttributes(new { @class = "action-buttons" }); // Set a fixed width for the Actions column
-                        })
-                        .ToolBar(toolbar => { toolbar.Create(); })
-                        .Editable(editable => editable.Mode(GridEditMode.InLine))
-                        .Pageable()
-                        .Sortable()
-                        .ClientDetailTemplateId("template")
-                        .Resizable(r => r.Columns(true))
-                        .Filterable(ftb => ftb.Mode(GridFilterMode.Row)) //Disable for multiselect
-                        .DataSource(dataSource => dataSource
-                            .Ajax()
-                            .Model(model =>
-                            {
-                                model.Id(c => c.RbMasterlistId);
-                                model.Field(c => c.RbMasterlistId);
-                                model.Field(c => c.RebuiltStockNum).Editable(true);
-                                model.Field(c => c.MmsStockCode).Editable(true);
-                               // model.Field(u => u.ListIds).DefaultValue(new List<int>());
-                               // model.Field(u => u.BusNames).DefaultValue(new List<string>());
-                                model.Field(c => c.ListOfBus).DefaultValue(new List<BCES.Models.Parts.BusesModel>()).Editable(true); //multiselect
-                                model.Field(c => c.LabourDetailsRebuiltParts).DefaultValue(new List<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel>()).Editable(false);
-                                model.Field(p => p.ListOfBusIds).DefaultValue(new List<int?>()); //multiselect
-                                })
-                                 .Events(events => events.RequestStart("onRequestStart"))      
-
-                            .Read(read => read.Url(Url.Action("GetRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Get))
-                            .Create(create => create.Url(Url.Action("AddRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
-                            .Update(update => update.Url(Url.Action("UpdateRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
-                        )
-                    )
-                }
-                catch (Exception ex)
-                {
-                    <div class="alert alert-danger">Error loading rebuilt parts: @ex.Message</div>
-                }
-            </text>);
-
-        tabstrip.Add().Text("Archived Parts")
-            .Content(@<text>
-                @try
-                {
-                    @Html.Partial("_ArchivedIndex")
-                }
-                catch (Exception ex)
-                {
-                    <div class="alert alert-danger">Error loading archived parts: @ex.Message</div>
-                }
-            </text>);
-    })
-)
-
-<!-- Placeholder for dynamically loaded email estimate popup and notification -->
-<div id="email-estimate-container">
-     @Html.Partial("_EmailEstimatePopup")
-    <div id="estimates-container"></div>
-    <div id="notification"></div>    
-</div>
-
-@section Scripts {
-    <script>
-        $(document).ready(function () {
-            $("#email-estimate-container").hide();
-            $("#archived-email-estimate-container").hide();
-             
-                $(document).on("kendo:editor-opened", function () {
-                    $("#VehicleSeries").trigger("change");
-                });
-           
-           /////////////////////////////// VehicleSeries multiselect end
-            var grid = $("#RebuiltPartsGrid").data("kendoGrid");
-
-            // Initialize Kendo Notification for displaying messages
-            var notificationElement = $("#notification");
-            if (notificationElement.length === 0) {
-                console.error("Notification element not found in the DOM.");
-            } else {
-                var notification = notificationElement.kendoNotification({
-                    position: {
-                        pinned: true,
-                        top: 50,
-                        right: 50
-                    },
-                    autoHideAfter: 5000, // Hide after 5 seconds
-                    stacking: "down"
-                }).data("kendoNotification");
-
-                // Bind the Save event for the grid
-                grid.bind("save", function (e) {
-                    //debugger;
-                    notification.show(e.model.RebuiltStockNum); // Display the stock number in the notification
-                });
-
-                // Bind the Save event for the grid
-                // grid.bind("save", function (e) {
-                //     debugger;
-                //     notification.show(e.model.RebuiltStockNum);
-                //     // This event is triggered when the user clicks the Update button
-                //     $.post('@Url.Action("UpdateRebuiltPartsView", "RebuiltParts")', { rebuiltPartNum: e.model.RebuiltStockNum })
-                //         .done(function (data) {
-                //             if (notification) {
-                //                 notification.show("Changes saved successfully!", "success");
-                //             } else {
-                //                 console.error("Notification is not initialized.");
-                //             }
-                //         })
-                //         .fail(function (xhr, status, error) {
-                //             notification.show(e.model.RebuiltStockNum);
-                //             console.error("Error saving changes: ", error);
-                //             if (notification) {
-                //                 notification.show("An error occurred while saving changes. Please try again.", "error");
-                //             } else {
-                //                 console.error("Notification is not initialized.");
-                //             }
-                //         });
-                // });
-
-                // Bind the Cancel event for the grid
-                grid.bind("cancel", function (e) {
-                    // This event is triggered when the user clicks the Cancel button
-                    $.post('@Url.Action("CancelDetails", "RebuiltParts")', { rebuiltPartNum: e.model.RebuiltStockNum })
-                        .done(function (data) {
-                            if (notification) {
-                                notification.show("Changes discarded!", "info");
-                            } else {
-                                console.error("Notification is not initialized.");
-                            }
-                        })
-                        .fail(function (xhr, status, error) {
-                            console.error("Error discarding changes: ", error);
-                            if (notification) {
-                                notification.show("An error occurred while discarding changes. Please try again.", "error");
-                            } else {
-                                console.error("Notification is not initialized.");
-                            }
-                        });
-                });
-
-                grid.bind("detailInit", function (e) {
-                    console.log("Detail initialization started for RebuiltStockNum: " + e.data.RebuiltStockNum);
-                    var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-                    var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-                    var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-                    var tabScPartDetail = '@Url.Action("ScPartsUsedInRbParts", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-                    var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-                    var tabUrlRbPartDetail = '@Url.Action("RbDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-                    var tabUrlTotalCost = '@Url.Action("TotalCostPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-
-                    // Get the container for the detail template
-                    var container = e.detailCell.find("#detail-template-" + e.data.RebuiltStockNum);
-
-                    // Load the TabStrip structure
-                    container.html(`
-                                <div id="tabstrip-container-${e.data.RebuiltStockNum}">
-                                    <ul>
-                                        <li class="k-state-active">Labour Details</li>
-                                        <li>Labour Hour</li>
-                                        <li>Material: Cost</li>
-                                        <li>Material: SC Parts</li>
-                                        <li>Material: NSC Parts</li>
-                                        <li>Material: RB Parts</li>
-                                        <li>Total Cost</li>
-                                    </ul>
-                                    <div id="labour-details-content"></div>
-                                    <div id="labour-hour-summary-content"></div>
-                                    <div id="material-cost-summary-content"></div>
-                                    <div id="material-details-content"></div>
-                                    <div id="nsc-details-content"></div>
-                                    <div id="rb-part-details-content"></div>
-                                    <div id="total-cost-content"></div>
-                                </div>
-                            `);
-
-                    // Initialize the Kendo TabStrip
-                    var tabStrip = $("#tabstrip-container-" + e.data.RebuiltStockNum).kendoTabStrip({
-                        animation: { open: { effects: "fadeIn" } },
-                        select: function (e) {
-                            var tabIndex = $(e.item).index(); // Get the index of the selected tab
-
-                            // Check for unsaved changes in the current tab
-                            var currentTabContent = tabStrip.contentElement(tabStrip.select().index());
-                            var currentGrid = $(currentTabContent).find(".k-grid").data("kendoGrid");
-
-                            if (currentGrid && (currentGrid.dataSource.hasChanges())) {
-                                // Show a warning notification
-                                if (notification) {
-                                    notification.show("You have unsaved changes. Click on Update or Cancel changes before clicking next tab.", "warning");
-                                } else {
-                                    console.error("Notification is not initialized.");
-                                }
-                                e.preventDefault(); // Prevent the tab switch
-                                return;
-                            }
-
-                            // Load the partial view content for the selected tab
-                            var tabUrl = tabIndex == 0 ? tabUrlLabourDetail :
-                                tabIndex == 1 ? tabUrlLabourHourSummary :
-                                    tabIndex == 2 ? tabUrlMaterialCostSummary :
-                                        tabIndex == 3 ? tabScPartDetail :
-                                            tabIndex == 4 ? tabUrlNscDetail :
-                                                tabIndex == 5 ? tabUrlRbPartDetail :
-                                                    tabUrlTotalCost;
-
-                            $.get(tabUrl)
-                                .done(function (data) {
-                                    $(e.contentElement).html(data);
-                                    kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
-
-                                    // Reset the hasChanges() state for read-only tabs
-                                    if (tabIndex === 6) { // Assuming the last tab is the read-only tab
-                                        var totalCostGrid = $(e.contentElement).find(".k-grid").data("kendoGrid");
-                                        notification.show("tabIndex === 6");
-                                        if (totalCostGrid) {
-                                            notification.show("inside totalCostGrid");
-                                            totalCostGrid.dataSource.read(); // Refresh the data source
-                                        }
-                                    }
-                                })
-                                .fail(function (xhr, status, error) {
-                                    console.error("Error loading tab content: ", error);
-                                    if (notification) {
-                                        notification.show("An error occurred while loading the tab content. Please try again.", "error");
-                                    } else {
-                                        console.error("Notification is not initialized.");
-                                    }
-                                });
-                        }
-                    }).data("kendoTabStrip");
-
-                    // Load the first tab's content
-                    $.get(tabUrlLabourDetail)
-                        .done(function (data) {
-                            $("#labour-details-content").html(data);
-                            kendo.init($("#labour-details-content")); // Reinitialize Kendo widgets
-                        })
-                        .fail(function (xhr, status, error) {
-                            console.error("Error loading initial tab content: ", error);
-                            if (notification) {
-                                notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
-                            } else {
-                                console.error("Notification is not initialized.");
-                            }
-                        });
-                });
-            }
-            //archived --------------------------------------------
-            var grid = $("#ArchivedRebuiltPartsGrid").data("kendoGrid");
-
-            // Initialize Kendo Notification for displaying messages
-            var notificationElement = $("#archived-notification");
-            if (notificationElement.length === 0) {
-                console.error("Notification element not found in the DOM.");
-            } else {
-                var notification = notificationElement.kendoNotification({
-                    position: {
-                        pinned: true,
-                        top: 50,
-                        right: 50
-                    },
-                    autoHideAfter: 5000, // Hide after 5 seconds
-                    stacking: "down"
-                }).data("kendoNotification");
-
-                // Bind the detailInit event for the grid
-                grid.bind("detailInit", function (e) {
-                    console.log("Detail initialization started for RebuiltStockNum: " + e.data.RebuiltStockNum);
-                    var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-                    var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-                    var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-                    var tabScPartDetail = '@Url.Action("ScPartsUsedInRbParts", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-                    var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-                    var tabUrlRbPartDetail = '@Url.Action("RbDetailsPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-                    var tabUrlTotalCost = '@Url.Action("TotalCostPartial", "RebuiltParts")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
-
-                    // Get the container for the detail template
-                    var container = e.detailCell.find("#archived-detail-template-" + e.data.RebuiltStockNum);
-
-                    // Load the TabStrip structure
-                    container.html(`
-                                <div id="archived-tabstrip-container-${e.data.RebuiltStockNum}">
-                                    <ul>
-                                        <li class="k-state-active">Labour Details</li>
-                                        <li>Labour Hour</li>
-                                        <li>Material: Cost</li>
-                                        <li>Material: SC Parts</li>
-                                        <li>Material: NSC Parts</li>
-                                        <li>Material: RB Parts</li>
-                                        <li>Total Cost</li>
-                                    </ul>
-                                    <div id="archived-labour-details-content"></div>
-                                    <div id="archived-labour-hour-summary-content"></div>
-                                    <div id="archived-material-cost-summary-content"></div>
-                                    <div id="archived-material-details-content"></div>
-                                    <div id="archived-nsc-details-content"></div>
-                                    <div id="archived-rb-part-details-content"></div>
-                                    <div id="archived-total-cost-content"></div>
-                                </div>
-                            `);
-
-                    // Initialize the Kendo TabStrip
-                    var tabStrip = $("#archived-tabstrip-container-" + e.data.RebuiltStockNum).kendoTabStrip({
-                        animation: { open: { effects: "fadeIn" } },
-                        select: function (e) {
-                            var tabIndex = $(e.item).index(); // Get the index of the selected tab
-
-                            // Load the partial view content for the selected tab
-                            var tabUrl = tabIndex == 0 ? tabUrlLabourDetail :
-                                tabIndex == 1 ? tabUrlLabourHourSummary :
-                                    tabIndex == 2 ? tabUrlMaterialCostSummary :
-                                        tabIndex == 3 ? tabScPartDetail :
-                                            tabIndex == 4 ? tabUrlNscDetail :
-                                                tabIndex == 5 ? tabUrlRbPartDetail :
-                                                    tabUrlTotalCost;
-
-                            $.get(tabUrl)
-                                .done(function (data) {
-                                    $(e.contentElement).html(data);
-                                    kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
-                                })
-                                .fail(function (xhr, status, error) {
-                                    console.error("Error loading tab content: ", error);
-                                    if (notification) {
-                                        notification.show("An error occurred while loading the tab content. Please try again.", "error");
-                                    } else {
-                                        console.error("Notification is not initialized.");
-                                    }
-                                });
-                        }
-                    }).data("kendoTabStrip");
-
-                    // Load the first tab's content
-                    $.get(tabUrlLabourDetail)
-                        .done(function (data) {
-                            $("#archived-labour-details-content").html(data);
-                            kendo.init($("#archived-labour-details-content")); // Reinitialize Kendo widgets
-                        })
-                        .fail(function (xhr, status, error) {
-                            console.error("Error loading initial tab content: ", error);
-                            if (notification) {
-                                notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
-                            } else {
-                                console.error("Notification is not initialized.");
-                            }
-                        });
-                });
-            }
-            //archived end  ----------------------------------------
-        });
-
-        function onArchiveClick(e) {
-            e.preventDefault();
-            var grid = $("#RebuiltPartsGrid").data("kendoGrid");
-            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
-
-            // Call the controller action with the entire dataItem as JSON
-            $.ajax({
-                url: '@Url.Action("ArchiveDetails", "RebuiltParts")',
-                type: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify(dataItem),
-                success: function (data) {
-                    // Display a Kendo Notification
-                    var notification = $("#notification").kendoNotification({
-                        position: {
-                            pinned: true,
-                            top: 50,
-                            right: 50
-                        },
-                        autoHideAfter: 5000, // Hide after 5 seconds
-                        stacking: "down"
-                    }).data("kendoNotification");
-
-                    notification.show("Archive is clicked.", "info");
-                },
-                error: function (xhr, status, error) {
-                    console.error("Error archiving: ", error);
-                }
-            });
+        public RebuiltPartsViewModel()
+        {
+            ListOfBus = new List<BusesModel>();
+            ListOfBusIds = new List<int?>(); // Initialize here
         }
 
-        function onEmailEstimateClick(e) {
-            e.preventDefault();
-            var grid = $("#RebuiltPartsGrid").data("kendoGrid");
-            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
-            var rebuiltPartNum = dataItem.RebuiltStockNum;
+        public int RbMasterlistId {  get; set; }
+        public string MmsStockCode { get; set; }
+        public string DetailedDesc { get; set; }
+        public string Keyword { get; set; }
+        public string JobNumber { get; set; }
+        public string RebuiltStockNum { get; set; }
+        public string? CoreCharge { get; set; }
+        public string? CorePartNum { get; set; }
 
-            // Show the email estimate container
-            $("#email-estimate-container").show();
+       public int? Qty {  get; set; }
+        public int? Percentage { get; set; }
 
-            // Generate the Excel file by calling SaveToExcel via AJAX
-            $.ajax({
-                url: '@Url.Action("SaveToExcel", "Export")',
-                type: 'GET',
-                data: { rebuiltPartNum: rebuiltPartNum },
-                xhrFields: {
-                    responseType: 'blob' // Ensure the response is treated as a binary file
-                },
-                success: function (data) {
-                    // Create a link element to trigger the file download
-                    var link = document.createElement('a');
-                    link.href = window.URL.createObjectURL(data);
-                    link.download = `${rebuiltPartNum}_RebuiltParts_Estimate.xlsx`;
-                    link.click();
+        public string? ExternalCost { get; set; }
+        public decimal? EstimatedCost { get; set; }
+        public string? RemanCost { get; set; }
+        public string? BuyNewCost { get; set; }
+        public decimal? TotalCost { get; set; }
 
-                    // Set the subject with the rebuilt number and today's date
-                    var today = new Date();
-                    var subject = `Rebuilt Part Estimates for ${rebuiltPartNum} - Date ${today.toLocaleDateString()} ${today.toLocaleTimeString()}`;
+        public List<LabourDetailsRebuiltPartsViewModel> LabourDetailsRebuiltParts { get; set; } = [];
 
-                    // Set the form values
-                    $("#to").val("");
-                    $("#subject").val(subject);
-                    $("#body").val(`Dear Sir/Madam,\nPlease find attached here with Rebuilt Part Estimate for ${rebuiltPartNum}.\n\nThank you`);
+        // Full list of bus objects (for display)
+        public List<BusesModel> ListOfBus { get; set; }
 
-                    // Open the Kendo Window
-                    var kendoWindow = $("#emailEstimateWindow").data("kendoWindow");
-                    if (kendoWindow) {
-                        kendoWindow.center().open();
-                    } else {
-                        console.error("Kendo Window not found.");
-                    }
-                },
-                error: function (xhr, status, error) {
-                    console.error("Error downloading Excel file:", error);
-                }
-            });
-        }
+        // List of IDs for editor binding
+        public List<int?> ListOfBusIds { get; set; }
 
-        function onSaveToExcelClick(e) {
-            e.preventDefault();
-            var grid = $("#RebuiltPartsGrid").data("kendoGrid");
-            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
-            var rebuiltPartNum = dataItem.RebuiltStockNum;
+        public string Description { get; set; }
+               
 
-            // Directly trigger the file download
-            window.location.href = '@Url.Action("SaveToExcel", "Export")' + '?rebuiltPartNum=' + rebuiltPartNum;
-        }
+        public string LastModifiedBy { get; set; }
+        public string LastModifiedDate { get; set; }
+        public string SopNumber { get; set; }
+        
+       
+        public bool IsActive { get; set; }
 
-        function onCancelEmailClick() {
-            // Close the Kendo Window
-            var window = $("#emailEstimateWindow").data("kendoWindow");
-            window.close();
+        public string? MaterialsTotal { get; set; }
+        public string? LabourTotal { get; set; }
+        public string? TotalRebuiltPartCost { get; set; }
+        public string? TotalCostTax { get; set; }
+        public string? EnteredBy { get; set; }
+        public string? DateEntered { get; set; } 
 
-            // Show a notification
-            var notification = $("#notification").data("kendoNotification");
-            notification.show("Email Request Cancelled", "info");
-        }
-    </script>
 
-    <script id="template" type="text/x-kendo-template">
-        <div id="detail-template-#=RebuiltStockNum#"></div>
-    </script>
-    <script>
-         function onArchivedEmailEstimateClick(e) {
-            e.preventDefault();
-            var grid = $("#ArchivedRebuiltPartsGrid").data("kendoGrid");
-            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
-            var rebuiltPartNum = dataItem.RebuiltStockNum;
-
-            // Show the email estimate container
-            $("#archived-email-estimate-container").show();
-
-            // Generate the Excel file by calling SaveToExcel via AJAX
-            $.ajax({
-                url: '@Url.Action("SaveToExcel", "Export")',
-                type: 'GET',
-                data: { rebuiltPartNum: rebuiltPartNum },
-                xhrFields: {
-                    responseType: 'blob' // Ensure the response is treated as a binary file
-                },
-                success: function (data) {
-                    // Create a link element to trigger the file download
-                    var link = document.createElement('a');
-                    link.href = window.URL.createObjectURL(data);
-                    link.download = `${rebuiltPartNum}_RebuiltParts_Estimate.xlsx`;
-                    link.click();
-
-                    // Set the subject with the rebuilt number and today's date
-                    var today = new Date();
-                    var subject = `Rebuilt Part Estimates for ${rebuiltPartNum} - Date ${today.toLocaleDateString()} ${today.toLocaleTimeString()}`;
-
-                    // Set the form values
-                    $("#to").val("");
-                    $("#subject").val(subject);
-                    $("#body").val(`Dear Sir/Madam,\nPlease find attached here with Rebuilt Part Estimate for ${rebuiltPartNum}.\n\nThank you`);
-
-                    // Open the Kendo Window
-                    var kendoWindow = $("#emailEstimateWindow").data("kendoWindow");
-                    if (kendoWindow) {
-                        kendoWindow.center().open();
-                    } else {
-                        console.error("Kendo Window not found.");
-                    }
-                },
-                error: function (xhr, status, error) {
-                    console.error("Error downloading Excel file:", error);
-                }
-            });
-        }
-
-        function onArchivedSaveToExcelClick(e) {
-            e.preventDefault();
-            var grid = $("#ArchivedRebuiltPartsGrid").data("kendoGrid");
-            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
-            var rebuiltPartNum = dataItem.RebuiltStockNum;
-
-            // Directly trigger the file download
-            window.location.href = '@Url.Action("SaveToExcel", "Export")' + '?rebuiltPartNum=' + rebuiltPartNum;
-        }
-    </script>
-    <script id="archived-template" type="text/x-kendo-template">
-        <div id="archived-detail-template-#=RebuiltStockNum#"></div>
-    </script>
-   <script>
-        // Event triggered before any CRUD operation (Read, Update, Destroy)
-        function onRequestStart(e) {
-            // Check if the request type is Update or Destroy
-            if (e.type === "update" || e.type === "destroy") {
-                var grid = $("#RebuiltPartsGrid").data("kendoGrid");
-                var selectedRow = grid.select(); // Get the selected row
-                var dataItem = grid.dataItem(selectedRow); // Get the data for the selected row
-
-                if (dataItem && dataItem.RebuiltStockNum) {
-                    // Append RebuiltStockNum to the request
-                    e.sender.transport.options.update.data = { RebuiltStockNum: dataItem.RebuiltStockNum };
-                    e.sender.transport.options.destroy.data = { RebuiltStockNum: dataItem.RebuiltStockNum };
-                }
-            }
-        }
-    </script>
-    <script>
-        function getAutoCompleteParams() {
-            var input = $("input[data-role='autocomplete']:focus");
-            return {
-                columnName: input.attr("name"),
-                searchText: input.val() || "" // Handle empty search text
-            };
-        }
-    </script>
-
+    }
 }
-VehicleSeriesEditor.cshtml :
+VehicleSeriesEditor.cs :
 @model List<int?> 
 
-@(Html.Kendo().MultiSelectFor(m => m)
+@(
+Html.Kendo().MultiSelectFor(m => m)
+    .HtmlAttributes(new { id = "ListOfBusIds" })
     .DataTextField("Description")
     .DataValueField("ListId")
     .Placeholder("Select vehicle series...")
