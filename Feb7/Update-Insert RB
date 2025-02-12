@@ -1,0 +1,141 @@
+You are ASP.NET core,  Telerik ASp.NET core, MS SQL expert.
+Based on the below Get function in the controller and model,pls write Update function.
+Add exception handling and trasaction. Assume db context is availabe (as in Get). Remember, RdubiltPartNumber can have access
+to multiple busid and busname. string_agg is just for telerik.
+Also if possible generate Create function as well
+
+[AllowAnonymous]       
+private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltPartsData() 
+{
+    try
+    {
+        var rebuiltPartsQuery = @"
+                                 SELECT rbm.RbMasterlistId,
+                                    rbm.[RebuiltStockNum],
+                                    rbm.[MmsStockCode],
+                                    rbm.[Keyword],
+                                    rbm.JobNumber,
+                                    rbm.[CorePartNum],
+                                    rbm.[DetailedDesc],
+                                    rbm.[CoreCharge],
+                                    rbm.[EstimatedCost],
+                                    rbm.[BuyNewCost],
+                                    rbm.[RemanCost],
+                                    rbm.[ExternalCost],
+                                        STRING_AGGCAST(lb.listid AS VARCHAR), ',') AS BusId,
+                                    STRING_AGG(lb.description, ',') AS BusName
+                                    FROM 
+                                        SBCES.RbMasterlist rbm
+                                    LEFT JOIN 
+                                        SBCES.RBLISTOFBUSES rbl ON rbm.RebuiltStockNum = rbl.RebuiltStockNum
+                                    LEFT JOIN 
+                                        SBCES.LISTOFBUSES lb ON rbl.listid = lb.listid
+                                        WHERE  rbl.listid is not null
+                                         GROUP BY
+                                         rbm.RbMasterlistId,
+                                        rbm.[RebuiltStockNum],
+                                        rbm.[MmsStockCode],
+                                        rbm.[Keyword],
+                                        rbm.JobNumber,
+                                        rbm.[CorePartNum],
+                                        rbm.[DetailedDesc],
+                                        rbm.[CoreCharge],
+                                        rbm.[EstimatedCost],
+                                        rbm.[BuyNewCost],
+                                        rbm.[RemanCost],
+                                        rbm.[ExternalCost]
+                                        
+                                 ";
+        
+
+        var buses = _dbConnection.Query<RebuiltPartsViewModel>(rebuiltPartsQuery).ToList();
+
+        // Parse SiteIdsString into SiteIds
+        foreach (var bus in buses)
+        {
+            bus.BusIds = string.IsNullOrEmpty(bus.BusId)
+                ? new List<int>()
+                : bus.BusId.Split(',').Select(int.Parse).ToList();
+
+            bus.BusNames = string.IsNullOrEmpty(bus.BusName)
+                ? new List<string>()
+                : bus.BusName.Split(',').ToList();
+
+            List<int> busIdList = bus.BusId.Split(',').Select(int.Parse).ToList();
+            List<string> busNameList = bus.BusName.Split(',').ToList();
+
+
+            var busModelList = busIdList.Zip(busNameList, (id, name) => new BusesModel
+            {
+                BusId = id,
+                BusName = name
+            }).ToList();
+            bus.Buses = busModelList;
+        }
+
+        return buses.Distinct().ToList();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error fetching rebuilt parts data: {ex.Message}");
+        return Enumerable.Empty<RebuiltPartsViewModel>();
+    }
+}
+[AllowAnonymous]
+private async Task UpdateRebuiltPartsAsync(RebuiltPartsViewModel rebuiltPartsViewModel)
+{
+    //TO DO --Add transaction and exception handlin
+  //  public List<BusesModel> Buses { get; set; } = new List<BusesModel>(); is puplated with the list which has id and description of buses
+}
+RebuiltPartsViewModel.cs :
+using BCES.Models.Admin;
+using BCES.Models.Common;
+
+namespace BCES.Models.Parts
+{
+    public class RebuiltPartsViewModel
+    {
+      public int RbMasterlistId {  get; set; }
+        public string MmsStockCode { get; set; }
+        public string DetailedDesc { get; set; }
+        public string Keyword { get; set; }
+        public string JobNumber { get; set; }
+        public string RebuiltStockNum { get; set; }
+        public string? CoreCharge { get; set; }
+        public string? CorePartNum { get; set; }
+
+       public string Qty {  get; set; }
+        public string Percentage { get; set; }
+
+
+        public string? TotalCost { get; set; }
+
+        public List<LabourDetailsRebuiltPartsViewModel> LabourDetailsRebuiltParts { get; set; } = [];
+
+        public List<BusesModel> Buses { get; set; } = new List<BusesModel>();
+       
+        public List<int> BusIds { get; set; } = new();// Parsed Site IDs
+        public List<string> BusNames { get; set; } = new();
+        public List<string> SelectedBuses { get; set; }
+        public string BusId { get; set; } // Comma-separated Site IDs from SQL
+        public string BusName { get; set; } // Comma-separated Site Names from SQL
+
+        public string Description { get; set; }              
+
+        public string LastModifiedBy { get; set; }
+        public string LastModifiedDate { get; set; }
+        public string SopNumber { get; set; }
+        public string? BuyNewCost { get; set; }
+        public string? RemanCost { get; set; }
+        public bool IsActive { get; set; }
+
+        public string? MaterialsTotal { get; set; }
+        public string? LabourTotal { get; set; }
+        public string? TotalRebuiltPartCost { get; set; }
+        public string? TotalCostTax { get; set; }
+        public string? EnteredBy { get; set; }
+        public string? DateEntered { get; set; } 
+
+
+    }
+}
