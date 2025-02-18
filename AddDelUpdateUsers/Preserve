@@ -1,0 +1,765 @@
+You are ASp.NET Core (v 8.0) and Telerik ASP.NET Core expert.
+In my application, I have a Telerik gird. Grid has columns which uses Telerik drop down and Telerik Multi select editor template.
+Grid has CRUD actions.
+When user clicks on Edit, drop down (RoleNameDropDown) and multi select selections(SiteCheckBoxGroup) are not defaultrd to "select" and previous selection
+values are not displayed.
+As a result, each time when user clicks on edit, he has to select Role and Site. This is not expected behaviour.
+Ideally, it should display the previoulsy selected values (comma selerated, in case f multi slect and string in case of drop down.
+
+How can I make sure the selected values are preserved and displayed?
+Index.cshtml :
+@model IEnumerable<BCES.Models.Admin.UserViewModel>
+
+@{
+    ViewData["Title"] = "User Management";
+        
+}
+ 
+
+<h4>User Management</h4>
+
+
+    @(
+        Html.Kendo().Grid<BCES.Models.Admin.UserViewModel>()
+        .Name("userGrid")
+        .Columns(columns =>
+        {
+            columns.Bound(u => u.UserADId).Title("User ID");
+            columns.Bound(u => u.UserName).Title("User Name");
+            columns.Bound(u => u.UserContactNo).Title("Phone Number");
+
+            columns.Bound(u => u.RoleName) // Display RoleName
+                .Title("Role Name")
+                .EditorTemplateName("RoleNameDropDown");
+
+            columns.Bound(u => u.SiteIds).Title("Site Name")
+            @* .ClientTemplate("#= Sites.map(site=>site.SiteName).join(' , ') #") *@
+            @* .ClientTemplate("#= Sites.map(site=>site.SiteName) #") *@
+            .ClientTemplate("# if (typeof Sites != 'undefined' && Sites && Sites.length > 0) { # #= Sites.map(site => site.SiteName).join(', ') # # } else { # Select Site # } #")
+             .EditorTemplateName("SiteCheckBoxGroup");
+
+            columns.Command(command =>
+            {
+                    command.Edit();
+                    command.Destroy();
+                }).Title("Actions");
+        })
+                .ToolBar(toolbar => toolbar.Create())
+                .Editable(editable => editable.Mode(GridEditMode.InLine))
+                .Pageable()
+                .Sortable()
+                .Scrollable()
+                
+                .DataSource(dataSource => dataSource
+                    .Ajax()
+                   .Events(events =>
+                    {
+                        events.RequestEnd("onRequestEnd"); //I've added this
+                    })
+                    .Read(read => read.Url(Url.Action("ReadUsers", "UserManagementGrid")).Type(HttpVerbs.Get))
+                        .Create(create => create.Url(Url.Action("AddUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+                        .Update(update => update.Url(Url.Action("UpdateUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+                        .Destroy(delete => delete.Url(Url.Action("DeleteUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+                    
+                   
+                    .Model(model =>
+                    {
+                        model.Id(u => u.UserID);
+                        model.Field(u => u.UserName).Editable(true);
+                        model.Field(u => u.RoleId).DefaultValue(0); 
+                        model.Field(u => u.RoleName);
+                        
+                        model.Field(u => u.SiteIds).DefaultValue(new List<int>());
+                    model.Field(u => u.SiteNames).DefaultValue(new List<string>());
+
+        })
+        
+    )
+)
+<input type="hidden" name="SelectedSites" id="SelectedSitesHidden" value="" />
+@section Scripts {
+    <script>
+         
+        //sites       
+
+        function onSiteChange(e) {
+           // debugger;
+            console.log("event: sitechange");
+            var selectedSites = this.value();
+            console.log("selected sites :");
+            console.log(selectedSites);
+            // '<%Session["SelectedSites"] = "' + selectedSites + '"; %>';
+
+            // // Set the hidden field's value to the selected site IDs as a comma-separated string
+            // $("#SelectedSitesHidden").val(selectedSites.join(","));
+            // console.log("Hidden var :");
+            // console.log(SelectedSitesHidden);
+
+            ////
+            $.ajax({
+                url: '@Url.Action("GetSelectedSites", "UserManagementGrid")',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ sites: selectedSites }),
+                beforeSend: function (xhr) {
+                    console.log("Sending data :", JSON.stringify({ sites: selectedSites }));
+                },
+                success: function (data) {
+                    console.log('Success:', data);
+                    // Optionally, update the UI with the response
+                },
+
+                error: function (error, data) {
+                    console.log('datasent : ', data);
+                    console.error('Error:', error);
+                }
+            });
+            ////
+        }
+
+        // function addHiddenFieldData() {
+        //     console.log("addHiddenFieldData : SelectedSites = ");
+        //     var selectedSites = document.getElementById("SelectedSitesHidden").value;
+        //     console.log(selectedSites);
+        //     sessionStorage.setItem('SelectedSites', selectedSites);
+        //     '<%Session["SelectedSites"] = "' + selectedSites + '"; %>';
+
+        //     ////
+        //     return {
+        //         SelectedSites: selectedSites                    
+        //     }
+        // }
+
+        function onSiteDataBound() {
+            console.log("event: sitedataBound");
+           
+
+        }
+
+
+        function onRoleChange(e) {
+            var selectedRoleId = this.value();
+            var selectedRoleName = this.text();
+
+            var grid = $("#userGrid").data("kendoGrid");
+            var currentModel = grid.dataItem($(e.sender.element).closest("tr"));
+            currentModel.set("RoleId", selectedRoleId);
+            currentModel.set("RoleName", selectedRoleName);
+        }
+
+        
+
+        
+        function errorHandler(e) {
+            if (e.errors) {
+                var message = "Errors:\n";
+                $.each(e.errors, function (key, value) {
+                    if ('errors' in value) {
+                        $.each(value.errors, function () {
+                            message += this + "\n";
+                        });
+                    }
+                });
+                alert(message);
+            }
+        }
+    </script>
+    <script>
+        function onRequestEnd(e) {
+           if (e.type == "create") {
+                var notification = $("#notification").data("kendoNotification");
+                //notification.show("Inside onRequestEnd.....................", "info");
+                $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+            }
+            if (e.type == "update") {
+                var notification = $("#notification").data("kendoNotification");
+                //notification.show("Inside onRequestEnd.....................", "info");
+                $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+            }
+        }
+    </script>
+}
+Editor/SiteCheckBoxGroup.cshtml :
+@model IEnumerable<BCES.Models.Admin.SiteModel>
+
+@(
+Html.Kendo().MultiSelect()
+            .Name("multiselect")
+            .Placeholder("Select Site..")
+            .DownArrow(true)
+            .NoDataTemplateId("noDataTemplate")
+            .DataTextField("SiteName")
+            .DataValueField("SiteId")           
+            .Filter("contains")
+            .BindTo(Model)
+            .AutoBind(true)             
+            .Value("SiteId") // Prepopulate with selected SiteIds
+            .DataSource(source =>
+            {
+               source.Read(read => read.Url(Url.Action("ReadSites", "UserManagementGrid")).Type(HttpVerbs.Get));
+                             
+            })
+            .Events(e =>
+                {
+                    e.Change("onSiteChange").DataBound("onSiteDataBound");
+                })
+        )
+Editor/RoleNameDropDown.cshtml :
+@model int
+
+@(Html.Kendo().DropDownList()
+    .Name("RoleId")
+    .DataTextField("RoleName")
+    .DataValueField("RoleId")
+    .BindTo((IEnumerable<BCES.Models.Admin.RoleModel>)ViewData["Roles"])
+    .OptionLabel("Select Role")
+    .Events(e => e.Change("onRoleChange"))
+)
+UserViewModel.cs :
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.UI;
+using System.Collections.Generic;
+//using System.Web.Mvc;
+
+namespace BCES.Models.Admin
+{
+    public class UserViewModel 
+    {
+            public int UserID { get; set; }
+
+            [Required]
+            public string UserADId { get; set; }
+            [Required]
+            public string UserName { get; set; }
+            public string? UserEmail { get; set; }
+            public string? UserContactNo { get; set; }
+            public string? Location { get; set; }
+            public int  RoleId { get; set; }
+          
+            public string RoleName { get; set; }
+            public List<SiteModel> Sites { get; set; } = new List<SiteModel>();
+            public List<string> SelectedSites { get; set; }
+            /////
+            public string SiteId { get; set; } // Comma-separated Site IDs from SQL
+            public string SiteName { get; set; } // Comma-separated Site Names from SQL
+
+            public List<int> SiteIds { get; set; } = new();// Parsed Site IDs
+            public List<string> SiteNames { get; set; } = new();// Parsed Site Names
+
+    }
+}
+UserManagementGridController.cs :
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System.Data;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
+using DataSourceRequest = Kendo.Mvc.UI.DataSourceRequest;
+using BCES.Data;
+using BCES.Controllers.Base;
+using HttpGetAttribute = Microsoft.AspNetCore.Mvc.HttpGetAttribute;
+using HttpPostAttribute = Microsoft.AspNetCore.Mvc.HttpPostAttribute;
+using Microsoft.AspNetCore.Authorization;
+
+namespace BCES.Controllers.Admin
+{
+
+    public class UserManagementGridController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private static List<string> _selectedSites = new List<string>();
+
+
+        public UserManagementGridController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        #region Index Action
+
+        // Index action to return the main view and load roles
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<IActionResult> Index()
+        {
+            try
+            {
+
+                //role
+                var roles = await GetRoles();
+                ViewData["Roles"] = roles;
+
+                ////sites 
+                var sites = await GetSites();
+                ViewData["Sites"] = sites;
+
+
+                // Fetch users and sites
+                var users = await GetUsers();
+
+                return View("~/Views/Admin/Index.cshtml"); // Return the main grid view
+            }
+            catch (Exception ex)
+            {
+                // Log the exception if necessary
+                return BadRequest("Error loading roles or sites.");
+            }
+        }
+        #endregion
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<IActionResult> ReadUsers([DataSourceRequest] DataSourceRequest request)
+        {
+            try
+            {
+
+                var users = await GetUsers();
+                return Json(users.ToDataSourceResult(request));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while fetching users.");
+            }
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> AddUser([DataSourceRequest] DataSourceRequest request, UserViewModel userViewModel)
+        {
+            try
+            {
+
+                if (userViewModel.RoleId <= 0)
+                {
+                    ModelState.AddModelError("RoleId", "Please select a valid role.");
+                    return Json(new[] { userViewModel }.ToDataSourceResult(request, ModelState));
+                }
+                var sites = _selectedSites;
+                userViewModel.SelectedSites = _selectedSites;
+
+                //names for display
+                string selectedSiteIds = string.Join(",", _selectedSites);
+                //update model
+                userViewModel.SiteId = selectedSiteIds;
+
+               //convert to it to pass to query
+                var siteIds = sites.Select(int.Parse).ToList();
+                //list of all the SiteNames for binding
+                string selectedSiteNames = GetUserSelectedSiteNames(siteIds);
+                //update model for binding
+                userViewModel.SiteName = selectedSiteNames;
+
+                //site related
+                // Split the comma-separated strings into lists
+                var siteIdsList = _selectedSites;
+                var siteNamesList = selectedSiteNames.Split(',').ToList();
+                var updatedUserView = UserManagementGridController.UpdateSiteInModel(userViewModel, siteIdsList, siteNamesList);
+
+
+                var userId = await AddUserAsync(userViewModel);              
+
+
+                // return Json(new[] { user }.ToDataSourceResult(request, ModelState));
+                return RedirectToAction("Index");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while adding the user.");
+            }
+        }
+              
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> UpdateUser([DataSourceRequest] DataSourceRequest request,  UserViewModel userViewModel)
+        {                       
+            try
+            {
+               
+                if (userViewModel != null) // && ModelState.IsValid)
+                {
+                   
+                    userViewModel.SelectedSites = _selectedSites;
+                    // convert to it to pass to query
+                    var siteIds = _selectedSites.Select(int.Parse).ToList();
+
+                    //list of all the SiteNames for binding
+                    string selectedSiteNames = GetUserSelectedSiteNames(siteIds);
+                    //update model for binding
+                    userViewModel.SiteName = selectedSiteNames;
+
+                    //Update SiteModel
+                    // Split the comma-separated strings into lists
+                    var siteIdsList = _selectedSites;
+                    var siteNamesList = selectedSiteNames.Split(',').ToList();
+                    var updatedUserView = UserManagementGridController.UpdateSiteInModel(userViewModel, siteIdsList, siteNamesList);
+
+                    await UpdateUserAsync(userViewModel);
+                }
+
+                return RedirectToAction("Index");
+               // return Json(new[] { userViewModel }.ToDataSourceResult(request, ModelState));
+               
+                
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while updating the user.");
+            }
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> DeleteUser([DataSourceRequest] DataSourceRequest request, UserViewModel userViewModel)
+        {
+            try
+            {
+
+                if (userViewModel != null)
+                {
+                    await DeleteUserAsync(userViewModel.UserID);
+                }
+
+                return Json(new[] { userViewModel }.ToDataSourceResult(request, ModelState));
+                
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while deleting the user.");
+            }
+        }
+
+        [AllowAnonymous]
+        private async Task<IEnumerable<UserViewModel>> GetUsers()
+        {
+            try
+            {
+                const string query = @"SELECT u.UserId, u.UserName, u.userADId, u.RoleId, r.RoleName,
+                                     STRING_AGG(CAST(us.SiteId AS VARCHAR), ',') AS SiteId,
+                                     STRING_AGG(s.SiteName, ',') AS SiteName
+                                      FROM SBCES.[Users] u
+                                      INNER JOIN SBCES.[Roles] r ON u.RoleId = r.RoleId
+                                      LEFT JOIN SBCES.UserSites us ON u.UserId = us.UserId
+                                      LEFT JOIN SBCES.Sites s ON us.SiteId = s.SiteId
+                                      GROUP BY u.userADId, u.UserId, u.UserName, u.RoleId, r.RoleName";
+
+                var users =  _dbConnection.Query<UserViewModel>(query).ToList();
+
+                // Parse SiteIdsString into SiteIds
+                foreach (var user in users)
+                {
+                    user.SiteIds = string.IsNullOrEmpty(user.SiteId)
+                        ? new List<int>()
+                        : user.SiteId.Split(',').Select(int.Parse).ToList();
+
+                    user.SiteNames = string.IsNullOrEmpty(user.SiteName)
+                        ? new List<string>()
+                        : user.SiteName.Split(',').ToList();
+
+                    List<int> siteIdList = user.SiteId.Split(',').Select(int.Parse).ToList();
+                    List<string> siteNameList = user.SiteName.Split(',').ToList();
+                    
+                   
+                    var siteModelList = siteIdList.Zip(siteNameList, (id, name) => new SiteModel
+                    {
+                        SiteId = id,
+                        SiteName = name
+                    }).ToList();
+                    user.Sites = siteModelList;                  
+
+                }     
+
+                return users.Distinct().ToList();
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+
+        [AllowAnonymous]
+        private async Task<int> AddUserAsync(UserViewModel userViewModel)
+        {
+            
+            // Start a transaction
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Insert into Users table
+                    var insertUserQuery = @"
+                                            INSERT INTO SBCES.Users (UserADId, UserName, RoleId)
+                                            VALUES (@UserADId, @UserName,  @RoleId);
+                                            SELECT CAST(SCOPE_IDENTITY() as int);";
+
+                    var userId = await _dbConnection.QuerySingleAsync<int>(insertUserQuery, new
+                    {
+                        UserName = userViewModel.UserName,
+                        UserADId = userViewModel.UserADId, 
+                        RoleId = userViewModel.RoleId,
+                    }, transaction);
+
+                    // Insert into UserSites table
+                    var insertUserSitesQuery = @"
+                                                INSERT INTO SBCES.UserSites (UserId, SiteId)
+                                                VALUES (@UserId, @SiteId);";
+
+                    foreach (var site in userViewModel.Sites)
+                    {
+                        await _dbConnection.ExecuteAsync(insertUserSitesQuery, new
+                        {
+                            UserId = userId,
+                            SiteId = site.SiteId
+                        }, transaction);
+                    }
+
+                    // Commit the transaction
+                    transaction.Commit();
+
+                    return userId;
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of any error
+                    transaction.Rollback();
+                    // Handle or log the exception
+                    throw new Exception("Failed to add user.", ex);
+                }
+            }
+        }
+        [AllowAnonymous]
+        private async Task UpdateUserAsync(UserViewModel userViewModel)
+        {
+            // Start a transaction
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Update the user's role in the Users table
+                    var updateUserQuery = @"
+                                            UPDATE SBCES.Users
+                                             SET RoleId =" +  userViewModel.RoleId +
+                                            "  ,UserName = '" + userViewModel.UserName + "'" +
+                                            " ,UserADId ='" + userViewModel.UserADId + "'" +
+                                            " WHERE UserId =" + userViewModel.UserID;
+                                        
+
+                    await _dbConnection.ExecuteAsync(updateUserQuery, new { RoleId = userViewModel.RoleId, UserADId = userViewModel.UserADId, UserName = userViewModel.UserName }, transaction);
+
+                    // Fetch the UserId for the given UserName
+                    var userIdQuery = @"
+                                        SELECT UserId
+                                        FROM SBCES.Users
+                                        WHERE UserId ="  + userViewModel.UserID;
+                    
+
+                    var fetchedUserId = await _dbConnection.QuerySingleOrDefaultAsync<int>(userIdQuery, new { UserId = userViewModel.UserID }, transaction);
+
+                    if (fetchedUserId == 0)
+                    {
+                        throw new Exception("User not found.");
+                    }
+
+                    // Delete existing UserSites entries for the user
+                    var deleteUserSitesQuery = @"
+                                                DELETE FROM SBCES.UserSites
+                                                WHERE UserId =" + userViewModel.UserID;
+
+                    await _dbConnection.ExecuteAsync(deleteUserSitesQuery, new { UserId = userViewModel.UserID }, transaction);
+
+                    // Insert new UserSites entries
+                    var insertUserSitesQuery = @"
+                                                INSERT INTO SBCES.UserSites (UserId, SiteId)
+                                                VALUES (@UserId, @SiteId);
+                                            ";
+
+                    foreach (var site in userViewModel.Sites)
+                    {
+                        await _dbConnection.ExecuteAsync(insertUserSitesQuery, new { UserId = userViewModel.UserID, SiteId = site.SiteId }, transaction);
+                    }
+
+                    // Commit the transaction
+                    transaction.Commit();
+
+                   // return userId;
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of any error
+                    transaction.Rollback();
+
+                    // Log the exception (consider using a logging framework)
+                    Console.WriteLine($"Error updating user: {ex.Message}");
+
+                    // Rethrow the exception to propagate it to the caller
+                    throw;
+                }
+            }
+        }
+
+        [AllowAnonymous]
+        private async Task DeleteUserAsync(int userId)
+        {
+           
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Delete from UserSites table
+                    var deleteUserSitesQuery = @"
+                                                DELETE FROM SBCES.UserSites
+                                                WHERE UserId = @UserId;";
+
+                    await _dbConnection.ExecuteAsync(deleteUserSitesQuery, new
+                    {
+                        UserId = userId
+                    }, transaction);
+
+                    // Delete from Users table
+                    var deleteUserQuery = @"
+                                            DELETE FROM SBCES.Users
+                                            WHERE UserId = @UserId;";
+
+                    await _dbConnection.ExecuteAsync(deleteUserQuery, new
+                    {
+                        UserId = userId
+                    }, transaction);
+
+                    // Commit the transaction
+                    transaction.Commit();
+
+                   // return true;
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of any error
+                    transaction.Rollback();
+                    // Handle or log the exception
+                    throw new Exception("Failed to delete user.", ex);
+                }
+            }
+        }
+
+        [AllowAnonymous]
+        private async Task<IEnumerable<RoleModel>> GetRoles()
+        {
+            var query = "SELECT RoleId, RoleName FROM SBCES.Roles";
+            return await _dbConnection.QueryAsync<RoleModel>(query);
+        }
+
+
+        //site related 
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetSelectedSites([FromBody] dynamic data)
+        {
+            var sites = data?.sites?.ToObject<List<string>>() ?? Enumerable.Empty<string>();
+            _selectedSites = sites;
+            var viewModel = new UserViewModel { SelectedSites = sites };
+            return Json(viewModel);
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<IActionResult> ReadSites([DataSourceRequest] DataSourceRequest request)
+        {
+            var sites = await GetSites(); 
+            return Json(sites);
+        }
+
+        [AllowAnonymous]
+        private async Task<IEnumerable<SiteModel>> GetSites()
+        {
+            var query = "SELECT SiteId, SiteName FROM SBCES.Sites";
+            var sites = await _dbConnection.QueryAsync<SiteModel>(query);
+            return sites.ToList();
+
+        }
+
+        [AllowAnonymous]
+        private string GetUserSelectedSiteNames(List<int> selectedSiteIds)
+        {
+            // Ensure the list of selected site IDs is not empty
+            if (selectedSiteIds == null || !selectedSiteIds.Any())
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                // Create the SQL query with placeholders for the site IDs
+                var query = "SELECT SiteName FROM SBCES.Sites WHERE SiteId IN @SelectedSiteIds";
+
+                // Execute the query using Dapper
+                var siteNames =  _dbConnection.Query<string>(query, new { SelectedSiteIds = selectedSiteIds });
+
+                // Concatenate the site names into a single string
+                return string.Join(", ", siteNames);
+            }
+            catch (Exception ex)
+            {
+                // Log the exception 
+                Console.WriteLine($"An error occurred: {ex.Message}");
+
+                // Rethrow the exception or return a default value
+                throw; // or return string.Empty;
+            }
+        }
+        // Function to update the Sites list based on selectedSiteIds and selectedSiteNames
+        [AllowAnonymous]
+        public static UserViewModel UpdateSiteInModel(UserViewModel userView, List<string> selectedSiteIds, List<string> selectedSiteNames)
+        {
+            // Clear the existing Sites list to avoid duplicates
+            userView.Sites.Clear();
+
+            // Iterate through the selectedSiteIds and selectedSiteNames
+            for (int i = 0; i < selectedSiteIds.Count; i++)
+            {
+                try
+                {
+                    // Parse the SiteId from string to int
+                    if (int.TryParse(selectedSiteIds[i], out int siteId))
+                    {
+                        // Create a new SiteModel instance
+                        var site = new SiteModel
+                        {
+                            SiteId = siteId,
+                            SiteName = selectedSiteNames[i]
+                        };
+
+                        // Add the new SiteModel to the Sites list
+                        userView.Sites.Add(site);
+                    }
+                    else
+                    {
+                        // Handle the case where the SiteId cannot be parsed
+                        throw new FormatException($"Invalid SiteId format: {selectedSiteIds[i]}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Log the exception or handle it as needed
+                    Console.WriteLine($"Error updating site: {ex.Message}");
+                }
+            }
+
+            // Return the updated UserViewModel
+            return userView;
+        }
+
+    }
+}
