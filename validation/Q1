@@ -3,6 +3,7 @@ Example I need to call validation for specefic columns say for supplier number a
 If you are implementing new post api, it will be saved in Controller/Common directory.
 Pls suggest the changes. I prefer serverside logic.
 Pls note these columns are also calling Autocomplete API.
+If possible try to use AutocompleteEditor for this checks.
 Index.cshtml :
 
 @model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
@@ -123,6 +124,312 @@ Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
        
   }
 
-         
+AutoCompleteEditor.cshtml :
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().AutoComplete()
+    .Name(fieldName)
+    .DataTextField("Text") // Changed from "this" to "Text"
+    .Filter("contains")
+    .Placeholder("Type to search...")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-role", "autocomplete" }
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getAutoCompleteParams");
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #") // Explicit template to display data
+)
+AutoCompleteController.cs :
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+
+
+namespace BCES.Controllers.Common
+{
+    public class AutoCompleteController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public AutoCompleteController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet]
+        public IActionResult GetAutoCompleteData(string columnName, string searchText)
+        {
+            // 1. Validate parameters
+            if (string.IsNullOrEmpty(columnName))
+                return BadRequest("Column name is required.");
+
+            // 2. Column whitelist
+            var columnMappings = new Dictionary<string, (string SqlColumn, string Table)>
+            {
+                //Admin Labour Tasks
+                { "TaskDescription", ("TaskDescription", "[SBCES].[LabourTaskDescriptions]") },
+                //NSC Parts 
+                { "OrigSuppNum", ("OrigSupplierNum", "[SBCES].[NonStockCodedParts]") },
+                { "OrigSupplierName", ("OrigSupplierName", "[SBCES].[NonStockCodedParts]") },
+                { "Description", ("DetailedDesc", "[SBCES].[NonStockCodedParts]") },
+                { "KeyWord", ("KeyWord", "[SBCES].[NonStockCodedParts]") },
+                //RB Parts
+                { "DetailedDesc", ("DetailedDesc", "[SBCES].[RbMasterlist]") },
+                { "LabourDefn", ("LABOURDEFN", "[SBCES].[EMPLCLASS]") },
+                { "CC", ("COSTCENTRE", "[SBCES].[COSTCENTRES]") },
+                { "CostCentre", ("COSTCENTRE", "[SBCES].[COSTCENTRES]") },
+                { "Task", ("TaskDescription", "[SBCES].[LabourTaskDescriptions]") },
+               
+
+                //{ "KeyWord", ("KeyWord", "[SBCES].[RbMasterlist]") }
+            };
+
+            if (!columnMappings.TryGetValue(columnName, out var mapping))
+                return BadRequest("Invalid column name.");
+
+            // 3. Parameterized query
+            using (var connection = _dbConnection)
+            {
+                var sql = $@"
+            SELECT DISTINCT {mapping.SqlColumn} AS Text
+            FROM {mapping.Table} 
+            WHERE {mapping.SqlColumn} LIKE @SearchText + '%'";
+
+                var results = connection.Query<string>(sql, new { SearchText = searchText ?? "" });
+
+                // Wrap results in objects with "Text" property
+                var data = results.Select(x => new { Text = x }).ToList();
+                return Json(data);
+            }
+
+        }
+
+
+
+    }
+
+}
+
+NSCPartsUsedController.cs :
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
+using DataSourceRequest = Kendo.Mvc.UI.DataSourceRequest;
+using BCES.Data;
+using Telerik.SvgIcons;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using BCES.Controllers.Base;
+using BCES.Models.Parts;
+using BCES.Models.Common;
+using Newtonsoft.Json.Linq;
+using static System.Net.Mime.MediaTypeNames;
+using Microsoft.AspNetCore.Authorization;
+
+namespace BCES.Controllers.Parts
+{
+
+    //[Route("NscPartsUsed")]
+    public class NscPartsUsedController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public NscPartsUsedController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+        // GET: NscPartsUsed/Index
+        [HttpGet("NscPartsUsedIndex")]
+        [AllowAnonymous]
+        public IActionResult NscPartsUsedIndex()
+        {
+          // return View();
+           return View("~/Views/Parts/NonStockCodedParts/Index.cshtml");
+        }
+
+        // POST: NscPartsUsed/GetNscPartsUsedView
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<ActionResult> GetNscPartsUsedView([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid
+            var model = await GetNscPartsUsedData();
+            return Json(model.ToDataSourceResult(request));
+        }
+
+        // POST: NscPartsUsed/CreateNscPartsUsed
+       [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> CreateNscPartsUsed([DataSourceRequest] DataSourceRequest request, [FromForm] NscPartsUsedViewModel nscPartsUsed)
+        {
+            //if (!ModelState.IsValid)
+            //{
+            //    return BadRequest(new
+            //    {
+            //        message = "Invalid data submitted",
+            //        errors = ModelState.Values
+            //            .SelectMany(v => v.Errors)
+            //            .Select(e => e.ErrorMessage)
+            //    });
+            //}
+
+            try
+            {
+                var insertQuery = String.Format(@"
+                INSERT INTO SBCES.NonStockCodedParts (OrigSupplierNum, OrigSupplierName,OemPartCost, DetailedDesc, Keyword, LastModifiedDate)
+                VALUES ('{0}', '{1}', {2}, '{3}', '{4}', '{5}')",
+                    nscPartsUsed.OrigSuppNum,
+                                  nscPartsUsed.OrigSupplierName,
+                                  nscPartsUsed.OemPartCost,
+                                  nscPartsUsed.Description,
+                                   nscPartsUsed.KeyWord,
+                                   DateTime.Now  
+                     );
+
+                
+                await _dbConnection.ExecuteAsync(insertQuery, nscPartsUsed);
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while updating the Non Stock Coded Part.");
+            }
+            
+        }
+
+        
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> UpdateNscPartsUsed([DataSourceRequest] DataSourceRequest request, [FromForm] NscPartsUsedViewModel nscPartsUsed)
+        {
+            try
+            {
+                //if (!ModelState.IsValid)
+                //{
+                //    return BadRequest(ModelState);
+                //}
+               
+                string updateQuery = string.Format(@" UPDATE SBCES.NonStockCodedParts 
+                   SET   
+                    OrigSupplierNum = '{0}', 
+                    OrigSupplierName = '{1}',
+                    OemPartCost= {2},
+                    DetailedDesc =  '{3}',
+                    Keyword = '{4}'
+                    
+                WHERE 
+                    Id = {5}", nscPartsUsed.OrigSuppNum, 
+                              nscPartsUsed.OrigSupplierName, 
+                              nscPartsUsed.OemPartCost,  
+                              nscPartsUsed.Description, 
+                              @nscPartsUsed.KeyWord, 
+                              nscPartsUsed.NscPartsUsedId
+                              );
+                
+               
+
+                await _dbConnection.ExecuteAsync(updateQuery, nscPartsUsed);
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while updating the Non Stock Coded Part.");
+            }
+            
+        }
+
+        // DELETE: NscPartsUsed/DeleteNscPartsUsed/{id}
+      //  [HttpDelete("{id}")]
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> DeleteNscPartsUsed([DataSourceRequest] DataSourceRequest request, NscPartsUsedViewModel nscPartsUsed)
+        {
+            try
+            {
+                var deleteQuery = String.Format(@"
+                DELETE FROM SCES.NscPartsUsed
+                WHERE NscPartsUsedId  = {0}", nscPartsUsed.NscPartsUsedId);
+
+
+                await _dbConnection.ExecuteAsync(deleteQuery, nscPartsUsed);
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while deleting the Non Stock Coded Part.");
+            }
+           
+        }
+
+        private async Task<IEnumerable<NscPartsUsedViewModel>> GetNscPartsUsedData()
+        {
+            try
+            {
+                var query = @"
+                SELECT 
+                    nspu.Id as NscPartsUsedId,
+                    nspu.OrigSupplierNum as OrigSuppNum,
+                    nspu.OrigSupplierName,
+                    nspu.OemPartCost,                   
+                    nspu.DetailedDesc as Description,
+                    nspu.Keyword
+                FROM 
+                    SBCES.NonStockCodedParts nspu;";
+
+
+                return await _dbConnection.QueryAsync<NscPartsUsedViewModel>(query);
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+            
+        }
+
+    }
+}
+
 
         
