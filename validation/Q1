@@ -1,1 +1,128 @@
 You are asp.net  8.0 and Telerik ASp.net core UI expert. My application uses Telerik ASp.NET core grid, and uses inline edit. I need to restrict user to enter any special characters like (*&^%@!"'?/,:;{]{+=)(^%/) in a few of the columns.Suggest best practise  to implement  this (may be client template or global JS)? User should be notified immidialtly when these specail characters are entered (hopeffuuly not when user clicks on any botton. AJAX.
+Example I need to call validation for specefic columns say for supplier number and supplier namebelow.
+If you are implementing new post api, it will be saved in Controller/Common directory.
+Pls suggest the changes. I prefer serverside logic.
+Pls note these columns are also calling Autocomplete API.
+Index.cshtml :
+
+@model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+
+@{
+    ViewData["Title"] = "Non Stock Coded Parts";
+}
+
+ <h4>Non Stock Coded Parts</h4>
+
+@(
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+                                .Name("NscPartsUsedGrid")
+                                .Columns(columns =>
+                            {
+                                columns.Bound(p => p.NscPartsUsedId).Title("Part Id").Hidden(true); 
+                                columns.Bound(p => p.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor").HtmlAttributes(new { data_validate_special_chars = "true" });
+                                columns.Bound(p => p.OrigSupplierName).Title("Supplier Name").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+                                columns.Bound(p => p.KeyWord).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+                                columns.Bound(p => p.Description).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+                                columns.Bound(p => p.OemPartCost).Title("OEM Part Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+                                columns.Command(command => {
+                                if(@ViewBag.RoleId == 1) {
+                                        command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+                                }
+                                if(@ViewBag.RoleId == 1) {
+                               
+                                        command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Edit button with tooltip
+                                }
+                                }).Width(200);
+                            })
+                    .ToolBar(toolbar =>
+                    {
+                        if (@ViewBag.RoleId == 1)
+                        {
+                            toolbar.Create();
+                        }
+                    })
+                .Editable(editable => editable.Mode(GridEditMode.InLine).TemplateName("NscPartsAddUpdate"))
+                
+                .Pageable()
+                .Sortable()
+                .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+                .DataSource(dataSource => dataSource
+                    .Ajax()
+                    .Events(events => events
+                    .Error("onDataSourceError")
+                    .RequestEnd("onRequestEnd")
+                     )
+                    .Model(model =>
+                    {
+                        model.Id(u => u.NscPartsUsedId);
+                        model.Field(c => c.NscPartsUsedId);
+                                                                       
+                    })
+                   
+                    .Read(read => read.Url(Url.Action("GetNscPartsUsedView", "NscPartsUsed")).Type(HttpVerbs.Get))
+                    .Create(create => create.Url(Url.Action("CreateNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+                    .Update(update => update.Url(Url.Action("UpdateNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+                    .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+                        
+                   )
+                
+            )
+<div id="notification"></div>
+  @section Scripts {
+    <script>
+        function getAutoCompleteParams() {
+            var input = $("input[data-role='autocomplete']:focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || "" // Handle empty search text
+            };
+        }
+    </script>
+    
+        @* notification - add following JS, add div, add in grid .Error("onDataSourceError"),  .RequestEnd("onRequestEnd"), change contoller action to return json *@
+     <script>
+            // Initialize notification FIRST
+            var notification = $("#notification").kendoNotification({
+                position: {
+                pinned: true,
+            top: 50,
+            right: 30
+                    },
+            autoHideAfter: 4000,
+            stacking: "down"
+                }).data("kendoNotification");
+
+            // Error handler
+            function onDataSourceError(e) {
+                let errorMessage = "Operation failed: ";
+
+            if (e.errorThrown) {
+                errorMessage += e.errorThrown;
+                    } else if (e.xhr && e.xhr.responseText) {
+                errorMessage += e.xhr.responseText;
+                    }
+
+            notification.error(errorMessage);
+                }
+
+            // Success handler
+            function onRequestEnd(e) {
+                    if (e.type === "create") {
+                notification.success("Record created successfully");
+                    } else if (e.type === "update") {
+                notification.success("Record updated successfully");
+                    } else if (e.type === "destroy") {
+                notification.success("Record deleted successfully");
+                    }
+                }
+    </script>
+
+
+     
+
+       
+  }
+
+         
+
+        
