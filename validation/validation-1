@@ -1,0 +1,113 @@
+🔹 Full Implementation with Kendo Notification
+📌 1️⃣ Add Kendo Notification in _Layout.cshtml
+Modify _Layout.cshtml to include the Kendo Notification widget and JavaScript.
+
+File: Views/Shared/_Layout.cshtml
+Place this inside the <body> tag before </body>.
+
+html
+Copy
+Edit
+<!-- Kendo Notification Widget -->
+<div id="notification"></div>
+
+<script>
+    $(document).ready(function () {
+        // Initialize Kendo Notification
+        var notification = $("#notification").kendoNotification({
+            position: { top: 20, right: 20 }, // Position at top-right
+            stacking: "down",
+            autoHideAfter: 3000, // Message disappears after 3 seconds
+            templates: [{
+                type: "error",
+                template: "<div class='k-notification-error'>#: message #</div>"
+            }]
+        }).data("kendoNotification");
+
+        // Attach validation only for fields marked with data attribute
+        $(document).on("focus", ".k-grid-edit-row input", function () {
+            var input = $(this);
+            var fieldName = input.attr("name");
+
+            if (input.data("validate-special-chars")) {
+                validateSpecialCharsAJAX(input, notification);
+            }
+        });
+    });
+
+    function validateSpecialCharsAJAX(input, notification) {
+        input.on("input", function () {
+            var value = $(this).val();
+
+            $.ajax({
+                url: "/Common/Validation/CheckSpecialChars", // Adjusted API path
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ value: value }),
+                success: function (response) {
+                    if (!response.isValid) {
+                        notification.show("Special characters are not allowed!", "error");
+                    }
+                },
+                error: function () {
+                    console.error("Error in validation API.");
+                }
+            });
+        });
+    }
+</script>
+</body>
+</html>
+📌 2️⃣ Modify Your View (Index.cshtml)
+Now, only mark fields needing validation using .HtmlAttributes(). This ensures the API is only called for relevant fields.
+
+File: Views/Home/Index.cshtml
+csharp
+Copy
+Edit
+@model IEnumerable<MyModel>
+
+@(Html.Kendo().Grid<MyModel>()
+    .Name("Grid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.Name)
+               .HtmlAttributes(new { data_validate_special_chars = "true" }); // Mark for validation
+
+        columns.Bound(c => c.Description); // No validation needed here
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InLine)) // Enable inline editing
+    .Pageable()
+    .Sortable()
+)
+📌 3️⃣ Update API Controller Path
+Since your controllers are inside the /Common/ directory, modify the API route accordingly.
+
+File: Controllers/Common/ValidationController.cs
+csharp
+Copy
+Edit
+using Microsoft.AspNetCore.Mvc;
+using System.Text.RegularExpressions;
+
+[Route("Common/Validation")]
+[ApiController]
+public class ValidationController : ControllerBase
+{
+    [HttpPost("CheckSpecialChars")]
+    public IActionResult CheckSpecialChars([FromBody] ValidationRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Value))
+            return Ok(new { isValid = true });
+
+        // Regex to detect special characters
+        bool hasSpecialChars = Regex.IsMatch(request.Value, @"[^a-zA-Z0-9\s]");
+
+        return Ok(new { isValid = !hasSpecialChars });
+    }
+}
+
+public class ValidationRequest
+{
+    public string Value { get; set; }
+}
