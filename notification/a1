@@ -1,0 +1,110 @@
+@model IEnumerable<BCES.Models.Admin.UserViewModel>
+
+@{
+    ViewData["Title"] = "User Management";
+}
+
+<h4>User Management</h4>
+
+@(
+    Html.Kendo().Grid<BCES.Models.Admin.UserViewModel>()
+    .Name("userGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(u => u.UserADId).Title("User ID");
+        columns.Bound(u => u.UserName).Title("User Name");
+        columns.Bound(u => u.UserContactNo).Title("Phone Number");
+
+        columns.Bound(u => u.RoleName) // Display RoleName
+            .Title("Role Name")
+            .EditorTemplateName("RoleNameDropDown");
+
+        columns.Bound(u => u.SiteIds).Title("Site Name")
+        .ClientTemplate("# if (typeof Sites != 'undefined' && Sites && Sites.length > 0) { # #= Sites.map(site => site.SiteName).join(', ') # # } else { # Select Site # } #")
+         .EditorTemplateName("SiteCheckBoxGroup");
+
+        columns.Command(command =>
+        {
+            command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" });
+            command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" });
+        }).Title("Actions");
+    })
+    .ToolBar(toolbar => toolbar.Create())
+    .Editable(editable => editable.Mode(GridEditMode.InLine))
+    .Pageable()
+    .Sortable()
+    .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Events(events =>
+        {
+            events.RequestEnd("onRequestEnd");
+            events.Error("onDataSourceError");
+        })
+        .Read(read => read.Url(Url.Action("ReadUsers", "UserManagementGrid")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("AddUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+        .Model(model =>
+        {
+            model.Id(u => u.UserID);
+            model.Field(u => u.UserName).Editable(true);
+            model.Field(u => u.RoleId).DefaultValue(0);
+            model.Field(u => u.RoleName);
+            model.Field(u => u.SiteIds).DefaultValue(new List<int>());
+            model.Field(u => u.SiteNames).DefaultValue(new List<string>());
+        })
+    )
+)
+
+<!-- Add the notification element -->
+<div id="notification"></div>
+
+@section Scripts {
+    <script>
+        // Initialize the Kendo Notification widget
+        $(document).ready(function() {
+            var notification = $("#notification").kendoNotification({
+                position: {
+                    pinned: true,
+                    top: 50,
+                    right: 30
+                },
+                autoHideAfter: 4000,
+                stacking: "down"
+            }).data("kendoNotification");
+        });
+
+        // Error handler
+        function onDataSourceError(e) {
+            let errorMessage = "Operation failed: ";
+
+            if (e.errorThrown) {
+                errorMessage += e.errorThrown;
+            } else if (e.xhr && e.xhr.responseText) {
+                errorMessage += e.xhr.responseText;
+            }
+
+            var notification = $("#notification").data("kendoNotification");
+            notification.error(errorMessage);
+        }
+
+        // Success handler
+        function onRequestEnd(e) {
+            var notification = $("#notification").data("kendoNotification");
+
+            if (e.type === "create") {
+                notification.show("Record created successfully");
+                $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+            } else if (e.type === "update") {
+                notification.show("Record updated successfully");
+                $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+            } else if (e.type === "destroy") {
+                notification.show("Record deleted successfully");
+                $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+            }
+        }
+
+        // Other functions (onSiteChange, onRoleChange, etc.) remain unchanged
+    </script>
+}
