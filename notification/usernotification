@@ -1,0 +1,288 @@
+You are ASP.NET core v8 and Telerik UI ASP.NET core expert. I need to use Kendo notication when user is created, update destroyed and erros.
+In the following code in function :
+function onRequestEnd(e) {
+...
+var notification = $("#notification").data("kendoNotification"); 
+//notification is undefined here.
+Can you pls help fix notification is undefined above?
+Index.cshtml :
+@model IEnumerable<BCES.Models.Admin.UserViewModel>
+
+@{
+    ViewData["Title"] = "User Management";
+        
+}
+ 
+
+<h4>User Management</h4>
+
+
+    @(
+        Html.Kendo().Grid<BCES.Models.Admin.UserViewModel>()
+        .Name("userGrid")
+        .Columns(columns =>
+        {
+            columns.Bound(u => u.UserADId).Title("User ID");
+            columns.Bound(u => u.UserName).Title("User Name");
+            columns.Bound(u => u.UserContactNo).Title("Phone Number");
+
+            columns.Bound(u => u.RoleName) // Display RoleName
+                .Title("Role Name")
+                .EditorTemplateName("RoleNameDropDown");
+
+            columns.Bound(u => u.SiteIds).Title("Site Name")
+            @* .ClientTemplate("#= Sites.map(site=>site.SiteName).join(' , ') #") *@
+            @* .ClientTemplate("#= Sites.map(site=>site.SiteName) #") *@
+            .ClientTemplate("# if (typeof Sites != 'undefined' && Sites && Sites.length > 0) { # #= Sites.map(site => site.SiteName).join(', ') # # } else { # Select Site # } #")
+             .EditorTemplateName("SiteCheckBoxGroup");
+
+            columns.Command(command =>
+            {
+                command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" });
+                command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" });
+                }).Title("Actions");
+        })
+                .ToolBar(toolbar => toolbar.Create())
+                .Editable(editable => editable.Mode(GridEditMode.InLine))
+                .Pageable()
+                .Sortable()
+                .Scrollable()
+                
+                .DataSource(dataSource => dataSource
+                    .Ajax()
+                   .Events(events =>
+                    {
+                        events.RequestEnd("onRequestEnd"); //I've added this
+                    })
+                    .Read(read => read.Url(Url.Action("ReadUsers", "UserManagementGrid")).Type(HttpVerbs.Get))
+                        .Create(create => create.Url(Url.Action("AddUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+                        .Update(update => update.Url(Url.Action("UpdateUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+                        .Destroy(delete => delete.Url(Url.Action("DeleteUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+                    
+                   
+                    .Model(model =>
+                    {
+                        model.Id(u => u.UserID);
+                        model.Field(u => u.UserName).Editable(true);
+                        model.Field(u => u.RoleId).DefaultValue(0); 
+                        model.Field(u => u.RoleName);
+                        
+                        model.Field(u => u.SiteIds).DefaultValue(new List<int>());
+                    model.Field(u => u.SiteNames).DefaultValue(new List<string>());
+
+        })
+        
+    )
+)
+<input type="hidden" name="SelectedSites" id="SelectedSitesHidden" value="" />
+@section Scripts {
+    <script>
+         
+        //sites       
+
+        function onSiteChange(e) {
+           // debugger;
+            console.log("event: sitechange");
+            var selectedSites = this.value();
+            console.log("selected sites :");
+            console.log(selectedSites);
+            // '<%Session["SelectedSites"] = "' + selectedSites + '"; %>';
+
+            // // Set the hidden field's value to the selected site IDs as a comma-separated string
+            // $("#SelectedSitesHidden").val(selectedSites.join(","));
+            // console.log("Hidden var :");
+            // console.log(SelectedSitesHidden);
+
+            ////
+            $.ajax({
+                url: '@Url.Action("GetSelectedSites", "UserManagementGrid")',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ sites: selectedSites }),
+                beforeSend: function (xhr) {
+                    console.log("Sending data :", JSON.stringify({ sites: selectedSites }));
+                },
+                success: function (data) {
+                    console.log('GetSelectedSites : Success:', data);
+                    // Optionally, update the UI with the response
+                },
+
+                error: function (error, data) {
+                    console.log(':GetSelectedSites : datasent : ', data);
+                    console.error('GetSelectedSites : Error:', error);
+                }
+            });
+            ////
+        }
+
+        // function addHiddenFieldData() {
+        //     console.log("addHiddenFieldData : SelectedSites = ");
+        //     var selectedSites = document.getElementById("SelectedSitesHidden").value;
+        //     console.log(selectedSites);
+        //     sessionStorage.setItem('SelectedSites', selectedSites);
+        //     '<%Session["SelectedSites"] = "' + selectedSites + '"; %>';
+
+        //     ////
+        //     return {
+        //         SelectedSites: selectedSites                    
+        //     }
+        // }
+
+        function onSiteDataBound() {
+            console.log("event: sitedataBound");
+           
+
+        }
+
+
+        function onRoleChange(e) {
+            var selectedRoleId = this.value();
+            var selectedRoleName = this.text();
+
+            var grid = $("#userGrid").data("kendoGrid");
+            var currentModel = grid.dataItem($(e.sender.element).closest("tr"));
+            currentModel.set("RoleId", selectedRoleId);
+            currentModel.set("RoleName", selectedRoleName);
+        }
+
+        
+
+        
+        function errorHandler(e) {
+            if (e.errors) {
+                var message = "Errors:\n";
+                $.each(e.errors, function (key, value) {
+                    if ('errors' in value) {
+                        $.each(value.errors, function () {
+                            message += this + "\n";
+                        });
+                    }
+                });
+                alert(message);
+            }
+        }
+    </script>
+    @* <script>
+        function onRequestEnd(e) {
+           if (e.type == "create") {
+                var notification = $("#notification").data("kendoNotification");
+                notification.show("User created", "info");
+                $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+            }
+            if (e.type == "update") {
+                var notification = $("#notification").data("kendoNotification");
+                notification.show("User updated", "info");
+                $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+            }
+        }
+    </script> *@
+    @* Start : Add following for validation *@
+    <script>
+        // Validation for AutoComplete
+        function validateAutoCompleteSelection(e) {
+            var notification = $("#notification").data("kendoNotification");
+            const column = e.sender.element.attr("data-column");
+            const value = e.sender.value();
+            let regex, error;
+
+            if (column === "UserADId") {
+                regex = /^[a-zA-Z\s]*$/;
+                error = "Invalid User AD Id, check for special characters";
+            }
+            else if (column === "UserName") {
+                regex = /^[a-zA-Z\s]*$/;
+                error = "Invalid User Name, check for special characters";
+            }
+
+            if (regex && !regex.test(value)) {
+                notification.error(error);
+                e.sender.value("");
+            }
+        }
+
+        // Inline Edit Validation
+        function onEdit(e) {
+            const validationRules = {
+                "UserADId": {
+                    regex: /^[a-zA-Z\s]*$/,
+                    error: "Invalid User AD Id, check for special characters"
+                },
+                "UserName": {
+                    regex: /^[a-zA-Z\s]*$/,
+                    error: "Invalid User Name, check for special characters"
+                }
+            };
+
+            Object.entries(validationRules).forEach(([field, rule]) => {
+                const input = e.container.find(`input[name='${field}']`);
+                input.on("input", function() {
+                    if (!rule.regex.test(this.value)) {
+                        notification.error(rule.error);
+                        $(this).addClass("k-invalid");
+                    } else {
+                        $(this).removeClass("k-invalid");
+                    }
+                });
+            });
+        }
+
+        // Keep existing notification and error handlers
+    </script>
+    @* End : Add  validation *@
+    <script>
+        function getAutoCompleteParams() {
+            var input = $("input[data-role='autocomplete']:focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || "" // Handle empty search text
+            };
+        }
+    </script>
+
+    @* notification - add following JS, add div, add in grid .Error("onDataSourceError"),  .RequestEnd("onRequestEnd"), change contoller action to return json *@
+    <script>
+        // Initialize notification FIRST
+        var notification = $("#notification").kendoNotification({
+            position: {
+            pinned: true,
+        top: 50,
+        right: 30
+                },
+        autoHideAfter: 4000,
+        stacking: "down"
+            }).data("kendoNotification");
+
+        // Error handler
+        function onDataSourceError(e) {
+            let errorMessage = "Operation failed: ";
+
+        if (e.errorThrown) {
+            errorMessage += e.errorThrown;
+                } else if (e.xhr && e.xhr.responseText) {
+            errorMessage += e.xhr.responseText;
+                }
+
+        notification.error(errorMessage);
+            }
+
+        // Success handler
+        function onRequestEnd(e) {
+            debugger;
+          // Initialize notification FIRST
+       
+                if (e.type === "create") {
+                    var notification = $("#notification").data("kendoNotification");
+                    notification.show("Record created successfully");
+                    $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+                } else if (e.type === "update") {
+                   var notification = $("#notification").data("kendoNotification");
+                    notification.show("Record updated successfully");
+                     $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+                } else if (e.type === "destroy") {
+                    var notification = $("#notification").data("kendoNotification");
+                     notification.show("Record deleted successfully");
+                    $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+                } 
+            }
+    </script>
+}
