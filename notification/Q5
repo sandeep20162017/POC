@@ -1,88 +1,86 @@
-1. Immediate Deletion with Confirmation (Pure JavaScript Approach)
-Step 1: Attach Delete Event Handler via jQuery
-Add this script to intercept delete button clicks after the grid is initialized:
+@model IEnumerable<BCES.Models.Admin.UserViewModel>
 
-javascript
-Copy
-// In Index.cshtml
-$(document).ready(function() {
-    // Use event delegation for dynamically generated delete buttons
-    $("#userGrid tbody").on("click", ".k-grid-delete", function(e) {
-        e.preventDefault(); // Prevent default grid behavior
+@{
+    ViewData["Title"] = "User Management";
+}
 
-        var grid = $("#userGrid").data("kendoGrid");
-        var row = $(this).closest("tr");
-        var dataItem = grid.dataItem(row);
+<h4>User Management</h4>
 
-        // Show Kendo confirmation dialog
-        kendo.confirm("Are you sure you want to delete this record?")
-            .then(function() {
-                // User clicked "Yes"
-                grid.dataSource.remove(dataItem); // Mark for deletion
-                grid.dataSource.sync(); // Immediately sync with server
-            }, function() {
-                // User clicked "No"
-                grid.cancelRow(row); // Cancel the delete action
-            });
-    });
-});
-Step 2: Configure Grid DataSource for Immediate Sync
-Ensure your grid's Destroy operation points to the DeleteUser action:
+@(Html.Kendo().Grid<BCES.Models.Admin.UserViewModel>()
+    .Name("userGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(u => u.UserADId).Title("User ID");
+        columns.Bound(u => u.UserName).Title("User Name");
+        columns.Bound(u => u.RoleName)
+            .Title("Role Name")
+            .EditorTemplateName("RoleNameDropDown");
+        
+        columns.Bound(u => u.SiteIds)
+            .Title("Site Name")
+            .ClientTemplate("# if (typeof Sites != 'undefined' && Sites && Sites.length > 0) { # #= Sites.map(site => site.SiteName).join(', ') # # } else { # Select Site # } #")
+            .EditorTemplateName("SiteCheckBoxGroup");
 
-csharp
-Copy
-// In Index.cshtml
-@(
-    Html.Kendo().Grid<BCES.Models.Admin.UserViewModel>()
-        .Name("userGrid")
-        .Columns(columns => { /* ... */ })
-        .DataSource(dataSource => dataSource
-            .Ajax()
-            .Destroy(destroy => destroy.Url(Url.Action("DeleteUser", "UserManagementGrid", new { userID = "{0}" }))
-            // ... other configurations
-        )
+        // Replace Command column with Custom Delete Button
+        columns.Template(@<text></text>)
+            .ClientTemplate("<button class='custom-delete-btn k-button k-button-icon'>Delete</button>")
+            .Title("Actions");
+    })
+    .ToolBar(toolbar =>
+    {
+        toolbar.Create();
+        toolbar.Save();
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Events(events => events
+            .RequestEnd("onRequestEnd")
+            .Error("onDataSourceError"))
+        .Read(read => read.Url(Url.Action("ReadUsers", "UserManagementGrid")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("AddUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+        .Destroy(destroy => destroy.Url(Url.Action("DeleteUser", "UserManagementGrid", new { userID = "{0}" })).Type(HttpVerbs.Post))
+        .Model(model =>
+        {
+            model.Id(u => u.UserID);
+            model.Field(u => u.UserName).Editable(true);
+            model.Field(u => u.RoleId).DefaultValue(0);
+            model.Field(u => u.RoleName).Editable(true);
+            model.Field(u => u.SiteIds).DefaultValue(new List<int>());
+            model.Field(u => u.SiteNames).DefaultValue(new List<string>());
+        })
+    )
 )
-2. Style the Kendo Confirmation Dialog
-Add CSS to customize the appearance of the dialog:
 
-css
-Copy
-/* In wwwroot/css/site.css or <style> tag */
-.k-dialog {
-    border-radius: 8px !important;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
-}
+<div id="notification"></div>
 
-.k-dialog-titlebar {
-    background-color: #dc3545 !important; /* Red header */
-    color: white !important;
-    font-weight: bold;
-    padding: 12px !important;
-}
+@section Scripts {
+    <!-- Existing scripts -->
+    <script>
+        $(document).ready(function() {
+            // Custom Delete Button Handler
+            $("#userGrid").on("click", ".custom-delete-btn", function(e) {
+                e.preventDefault();
 
-.k-dialog-content {
-    font-size: 16px !important;
-    padding: 20px !important;
-}
+                var grid = $("#userGrid").data("kendoGrid");
+                var row = $(this).closest("tr");
+                var dataItem = grid.dataItem(row);
 
-.k-dialog-buttongroup {
-    padding: 10px 20px !important;
-    gap: 10px !important;
-}
+                // Show custom confirmation dialog
+                kendo.confirm("Are you sure you want to delete this record?")
+                    .then(function() {
+                        grid.dataSource.remove(dataItem); // Mark for deletion
+                        grid.dataSource.sync(); // Immediate sync
+                    })
+                    .fail(function() {
+                        grid.cancelRow(row);
+                    });
+            });
+        });
 
-.k-dialog-buttongroup .k-button {
-    border-radius: 5px !important;
-    padding: 8px 20px !important;
-}
-
-/* Style "Yes" button */
-.k-dialog-buttongroup .k-button:first-child {
-    background-color: #28a745 !important;
-    border-color: #28a745 !important;
-}
-
-/* Style "No" button */
-.k-dialog-buttongroup .k-button:last-child {
-    background-color: #6c757d !important;
-    border-color: #6c757d !important;
+        // Rest of your existing scripts (onRequestEnd, onDataSourceError, etc.)
+    </script>
 }
