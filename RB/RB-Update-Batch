@@ -1,23 +1,20 @@
-Updated Code:
-
-LabourDetailsController.cs
-csharp
-Copy
 [HttpPost]
 [AllowAnonymous]
 public IActionResult UpdateLabourDetail(
     [DataSourceRequest] DataSourceRequest request,
     [FromBody] IEnumerable<LabourDetailsRebuiltPartsViewModel> models,
-    [FromQuery] string rebuiltPartNum)
+    [FromQuery] string rebuiltPartNum) // Optional: Only if RebuiltPartNum is global
 {
-    if (models != null && ModelState.IsValid)
+    if (models == null || !ModelState.IsValid)
+    {
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+
+    foreach (var model in models)
     {
         try
         {
-            foreach (var model in models)
-            {
-                // Use parameterized query to prevent SQL injection
-                string query = @"
+            string query = @"
 UPDATE SBCES.EMPLOYEELABOUR 
 SET 
     LABOURDEFN = @LabourDefn,
@@ -32,60 +29,37 @@ SET
     ADJHRS = @AdjHrs,
     DATEREVISED = @DateRevised,
     TIMEADDITION = @TimeAddition,
-    REBUILTPARTNUM = @RebuiltPartNum,
+    REBUILTPARTNUM = @RebuiltPartNum,  // Now from model
     LASTMODIFIEDBY = @LastModifiedBy
-WHERE Id = @Id"; // Update by Id
+WHERE Id = @Id";  // Primary key
 
-                var parameters = new
-                {
-                    LabourDefn = model.LabourDefn,
-                    DateEntered = DateTime.Now,
-                    LinkNumber = rebuiltPartNum, // From query parameter
-                    TypeId = "RB", // Hardcoded as per original
-                    CostCentre = model.CostCentre,
-                    Task = model.Task,
-                    LabourType = model.LabourType,
-                    Usage = model.Usage,
-                    HrsReqd = model.HrsReqd,
-                    AdjHrs = model.AdjHrs,
-                    DateRevised = DateTime.Now,
-                    TimeAddition = model.TimeAddition,
-                    RebuiltPartNum = rebuiltPartNum, // From query parameter
-                    LastModifiedBy = ViewBag.UserName,
-                    Id = model.Id // Critical: Use model's Id
-                };
+            var parameters = new
+            {
+                model.LabourDefn,
+                DateEntered = DateTime.Now,
+                model.LinkNumber,       // From model (not query)
+                TypeId = "RB",            // Hardcoded or from model
+                model.CostCentre,
+                model.Task,
+                model.LabourType,
+                model.Usage,
+                model.HrsReqd,
+                model.AdjHrs,
+                DateRevised = DateTime.Now,
+                model.TimeAddition,
+                model.RebuiltPartNum,     // From model (not query)
+                LastModifiedBy = ViewBag.UserName,
+                model.Id                  // Critical for WHERE
+            };
 
-                _dbConnection.Execute(query, parameters);
-            }
+            _dbConnection.Execute(query, parameters);
         }
         catch (Exception ex)
         {
-            // Log the exception
-            return Json(models.ToDataSourceResult(request, ModelState));
+            // Log error and handle state
+            ModelState.AddModelError("", "Error updating row: " + ex.Message);
         }
     }
 
     return Json(models.ToDataSourceResult(request, ModelState));
 }
-Adjustments Explained:
-Batch Model Handling: The action now accepts IEnumerable<LabourDetailsRebuiltPartsViewModel> models, allowing it to process multiple rows.
-
-Parameterized SQL: Uses @Id in the WHERE clause to target the correct row, preventing SQL injection.
-
-RebuiltPartNum Handling: Assumes rebuiltPartNum from the query parameter applies to all updated rows (adjust if per-row value is needed).
-
-4. Ensure Grid Includes Id in DataSource
-Verify the Grid's DataSource model configuration includes Id so it's sent during updates:
-
-LabourDetailsRebuitParts.cshtml
-csharp
-Copy
-.DataSource(dataSource => dataSource
-    .Ajax()
-    .Model(model =>
-    {
-        model.Id(c => c.Id); // Ensure Id is configured as the key
-        // Include other fields if necessary
-    })
-    // ... rest of configuration
-)
