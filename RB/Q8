@@ -1,0 +1,100 @@
+In the following query, for the following code snipet getting error :
+Msg 402, Level 16, State 1, Line 16
+The data types varchar and varchar are incompatible in the subtract operator.
+(SBCES.FINALCOST(
+            CAST(PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(QTYREQD AS NUMERIC(18,2)), 
+            MMSCOST, 
+            0
+         ) - 
+         SBCES.FINALCOST(
+            CAST(PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(QTYREQD AS NUMERIC(18,2)), 
+            CORECOST, 
+            0
+         )) AS COST,
+May be you need to add more casting. Pls do not change [SBCES].[FinalCost] function. Make the required cahnges in the full query pls.
+Full Query :
+DECLARE @LinkCode VARCHAR(50) = '035434';
+
+SELECT 
+    ISNULL(C.NAME, 'NONE') AS [ASSEMBLY AREA],
+    ISNULL(A.COSTCENTRE, '0') AS [CC],
+    ISNULL(SUM(A.COST), '0') AS [TOTAL COST],
+    ISNULL(SUM(A.TAXCOST), '0') AS [TAXABLE COST]
+FROM (
+    SELECT 
+        COSTCENTRE,
+        (SBCES.FINALCOST(
+            CAST(PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(QTYREQD AS NUMERIC(18,2)), 
+            MMSCOST, 
+            0
+         ) - 
+         SBCES.FINALCOST(
+            CAST(PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(QTYREQD AS NUMERIC(18,2)), 
+            CORECOST, 
+            0
+         )) AS COST,
+        SBCES.FINALCOST(
+            CAST(PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(QTYREQD AS NUMERIC(18,2)), 
+            MMSCOST, 
+            0
+        ) AS TAXCOST
+    FROM 
+        SBCES.SCPARTSUSED
+    WHERE 
+        LINKCODE = UPPER(@LinkCode)
+        AND REBUILTPART = 'N'
+        AND LINKTYPE = 'RB'
+    UNION ALL
+    SELECT 
+        NSCP.COSTCENTRE,
+        (SBCES.FINALCOST(
+            CAST(NSCP.PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(NSCP.QTYREQD AS NUMERIC(18,2)), 
+            NSCOEM.OEMPARTCOST, 
+            0
+         ) - 
+         SBCES.FINALCOST(
+            CAST(NSCP.PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(NSCP.QTYREQD AS NUMERIC(18,2)), 
+            NSCP.CORECOST, 
+            0
+         )) AS COST,
+        SBCES.FINALCOST(
+            CAST(NSCP.PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(NSCP.QTYREQD AS NUMERIC(18,2)), 
+            NSCOEM.OEMPARTCOST, 
+            0
+        ) AS TAXCOST
+    FROM 
+        SBCES.NSCPARTSUSED NSCP
+    LEFT JOIN 
+        SBCES.NONSTOCKCODEDPARTS NSCOEM ON NSCOEM.ID = NSCP.ID
+    WHERE 
+        NSCP.LINKCODE = UPPER(@LinkCode)
+        AND NSCP.LINKTYPE = 'RB'
+) A
+INNER JOIN 
+    SBCES.COSTCENTRES C ON C.COSTCENTRE = A.COSTCENTRE
+GROUP BY 
+    A.COSTCENTRE, 
+    C.NAME;
+Function :
+
+CREATE FUNCTION [SBCES].[FinalCost]
+    (@ViPercent VARCHAR(20),
+     @ViQuantity VARCHAR(20),
+     @ViCost DECIMAL(10,2),
+     @ViCoreCost DECIMAL(10,2))
+RETURNS VARCHAR(4000) AS
+BEGIN
+    DECLARE @Total DECIMAL(38,4);
+ 
+    SET @Total = (CAST(REPLACE(ISNULL(@ViPercent,'0'),',','.') AS DECIMAL(10,4))/ 100) * CAST(@ViQuantity AS DECIMAL(10,4)) * @ViCost;
+    RETURN ROUND(@Total - @ViCoreCost, 2);
+END;
+GO
