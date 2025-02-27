@@ -1,0 +1,121 @@
+1. Update the Grid DataSource Configuration
+Explicitly set the contentType to "application/json" and adjust the .Data() function to serialize the payload correctly:
+
+LabourDetailsRebuitParts.cshtml
+csharp
+Copy
+@(Html.Kendo().Grid<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel>()
+    .Name((string)ViewBag.PartNum)
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model => model.Id(c => c.Id))
+        .Update(update => update
+            .Url(Url.Action("UpdateLabourDetail", "LabourDetails") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType)
+            .Type(HttpVerbs.Post)
+            .ContentType("application/json") // Explicitly set JSON
+            .Data("serializeData") // Custom function to format data
+        )
+        // ... other configurations (Read, Create, Destroy)
+    )
+    // ... rest of the Grid configuration
+)
+Add JavaScript Serialization Helper
+Include this script to format the payload correctly:
+
+javascript
+Copy
+<script>
+    function serializeData(data) {
+        // Include all fields from the model in the payload
+        return JSON.stringify({
+            Id: data.Id,
+            LabourDefn: data.LabourDefn,
+            CostCentre: data.CostCentre,
+            Task: data.Task,
+            Usage: data.Usage,
+            HrsReqd: data.HrsReqd,
+            // Include other fields from LabourDetailsRebuiltPartsViewModel
+            RebuiltPartNum: "@ViewBag.PartNum" // Pass from query string if needed
+        });
+    }
+</script>
+2. Simplify the Controller Action
+Remove the wrapper class and directly accept the model with [FromBody]:
+
+LabourDetailsController.cs
+csharp
+Copy
+[HttpPost]
+[AllowAnonymous]
+public IActionResult UpdateLabourDetail(
+    [DataSourceRequest] DataSourceRequest request,
+    [FromBody] LabourDetailsRebuiltPartsViewModel model, // Directly bind the model
+    [FromQuery] string rebuiltPartNum)
+{
+    if (ModelState.IsValid)
+    {
+        try
+        {
+            string query = @"
+UPDATE SBCES.EMPLOYEELABOUR 
+SET 
+    LABOURDEFN = @LabourDefn,
+    COSTCENTRE = @CostCentre,
+    TASK = @Task,
+    USAGE = @Usage,
+    HRSREQD = @HrsReqd,
+    REBUILTPARTNUM = @RebuiltPartNum 
+WHERE Id = @Id"; // Update by Id
+
+            var parameters = new
+            {
+                model.LabourDefn,
+                model.CostCentre,
+                model.Task,
+                model.Usage,
+                model.HrsReqd,
+                RebuiltPartNum = rebuiltPartNum, // From query parameter
+                model.Id
+            };
+
+            _dbConnection.Execute(query, parameters);
+        }
+        catch (Exception ex)
+        {
+            ModelState.AddModelError("", "Error: " + ex.Message);
+        }
+    }
+
+    return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+}
+3. Ensure the Model Matches the Payload
+Confirm that LabourDetailsRebuiltPartsViewModel includes all fields sent in the payload (e.g., Id, LabourDefn, CostCentre). Remove [FromBody] wrappers if unnecessary.
+
+Key Fixes Explained:
+Correct Content-Type
+The Grid now sends data as application/json instead of x-www-form-urlencoded.
+
+Simplified Model Binding
+The controller action directly accepts the model without a wrapper class, aligning with the payload structure.
+
+Explicit Field Mapping
+The serializeData function ensures all required fields (including Id) are included in the JSON payload.
+
+Verify the Payload Structure
+After these changes, the request payload should look like this (check in browser DevTools):
+
+json
+Copy
+{
+  "Id": 17509,
+  "LabourDefn": "DRILL OPERATOR",
+  "CostCentre": "05H5",
+  "Task": "TEST COMPONENTS",
+  "Usage": "89",
+  "HrsReqd": "8:10",
+  "RebuiltPartNum": "0001"
+}
+Final Notes:
+Batch vs. Single Updates: If using batch mode, ensure the action accepts IEnumerable<LabourDetailsRebuiltPartsViewModel> and iterates over each model.
+
+Error Handling: Add logging to catch exceptions (e.g., catch (Exception ex) { _logger.LogError(ex, "Update failed"); }).
