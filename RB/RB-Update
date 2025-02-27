@@ -1,0 +1,218 @@
+You are ASP.NET V 8.0 and Telerik (Kendoo) ASp.NET Core expert. Using InCell edit for grid.
+For the following code, I need to update the logic for UpdateLabourDetail. User may be able to update mutiple rows.
+I believe InCell uses batch update. For each update I believe we need to pass SBCS.EmployeeLabour Id, along with RebuiltPartNumber for each row.
+Either from query string or by other type.
+If batch update, save all the ids which changed and update all at once
+If row by row update, get the ids which changed.
+
+Can you pls tell me how to pass Id for each update?
+Scmema :
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[EmployeeLabour]    Script Date: 2/27/2025 12:15:17 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[EmployeeLabour](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[LabourDefn] [varchar](50) NULL,
+	[DateEntered] [datetime] NULL,
+	[LinkNumber] [varchar](25) NULL,
+	[TypeId] [varchar](5) NULL,
+	[CostCentre] [varchar](5) NULL,
+	[Task] [varchar](50) NULL,
+	[LabourType] [int] NULL,
+	[Usage] [varchar](25) NULL,
+	[HrsReqd] [varchar](25) NULL,
+	[AdjHrs] [varchar](25) NULL,
+	[DateRevised] [date] NULL,
+	[TimeAddition] [numeric](18, 2) NULL,
+	[RebuiltPartNum] [varchar](30) NULL,
+	[LastModifiedBy] [varchar](25) NULL,
+ CONSTRAINT [PK_EmployeeLabour] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+LabourDetailsController.cs :
+[HttpPost]
+[AllowAnonymous]
+public IActionResult UpdateLabourDetail([DataSourceRequest] DataSourceRequest request, LabourDetailsRebuiltPartsViewModel model, [FromQuery] string rebuiltPartNum)
+{
+    if (ModelState.IsValid)
+    {
+        try
+        {
+            var PartType = "RB";
+            string query = String.Format(@"UPDATE SBCES.EMPLOYEELABOUR 
+                                        SET LABOURDEFN = '{0}'
+                                        ,  DATEENTERED = '{1}'
+                                        ,  LINKNUMBER = '{2}'
+                                        ,  TYPEID = '{3}'
+                                        ,  COSTCENTRE = '{4}'
+                                        ,  TASK = '{5}'
+                                         ,  LABOURTYPE = '{6}'
+                                         ,  USAGE = '{7}'
+                                         ,  HRSREQD = '{8}'
+                                         ,  ADJHRS = '{9}'
+                                         ,  DATEREVISED = '{10}'
+                                         , TIMEADDITION = {11}
+                                         ,  REBUILTPARTNUM = '{12}'
+                                         , LASTMODIFIEDBY = '{13}' 
+                                          WHERE LINKNUMBER = '{14}'
+                                          AND TYPEID = '{15}'
+
+                                        ;",
+                                                model.LabourDefn
+                                               , DateTime.Now
+                                                , rebuiltPartNum
+                                                , PartType
+                                                , model.CostCentre
+                                                , model.Task
+                                                , model.LabourType
+                                                , model.Usage
+                                                , model.HrsReqd
+                                                , model.AdjHrs
+                                                , DateTime.Now.ToString()
+                                                , model.TimeAddition
+                                                , rebuiltPartNum
+                                                , ViewBag.UserName
+                                                , rebuiltPartNum
+                                                , PartType
+                                      );
+
+            var tt = query;
+            _dbConnection.Execute(query, model);
+            
+        }
+        catch (Exception ex)
+        {
+            return null;
+        }
+    }
+    return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+}
+LabourDetailsViewModel.cs :
+using System.ComponentModel.DataAnnotations.Schema;
+using System.ComponentModel.DataAnnotations;
+
+namespace BCES.Models.Parts
+{
+    public class LabourDetailsRebuiltPartsViewModel
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public int Id { get; set; }
+
+        [StringLength(50)]
+        public string? LabourDefn { get; set; }
+
+        public DateTime? DateEntered { get; set; }
+
+        [StringLength(25)]
+        public string? LinkNumber { get; set; }
+
+        [StringLength(5)]
+        public string? TypeId { get; set; }
+
+        [StringLength(5)]
+        public string? CostCentre { get; set; }
+
+        [StringLength(50)]
+        public string? Task { get; set; }
+
+        public int? LabourType { get; set; }
+
+        [StringLength(25)]
+        public string? Usage { get; set; }
+
+        public decimal? RatePerHour { get; set; }
+      
+
+        [StringLength(25)]
+        public string? HrsReqd { get; set; }
+
+        [StringLength(25)]
+        public string? AdjHrs { get; set; }
+
+        public DateOnly? DateRevised { get; set; }  // Using DateOnly for date (no time component)
+
+        [Column(TypeName = "numeric(18,2)")]
+        public decimal? TimeAddition { get; set; }
+
+        [StringLength(30)]
+        public string? RebuiltPartNum { get; set; }
+
+        [StringLength(25)]
+        public string? LastModifiedBy { get; set; }
+
+
+    }
+
+}
+LabourDetailsRebuitParts.cshtml :
+@model IEnumerable<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel>
+
+@{
+    ViewData["Title"] = "Labour Details";
+}
+
+<h6>Labour Details</h6>
+
+@(Html.Kendo().Grid<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel>()
+    .Name((string)ViewBag.PartNum)
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.Id).Title("Id");
+        columns.Bound(c => c.LabourDefn).Title("Labour Type").EditorTemplateName("AutoCompleteEditor"); 
+        columns.Bound(c => c.CostCentre).Title("Cost Centre").EditorTemplateName("AutoCompleteEditor");
+        columns.Bound(c => c.Task).Title("Labour Task").EditorTemplateName("AutoCompleteEditor");
+        columns.Bound(c => c.Usage).Title("Percent Usage");
+      //  columns.Bound(c => c.TimeAddition).Title("Time").Format("{0:N2}");
+       // columns.Bound(c => c.RatePerHour).Title("Rate Per Hour").Format("{0:N2}");
+        columns.Bound(c => c.HrsReqd).Title("Hrs Reqd").Format("{0:N2}");
+       // columns.Bound(c => c.DateRevised).Title("Date Revised");
+       // columns.Command(command => command.Edit()).Title("Actions");
+    })
+    .ToolBar(toolbar =>
+    {
+        if (@ViewBag.RoleId == 1)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    
+    .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.Id); 
+            model.Field(c => c.LabourType);
+        })
+        .Events(events =>
+        {
+            events.RequestEnd("onRequestEnd"); 
+                events.Error("onDataSourceError");
+        })
+
+        .Read(read => read.Url(Url.Action("GetLabourDetails", "LabourDetails") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("CreateLabourDetail", "LabourDetails") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateLabourDetail", "LabourDetails") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteLabourDetail", "LabourDetails") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+)
+@section Scripts {
+    
+    
+}
