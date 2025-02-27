@@ -1,0 +1,91 @@
+Updated Code:
+
+LabourDetailsController.cs
+csharp
+Copy
+[HttpPost]
+[AllowAnonymous]
+public IActionResult UpdateLabourDetail(
+    [DataSourceRequest] DataSourceRequest request,
+    [FromBody] IEnumerable<LabourDetailsRebuiltPartsViewModel> models,
+    [FromQuery] string rebuiltPartNum)
+{
+    if (models != null && ModelState.IsValid)
+    {
+        try
+        {
+            foreach (var model in models)
+            {
+                // Use parameterized query to prevent SQL injection
+                string query = @"
+UPDATE SBCES.EMPLOYEELABOUR 
+SET 
+    LABOURDEFN = @LabourDefn,
+    DATEENTERED = @DateEntered,
+    LINKNUMBER = @LinkNumber,
+    TYPEID = @TypeId,
+    COSTCENTRE = @CostCentre,
+    TASK = @Task,
+    LABOURTYPE = @LabourType,
+    USAGE = @Usage,
+    HRSREQD = @HrsReqd,
+    ADJHRS = @AdjHrs,
+    DATEREVISED = @DateRevised,
+    TIMEADDITION = @TimeAddition,
+    REBUILTPARTNUM = @RebuiltPartNum,
+    LASTMODIFIEDBY = @LastModifiedBy
+WHERE Id = @Id"; // Update by Id
+
+                var parameters = new
+                {
+                    LabourDefn = model.LabourDefn,
+                    DateEntered = DateTime.Now,
+                    LinkNumber = rebuiltPartNum, // From query parameter
+                    TypeId = "RB", // Hardcoded as per original
+                    CostCentre = model.CostCentre,
+                    Task = model.Task,
+                    LabourType = model.LabourType,
+                    Usage = model.Usage,
+                    HrsReqd = model.HrsReqd,
+                    AdjHrs = model.AdjHrs,
+                    DateRevised = DateTime.Now,
+                    TimeAddition = model.TimeAddition,
+                    RebuiltPartNum = rebuiltPartNum, // From query parameter
+                    LastModifiedBy = ViewBag.UserName,
+                    Id = model.Id // Critical: Use model's Id
+                };
+
+                _dbConnection.Execute(query, parameters);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log the exception
+            return Json(models.ToDataSourceResult(request, ModelState));
+        }
+    }
+
+    return Json(models.ToDataSourceResult(request, ModelState));
+}
+Adjustments Explained:
+Batch Model Handling: The action now accepts IEnumerable<LabourDetailsRebuiltPartsViewModel> models, allowing it to process multiple rows.
+
+Parameterized SQL: Uses @Id in the WHERE clause to target the correct row, preventing SQL injection.
+
+RebuiltPartNum Handling: Assumes rebuiltPartNum from the query parameter applies to all updated rows (adjust if per-row value is needed).
+
+4. Ensure Grid Includes Id in DataSource
+Verify the Grid's DataSource model configuration includes Id so it's sent during updates:
+
+LabourDetailsRebuitParts.cshtml
+csharp
+Copy
+.DataSource(dataSource => dataSource
+    .Ajax()
+    .Model(model =>
+    {
+        model.Id(c => c.Id); // Ensure Id is configured as the key
+        // Include other fields if necessary
+    })
+    // ... rest of configuration
+)
