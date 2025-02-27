@@ -1,0 +1,70 @@
+Step 1: Update the Grid DataSource Configuration
+Ensure the Grid sends data as JSON by explicitly setting the contentType and using data to wrap models:
+
+LabourDetailsRebuitParts.cshtml
+csharp
+Copy
+.DataSource(dataSource => dataSource
+    .Ajax()
+    .Model(model => model.Id(c => c.Id))
+    .Update(update => update
+        .Url(Url.Action("UpdateLabourDetail", "LabourDetails") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType)
+        .Type(HttpVerbs.Post)
+        .Data("function(data) { return { models: data.models }; }") // Wrap data for JSON binding
+    )
+    // ... other configurations
+)
+Step 2: Modify the Controller Action
+Decorate the action with [FromBody] to accept JSON data and adjust parameters:
+
+LabourDetailsController.cs
+csharp
+Copy
+[HttpPost]
+[AllowAnonymous]
+public IActionResult UpdateLabourDetail(
+    [DataSourceRequest] DataSourceRequest request,
+    [FromBody] DataSourceRequestModelsWrapper modelsWrapper, // Use a wrapper for batch data
+    [FromQuery] string rebuiltPartNum)
+{
+    if (modelsWrapper?.Models == null || !ModelState.IsValid)
+    {
+        return Json(modelsWrapper?.Models.ToDataSourceResult(request, ModelState));
+    }
+
+    foreach (var model in modelsWrapper.Models)
+    {
+        // Your update logic using model.Id and rebuiltPartNum
+        string query = @"UPDATE SBCES.EMPLOYEELABOUR SET ... WHERE Id = @Id";
+        _dbConnection.Execute(query, new { model.Id, ... });
+    }
+
+    return Json(modelsWrapper.Models.ToDataSourceResult(request, ModelState));
+}
+
+// Helper class to match Kendo's batch data structure
+public class DataSourceRequestModelsWrapper
+{
+    public List<LabourDetailsRebuiltPartsViewModel> Models { get; set; }
+}
+Step 3: Ensure JSON Serialization
+Add the [ApiController] attribute to your controller to enforce JSON binding:
+
+LabourDetailsController.cs
+csharp
+Copy
+[ApiController]
+[Route("[controller]/[action]")]
+public class LabourDetailsController : Controller
+{
+    // ...
+}
+Key Fixes Explained:
+Content-Type Mismatch
+The error 415 occurs because the server expects JSON (application/json) but receives data in another format (e.g., x-www-form-urlencoded). The [FromBody] attribute and contentType: "application/json" resolve this.
+
+Batch Data Structure
+Kendo sends batch updates in a models array. The wrapper class DataSourceRequestModelsWrapper captures this structure.
+
+Primary Key Targeting
+The SQL query now uses WHERE Id = @Id, ensuring updates target the correct row.
