@@ -1,0 +1,68 @@
+DECLARE @LinkCode VARCHAR(50) = '035434';
+
+SELECT 
+    ISNULL(C.NAME, 'NONE') AS [ASSEMBLY AREA],
+    ISNULL(A.COSTCENTRE, '0') AS [CC],
+    ISNULL(SUM(A.COST), '0') AS [TOTAL COST],
+    ISNULL(SUM(A.TAXCOST), '0') AS [TAXABLE COST]
+FROM (
+    SELECT 
+        COSTCENTRE,
+        (SBCES.FINALCOST(
+            CAST(PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(QTYREQD AS NUMERIC(18,2)), 
+            MMSCOST, 
+            0
+         ) - 
+         SBCES.FINALCOST(
+            CAST(PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(QTYREQD AS NUMERIC(18,2)), 
+            CORECOST, 
+            0
+         )) AS COST,
+        SBCES.FINALCOST(
+            CAST(PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(QTYREQD AS NUMERIC(18,2)), 
+            MMSCOST, 
+            0
+        ) AS TAXCOST
+    FROM 
+        SBCES.SCPARTSUSED
+    WHERE 
+        LINKCODE = UPPER(@LinkCode)
+        AND REBUILTPART = 'N'
+        AND LINKTYPE = 'RB'
+    UNION ALL
+    SELECT 
+        NSCP.COSTCENTRE,
+        (SBCES.FINALCOST(
+            CAST(NSCP.PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(NSCP.QTYREQD AS NUMERIC(18,2)), 
+            NSCOEM.OEMPARTCOST, 
+            0
+         ) - 
+         SBCES.FINALCOST(
+            CAST(NSCP.PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(NSCP.QTYREQD AS NUMERIC(18,2)), 
+            NSCP.CORECOST, 
+            0
+         )) AS COST,
+        SBCES.FINALCOST(
+            CAST(NSCP.PERCENTUSAGE AS NUMERIC(18,2)), 
+            CAST(NSCP.QTYREQD AS NUMERIC(18,2)), 
+            NSCOEM.OEMPARTCOST, 
+            0
+        ) AS TAXCOST
+    FROM 
+        SBCES.NSCPARTSUSED NSCP
+    LEFT JOIN 
+        SBCES.NONSTOCKCODEDPARTS NSCOEM ON NSCOEM.ID = NSCP.ID
+    WHERE 
+        NSCP.LINKCODE = UPPER(@LinkCode)
+        AND NSCP.LINKTYPE = 'RB'
+) A
+INNER JOIN 
+    SBCES.COSTCENTRES C ON C.COSTCENTRE = A.COSTCENTRE
+GROUP BY 
+    A.COSTCENTRE, 
+    C.NAME;
