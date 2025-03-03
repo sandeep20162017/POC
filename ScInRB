@@ -1,0 +1,249 @@
+You are asp.net core (v 8.0) and Telerik ASP.NET core expert.
+App is using Telerik grid, Inline edit. Grid has CRUD operations.
+For the following grid, when user enters value in MMSStockCode, I need to populate PartType, DetailedDesc columns
+using SQL Select PartType, DetailedDescnfrom SBCES.StockCodedParts where MMSStockCode = value in MMSStockCode text box.
+Make PartType, DetailedDesc as non editable. App uses dapper.
+_ScPartsinRbParts.cshtml :
+@model IEnumerable<BCES.Models.Parts.StockCodedPartsViewModel>
+
+@{
+    ViewData["Title"] = "Stock Coded Parts Details";
+}
+
+<h6>Stock Coded Parts Used</h6>
+
+@(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
+    .Name("ScPartsMaterialDetailsRebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.MMSStockCode).Title("Stock Code");
+        columns.Bound(c => c.PartType).Title("Part Type");
+        columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+        columns.Bound(c => c.DetailedDesc).Title("Part Description");
+        columns.Bound(c => c.CC).Title("CC").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+        columns.Bound(c => c.UnitCost).Title("Unit Cost");
+        columns.Bound(c => c.Qty).Title("Qty");
+        columns.Bound(c => c.Percentage).Title("Percentage Used");
+        columns.Bound(c => c.CoreCost).Title("Core Cost").Format("{0:N2}");
+      
+       
+        // columns.Bound(c => c.DateRevised).Title("Date Revised");
+        columns.Command(command =>
+        {
+            if (@ViewBag.RoleId == 1)
+            {
+               // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+            }
+            if (@ViewBag.RoleId == 1)
+            {
+
+                command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Delete button with tooltip
+            }
+        }).Width(200);
+    })
+     .ToolBar(toolbar =>
+    {
+        if (@ViewBag.RoleId == 1)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+
+    //.Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(true)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.MMSStockCode); 
+            model.Field(c => c.MMSStockCode);
+        })
+
+        .Events(events =>
+        {
+            events.RequestEnd("onRequestEnd");
+            events.Error("onDataSourceError");
+        })
+
+        .Read(read => read.Url(Url.Action("GetScPartsUsedInRbParts", "ScPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("CreateScPartsUsedInRbtParts", "ScPartsUsedInRbParts")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateScPartsUsedInRbtParts", "ScPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteScPartsUsedInRbtParts", "ScPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+)
+ScPartsUsedinRbController.cs :
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+
+
+namespace BCES.Controllers.Parts
+{
+    public class ScPartsUsedInRbPartsController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public ScPartsUsedInRbPartsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<ActionResult> GetScPartsUsedInRbParts([DataSourceRequest] DataSourceRequest request, [FromQuery] string rebuiltPartNum, [FromQuery] string gridType)
+        {
+            // Fetch data for the grid
+
+            if (string.IsNullOrEmpty(rebuiltPartNum))
+            {
+                return BadRequest("rebuiltPartNum is required.");
+            }
+
+            // Fetch data for the grid using the rebuiltPartNum
+            var model = await GetScPartsUsedInRbPartsData(rebuiltPartNum, gridType);
+            return Json(model.ToDataSourceResult(request));
+
+        }
+
+        private async Task<IEnumerable<StockCodedPartsViewModel>> GetScPartsUsedInRbPartsData(string RebuiltPartNum, string gridType)
+        {
+            //TODO use GridType
+
+            try
+            {
+
+                var query = @"
+                             DECLARE @RebuiltPartNumber VARCHAR(30) = '" + RebuiltPartNum + "'" +
+                             @"
+                                SELECT  [StockCode] as MMSStockCode
+                              ,[UnitCost]
+                              ,[QTY]
+                              ,[Percentage]
+                              ,[CoreCost]
+                              ,[TotalCost]
+                              ,[CC]
+                              ,[Description]
+                              ,[Keyword]
+                              ,[OemCost]
+                              ,[MmsRebuiltCode]
+                              ,[RebuiltPartCost]
+                              ,[RebuiltPart]
+                              ,[Id]
+                              ,[linkCode]
+                              ,[linkType]
+                          FROM [CES].[SBCES].[StockPartUsed]
+                                WHERE 
+                                    StockCode = @RebuiltPartNumber 
+                                  --AND LinkType = @LinkType;
+
+                                ";
+
+                return await _dbConnection.QueryAsync<StockCodedPartsViewModel>(query);
+
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public IActionResult CreateScPartsUsedInRbtParts([DataSourceRequest] DataSourceRequest request, StockCodedPartsViewModel model, [FromQuery] string rebuiltPartNum)
+        {
+            if (ModelState.IsValid)
+            {
+                try
+                {
+                }
+                catch (Exception ex)
+                {
+                }
+            }
+            return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+        }
+
+        [AcceptVerbs("Post")]
+        public ActionResult UpdateScPartsUsedInRbtParts([DataSourceRequest] DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<StockCodedPartsViewModel> models)
+        {
+            if (models != null && ModelState.IsValid)
+            {
+                foreach (var model in models)
+                {
+                    UpdateScPartData(model);
+                }
+            }
+
+            return Json(models.ToDataSourceResult(request, ModelState));
+        }
+
+        [AllowAnonymous]
+        public IActionResult UpdateScPartData(StockCodedPartsViewModel model)
+
+        {
+            if (ModelState.IsValid)
+            {
+                try
+                {
+                    //string query = @"
+                    //                UPDATE SBCES.StockPartUsed
+                    //                SET 
+                    //                    LABOURDEFN = @LabourDefn,
+                    //                    COSTCENTRE = @CostCentre,
+                    //                    TASK = @Task,
+                    //                    USAGE = @Usage,
+                    //                    HRSREQD = @HrsReqd,
+                    //                    REBUILTPARTNUM = @LinkNumber 
+                    //                WHERE Id = @Id";
+
+                    //var parameters = new
+                    //{
+                    //    model.LabourDefn,
+                    //    model.CostCentre,
+                    //    model.Task,
+                    //    model.Usage,
+                    //    model.HrsReqd,
+                    //    model.LinkNumber, // From query parameter
+                    //    model.Id
+                    //};
+
+                    //_dbConnection.Execute(query, parameters);
+                }
+                catch (Exception e)
+                {
+                }
+            }
+            return Json(ModelState);
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public IActionResult DeleteScPartsUsedInRbtParts([DataSourceRequest] DataSourceRequest request, StockCodedPartsViewModel model)
+        {
+            //var existing = _data.FirstOrDefault(m => m.LabourType == model.LabourType);
+            //if (existing != null)
+            //{
+            //    _data.Remove(existing);
+            //}
+            //return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+            return null;
+        }
+    }
+}
