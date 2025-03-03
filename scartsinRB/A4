@@ -1,0 +1,87 @@
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> CreateScPartsUsedInRbtParts(
+    [DataSourceRequest] DataSourceRequest request,
+    [Bind(Prefix = "models")] IEnumerable<StockCodedPartsViewModel> models,
+    [FromQuery] string rebuiltPartNum,
+    [FromQuery] string gridType)
+{
+    if (!ModelState.IsValid)
+    {
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+
+    using var transaction = _dbConnection.BeginTransaction();
+    try
+    {
+        // Get values from ViewBag and system
+        var userEntered = ViewBag.UserADId?.ToString().ToUpper() ?? "SYSTEM";
+        var dateEntered = DateTime.Now;
+        var linkCode = ViewBag.MMsCode?.ToString().ToUpper() ?? "DEFAULT_CODE";
+
+        foreach (var model in models)
+        {
+            var parameters = new DynamicParameters();
+            
+            // Convert all string values to uppercase
+            parameters.Add("MMSStockCode", model.MMSStockCode?.ToUpperInvariant());
+            parameters.Add("CC", model.CC?.ToUpperInvariant() ?? " ");
+            parameters.Add("CorePartNumber", model.CorePartNumber?.ToUpperInvariant() ?? " ");
+            parameters.Add("UserEntered", userEntered);
+            parameters.Add("DateEntered", dateEntered);
+            parameters.Add("LinkCode", linkCode);
+            
+            // Decimal values with defaults
+            parameters.Add("UnitCost", model.UnitCost ?? 0m);
+            parameters.Add("MmsNewCost", model.MmsNewCost ?? 0m);
+            parameters.Add("CoreCost", model.CoreCost ?? 0m);
+            parameters.Add("RebPartCost", model.PartCost ?? 0m);
+            
+            // String values with uppercase conversion and defaults
+            parameters.Add("Qty", (model.Qty ?? "0").ToUpperInvariant());
+            parameters.Add("Percentage", (model.Percentage ?? "0").ToUpperInvariant());
+
+            var sql = @"
+                INSERT INTO SCPartsUsed (
+                    MMSStockCode, DateEntered, UserEntered, MMSCost, OEMCost,
+                    LastModifiedBy, LastModifiedDate, CostCentre, QtyReqd,
+                    PercentUsage, LinkCode, RebuiltPart, LinkType, MMSRebuiltCode,
+                    CoreCost, RebPartCost
+                ) VALUES (
+                    UPPER(@MMSStockCode), 
+                    @DateEntered, 
+                    UPPER(@UserEntered),
+                    @UnitCost, 
+                    @MmsNewCost,
+                    UPPER(@UserEntered), 
+                    @DateEntered, 
+                    UPPER(@CC),
+                    UPPER(@Qty), 
+                    UPPER(@Percentage),
+                    UPPER(@LinkCode), 
+                    UPPER(@RebuiltPart), 
+                    UPPER(@LinkType),
+                    UPPER(@CorePartNumber), 
+                    @CoreCost,
+                    @RebPartCost
+                )";
+
+            await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+        }
+
+        transaction.Commit();
+        return Json(models.ToDataSourceResult(request));
+    }
+    catch (SqlException sqlEx)
+    {
+        transaction.Rollback();
+        ModelState.AddModelError("", $"Database error: {sqlEx.Message}");
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+    catch (Exception ex)
+    {
+        transaction.Rollback();
+        ModelState.AddModelError("", $"Unexpected error: {ex.Message}");
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+}
