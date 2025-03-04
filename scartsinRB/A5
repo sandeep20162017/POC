@@ -1,0 +1,71 @@
+public async Task<IActionResult> CreateLabourDetail(
+    [DataSourceRequest] DataSourceRequest request,
+    [Bind(Prefix = "models")] IEnumerable<LabourDetailsRebuiltPartsViewModel> models,
+    [FromQuery] string rebuiltPartNum,
+    [FromQuery] string gridType)
+{
+    if (!ModelState.IsValid)
+    {
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+
+    _dbConnection.Open();
+    using (var transaction = _dbConnection.BeginTransaction())
+    {
+        try
+        {
+            foreach (var model in models)
+            {
+                var PartType = "RB";
+                // Use parameterized query instead of string.Format
+                string query = @"INSERT INTO SBCES.EMPLOYEELABOUR (
+                                    LABOURDEFN, DATEENTERED, LINKNUMBER, TYPEID, 
+                                    COSTCENTRE, TASK, LABOURTYPE, USAGE, HRSREQD, 
+                                    ADJHRS, DATEREVISED, TIMEADDITION, REBUILTPARTNUM, 
+                                    LASTMODIFIEDBY) 
+                                 VALUES (
+                                    @LabourDefn, @Now1, @LinkNumber, @TypeId, 
+                                    @CostCentre, @Task, @LabourType, @Usage, @HrsReqd, 
+                                    @AdjHrs, @Now2, @TimeAddition, @RebuiltPartNum, 
+                                    @LastModifiedBy)";
+
+                var parameters = new 
+                {
+                    LabourDefn = model.LabourDefn,
+                    Now1 = DateTime.Now,
+                    LinkNumber = rebuiltPartNum,
+                    TypeId = PartType,
+                    CostCentre = model.CostCentre,
+                    Task = model.Task,
+                    LabourType = model.LabourType,
+                    Usage = model.Usage,
+                    HrsReqd = model.HrsReqd,
+                    AdjHrs = model.AdjHrs,
+                    Now2 = DateTime.Now,
+                    TimeAddition = model.TimeAddition,
+                    RebuiltPartNum = rebuiltPartNum,
+                    LastModifiedBy = ViewBag.UserName
+                };
+
+                // Execute the command with the transaction
+                _dbConnection.Execute(query, parameters, transaction: transaction);
+            }
+
+            // Commit after all inserts
+            transaction.Commit();
+
+            return Json(models.ToDataSourceResult(request));
+        }
+        catch (Exception ex)
+        {
+            transaction.Rollback();
+            // Log the exception (ex) here
+            ModelState.AddModelError("", "An error occurred while saving data.");
+            return Json(models.ToDataSourceResult(request, ModelState));
+        }
+        finally
+        {
+            _dbConnection.Close(); // Ensure connection is closed
+        }
+    }
+}
