@@ -1,0 +1,75 @@
+You are ASP,nET core v 8 and Telerik (Kendoo) ASP.NET core expert.
+For the following controller action, I am getting exception :
+ExecuteNonQuery requires the command to have a transaction when the connection assigned to the command is in a pending local transaction.  The Transaction property of the command has not been initialized.
+
+Controller action :
+ public async Task<IActionResult> CreateLabourDetail(
+     [DataSourceRequest]
+ DataSourceRequest request,
+      [Bind(Prefix = "models")] IEnumerable<LabourDetailsRebuiltPartsViewModel> models,
+      [FromQuery] string rebuiltPartNum,
+      [FromQuery] string gridType)
+ {
+     if (!ModelState.IsValid)
+     {
+         return Json(models.ToDataSourceResult(request, ModelState));
+     }
+     _dbConnection.Open();
+     using (var transaction = _dbConnection.BeginTransaction())
+     {
+         try
+         {
+             foreach (var model in models)
+             {
+                 var PartType = "RB";
+                 string query = String.Format(@"INSERT INTO SBCES.EMPLOYEELABOUR (
+                                         LABOURDEFN
+                                         , DATEENTERED
+                                         , LINKNUMBER
+                                         , TYPEID
+                                         , COSTCENTRE
+                                         , TASK
+                                          , LABOURTYPE
+                                          , USAGE
+                                          , HRSREQD
+                                          , ADJHRS
+                                          , DATEREVISED
+                                          , TIMEADDITION
+                                          , REBUILTPARTNUM
+                                          , LASTMODIFIEDBY ) 
+                                         VALUES('{0}', '{1}', '{2}', '{3}', '{4}', '{5}',
+                                          '{6}', '{7}', {8}, '{9}', '{10}', {11},
+                                          '{12}', '{13}' );",
+
+                                                 model.LabourDefn
+                                                , DateTime.Now
+                                                 , rebuiltPartNum
+                                                 , PartType
+                                                 , model.CostCentre
+                                                 , model.Task
+                                                 , model.LabourType
+                                                 , model.Usage
+                                                 , model.HrsReqd
+                                                 , model.AdjHrs
+                                                 , DateTime.Now.ToString()
+                                                 , model.TimeAddition
+                                                 , rebuiltPartNum
+                                                 , ViewBag.UserName
+                                       );
+
+                 var tt = query;
+                 _dbConnection.Execute(query, model);
+                 transaction.Commit();
+
+             }
+
+             return Json(models.ToDataSourceResult(request));
+         }
+         catch (Exception ex)
+         {
+             transaction.Rollback();
+             return Json(models.ToDataSourceResult(request, ModelState));
+         }
+     }
+    
+ }
