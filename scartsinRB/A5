@@ -1,131 +1,90 @@
-public async Task<IActionResult> CreateLabourDetail(
-    [DataSourceRequest] DataSourceRequest request,
-    [Bind(Prefix = "models")] IEnumerable<LabourDetailsRebuiltPartsViewModel> models,
-    [FromQuery] string rebuiltPartNum,
-    [FromQuery] string gridType)
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using System.Data;
+using System.Data.SqlClient;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+
+public class YourController : Controller
 {
-    if (!ModelState.IsValid)
+    private readonly string _connectionString;
+
+    // Inject IConfiguration to get connection string
+    public YourController(IConfiguration config)
     {
-        return Json(models.ToDataSourceResult(request, ModelState));
+        _connectionString = config.GetConnectionString("YourConnectionStringName");
     }
 
-    _dbConnection.Open();
-    using (var transaction = _dbConnection.BeginTransaction())
+    [HttpPost]
+    public async Task<IActionResult> CreateLabourDetail(
+        [DataSourceRequest] DataSourceRequest request,
+        [Bind(Prefix = "models")] IEnumerable<LabourDetailsRebuiltPartsViewModel> models,
+        [FromQuery] string rebuiltPartNum,
+        [FromQuery] string gridType)
     {
-        try
+        if (!ModelState.IsValid)
         {
-            foreach (var model in models)
-            {
-                var PartType = "RB";
-                // Use parameterized query instead of string.Format
-                string query = @"INSERT INTO SBCES.EMPLOYEELABOUR (
-                                    LABOURDEFN, DATEENTERED, LINKNUMBER, TYPEID, 
-                                    COSTCENTRE, TASK, LABOURTYPE, USAGE, HRSREQD, 
-                                    ADJHRS, DATEREVISED, TIMEADDITION, REBUILTPARTNUM, 
-                                    LASTMODIFIEDBY) 
-                                 VALUES (
-                                    @LabourDefn, @Now1, @LinkNumber, @TypeId, 
-                                    @CostCentre, @Task, @LabourType, @Usage, @HrsReqd, 
-                                    @AdjHrs, @Now2, @TimeAddition, @RebuiltPartNum, 
-                                    @LastModifiedBy)";
-
-                var parameters = new 
-                {
-                    LabourDefn = model.LabourDefn,
-                    Now1 = DateTime.Now,
-                    LinkNumber = rebuiltPartNum,
-                    TypeId = PartType,
-                    CostCentre = model.CostCentre,
-                    Task = model.Task,
-                    LabourType = model.LabourType,
-                    Usage = model.Usage,
-                    HrsReqd = model.HrsReqd,
-                    AdjHrs = model.AdjHrs,
-                    Now2 = DateTime.Now,
-                    TimeAddition = model.TimeAddition,
-                    RebuiltPartNum = rebuiltPartNum,
-                    LastModifiedBy = ViewBag.UserName
-                };
-
-                // Execute the command with the transaction
-                _dbConnection.Execute(query, parameters, transaction: transaction);
-            }
-
-            // Commit after all inserts
-            transaction.Commit();
-
-            return Json(models.ToDataSourceResult(request));
-        }
-        catch (Exception ex)
-        {
-            transaction.Rollback();
-            // Log the exception (ex) here
-            ModelState.AddModelError("", "An error occurred while saving data.");
             return Json(models.ToDataSourceResult(request, ModelState));
         }
-        finally
+
+        // Create and manage connection locally
+        using (var connection = new SqlConnection(_connectionString))
         {
-            _dbConnection.Close(); // Ensure connection is closed
-        }
+            await connection.OpenAsync(); // Async open
+
+            using (var transaction = await connection.BeginTransactionAsync())
+            {
+                try
+                {
+                    foreach (var model in models)
+                    {
+                        const string query = @"
+                            INSERT INTO SBCES.EMPLOYEELABOUR (
+                                LABOURDEFN, DATEENTERED, LINKNUMBER, TYPEID, 
+                                COSTCENTRE, TASK, LABOURTYPE, USAGE, HRSREQD, 
+                                ADJHRS, DATEREVISED, TIMEADDITION, REBUILTPARTNUM, LASTMODIFIEDBY
+                            ) VALUES (
+                                @LabourDefn, @DateEntered, @LinkNumber, @TypeId,
+                                @CostCentre, @Task, @LabourType, @Usage, @HrsReqd,
+                                @AdjHrs, @DateRevised, @TimeAddition, @RebuiltPartNum, @LastModifiedBy
+                            )";
+
+                        var parameters = new
+                        {
+                            model.LabourDefn,
+                            DateEntered = DateTime.Now,
+                            LinkNumber = rebuiltPartNum,
+                            TypeId = "RB", // PartType
+                            model.CostCentre,
+                            model.Task,
+                            model.LabourType,
+                            model.Usage,
+                            model.HrsReqd,
+                            model.AdjHrs,
+                            DateRevised = DateTime.Now,
+                            model.TimeAddition,
+                            RebuiltPartNum = rebuiltPartNum,
+                            LastModifiedBy = ViewBag.UserName // Ensure ViewBag.UserName exists
+                        };
+
+                        // Async execute with transaction
+                        await connection.ExecuteAsync(query, parameters, transaction: transaction);
+                    }
+
+                    await transaction.CommitAsync(); // Async commit
+                    return Json(models.ToDataSourceResult(request));
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    // Log the error (e.g., using ILogger)
+                    // _logger.LogError(ex, "Error inserting labour details");
+                    
+                    ModelState.AddModelError("", "An error occurred while saving data.");
+                    return Json(models.ToDataSourceResult(request, ModelState));
+                }
+            } // Transaction disposed here
+        } // Connection closed/disposed here automatically
     }
 }
-
-Model :
-using System.ComponentModel.DataAnnotations.Schema;
-using System.ComponentModel.DataAnnotations;
-
-namespace BCES.Models.Parts
-{
-    public class LabourDetailsRebuiltPartsViewModel
-    {
-        [Key]
-        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
-        public int Id { get; set; }
-
-        [StringLength(50)]
-        public string? LabourDefn { get; set; }
-
-        public DateTime? DateEntered { get; set; }
-
-        [StringLength(25)]
-        public string? LinkNumber { get; set; }
-
-        [StringLength(5)]
-        public string? TypeId { get; set; }
-
-        [StringLength(5)]
-        public string? CostCentre { get; set; }
-
-        [StringLength(50)]
-        public string? Task { get; set; }
-
-        public int? LabourType { get; set; }
-
-        [StringLength(25)]
-        public string? Usage { get; set; }
-
-        public decimal? RatePerHour { get; set; }
-      
-
-        [StringLength(25)]
-        public string? HrsReqd { get; set; }
-
-        [StringLength(25)]
-        public string? AdjHrs { get; set; }
-
-        public DateOnly? DateRevised { get; set; }  // Using DateOnly for date (no time component)
-
-        [Column(TypeName = "numeric(18,2)")]
-        public decimal? TimeAddition { get; set; }
-
-        [StringLength(30)]
-        public string? RebuiltPartNum { get; set; }
-
-        [StringLength(25)]
-        public string? LastModifiedBy { get; set; }
-
-
-    }
-
-}
-
