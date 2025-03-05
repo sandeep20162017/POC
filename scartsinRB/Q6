@@ -1,0 +1,229 @@
+You are ASP.NET core V 8.0 and telerik ASP.NET core expert.
+I need to add telerik dialog box (example below) when user clicks on Telerik custom button command.Custom(" ").Click("refreshPartDetails").
+Grid is using incell edit.
+This dialog should display "Part Description" and "Part Type". Just read and close button. when user clicks on close dialog should disapper.
+Once diaong box is implemented, I would like to take out 
+ // columns.Bound(c => c.PartType).Title("Part Type");
+      //  columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+      //  columns.Bound(c => c.DetailedDesc).Title("Part Description");
+
+"Part Description" and "Part Type" are populated using controller action and dapper cll below.
+Controller action :
+ [HttpGet]
+ public async Task<IActionResult> GetPartDetails(string mmsStockCode)
+ {
+     if (string.IsNullOrEmpty(mmsStockCode))
+     {
+         return NotFound("Stock Code is required");
+     }
+
+     try
+     {
+         var query = @"
+                     SELECT TOP 1 
+                         PartType, 
+                         DetailedDesc AS DetailedDesc 
+                     FROM SBCES.StockCodedParts 
+                     WHERE MMSStockCode ='" + mmsStockCode + "'";
+
+         using (var connection = _db.CreateConnection())
+         {
+             var result = await connection.QueryFirstOrDefaultAsync(query, new { mmsStockCode });
+
+             if (result == null)
+             {
+                 return NotFound(new { Message = "Stock Code not found" });
+             }
+
+             return Ok(new
+             {
+                 PartType = result.PartType,
+                 DetailedDesc = result.DetailedDesc
+             });
+         }
+     }
+     catch (Exception ex)
+     {
+         // Log error here
+         return StatusCode(500, new { Message = "Error retrieving part details" });
+     }
+ }
+_ScPartsUsedInRbParts.cshtml :
+@model IEnumerable<BCES.Models.Parts.StockCodedPartsViewModel>
+
+@{
+    ViewData["Title"] = "Stock Coded Parts Details";
+}
+
+<h6>Stock Coded Parts Used</h6>
+
+@(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
+    .Name("ScPartsMaterialDetailsRebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.MMSStockCode).Title("Stock Code");
+        columns.Command(command =>
+        {
+            command.Custom(" ").Click("refreshPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+           //use dialog box here to display Part Type and Part Description
+        }).Width(200);
+       // columns.Bound(c => c.PartType).Title("Part Type");
+      //  columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+      //  columns.Bound(c => c.DetailedDesc).Title("Part Description");
+        columns.Bound(c => c.CC).Title("CC").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+        columns.Bound(c => c.UnitCost).Title("Unit Cost");
+        columns.Bound(c => c.Qty).Title("Qty");
+        columns.Bound(c => c.Percentage).Title("Percentage Used");
+        columns.Bound(c => c.CoreCost).Title("Core Cost").Format("{0:N2}");
+      
+       
+        // columns.Bound(c => c.DateRevised).Title("Date Revised");
+        columns.Command(command =>
+        {
+            if (@ViewBag.RoleId == 1)
+            {
+               // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+            }
+            if (@ViewBag.RoleId == 1)
+            {
+
+                command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Delete button with tooltip
+            }
+        }).Width(200);
+    })
+     .ToolBar(toolbar =>
+    {
+        if (@ViewBag.RoleId == 1)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+
+    //.Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(true)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.MMSStockCode); 
+            model.Field(c => c.MMSStockCode);
+         //   model.Field(c => c.PartType).Editable(false);
+         //   model.Field(c => c.DetailedDesc).Editable(false);
+        })
+
+        .Events(events =>
+        {
+            events.RequestEnd("onRequestEnd");
+            events.Error("onDataSourceError");
+        })
+
+        .Read(read => read.Url(Url.Action("GetScPartsUsedInRbParts", "ScPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("CreateScPartsUsedInRbtParts", "ScPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateScPartsUsedInRbtParts", "ScPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteScPartsUsedInRbtParts", "ScPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+)
+Javascript :
+<script>
+    function refreshPartDetails(e) {
+       
+        var grid = $("#ScPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+
+        var notification = $("#notification").data("kendoNotification");
+        notification.show("Inside refreshPartDetails", "error");
+       
+
+        if (!dataItem.MMSStockCode) {
+            notification.show("Please enter a valid Stock Code before refreshing", "error");
+            return;
+        }
+
+        $.ajax({
+            url: '@Url.Action("GetPartDetails", "ScPartsUsedInRbParts")',
+            data: { mmsStockCode: dataItem.MMSStockCode },
+            beforeSend: function () {
+                notification.show("Fetching part details...", "info");
+            },
+            success: function (response) {
+                if (response && response.PartType && response.DetailedDesc) {
+                    dataItem.set("PartType", response.PartType);
+                    dataItem.set("DetailedDesc", response.DetailedDesc);
+                    grid.refresh();
+                    notification.show("Part details updated successfully", "success");
+                } else {
+                    notification.show("No matching parts found for this Stock Code", "warning");
+                }
+            },
+            error: function (xhr) {
+                var errorMessage = xhr.status === 404
+                    ? "Stock Code not found in system"
+                    : "Error retrieving part details";
+                notification.show(errorMessage, "error");
+            }
+        });
+    }
+
+</script>
+   
+
+
+
+Teleril Dialog example :
+<div id="example">
+    @(Html.Kendo().Dialog()
+        .Name("dialog")
+        .Title("Software Update")
+        .Content("<p>A new version of <strong>Kendo UI</strong> is available. Would you like to download and install it now?<p>")
+        .Width(400)
+        .Modal(false)
+        .Actions(actions =>
+        {
+            actions.Add().Text("Skip this version").Action("onSkipVersionClick");
+            actions.Add().Text("Remind me later");
+            actions.Add().Text("Install update").Primary(true);
+        })
+        .Events(ev => ev.Close("onClose").Open("onOpen"))
+    )
+
+    @(Html.Kendo().Button()
+        .Name("showDialogBtn")
+        .HtmlAttributes(new { style = "display:none;", @class = "hide-on-narrow" })
+        .Content("Open Dialog")
+        .Events(ev => ev.Click("showDialog"))
+    )
+</div>
+
+<script>
+    function onClose() {
+        $("#showDialogBtn").fadeIn();
+    }
+
+    function onOpen() {
+        $("#showDialogBtn").fadeOut();
+    }
+
+    function showDialog() {
+        $('#dialog').data("kendoDialog").open();
+    }
+
+    function onSkipVersionClick() {
+        // Insert any custom JavaSctipt logic when "Skip this version" is selected.
+        // For example, call a specified JavaScrip function to execute.
+    }
+</script>
+
+<style>
+    #example {
+        min-height: 350px;
+    }
+</style>
+Also available for:
+
+HTML5 / JavaScript
+ASP.NET MVC
