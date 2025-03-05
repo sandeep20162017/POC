@@ -1,0 +1,78 @@
+You are ASP.NET core (v8.0) and Telerik ASp.NET core expert.
+I have Telerik grid. Grid uses Incell edit.
+I need to create two new columns. These columns will be calculated based on other columns
+Create two columns in the grid "Cost Saving Per Unit" and "percentage saving per unit"
+Use formula for "Cost Saving Per Unit" = BuyNewCost - Remanufactured Cost
+For "percentage saving per unit" calculate the percentage based on "Cost Saving Per Unit"
+In the model BuyNewCost and Remanufactured Cost are string. You may need to convert to decimal.
+If BuyNewCost or Remanufactured Cost are blank or does not contain proper value, display 0 in "Cost Saving Per Unit" and "percentage saving per unit"
+Both "Cost Saving Per Unit" and "percentage saving per unit" should be non editable.
+If possible display negaive values as (). Example -221.97 = (221.97)
+
+
+Index.cshtml :
+@(Html.Kendo().Grid<RebuiltPartsViewModel>()
+    .Name("RebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.MmsStockCode).Title("MMS Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.DetailedDesc).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.JobNumber).Title("Job Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CorePartNum).Title("Core Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CoreCharge).Title("Core Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C}").EditorTemplateName("Currency");
+        columns.Bound(c => c.BuyNewCost).Title("Buy New Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C}").EditorTemplateName("Currency");
+        columns.Bound(c => c.RemanCost).Title("Remanufactured Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).EditorTemplateName("Currency").ClientTemplate("#:kendo.toString(RemanCost, 'c2')#");
+
+        //multiselect                           
+        columns.Bound(u => u.BusId).Title("Vehicle Series") 
+       .ClientTemplate("# if (typeof Buses != 'undefined'  && Buses && Buses.length > 0) { # #= Buses.map(bus => bus.BusName).join(', ') # # } else { # Select Vehicle # } #")
+        .EditorTemplateName("VehicleSeriesEditor");
+
+        @* // Replace Command column with Custom Delete Button
+         columns.Bound(u => u.RebuiltStockNum)
+        .ClientTemplate("<button class='custom-delete-btn k-button k-button-icon'>Delete</button>")
+        .Title("Actions"); *@
+
+        columns.Command(command =>
+        {
+           // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+            command.Custom("Archive").Text(" ").IconClass("k-icon k-i-folder").Click("onArchiveClick").HtmlAttributes(new { title = "Archive" }); // Archive button with tooltip
+            command.Custom("Save to Excel").Text(" ").IconClass("k-icon k-i-file-excel").Click("onSaveToExcelClick").HtmlAttributes(new { title = "Save to Excel" }); // Save to Excel button with tooltip
+            command.Custom("Email Estimate").Text(" ").IconClass("k-icon k-i-email").Click("onEmailEstimateClick").HtmlAttributes(new { title = "Email Estimate" }); // Email Estimate button with tooltip
+        }).Title("Actions").Width(200).HtmlAttributes(new { @class = "action-buttons" }); // Set a fixed width for the Actions column
+    })
+    .ToolBar(toolbar => {
+        toolbar.Create();
+        toolbar.Save();
+    })
+
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    //.Scrollable()
+    .ClientDetailTemplateId("template")
+    .Resizable(r => r.Columns(true))
+    .Filterable(ftb => ftb.Mode(GridFilterMode.Row)) //Disable for multiselect
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.RbMasterlistId);
+            model.Field(c => c.RbMasterlistId);
+            model.Field(c => c.RebuiltStockNum).Editable(true);
+            model.Field(c => c.MmsStockCode).Editable(true);
+            model.Field(u => u.BusIds).DefaultValue(new List<int>());
+            model.Field(u => u.BusNames).DefaultValue(new List<string>());
+          })
+        .Events(events =>
+        {
+            events.RequestEnd("onRequestEnd"); 
+             events.Error("onDataSourceError");
+        })
+        .Read(read => read.Url(Url.Action("GetRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("AddRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+    )
+)
