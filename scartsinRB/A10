@@ -1,0 +1,131 @@
+@(Html.Kendo().Grid<RebuiltPartsViewModel>()
+    .Name("RebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        // Existing columns
+        columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.MmsStockCode).Title("MMS Stock Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.DetailedDesc).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.JobNumber).Title("Job Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CorePartNum).Title("Core Code").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+        columns.Bound(c => c.CoreCharge).Title("Core Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C}").EditorTemplateName("Currency");
+        columns.Bound(c => c.BuyNewCost).Title("Buy New Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C}").EditorTemplateName("Currency");
+        columns.Bound(c => c.RemanCost).Title("Remanufactured Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).EditorTemplateName("Currency").ClientTemplate("#:kendo.toString(RemanCost, 'c2')#");
+
+        // New calculated columns
+        columns.Template(@<text></text>)
+            .Title("Cost Saving Per Unit")
+            .ClientTemplate("#= calculateCostSaving(data) #")
+            .Width(150)
+            .HtmlAttributes(new { @class = "non-editable" });
+
+        columns.Template(@<text></text>)
+            .Title("Percentage Saving Per Unit")
+            .ClientTemplate("#= calculatePercentageSaving(data) #")
+            .Width(150)
+            .HtmlAttributes(new { @class = "non-editable" });
+
+        // Vehicle Series and Actions columns
+        columns.Bound(u => u.BusId).Title("Vehicle Series")
+            .ClientTemplate("# if (typeof Buses != 'undefined' && Buses && Buses.length > 0) { # #= Buses.map(bus => bus.BusName).join(', ') # # } else { # Select Vehicle # } #")
+            .EditorTemplateName("VehicleSeriesEditor");
+
+        columns.Command(command =>
+        {
+            command.Custom("Archive").Text(" ").IconClass("k-icon k-i-folder").Click("onArchiveClick").HtmlAttributes(new { title = "Archive" });
+            command.Custom("Save to Excel").Text(" ").IconClass("k-icon k-i-file-excel").Click("onSaveToExcelClick").HtmlAttributes(new { title = "Save to Excel" });
+            command.Custom("Email Estimate").Text(" ").IconClass("k-icon k-i-email").Click("onEmailEstimateClick").HtmlAttributes(new { title = "Email Estimate" });
+        }).Title("Actions").Width(200).HtmlAttributes(new { @class = "action-buttons" });
+    })
+    // Rest of the grid configuration remains the same
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    .ClientDetailTemplateId("template")
+    .Resizable(r => r.Columns(true))
+    .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.RbMasterlistId);
+            model.Field(c => c.RbMasterlistId);
+            model.Field(c => c.RebuiltStockNum).Editable(true);
+            model.Field(c => c.MmsStockCode).Editable(true);
+            model.Field(u => u.BusIds).DefaultValue(new List<int>());
+            model.Field(u => u.BusNames).DefaultValue(new List<string>());
+        })
+        .Events(events => events
+            .RequestEnd("onRequestEnd")
+            .Error("onDataSourceError"))
+        .Read(read => read.Url(Url.Action("GetRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("AddRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+    )
+)
+
+<script>
+    function parseCurrency(value) {
+        try {
+            if (!value) return 0;
+            // Remove non-numeric characters except digits, dots, and minus signs
+            var numString = value.toString().replace(/[^0-9.-]/g, '');
+            var num = parseFloat(numString);
+            return isNaN(num) ? 0 : num;
+        } catch (e) {
+            showError("Error parsing currency: " + e.message);
+            return 0;
+        }
+    }
+
+    function formatNegative(value) {
+        try {
+            if (typeof value !== 'number') {
+                value = 0;
+            }
+            // Format to 2 decimal places and wrap negatives in parentheses
+            return value < 0 ? `(${Math.abs(value).toFixed(2)})` : value.toFixed(2);
+        } catch (e) {
+            showError("Error formatting number: " + e.message);
+            return '0.00';
+        }
+    }
+
+    function calculateCostSaving(data) {
+        try {
+            var buyNew = parseCurrency(data.BuyNewCost);
+            var reman = parseCurrency(data.RemanCost);
+            var costSaving = buyNew - reman;
+            return formatNegative(costSaving);
+        } catch (e) {
+            showError("Error calculating cost saving: " + e.message);
+            return '0.00';
+        }
+    }
+
+    function calculatePercentageSaving(data) {
+        try {
+            var buyNew = parseCurrency(data.BuyNewCost);
+            var reman = parseCurrency(data.RemanCost);
+            var costSaving = buyNew - reman;
+
+            if (buyNew === 0) return '0.00%'; // Avoid division by zero
+
+            var percentage = (costSaving / buyNew) * 100;
+            return formatNegative(percentage) + '%';
+        } catch (e) {
+            showError("Error calculating percentage saving: " + e.message);
+            return '0.00%';
+        }
+    }
+
+    function showError(message) {
+        var notification = $("#notification").data("kendoNotification");
+        if (notification) {
+            notification.error(message);
+        } else {
+            console.error("Notification widget not initialized. Error: " + message);
+        }
+    }
+</script>
