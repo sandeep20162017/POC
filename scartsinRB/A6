@@ -1,0 +1,131 @@
+First, add the dialog component in your _ScPartsUsedInRbParts.cshtml:
+
+html
+Copy
+@(Html.Kendo().Dialog()
+    .Name("partDetailsDialog")
+    .Title("Part Details")
+    .Width(400)
+    .Modal(true)
+    .Visible(false)
+    .Actions(actions => 
+    {
+        actions.Add().Text("Close").Primary(true);
+    })
+)
+Run HTML
+Update your JavaScript function to show the dialog:
+
+javascript
+Copy
+function refreshPartDetails(e) {
+    var grid = $("#ScPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+    var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+    var notification = $("#notification").data("kendoNotification");
+
+    if (!dataItem.MMSStockCode) {
+        notification.show("Please enter a valid Stock Code before refreshing", "error");
+        return;
+    }
+
+    $.ajax({
+        url: '@Url.Action("GetPartDetails", "ScPartsUsedInRbParts")',
+        data: { mmsStockCode: dataItem.MMSStockCode },
+        beforeSend: function () {
+            notification.show("Fetching part details...", "info");
+        },
+        success: function (response) {
+            if (response && response.PartType && response.DetailedDesc) {
+                var dialog = $("#partDetailsDialog").data("kendoDialog");
+                dialog.content(`
+                    <div style="padding: 10px;">
+                        <p><strong>Part Type:</strong> ${response.PartType}</p>
+                        <p><strong>Part Description:</strong> ${response.DetailedDesc}</p>
+                    </div>
+                `);
+                dialog.open();
+            } else {
+                notification.show("No matching parts found for this Stock Code", "warning");
+            }
+        },
+        error: function (xhr) {
+            var errorMessage = xhr.status === 404
+                ? "Stock Code not found in system"
+                : "Error retrieving part details";
+            notification.show(errorMessage, "error");
+        }
+    });
+}
+Remove the commented columns from your grid configuration:
+
+csharp
+Copy
+@(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
+    .Name("ScPartsMaterialDetailsRebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.MMSStockCode).Title("Stock Code");
+        columns.Command(command =>
+        {
+            command.Custom(" ").Click("refreshPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+        }).Width(200);
+        columns.Bound(c => c.CC).Title("CC").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+        columns.Bound(c => c.UnitCost).Title("Unit Cost");
+        columns.Bound(c => c.Qty).Title("Qty");
+        columns.Bound(c => c.Percentage).Title("Percentage Used");
+        columns.Bound(c => c.CoreCost).Title("Core Cost").Format("{0:N2}");
+        
+        columns.Command(command =>
+        {
+            if (@ViewBag.RoleId == 1)
+            {
+                command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" });
+            }
+        }).Width(200);
+    })
+    // Rest of the grid configuration remains the same
+)
+Update your controller action to use parameterized query (important security fix):
+
+csharp
+Copy
+[HttpGet]
+public async Task<IActionResult> GetPartDetails(string mmsStockCode)
+{
+    if (string.IsNullOrEmpty(mmsStockCode))
+    {
+        return NotFound("Stock Code is required");
+    }
+
+    try
+    {
+        var query = @"
+            SELECT TOP 1 
+                PartType, 
+                DetailedDesc 
+            FROM SBCES.StockCodedParts 
+            WHERE MMSStockCode = @mmsStockCode";
+
+        using (var connection = _db.CreateConnection())
+        {
+            var result = await connection.QueryFirstOrDefaultAsync(query, new { mmsStockCode });
+
+            if (result == null)
+            {
+                return NotFound(new { Message = "Stock Code not found" });
+            }
+
+            return Ok(new
+            {
+                PartType = result.PartType,
+                DetailedDesc = result.DetailedDesc
+            });
+        }
+    }
+    catch (Exception ex)
+    {
+        // Log error here
+        return StatusCode(500, new { Message = "Error retrieving part details" });
+    }
+}
+Key changes made:
