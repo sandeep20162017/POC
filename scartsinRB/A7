@@ -1,0 +1,103 @@
+[AcceptVerbs("Post")]
+[AllowAnonymous]
+public async Task<IActionResult> UpdateScPartsUsedInRbtParts(
+    [DataSourceRequest] DataSourceRequest request,
+    [Bind(Prefix = "models")] IEnumerable<StockCodedPartsViewModel> models,
+    [FromQuery] string rebuiltPartNum,
+    [FromQuery] string gridType)
+{
+    if (!ModelState.IsValid)
+    {
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+
+    using var transaction = _dbConnection.BeginTransaction();
+    try
+    {
+        var enteredBy = ViewBag.UserADId?.ToString().ToUpper() ?? "SYSTEM";
+        var dateModified = DateTime.Now;
+
+        foreach (var model in models)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("MMSStockCode", model.MMSStockCode?.ToUpperInvariant());
+            parameters.Add("CC", model.CC?.ToUpperInvariant() ?? " ");
+            parameters.Add("UnitCost", model.UnitCost ?? 0m);
+            parameters.Add("Qty", (model.Qty ?? "0").ToUpperInvariant());
+            parameters.Add("Percentage", (model.Percentage ?? "0").ToUpperInvariant());
+            parameters.Add("CoreCost", model.CoreCost ?? 0m);
+            parameters.Add("RebuiltPartNum", rebuiltPartNum?.ToUpperInvariant());
+            parameters.Add("LastModifiedBy", enteredBy);
+            parameters.Add("LastModifiedDate", dateModified);
+
+            var sql = @"
+                UPDATE SBCES.SCPartsUsed 
+                SET 
+                    CostCentre = UPPER(@CC),
+                    UnitCost = @UnitCost,
+                    QtyReqd = UPPER(@Qty),
+                    PercentUsage = UPPER(@Percentage),
+                    CoreCost = @CoreCost,
+                    LastModifiedBy = @LastModifiedBy,
+                    LastModifiedDate = @LastModifiedDate
+                WHERE 
+                    MMSStockCode = @MMSStockCode
+                    AND MMSRebuiltCode = @RebuiltPartNum";
+
+            await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+        }
+
+        transaction.Commit();
+        return Json(models.ToDataSourceResult(request));
+    }
+    catch (Exception ex)
+    {
+        transaction.Rollback();
+        ModelState.AddModelError("", $"Error updating record: {ex.Message}");
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+}
+
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> DeleteScPartsUsedInRbtParts(
+    [DataSourceRequest] DataSourceRequest request,
+    [Bind(Prefix = "models")] IEnumerable<StockCodedPartsViewModel> models,
+    [FromQuery] string rebuiltPartNum,
+    [FromQuery] string gridType)
+{
+    if (!ModelState.IsValid)
+    {
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+
+    using var transaction = _dbConnection.BeginTransaction();
+    try
+    {
+        foreach (var model in models)
+        {
+            var parameters = new 
+            {
+                MMSStockCode = model.MMSStockCode?.ToUpperInvariant(),
+                RebuiltPartNum = rebuiltPartNum?.ToUpperInvariant()
+            };
+
+            var sql = @"
+                DELETE FROM SBCES.SCPartsUsed 
+                WHERE 
+                    MMSStockCode = @MMSStockCode
+                    AND MMSRebuiltCode = @RebuiltPartNum";
+
+            await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+        }
+
+        transaction.Commit();
+        return Json(models.ToDataSourceResult(request));
+    }
+    catch (Exception ex)
+    {
+        transaction.Rollback();
+        ModelState.AddModelError("", $"Error deleting record: {ex.Message}");
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+}
