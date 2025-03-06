@@ -1,1 +1,124 @@
+Controller Action (NscPartsUsedInRbPartsController.cs):
 
+csharp
+Copy
+[HttpGet]
+public async Task<IActionResult> RefreshNscPartDetails(string origSuppNum)
+{
+    if (string.IsNullOrEmpty(origSuppNum))
+    {
+        return BadRequest(new { Message = "Supplier Number is required." });
+    }
+
+    try
+    {
+        var query = @"
+            SELECT TOP 1 
+                suppliername AS OrigSupplierName,
+                Keyword AS KeyWord,
+                detaileddesc AS Description,
+                OemPartCost
+            FROM [CES].[SBCES].[NonStockCodedParts]
+            WHERE suppliernumber = @origSuppNum";
+
+        using (var connection = _db.CreateConnection())
+        {
+            var result = await connection.QueryFirstOrDefaultAsync(query, new { origSuppNum });
+
+            if (result == null)
+            {
+                return NotFound(new { Message = "Supplier Number not found." });
+            }
+
+            // Validate OemPartCost
+            if (string.IsNullOrEmpty(result.OemPartCost) || 
+                !decimal.TryParse(result.OemPartCost, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal oemCost) ||
+                oemCost <= 0)
+            {
+                return Ok(new 
+                { 
+                    Message = "Invalid Part Cost - must be greater than 0",
+                    Data = result // Send data anyway if needed
+                });
+            }
+
+            return Ok(new 
+            {
+                OrigSupplierName = result.OrigSupplierName,
+                KeyWord = result.KeyWord,
+                Description = result.Description,
+                OemPartCost = result.OemPartCost
+            });
+        }
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Error refreshing NSC part details");
+        return StatusCode(500, new { Message = "An error occurred while refreshing part details." });
+    }
+}
+JavaScript Function (Add to NSCpartsUsedinRBParts.cshtml):
+
+javascript
+Copy
+<script>
+    function refreshNscPartDetails(e) {
+        var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        var notification = $("#notification").data("kendoNotification");
+
+        if (!dataItem.OrigSuppNum) {
+            notification.show("Supplier Number is required to refresh details", "error");
+            return;
+        }
+
+        $.ajax({
+            url: '@Url.Action("RefreshNscPartDetails", "NscPartsUsedInRbParts")',
+            data: { origSuppNum: dataItem.OrigSuppNum },
+            beforeSend: function() {
+                notification.show("Refreshing part details...", "info");
+            },
+            success: function(response) {
+                if (response.Message) {
+                    // Handle cost validation error
+                    notification.show(response.Message, "error");
+                    
+                    // Optional: Update other fields even if cost is invalid
+                    if (response.Data) {
+                        dataItem.set("OrigSupplierName", response.Data.OrigSupplierName);
+                        dataItem.set("KeyWord", response.Data.KeyWord);
+                        dataItem.set("Description", response.Data.Description);
+                        grid.refresh();
+                    }
+                } else {
+                    // Update all fields
+                    dataItem.set("OrigSupplierName", response.OrigSupplierName);
+                    dataItem.set("KeyWord", response.KeyWord);
+                    dataItem.set("Description", response.Description);
+                    dataItem.set("OemPartCost", response.OemPartCost);
+                    grid.refresh();
+                    notification.show("Details updated successfully", "success");
+                }
+            },
+            error: function(xhr) {
+                var errorMessage = xhr.status === 404 
+                    ? "Supplier not found" 
+                    : "Error refreshing details";
+                notification.show(errorMessage, "error");
+            }
+        });
+    }
+</script>
+Key Implementation Notes:
+
+The controller uses parameterized queries to prevent SQL injection
+
+Decimal parsing uses invariant culture to handle different regional settings
+
+Error responses contain structured messages for client handling
+
+The grid is refreshed after updates to ensure proper formatting
+
+Server-side validation occurs before client-side updates
+
+Notifications provide clear user feedback
