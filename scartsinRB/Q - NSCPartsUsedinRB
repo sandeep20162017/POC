@@ -1,0 +1,286 @@
+You are ASp.NET core and telerik ASp.NET core expert.
+In NscPartsMaterialDetailsRebuiltPartsGrid (NSCpartsUsedinRBParts.cshtml) I have added new custom button.
+ columns.Command(command =>
+{
+    command.Custom(" ").Click("refreshNscPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+}).Width(10);
+When user clicks on this icon button, dapper call is made (controller action). I have provided you a sample implementaion logic in _ScpartsUsedInRBParts.cshtl below.
+You can refer to that implementaion.
+select suppliernumber, suppliername, Keyword, detaileddesc, OemPartCost  FROM [CES].[SBCES].[NonStockCodedParts]
+where suppliernumber = suppliernumber  in OrigSuppNum grid cell.
+In the same row grid cells follwing columns gets populated
+columns.Bound(c => c.OrigSupplierName).Title("Supplier Name").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor").Width(30);
+columns.Bound(c => c.OemPartCost).Title("Part Cost").Width(30); 
+columns.Bound(c => c.Description).Title("Description").Width(50);
+ columns.Bound(c => c.KeyWord).Title("KeyWord").Width(50);
+Need your help for Ajax call, controller action, any other changes.
+Add exception handling.
+Also pls issue notification error when OemPartCost is null or 0. In Database OemPartCost is varchar.
+Nofify erros using kedoo notfication. Assume notification is initialized.
+NSCPartsUsedinRBPart.cshtml :
+@model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+
+@{
+    ViewData["Title"] = "Non Stock Coded Parts Details";
+}
+
+<h6>Non Stock Coded Parts Used</h6>
+
+@(Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+    .Name("NscPartsMaterialDetailsRebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor").Width(30);
+        columns.Command(command =>
+       {
+           command.Custom(" ").Click("refreshNscPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+       }).Width(10);
+        columns.Bound(c => c.OrigSupplierName).Title("Supplier Name").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor").Width(30);
+       
+      //  columns.Bound(c => c.OemPartCost).Title("Unit Cost").Format("{0:N2}").Width(30);
+        columns.Bound(c => c.Qty).Title("Qty").Width(30);
+        columns.Bound(c => c.CC).Title("CC").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor").Width(40); ;
+        columns.Bound(c => c.Percentage).Title("Percentage").Width(30);
+        columns.Bound(c => c.OemPartCost).Title("Part Cost").Width(30);
+        columns.Bound(c => c.CoreCost).Title("Core Cost").Width(30);
+        columns.Bound(c => c.TotalCost).Title("Total Cost").Width(30);
+        columns.Bound(c => c.Description).Title("Description").Width(50);
+        columns.Bound(c => c.KeyWord).Title("KeyWord").Width(50);
+        // columns.Bound(c => c.DateRevised).Title("Date Revised");
+       // columns.Command(command => command.Edit()).Title("Actions");
+        columns.Command(command =>
+        {
+            if (@ViewBag.RoleId == 1)
+            {
+                // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+            }
+            if (@ViewBag.RoleId == 1)
+            {
+
+                command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Delete button with tooltip
+            }
+        }).Width(100);
+    })
+     .ToolBar(toolbar =>
+    {
+        if (@ViewBag.RoleId == 1)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+
+   // .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(true)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.OrigSuppNum);
+            model.Field(c => c.OrigSupplierName).Editable(true);
+            model.Field(c => c.OrigSuppNum).Editable(true);
+            model.Field(c => c.OemPartCost).Editable(true);
+            model.Field(c => c.TotalCost).Editable(false);
+        })
+        .Events(events =>
+        {
+            events.RequestEnd("onRequestEnd");
+            events.Error("onDataSourceError");
+        })
+
+        .Read(read => read.Url(Url.Action("GetNscPartsUsedInRbParts", "NscPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+       
+        .Create(create => create.Url(Url.Action("CreateNscPartsUsedInRbtParts", "NscPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateNscPartsUsedInRbtParts", "NscPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsedInRbtParts", "NscPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+
+)
+
+
+Sample implentation logic you can use (this open up dialog box, I don't want dialog box in NSCPArtsUsedinRBParts.cshtml) :
+ScPartsUsedinRBParts.cshtml :
+@model IEnumerable<BCES.Models.Parts.StockCodedPartsViewModel>
+
+@{
+    ViewData["Title"] = "Stock Coded Parts Details";
+}
+
+<h6>Stock Coded Parts Used</h6>
+
+@(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
+    .Name("ScPartsMaterialDetailsRebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.MMSStockCode).Title("Stock Code").EditorTemplateName("AutoCompleteEditor").Width(70); ;
+        columns.Command(command =>
+        {
+            command.Custom(" ").Click("refreshScPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+           
+        }).Width(10);
+      //  columns.Bound(c => c.PartType).Title("Part Type");
+      //  columns.Bound(c => c.Keyword).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+     //   columns.Bound(c => c.DetailedDesc).Title("Part Description");
+        columns.Bound(c => c.UnitCost).Title("Unit Cost").Width(30);
+        columns.Bound(c => c.Qty).Title("Qty").Width(20);
+        columns.Bound(c => c.Percentage).Title("%").Width(50);
+        columns.Bound(c => c.CC).Title("CC").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor").Width(40); ;
+             
+        columns.Bound(c => c.CoreCost).Title("Core Cost").Format("{0:N2}").Width(100); 
+        columns.Bound(c => c.TotalCost).Title("Total Cost").Format("{0:N2}").Width(100); ;
+      
+       
+        // columns.Bound(c => c.DateRevised).Title("Date Revised");
+        columns.Command(command =>
+        {
+            if (@ViewBag.RoleId == 1)
+            {
+               // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+            }
+            if (@ViewBag.RoleId == 1)
+            {
+
+                command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Delete button with tooltip
+            }
+        }).Width(100);
+    })
+     .ToolBar(toolbar =>
+    {
+        if (@ViewBag.RoleId == 1)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+
+    //.Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(true)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.MMSStockCode); 
+            model.Field(c => c.MMSStockCode);
+         //   model.Field(c => c.PartType).Editable(false);
+         //   model.Field(c => c.DetailedDesc).Editable(false);
+        })
+
+        .Events(events =>
+        {
+            events.RequestEnd("onRequestEnd");
+            events.Error("onDataSourceError");
+        })
+
+        .Read(read => read.Url(Url.Action("GetScPartsUsedInRbParts", "ScPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("CreateScPartsUsedInRbtParts", "ScPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateScPartsUsedInRbtParts", "ScPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteScPartsUsedInRbtParts", "ScPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+)
+
+@(Html.Kendo().Dialog()
+    .Name("partDetailsDialog")
+    .Title("Part Details")
+    .Width(400)
+    .Modal(true)
+    .Visible(false)
+    .Actions(actions =>
+    {
+        actions.Add().Text("Close").Primary(true);
+    })
+)
+
+Controller action in SCPartsUsedinRBParts.cs (for your reference)
+[HttpGet]
+public async Task<IActionResult> GetScPartDetails(string mmsStockCode)
+{
+    if (string.IsNullOrEmpty(mmsStockCode))
+    {
+        return NotFound("Stock Code is required");
+    }
+
+    try
+    {
+        var query = @"
+                    SELECT TOP 1 
+                        PartType, 
+                        DetailedDesc AS DetailedDesc 
+                    FROM SBCES.StockCodedParts 
+                    WHERE MMSStockCode ='" + mmsStockCode + "'";
+
+        using (var connection = _db.CreateConnection())
+        {
+            var result = await connection.QueryFirstOrDefaultAsync(query, new { mmsStockCode });
+
+            if (result == null)
+            {
+                return NotFound(new { Message = "Stock Code not found" });
+            }
+
+            return Ok(new
+            {
+                PartType = result.PartType,
+                DetailedDesc = result.DetailedDesc
+            });
+        }
+    }
+    catch (Exception ex)
+    {
+        // Log error here
+        return StatusCode(500, new { Message = "Error retrieving part details" });
+    }
+}
+Javascript in SCPartsUsedinRBPart.cshtml (For your reference) :
+    <script>
+        function refreshScPartDetails(e) {
+            var grid = $("#ScPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var notification = $("#notification").data("kendoNotification");
+
+            if (!dataItem.MMSStockCode) {
+                notification.show("Please enter a valid Stock Code before refreshing", "error");
+                return;
+            }
+
+            $.ajax({
+                url: '@Url.Action("GetPartDetails", "ScPartsUsedInRbParts")',
+                data: { mmsStockCode: dataItem.MMSStockCode },
+                beforeSend: function () {
+                    notification.show("Fetching part details...", "info");
+                },
+                success: function (response) {
+                    if (response && response.PartType && response.DetailedDesc) {
+                        var dialog = $("#partDetailsDialog").data("kendoDialog");
+                        dialog.content(`
+                            <div style="padding: 10px;">
+                                <p><strong>Part Type:</strong> ${response.PartType}</p>
+                                <p><strong>Part Description:</strong> ${response.DetailedDesc}</p>
+                            </div>
+                        `);
+                        dialog.open();
+                    } else {
+                        notification.show("No matching parts found for this Stock Code", "warning");
+                    }
+                },
+                error: function (xhr) {
+                    var errorMessage = xhr.status === 404
+                        ? "Stock Code not found in system"
+                        : "Error retrieving part details";
+                    notification.show(errorMessage, "error");
+                }
+            });
+        }
+
+    </script>
+
+
