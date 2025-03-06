@@ -1,0 +1,105 @@
+You are ASp.NET core v 8.0 and Telerik ASP.NET core expert.
+I am getting exception for the following insert.
+"Error at ,"
+I need to know which excat column name inseret is complaining about.
+Controller :
+        public async Task<IActionResult> CreateNscPartsUsedInRbtParts(
+                                             [DataSourceRequest] DataSourceRequest request,
+                                             [Bind(Prefix = "models")] IEnumerable<NscPartsUsedViewModel> models,
+                                             [FromQuery] string rebuiltPartNum,
+                                             [FromQuery] string gridType)
+        {
+            if (!ModelState.IsValid)
+            {
+                return Json(models.ToDataSourceResult(request, ModelState));
+            }
+
+            _dbConnection.Open();
+
+            using var transaction = _dbConnection.BeginTransaction();
+            try
+            {
+                // Get values from ViewBag and system
+                var enteredBy = ViewBag.UserADId?.ToString().ToUpper() ?? "SYSTEM";
+                var dateEntered = DateTime.Now;
+                //var linkCode = ViewBag.MMsCode?.ToString().ToUpper() ?? "DEFAULT_CODE";
+                var linkType = "RB";
+                //var isRebuiltPart = 'N';
+
+                foreach (var model in models)
+                {
+                    var parameters = new DynamicParameters();
+
+                    // Convert all string values to uppercase
+                    parameters.Add("Id", model.Id);
+                   
+                    parameters.Add("Cost", model.OemPartCost);                    
+                    parameters.Add("LinkCode", rebuiltPartNum?.ToUpperInvariant());
+                    parameters.Add("LinkType", linkType?.ToUpperInvariant());
+                    parameters.Add("EnteredBy", enteredBy?.ToUpperInvariant());
+                    parameters.Add("LastModifiedBy", enteredBy?.ToUpperInvariant());
+                    parameters.Add("DateEntered", dateEntered);
+                    parameters.Add("LastModifiedDate", dateEntered);
+                    //parameters.Add("QtyReqd", model.Qty);
+                    parameters.Add("CostCentre", model.CC?.ToUpperInvariant());
+                    parameters.Add("OrigSupplierName", model.OrigSupplierName?.ToUpperInvariant());
+                    parameters.Add("OrigSuppNum", model.OrigSuppNum?.ToUpperInvariant());
+                    // Decimal values with defaults                    
+                    parameters.Add("CoreCost", model.CoreCost ?? 0m);
+                    // String values with uppercase conversion and defaults
+                    parameters.Add("QtyReqd", (model.Qty ?? "0").ToUpperInvariant());
+                    parameters.Add("PercentUsage", (model.Percentage ?? "0").ToUpperInvariant());
+
+                    var sql = @"
+                            INSERT INTO SBCES.NSCPartsUsed (
+                                  ,OrigSuppNum
+                                  ,OrigSupplierName
+                                  ,CostCentre
+                                  ,QtyReqd
+                                  ,PercentUsage
+                              --    ,DateEntered
+                                  ,EnteredBy
+                                  ,LastModifiedBy
+                               --   ,LastModifiedDate
+                                  ,LinkCode
+                                  ,Cost
+                                  ,LinkType
+                                  ,CoreCost
+                                  ,Id
+                            ) VALUES (
+                                UPPER(@OrigSuppNum), 
+                                UPPER(@OrigSupplierName), 
+                                UPPER(@CostCentre),
+                                @QtyReqd, 
+                                @PercentUsage,
+                              --   @DateEntered,
+                                UPPER(@EnteredBy),
+                                UPPER(@LastModifiedBy),
+                             --   @LastModifiedDate,                                
+                                UPPER(@LinkCode),
+                                @Cost,
+                                UPPER(@LinkType), 
+                                @CoreCost,
+                                @Id
+                                
+                            )";
+
+                    await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+                }
+
+                transaction.Commit();
+                return Json(models.ToDataSourceResult(request));
+            }
+            catch (SqlException sqlEx)
+            {
+                transaction.Rollback();
+                ModelState.AddModelError("", $"Database error: {sqlEx.Message}");
+                return Json(models.ToDataSourceResult(request, ModelState));
+            }
+            catch (Exception ex)
+            {
+                transaction.Rollback();
+                ModelState.AddModelError("", $"Unexpected error: {ex.Message}");
+                return Json(models.ToDataSourceResult(request, ModelState));
+            }
+        }
