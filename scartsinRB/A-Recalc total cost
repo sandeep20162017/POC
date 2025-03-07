@@ -1,0 +1,126 @@
+Here's the corrected solution using proper Telerik ASP.NET Core Grid events and field detection:
+
+cshtml
+Copy
+<script>
+    function onCellClose(e) {
+        // Get the field name from the cell's data-bind attribute
+        const fieldName = getFieldNameFromCell(e.cell);
+        
+        // Fields that affect TotalCost
+        const criticalFields = ["Percentage", "Qty", "OemPartCost"];
+        
+        if (criticalFields.includes(fieldName)) {
+            const dataItem = e.model;
+            dataItem.set("needsRecalculation", true);
+            showNotification("info", "Please recalculate Total Cost for this row.");
+        }
+    }
+
+    function getFieldNameFromCell(cell) {
+        // Extract field name from data-bind attribute
+        const bindAttr = cell.attributes["data-bind"];
+        if (!bindAttr) return null;
+        
+        // Match patterns like "text: Percentage" or "value:Percentage"
+        const match = bindAttr.value.match(/(text|value):\s*([\w\.]+)/);
+        return match ? match[2] : null;
+    }
+
+    function onSaveChanges(e) {
+        const grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+        const needsRecalc = grid.dataSource.data().some(item => item.needsRecalculation);
+        
+        if (needsRecalc) {
+            e.preventDefault();
+            showNotification("error", "Recalculate Total Cost for modified rows before saving.");
+        }
+    }
+
+    function recalculateTotalCost(e) {
+        e.preventDefault();
+        const grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+        const row = $(e.currentTarget).closest("tr");
+        const dataItem = grid.dataItem(row);
+        
+        // Get current values with fallbacks
+        const percentage = parseFloat(dataItem.Percentage) || 0;
+        const qty = parseFloat(dataItem.Qty) || 0;
+        const oemPartCost = parseFloat(dataItem.OemPartCost) || 0;
+
+        $.ajax({
+            url: '@Url.Action("RecalculateTotalCost", "NscPartsUsedInRbParts")',
+            type: 'POST',
+            data: {
+                percentage: percentage,
+                qty: qty,
+                oemPartCost: oemPartCost
+            },
+            success: function(response) {
+                if (response.success) {
+                    dataItem.set("TotalCost", response.totalCost);
+                    dataItem.set("needsRecalculation", false);
+                    grid.refresh();
+                    showNotification("success", "Total Cost updated successfully.");
+                } else {
+                    showNotification("error", response.message);
+                }
+            },
+            error: function(xhr) {
+                showNotification("error", "Error: " + xhr.statusText);
+            }
+        });
+    }
+</script>
+Key changes and validations:
+
+Field Detection:
+
+javascript
+Copy
+function getFieldNameFromCell(cell) {
+    const bindAttr = cell.attributes["data-bind"];
+    return bindAttr?.value.split(':')[1]?.trim().split('.')[0];
+}
+Model Configuration:
+
+cshtml
+Copy
+.Model(model => {
+    model.Id(c => c.OrigSuppNum);
+    model.Field("needsRecalculation").DefaultValue(false);
+    // ... other fields ...
+})
+Grid Events Configuration:
+
+cshtml
+Copy
+.Events(events => events
+    .CellClose("onCellClose")
+    .SaveChanges("onSaveChanges")
+)
+Server-side Validation:
+
+csharp
+Copy
+[HttpPost]
+public IActionResult RecalculateTotalCost(
+    [FromForm] decimal percentage,
+    [FromForm] decimal qty,
+    [FromForm] decimal oemPartCost)
+{
+    try
+    {
+        if (percentage < 0 || qty < 0 || oemPartCost < 0)
+            return BadRequest(new { success = false, message = "Negative values not allowed" });
+
+        // SQL execution and return
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, new { 
+            success = false, 
+            message = $"Server error: {ex.Message}" 
+        });
+    }
+}
