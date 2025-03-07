@@ -1,0 +1,226 @@
+You are ASP.net core v 8.0 and Telerik ASP.NET Core expert.
+When user clicks on Recalulate custom command, TotalCost column in the grid must be refreshed with the new value from 
+RecalculateTotalCost. Curretly the value is not refreshed.
+Controller action gets called :
+[HttpPost]
+public async Task<IActionResult> RecalculateTotalCost([FromForm] decimal percentage,
+                                                        [FromForm] decimal qty,
+                                                        [FromForm] decimal oemPartCost)
+                                                                
+{
+    try
+    {
+        string sql = "SELECT SBCES.FINALCOST(@Percentage, @Qty, @OemPartCost, 0) AS TotalCost";
+
+        using (var connection = _db.CreateConnection())
+        {
+            var totalCost = await connection.ExecuteScalarAsync<decimal>(sql, new
+            {
+                Percentage = percentage,
+                Qty = qty,
+                OemPartCost = oemPartCost
+            });
+            return Ok(new { TotalCost = totalCost });
+        }
+    }
+    catch (Exception ex)
+    {
+        return BadRequest(new { Message = ex.Message });
+    }
+}
+NscPartsUsedinRBParts.cshtml :
+@model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+
+@{
+    ViewData["Title"] = "Non Stock Coded Parts Details";
+}
+
+<h6>Non Stock Coded Parts Used</h6>
+
+@(
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+                .Name("NscPartsMaterialDetailsRebuiltPartsGrid")
+                .Columns(columns =>
+                {
+                    columns.Bound(c => c.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor").Width(30);
+                    columns.Command(command =>
+                   {
+                       command.Custom(" ").Click("refreshNscPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+                   }).Width(10);
+                    columns.Bound(c => c.OrigSupplierName).Title("Supplier Name").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor").Width(30);
+
+                    //  columns.Bound(c => c.OemPartCost).Title("Unit Cost").Format("{0:N2}").Width(30);
+                    columns.Bound(c => c.CC).Title("CC").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor").Width(40); ;
+                    columns.Bound(c => c.Qty).Title("Qty").Width(30);                    
+                    columns.Bound(c => c.Percentage).Title("Percentage").HtmlAttributes(new { data_field = "Percentage"}).Width(30);
+                    columns.Bound(c => c.OemPartCost).Title("Part Cost").Width(30);
+                    columns.Bound(c => c.CoreCost).Title("Core Cost").Width(30);
+                    columns.Command(command =>
+                    {
+                        command.Custom("Recalculate")
+                            .Click("recalculateTotalCost")
+                            .HtmlAttributes(new { @class = "k-grid-recalculate" });
+                    }).HtmlAttributes( new { data_field = "Commands" }).Width(10);
+
+                    columns.Bound(c => c.TotalCost).Title("Total Cost").Width(30);
+                    columns.Bound(c => c.Description).Title("Description").Width(50);
+                    columns.Bound(c => c.KeyWord).Title("KeyWord").Width(50);
+                    // columns.Bound(c => c.DateRevised).Title("Date Revised");
+                    // columns.Command(command => command.Edit()).Title("Actions");
+                    columns.Command(command =>
+                    {
+                        if (@ViewBag.RoleId == 1)
+                        {
+                            // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+                        }
+                        if (@ViewBag.RoleId == 1)
+                        {
+
+                            command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Delete button with tooltip
+                        }
+                    }).Width(100);
+                })
+                .Events (events => 
+                {
+                    //events.Edit("onEdit") ;
+                    //events.Save("onSave");
+                    events.CellClose("onCellClose");
+                    events.SaveChanges("onSaveChanges");
+
+                })
+
+     .ToolBar(toolbar =>
+    {
+        if (@ViewBag.RoleId == 1)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+
+   // .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(true)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.OrigSuppNum);
+            model.Field(c => c.OrigSupplierName).Editable(true);
+            model.Field(c => c.OrigSuppNum).Editable(true);
+            model.Field(c => c.OemPartCost).Editable(true);
+            model.Field(c => c.TotalCost).Editable(false);
+            model.Field("needsRecalculation", typeof(bool)).DefaultValue(false);
+        })
+        .Events(events =>
+        {
+                      
+            events.RequestEnd("onRequestEnd");
+            events.Error("onDataSourceError");
+        })
+
+        .Read(read => read.Url(Url.Action("GetNscPartsUsedInRbParts", "NscPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+       
+        .Create(create => create.Url(Url.Action("CreateNscPartsUsedInRbtParts", "NscPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateNscPartsUsedInRbtParts", "NscPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsedInRbtParts", "NscPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+
+)
+
+
+JS :
+<script>
+    function onCellClose(e) {
+        // Get grid instance and cell element
+        const grid = e.sender;
+        const cell = e.container || e.cell; // Handle different event argument structures
+
+        // Method 1: Get field name from column index
+        const columnIndex = $(cell).index();
+        const column = grid.columns[columnIndex];
+        let fieldName = column.field;
+
+        // Method 2: Fallback to data-field attribute
+        if (!fieldName) {
+            fieldName = $(cell).attr("data-field");
+        }
+
+        // Debugging: Uncomment to see values in console
+        console.log("Column Index:", columnIndex);
+        console.log("Column Object:", column);
+        console.log("Field Name:", fieldName);
+
+        // Fields that require recalculation
+        const criticalFields = ["Percentage", "Qty", "OemPartCost"];
+
+        if (criticalFields.includes(fieldName)) {
+            const dataItem = e.model;
+            dataItem.set("needsRecalculation", true);
+            showNotification("info", "Please recalculate Total Cost for this row.");
+        }
+    }
+
+    
+
+    function onSaveChanges(e) {
+        const grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+        const needsRecalc = grid.dataSource.data().some(item => item.needsRecalculation);
+        showNotification("error", "inside onSaveChates :.needsRecalc = " + needsRecalc);
+
+        if (needsRecalc) {
+            e.preventDefault();
+            showNotification("error", "Recalculate Total Cost for modified rows before saving.");
+        }
+    }
+
+    function recalculateTotalCost(e) {
+        e.preventDefault();
+        const grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+        const row = $(e.currentTarget).closest("tr");
+        const dataItem = grid.dataItem(row);
+
+        // Get current values with fallbacks
+        const percentage = parseFloat(dataItem.Percentage) || 0;
+        const qty = parseFloat(dataItem.Qty) || 0;
+        const oemPartCost = parseFloat(dataItem.OemPartCost) || 0;
+
+        $.ajax({
+            url: '@Url.Action("RecalculateTotalCost", "NscPartsUsedInRbParts")',
+            type: 'POST',
+            data: {
+                percentage: percentage,
+                qty: qty,
+                oemPartCost: oemPartCost
+            },
+            success: function (response) {
+                if (response.success) {
+                    dataItem.set("TotalCost", response.totalCost);
+                    dataItem.set("needsRecalculation", false);
+                    grid.refresh();
+                    showNotification("success", "Total Cost updated successfully.");
+                } else {
+                    showNotification("error", response.message);
+                }
+            },
+            error: function (xhr) {
+                showNotification("error", "Error: " + xhr.statusText);
+            }
+        });
+    }
+
+    function showNotification(type, message) {
+        var notification = $("#notification").data("kendoNotification");
+        if (!notification) {
+            notification = $("#notification").kendoNotification({
+                position: { pinned: true, top: 50, right: 50 },
+                autoHideAfter: 5000
+            }).data("kendoNotification");
+        }
+        notification.show(message, type);
+    }
+</script>
