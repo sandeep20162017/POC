@@ -1,440 +1,138 @@
-You are ASP.NET core v8 and Telerik ASP.NET core epert.
-You have excellent knowlege of MS SQL.
-Make changes in controoler (Insert, update) and cshtml.
-I need to add a new icon button (tool tip : Recalulate total cost), some thing like refreshNscPartDetails,  before column 
-columns.Bound(c => c.TotalCost).Title("Total Cost").Width(30);
-When user clicks on the new icon button, column TotalCost is populated using following SQL :
-FINALCOST is user defined SQL fuction
-Select
- CAST(SBCES.FINALCOST(
-     CAST(SBCES.NSCPARTSUSED.PERCENTUSAGE AS NUMERIC(18,2)), 
-     CAST(SBCES.NSCPARTSUSED.QTYREQD AS NUMERIC(18,2)), 
-     SBCES.NONSTOCKCODEDPARTS.OEMPARTCOST, 
-     0
- ) AS DECIMAL(18,2)) AS [TotalCost],
+Update the Grid Columns in cshtml:
+Add the new Recalculate button column before the TotalCost column.
 
-FROM 
-    SBCES.NSCPARTSUSED  -- Schema applied
-LEFT JOIN 
-    SBCES.NONSTOCKCODEDPARTS  -- Schema applied
-    ON SBCES.NONSTOCKCODEDPARTS.ID = SBCES.NSCPARTSUSED.ID
-WHERE 
-    SBCES.NSCPARTSUSED.LINKCODE = @RebuiltPartNumber
-    AND SBCES.NSCPARTSUSED.LINKTYPE = 'RB'
-    
- PERCENTUSAGE, QTYREQD, OEMPARTCOST is from the value in the grid column.
- Add exception handling in the code. Errors must be displayed in Kendoo notification.
- When user changes value in any of the columns (PERCENTUSAGE, QTYREQD, OEMPARTCOST), notify user to click on recalcuate Total cost.
- Avoid user to click on save or update if Total cost value is changed due to any changes in changes value in any of the columns (PERCENTUSAGE, QTYREQD, OEMPARTCOST)
- _NscPartsUsedInRBParts.cshtml :
- @model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
-
-@{
-    ViewData["Title"] = "Non Stock Coded Parts Details";
-}
-
-<h6>Non Stock Coded Parts Used</h6>
-
-@(Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
-    .Name("NscPartsMaterialDetailsRebuiltPartsGrid")
-    .Columns(columns =>
-    {
-        columns.Bound(c => c.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor").Width(30);
-        columns.Command(command =>
-       {
-           command.Custom(" ").Click("refreshNscPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
-
-       }).Width(10);
-        columns.Bound(c => c.OrigSupplierName).Title("Supplier Name").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor").Width(30);
-       
-      //  columns.Bound(c => c.OemPartCost).Title("Unit Cost").Format("{0:N2}").Width(30);
-        columns.Bound(c => c.Qty).Title("Qty").Width(30);
-        columns.Bound(c => c.CC).Title("CC").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor").Width(40); ;
-        columns.Bound(c => c.Percentage).Title("Percentage").Width(30);
-        columns.Bound(c => c.OemPartCost).Title("Part Cost").Width(30);
-        columns.Bound(c => c.CoreCost).Title("Core Cost").Width(30);
-        columns.Bound(c => c.TotalCost).Title("Total Cost").Width(30);
-        columns.Bound(c => c.Description).Title("Description").Width(50);
-        columns.Bound(c => c.KeyWord).Title("KeyWord").Width(50);
-        // columns.Bound(c => c.DateRevised).Title("Date Revised");
-       // columns.Command(command => command.Edit()).Title("Actions");
-        columns.Command(command =>
-        {
-            if (@ViewBag.RoleId == 1)
-            {
-                // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
-            }
-            if (@ViewBag.RoleId == 1)
-            {
-
-                command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Delete button with tooltip
-            }
-        }).Width(100);
-    })
-     .ToolBar(toolbar =>
-    {
-        if (@ViewBag.RoleId == 1)
-        {
-            toolbar.Create();
-            toolbar.Save();
-        }
-    })
-    .Editable(editable => editable.Mode(GridEditMode.InCell))
-    .Pageable()
-    .Sortable()
-
-   // .Scrollable()
-    .DataSource(dataSource => dataSource
-        .Ajax()
-        .Batch(true)
-        .ServerOperation(false)
-        .Model(model =>
-        {
-            model.Id(c => c.OrigSuppNum);
-            model.Field(c => c.OrigSupplierName).Editable(true);
-            model.Field(c => c.OrigSuppNum).Editable(true);
-            model.Field(c => c.OemPartCost).Editable(true);
-            model.Field(c => c.TotalCost).Editable(false);
-        })
-        .Events(events =>
-        {
-            events.RequestEnd("onRequestEnd");
-            events.Error("onDataSourceError");
-        })
-
-        .Read(read => read.Url(Url.Action("GetNscPartsUsedInRbParts", "NscPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
-       
-        .Create(create => create.Url(Url.Action("CreateNscPartsUsedInRbtParts", "NscPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
-        .Update(update => update.Url(Url.Action("UpdateNscPartsUsedInRbtParts", "NscPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
-        .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsedInRbtParts", "NscPartsUsedInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
-    )
-
-)
-
-NSCPArtsUsedInRBPartsController.cs :
-using Kendo.Mvc.Extensions;
-using Kendo.Mvc.UI;
-using BCES.Models.Parts;
-using BCES.Controllers.Base;
-using BCES.Data;
-using System.Data;
-using Dapper;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-using System.Data.SqlClient;
-using System.Globalization;
-
-
-namespace BCES.Controllers.Parts
+cshtml
+Copy
+columns.Bound(c => c.CoreCost).Title("Core Cost").Width(30);
+columns.Command(command =>
 {
-    public class NscPartsUsedInRbPartsController : BaseController
+    command.Custom(" ").Click("recalculateTotalCost").IconClass("k-i-refresh").HtmlAttributes(new { title = "Recalculate Total Cost", @class = "k-button k-button-icontext" });
+}).Width(10);
+columns.Bound(c => c.TotalCost).Title("Total Cost").Width(30).Editable(false);
+2. Add Notification Div in cshtml:
+
+cshtml
+Copy
+<div id="notification"></div>
+3. Add Client-Side Scripts in cshtml:
+
+javascript
+Copy
+<script>
+    var rebuiltPartNum = '@ViewBag.PartNum';
+
+    function recalculateTotalCost(e) {
+        e.preventDefault();
+        var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+
+        var percentage = parseFloat(dataItem.Percentage?.replace(/,/g, '.')) || 0;
+        var qty = parseFloat(dataItem.Qty?.replace(/,/g, '.')) || 0;
+        var oemPartCost = dataItem.OemPartCost || 0;
+
+        $.ajax({
+            url: '@Url.Action("RecalculateTotalCost", "NscPartsUsedInRbParts")',
+            type: 'POST',
+            data: {
+                percentage: percentage,
+                qty: qty,
+                oemPartCost: oemPartCost
+            },
+            success: function (response) {
+                if (response.totalCost !== undefined) {
+                    dataItem.set("TotalCost", response.totalCost);
+                    dataItem.set("needsRecalculation", false);
+                    grid.refresh();
+                    showNotification("success", "Total Cost recalculated successfully.");
+                } else if (response.message) {
+                    showNotification("error", response.message);
+                }
+            },
+            error: function (xhr) {
+                var message = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : "An error occurred during recalculation.";
+                showNotification("error", message);
+            }
+        });
+    }
+
+    function onEdit(e) {
+        if (["Percentage", "Qty", "OemPartCost"].includes(e.field)) {
+            e.model.set("needsRecalculation", true);
+            showNotification("info", "Please recalculate Total Cost after modifying " + e.field + ".");
+        }
+    }
+
+    function onSave(e) {
+        var grid = e.sender;
+        var dataItems = grid.dataSource.data();
+        var needsRecalculation = dataItems.some(item => item.needsRecalculation);
+        
+        if (needsRecalculation) {
+            e.preventDefault();
+            showNotification("error", "You must recalculate Total Cost for modified rows before saving.");
+        }
+    }
+
+    function showNotification(type, message) {
+        var notification = $("#notification").data("kendoNotification");
+        if (!notification) {
+            notification = $("#notification").kendoNotification({
+                position: { pinned: true, top: 50, right: 50 },
+                autoHideAfter: 5000
+            }).data("kendoNotification");
+        }
+        notification.show(message, type);
+    }
+</script>
+4. Add RecalculateTotalCost Action in Controller:
+
+csharp
+Copy
+[HttpPost]
+public async Task<IActionResult> RecalculateTotalCost(decimal percentage, decimal qty, decimal oemPartCost)
+{
+    try
     {
-        private readonly DapperContext _db;
-        private readonly IDbConnection _dbConnection;
-        private readonly IHttpContextAccessor _httpContextAccessor;
-
-
-        public NscPartsUsedInRbPartsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        string sql = "SELECT SBCES.FINALCOST(@Percentage, @Qty, @OemPartCost, 0) AS TotalCost";
+        
+        using (var connection = _db.CreateConnection())
         {
-            _db = dapper;
-            _dbConnection = _db.CreateConnection();
-
-            _httpContextAccessor = httpContextAccessor;
+            var totalCost = await connection.ExecuteScalarAsync<decimal>(sql, new { 
+                Percentage = percentage, 
+                Qty = qty, 
+                OemPartCost = oemPartCost 
+            });
+            return Ok(new { TotalCost = totalCost });
         }
-
-        [HttpGet]
-        [AllowAnonymous]
-        public async Task<JsonResult> GetNscPartsUsedInRbParts([DataSourceRequest] DataSourceRequest request, [FromQuery] string rebuiltPartNum,  [FromQuery] string gridType)
-        {
-            // Fetch data for the grid
-
-            if (string.IsNullOrEmpty(rebuiltPartNum))
-            {
-                return null;// BadRequest("rebuiltPartNum is required.");
-            }
-
-            // Fetch data for the grid using the rebuiltPartNum
-            var model = await GetNscPartsUsedInRbPartsData(rebuiltPartNum, gridType);
-            return Json(model.ToDataSourceResult(request));
-
-        }
-        [AllowAnonymous]
-        private async Task<IEnumerable<NscPartsUsedViewModel>> GetNscPartsUsedInRbPartsData(string RebuiltPartNum, string gridType)
-        {
-            //TODO use GridType
-            try
-            {
-
-                var query = @"
-                             DECLARE @RebuiltPartNumber VARCHAR(30) = '" + RebuiltPartNum + "'" +
-                             @"
-                              SELECT 
-                                UPPER(SBCES.NONSTOCKCODEDPARTS.ORIGSUPPLIERNUM) AS [OrigSuppNum],
-                                UPPER(SBCES.NONSTOCKCODEDPARTS.ORIGSUPPLIERNAME) AS [OrigSupplierName],
-                                SBCES.NONSTOCKCODEDPARTS.OEMPARTCOST AS [OemPartCost],
-                                UPPER(SBCES.NSCPARTSUSED.QTYREQD) AS [QTY],
-                                REPLACE(SBCES.NSCPARTSUSED.PERCENTUSAGE, ',', '.') AS [Percentage],
-                                -- Casting logic with SBCES.FINALCOST
-                                CAST(SBCES.FINALCOST(
-                                    CAST(SBCES.NSCPARTSUSED.PERCENTUSAGE AS NUMERIC(18,2)), 
-                                    CAST(SBCES.NSCPARTSUSED.QTYREQD AS NUMERIC(18,2)), 
-                                    SBCES.NSCPARTSUSED.CORECOST, 
-                                    0
-                                ) AS DECIMAL(18,2)) AS [CoreCost],
-                                CAST(SBCES.FINALCOST(
-                                    CAST(SBCES.NSCPARTSUSED.PERCENTUSAGE AS NUMERIC(18,2)), 
-                                    CAST(SBCES.NSCPARTSUSED.QTYREQD AS NUMERIC(18,2)), 
-                                    SBCES.NONSTOCKCODEDPARTS.OEMPARTCOST, 
-                                    0
-                                ) AS DECIMAL(18,2)) AS [TotalCost],
-                                UPPER(SBCES.NSCPARTSUSED.COSTCENTRE) AS [CC],
-                                ISNULL(UPPER(SBCES.NONSTOCKCODEDPARTS.DETAILEDDESC), '') AS [DESCRIPTION],
-                                ISNULL(UPPER(SBCES.NONSTOCKCODEDPARTS.KEYWORD), '') AS [KEYWORD],
-                                UPPER(SBCES.NSCPARTSUSED.ID) AS [ID],
-                                UPPER(SBCES.NSCPARTSUSED.LASTMODIFIEDDATE) AS [LASTMODIFIEDDATE]
-   
-                            FROM 
-                                SBCES.NSCPARTSUSED  -- Schema applied
-                            LEFT JOIN 
-                                SBCES.NONSTOCKCODEDPARTS  -- Schema applied
-                                ON SBCES.NONSTOCKCODEDPARTS.ID = SBCES.NSCPARTSUSED.ID
-                            WHERE 
-                                SBCES.NSCPARTSUSED.LINKCODE = @RebuiltPartNumber
-                                AND SBCES.NSCPARTSUSED.LINKTYPE = 'RB'
-                            ORDER BY 
-                                SBCES.NONSTOCKCODEDPARTS.ORIGSUPPLIERNUM;
-
-                                ";
-
-                return await _dbConnection.QueryAsync<NscPartsUsedViewModel>(query);
-
-            }
-            catch (Exception ex)
-            {
-                return null;
-            }
-        }
-
-        [AcceptVerbs("Post")]
-        [AllowAnonymous]
-        public async Task<IActionResult> UpdateNscPartsUsedInRbtParts(
-                                                   [DataSourceRequest] DataSourceRequest request,
-                                                   [Bind(Prefix = "models")] IEnumerable<NscPartsUsedViewModel> models,
-                                                   [FromQuery] string rebuiltPartNum,
-                                                   [FromQuery] string gridType)
-        {
-            if (!ModelState.IsValid)
-            {
-                return Json(models.ToDataSourceResult(request, ModelState));
-            }
-            _dbConnection.Open();
-            using var transaction = _dbConnection.BeginTransaction();
-            try
-            {
-                var enteredBy = ViewBag.UserADId?.ToString().ToUpper() ?? "SYSTEM";
-                var dateModified = DateTime.Now;
-
-                foreach (var model in models)
-                {
-                    var parameters = new DynamicParameters();
-                    parameters.Add("Id", model.Id?.ToUpperInvariant());
-                    parameters.Add("CC", model.CC?.ToUpperInvariant() ?? " ");
-                    parameters.Add("UnitCost", model.OemPartCost ?? 0m);
-                    parameters.Add("Qty", (model.Qty ?? "0").ToUpperInvariant());
-                    parameters.Add("Percentage", (model.Percentage ?? "0").ToUpperInvariant());
-                    parameters.Add("CoreCost", model.CoreCost);
-                    parameters.Add("RebuiltPartNum", rebuiltPartNum?.ToUpperInvariant());
-                    parameters.Add("LastModifiedBy", enteredBy);
-                    parameters.Add("LastModifiedDate", dateModified);
-
-                    var sql = @"
-                                UPDATE SBCES.NSCPartsUsed 
-                                SET 
-                                    CostCentre = UPPER(@CC),
-                                    Cost = @UnitCost,
-                                    QtyReqd = UPPER(@Qty),
-                                    PercentUsage = UPPER(@Percentage),
-                                    coreCost = @CoreCost,
-                                    LastModifiedBy = @LastModifiedBy,
-                                    LastModifiedDate = @LastModifiedDate
-                                WHERE 
-                                    Id = @Id
-                                  --  AND MMSRebuiltCode = @RebuiltPartNum";
-
-                    await _dbConnection.ExecuteAsync(sql, parameters, transaction);
-                }
-
-                transaction.Commit();
-                return Json(models.ToDataSourceResult(request));
-            }
-            catch (Exception ex)
-            {
-                transaction.Rollback();
-                ModelState.AddModelError("", $"Error updating record: {ex.Message}");
-                return Json(models.ToDataSourceResult(request, ModelState));
-            }
-        }
-
-        [HttpPost]
-        [AllowAnonymous]
-        public async Task<IActionResult> CreateNscPartsUsedInRbtParts(
-                                             [DataSourceRequest] DataSourceRequest request,
-                                             [Bind(Prefix = "models")] IEnumerable<NscPartsUsedViewModel> models,
-                                             [FromQuery] string rebuiltPartNum,
-                                             [FromQuery] string gridType)
-        {
-            if (!ModelState.IsValid)
-            {
-                return Json(models.ToDataSourceResult(request, ModelState));
-            }
-
-            _dbConnection.Open();
-
-            using var transaction = _dbConnection.BeginTransaction();
-            try
-            {
-                // Get values from ViewBag and system
-                var enteredBy = ViewBag.UserADId?.ToString().ToUpper() ?? "SYSTEM";
-                var dateEntered = DateTime.Now;
-                //var linkCode = ViewBag.MMsCode?.ToString().ToUpper() ?? "DEFAULT_CODE";
-                var linkType = "RB";
-                //var isRebuiltPart = 'N';
-
-                foreach (var model in models)
-                {
-                    var parameters = new DynamicParameters();
-
-                    // Convert all string values to uppercase
-                    parameters.Add("Id", rebuiltPartNum);
-                   
-                    parameters.Add("Cost", model.OemPartCost);                    
-                    parameters.Add("LinkCode", rebuiltPartNum?.ToUpperInvariant());
-                    parameters.Add("LinkType", linkType?.ToUpperInvariant());
-                    parameters.Add("EnteredBy", enteredBy?.ToUpperInvariant());
-                    parameters.Add("LastModifiedBy", enteredBy?.ToUpperInvariant());
-                    parameters.Add("DateEntered", dateEntered);
-                    parameters.Add("LastModifiedDate", dateEntered);
-                    //parameters.Add("QtyReqd", model.Qty);
-                    parameters.Add("CostCentre", model.CC?.ToUpperInvariant());
-                    parameters.Add("OrigSupplierName", model.OrigSupplierName?.ToUpperInvariant());
-                    parameters.Add("OrigSuppNum", model.OrigSuppNum?.ToUpperInvariant());
-                    // Decimal values with defaults                    
-                    parameters.Add("CoreCost", model.CoreCost ?? 0m);
-                    // String values with uppercase conversion and defaults
-                    parameters.Add("QtyReqd", (model.Qty ?? "0").ToUpperInvariant());
-                    parameters.Add("PercentUsage", (model.Percentage ?? "0").ToUpperInvariant());
-
-                    var sql = @"
-                            INSERT INTO SBCES.NSCPartsUsed (
-                                  OrigSuppNum
-                                  ,OrigSupplierName
-                                  ,CostCentre
-                                  ,QtyReqd
-                                  ,PercentUsage
-                                 ,DateEntered
-                                  ,EnteredBy
-                                  ,LastModifiedBy
-                                  ,LastModifiedDate
-                                  ,LinkCode
-                                  ,Cost
-                                  ,LinkType
-                                  ,CoreCost
-                                  ,Id
-                            ) VALUES (
-                                UPPER(@OrigSuppNum), 
-                                UPPER(@OrigSupplierName), 
-                                UPPER(@CostCentre),
-                                @QtyReqd, 
-                                @PercentUsage,
-                                 @DateEntered,
-                                UPPER(@EnteredBy),
-                                UPPER(@LastModifiedBy),
-                               @LastModifiedDate,                                
-                                UPPER(@LinkCode),
-                                @Cost,
-                                UPPER(@LinkType), 
-                                @CoreCost,
-                                (SELECT top 1 [Id]  FROM [SBCES].[NonStockCodedParts]  where OrigSupplierNum = UPPER(@OrigSuppNum))
-                                
-                            )";
-
-                    await _dbConnection.ExecuteAsync(sql, parameters, transaction);
-                }
-
-                transaction.Commit();
-                return Json(models.ToDataSourceResult(request));
-            }
-            catch (SqlException sqlEx)
-            {
-                transaction.Rollback();
-                ModelState.AddModelError("", $"Database error: {sqlEx.Message}");
-                return Json(models.ToDataSourceResult(request, ModelState));
-            }
-            catch (Exception ex)
-            {
-                transaction.Rollback();
-                ModelState.AddModelError("", $"Unexpected error: {ex.Message}");
-                return Json(models.ToDataSourceResult(request, ModelState));
-            }
-        }
-
-        [HttpGet]
-        public async Task<IActionResult> RefreshNscPartDetails(string origSuppNum)
-        {
-            if (string.IsNullOrEmpty(origSuppNum))
-            {
-                return BadRequest(new { Message = "Supplier Number is required." });
-            }
-
-            try
-            {
-                var query = @"
-                            SELECT TOP 1 
-                                OrigSupplierName AS OrigSupplierName,
-                                Keyword AS KeyWord,
-                                detaileddesc AS Description,
-                                OemPartCost
-                            FROM [CES].[SBCES].[NonStockCodedParts]
-                            WHERE origsuppliernum = @origSuppNum";
-
-                using (var connection = _db.CreateConnection())
-                {
-                    var result = await connection.QueryFirstOrDefaultAsync(query, new { origSuppNum });
-
-                    if (result == null)
-                    {
-                        return NotFound(new { Message = "Supplier Number not found." });
-                    }
-
-                    // Validate OemPartCost
-                    if (result.OemPartCost < 0 )
-                    {
-                        return Ok(new
-                        {
-                            Message = "Invalid Part Cost - must be greater than 0",
-                            Data = result // Send data anyway if needed
-                        });
-                    }
-
-                    return Ok(new
-                    {
-                        OrigSupplierName = result.OrigSupplierName,
-                        KeyWord = result.KeyWord,
-                        Description = result.Description,
-                        OemPartCost = result.OemPartCost
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-               // _logger.LogError(ex, "Error refreshing NSC part details");
-                return StatusCode(500, new { Message = "An error occurred while refreshing part details." });
-            }
-        }
-
+    }
+    catch (Exception ex)
+    {
+        return BadRequest(new { Message = ex.Message });
     }
 }
+5. Update Grid Events in cshtml:
 
+cshtml
+Copy
+.Events(events =>
+{
+    events.Edit("onEdit");
+    events.Save("onSave");
+    events.RequestEnd("onRequestEnd");
+    events.Error("onDataSourceError");
+})
+6. Update DataSource Model in cshtml:
+Add the needsRecalculation field to track dirty state:
 
-
- 
+cshtml
+Copy
+.Model(model =>
+{
+    model.Id(c => c.OrigSuppNum);
+    model.Field(c => c.OrigSupplierName).Editable(true);
+    model.Field(c => c.OrigSuppNum).Editable(true);
+    model.Field(c => c.OemPartCost).Editable(true);
+    model.Field(c => c.TotalCost).Editable(false);
+    model.Field("needsRecalculation", typeof(bool)).DefaultValue(false);
+})
+Key Features Implemented:
