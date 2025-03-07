@@ -1,0 +1,189 @@
+1. Fix Controller Response Format
+
+csharp
+Copy
+[HttpPost]
+public async Task<IActionResult> RecalculateTotalCost([FromForm] decimal percentage,
+                                                      [FromForm] decimal qty,
+                                                      [FromForm] decimal oemPartCost)
+{
+    try
+    {
+        string sql = "SELECT SBCES.FINALCOST(@Percentage, @Qty, @OemPartCost, 0) AS TotalCost";
+
+        using (var connection = _db.CreateConnection())
+        {
+            var totalCost = await connection.ExecuteScalarAsync<decimal>(sql, new
+            {
+                Percentage = percentage,
+                Qty = qty,
+                OemPartCost = oemPartCost
+            });
+            return Ok(new { 
+                success = true, 
+                totalCost = totalCost  // Match client-side property name
+            });
+        }
+    }
+    catch (Exception ex)
+    {
+        return BadRequest(new { 
+            success = false, 
+            message = ex.Message 
+        });
+    }
+}
+2. Update recalculateTotalCost Function
+
+javascript
+Copy
+function recalculateTotalCost(e) {
+    e.preventDefault();
+    const grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+    const row = $(e.currentTarget).closest("tr");
+    const dataItem = grid.dataItem(row);
+
+    // Handle number formatting
+    const parseNumber = (value) => {
+        const num = typeof value === 'string' 
+            ? parseFloat(value.replace(/,/g, '')) 
+            : value;
+        return isNaN(num) ? 0 : num;
+    };
+
+    const percentage = parseNumber(dataItem.Percentage);
+    const qty = parseNumber(dataItem.Qty);
+    const oemPartCost = parseNumber(dataItem.OemPartCost);
+
+    $.ajax({
+        url: '@Url.Action("RecalculateTotalCost", "NscPartsUsedInRbParts")',
+        type: 'POST',
+        contentType: 'application/x-www-form-urlencoded',
+        data: {
+            percentage: percentage,
+            qty: qty,
+            oemPartCost: oemPartCost
+        },
+        success: function(response) {
+            if (response.success) {
+                // Update data item and refresh grid
+                dataItem.set("TotalCost", response.totalCost);
+                dataItem.set("needsRecalculation", false);
+                
+                // Force grid refresh
+                grid.dataSource.sync();
+                grid.refresh();
+                
+                showNotification("success", "Total Cost updated: $" + response.totalCost.toFixed(2));
+            } else {
+                showNotification("error", response.message || "Recalculation failed");
+            }
+        },
+        error: function(xhr) {
+            showNotification("error", "Server error: " + xhr.statusText);
+        }
+    });
+}
+3. Enhance Grid Configuration
+
+cshtml
+Copy
+.Model(model =>
+{
+    model.Id(c => c.OrigSuppNum);
+    model.Field(c => c.Percentage).Editable(true);
+    model.Field(c => c.Qty).Editable(true);
+    model.Field(c => c.OemPartCost).Editable(true);
+    model.Field(c => c.TotalCost)
+         .Editable(false)
+         .ClientTemplate("#= kendo.toString(TotalCost, 'n2') #"); // Format display
+    model.Field("needsRecalculation", typeof(bool)).DefaultValue(false);
+})
+4. Add Data Formatting to Columns
+
+cshtml
+Copy
+columns.Bound(c => c.Percentage)
+    .Title("Percentage")
+    .Format("{0:n2}")
+    .HtmlAttributes(new { data_field = "Percentage" })
+    .Width(30);
+
+columns.Bound(c => c.Qty)
+    .Title("Qty")
+    .Format("{0:n2}")
+    .Width(30);
+
+columns.Bound(c => c.OemPartCost)
+    .Title("Part Cost")
+    .Format("{0:n2}")
+    .Width(30);
+
+columns.Bound(c => c.TotalCost)
+    .Title("Total Cost")
+    .Format("{0:n2}")
+    .Width(30);
+5. Debugging Enhancements
+
+javascript
+Copy
+// Add to recalculateTotalCost function
+console.log("Sending values:", {
+    percentage: percentage,
+    qty: qty,
+    oemPartCost: oemPartCost
+});
+
+// Add to AJAX success
+console.log("Received response:", response);
+Key Changes Explanation:
+
+Controller Response Format
+
+Added success property for consistent client-side handling
+
+Fixed property casing (totalCost instead of TotalCost)
+
+Number Parsing
+
+Added robust number parsing with comma handling
+
+Added fallback to 0 for invalid numbers
+
+Grid Synchronization
+
+Added grid.dataSource.sync() to persist changes
+
+Added currency formatting in client template
+
+Data Validation
+
+Added server-side parameter validation
+
+Enhanced error messages
+
+Common Fixes for Refresh Issues:
+
+Verify Data Types
+Ensure TotalCost in ViewModel is decimal:
+
+csharp
+Copy
+public decimal TotalCost { get; set; }
+Check Column Order
+Ensure the Recalculate command column is before TotalCost column
+
+Test SQL Function Separately
+Verify FINALCOST function works directly in SQL Server:
+
+sql
+Copy
+SELECT SBCES.FINALCOST(10.5, 2, 25.99, 0)
+Network Inspection
+Use browser dev tools to:
+
+Verify AJAX request payload
+
+Check response values
+
+Ensure no CORS errors
