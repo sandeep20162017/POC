@@ -1,0 +1,77 @@
+Also, remind the user to replace the table names if they used different ones, just in case. And maybe add a note about checking for duplicates within each table before proceeding, as that could skew results.
+
+Finally, think about how to present the answer: start with the problem, outline different methods, provide code examples, and mention performance considerations. Make sure it's clear and addresses all parts of the user's question.
+
+(Due to technical issues, the search service is temporarily unavailable.)
+
+Here's a SQL solution to analyze the IDs between the two tables using set operations and joins:
+
+1. Common IDs (Exists in Both Tables)
+sql
+Copy
+-- Using INNER JOIN
+SELECT n.ID AS CommonID
+FROM NSCPARTS n
+INNER JOIN NSCPARTSUSED nu ON n.ID = nu.ID;
+
+-- Using INTERSECT
+SELECT ID FROM NSCPARTS
+INTERSECT
+SELECT ID FROM NSCPARTSUSED;
+2. IDs Existing Only in NSCPARTS
+sql
+Copy
+-- Using LEFT JOIN
+SELECT n.ID AS NSCPARTS_Only
+FROM NSCPARTS n
+LEFT JOIN NSCPARTSUSED nu ON n.ID = nu.ID
+WHERE nu.ID IS NULL;
+
+-- Using EXCEPT
+SELECT ID FROM NSCPARTS
+EXCEPT
+SELECT ID FROM NSCPARTSUSED;
+3. IDs Existing Only in NSCPARTSUSED
+sql
+Copy
+-- Using RIGHT JOIN
+SELECT nu.ID AS NSCPARTSUSED_Only
+FROM NSCPARTS n
+RIGHT JOIN NSCPARTSUSED nu ON n.ID = nu.ID
+WHERE n.ID IS NULL;
+
+-- Using EXCEPT
+SELECT ID FROM NSCPARTSUSED
+EXCEPT
+SELECT ID FROM NSCPARTS;
+4. Complete Analysis in Single Query
+sql
+Copy
+SELECT 
+    COALESCE(n.ID, nu.ID) AS ID,
+    CASE 
+        WHEN n.ID IS NOT NULL AND nu.ID IS NOT NULL THEN 'Exists in Both'
+        WHEN n.ID IS NOT NULL THEN 'Exists Only in NSCPARTS'
+        ELSE 'Exists Only in NSCPARTSUSED'
+    END AS Status
+FROM NSCPARTS n
+FULL OUTER JOIN NSCPARTSUSED nu ON n.ID = nu.ID
+ORDER BY ID;
+5. Count Summary
+sql
+Copy
+SELECT 
+    Status,
+    COUNT(*) AS Count
+FROM (
+    SELECT 
+        COALESCE(n.ID, nu.ID) AS ID,
+        CASE 
+            WHEN n.ID IS NOT NULL AND nu.ID IS NOT NULL THEN 'Both'
+            WHEN n.ID IS NOT NULL THEN 'NSCPARTS Only'
+            ELSE 'NSCPARTSUSED Only'
+        END AS Status
+    FROM NSCPARTS n
+    FULL OUTER JOIN NSCPARTSUSED nu ON n.ID = nu.ID
+) AS Summary
+GROUP BY Status;
