@@ -1,0 +1,69 @@
+SELECT 
+    ISNULL(C.Name, 'NONE') AS AssemblyArea,
+    ISNULL(A.CostCentre, '0') AS CC,
+    ISNULL(SUM(A.Cost), 0) AS TotalCost,
+    ISNULL(SUM(A.TaxCost), 0) AS TaxableCost
+FROM 
+(
+    -- First Subquery
+    SELECT 
+        SPU.CostCentre,
+        SBCES.FinalCost(
+            SPU.PercentUsage, 
+            SPU.QtyReqd, 
+            SPU.MmsCost, 
+            0
+        ) - SBCES.FinalCost(
+            SPU.PercentUsage, 
+            SPU.QtyReqd, 
+            SPU.CoreCost, 
+            0
+        ) AS Cost,
+        SBCES.FinalCost(
+            SPU.PercentUsage, 
+            SPU.QtyReqd, 
+            SPU.MmsCost, 
+            0
+        ) AS TaxCost
+    FROM 
+        SBCES.ScPartsUsed SPU
+    WHERE 
+        SPU.LinkCode = '035434' 
+        AND SPU.RebuiltPart = 'N'
+        AND SPU.LinkType = 'RB'
+    
+    UNION ALL
+    
+    -- Second Subquery
+    SELECT 
+        NSCU.CostCentre,
+        SBCES.FinalCost(
+            NSCU.PercentUsage, 
+            NSCU.QtyReqd, 
+            NSCP.OemPartCost, 
+            0
+        ) - SBCES.FinalCost(
+            NSCU.PercentUsage, 
+            NSCU.QtyReqd, 
+            NSCU.CoreCost, 
+            0
+        ) AS Cost,
+        SBCES.FinalCost(
+            NSCU.PercentUsage, 
+            NSCU.QtyReqd, 
+            NSCP.OemPartCost, 
+            0
+        ) AS TaxCost
+    FROM 
+        SBCES.NscPartsUsed NSCU
+        LEFT JOIN SBCES.NonStockCodedParts NSCP 
+            ON NSCP.Id = NSCU.Id
+    WHERE 
+        NSCU.LinkCode = '035434' 
+        AND NSCU.LinkType = 'RB'
+) A
+LEFT JOIN SBCES.CostCentres C 
+    ON C.CostCentre = A.CostCentre
+GROUP BY 
+    A.CostCentre, 
+    C.Name;
