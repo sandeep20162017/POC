@@ -1,0 +1,101 @@
+WITH CombinedParts AS (
+    -- First part: Stock Coded Parts
+    SELECT 
+        SPU.CostCentre,
+        SBCES.FinalCost(
+            SPU.PercentUsage, 
+            SPU.QtyReqd, 
+            SPU.MmsCost, 
+            0
+        ) - SBCES.FinalCost(
+            SPU.PercentUsage, 
+            SPU.QtyReqd, 
+            SPU.CoreCost, 
+            0
+        ) AS Cost,
+        SBCES.FinalCost(
+            SPU.PercentUsage, 
+            SPU.QtyReqd, 
+            SPU.MmsCost, 
+            0
+        ) AS TaxCost
+    FROM 
+        SBCES.ScPartsUsed SPU
+    WHERE 
+        UPPER(SPU.LinkCode) = UPPER(@RebuiltStockNum) 
+        AND SPU.RebuiltPart = 'N'
+        AND UPPER(SPU.LinkType) = 'RB'
+
+    UNION ALL
+
+    -- Second part: Non-Stock Coded Parts
+    SELECT 
+        NSCU.CostCentre,
+        SBCES.FinalCost(
+            NSCU.PercentUsage, 
+            NSCU.QtyReqd, 
+            NSCP.OemPartCost, 
+            0
+        ) - SBCES.FinalCost(
+            NSCU.PercentUsage, 
+            NSCU.QtyReqd, 
+            NSCU.CoreCost, 
+            0
+        ) AS Cost,
+        SBCES.FinalCost(
+            NSCU.PercentUsage, 
+            NSCU.QtyReqd, 
+            NSCP.OemPartCost, 
+            0
+        ) AS TaxCost
+    FROM 
+        SBCES.NscPartsUsed NSCU
+        LEFT JOIN SBCES.NonStockCodedParts NSCP 
+            ON NSCU.Id = NSCP.Id
+    WHERE 
+        UPPER(NSCU.LinkCode) = UPPER(@RebuiltStockNum) 
+        AND UPPER(NSCU.LinkType) = 'RB'
+)
+
+SELECT 
+    ISNULL(C.Name, 'NONE') AS AssemblyArea,
+    ISNULL(A.CostCentre, '0') AS CC,
+    ISNULL(SUM(A.Cost), 0) AS TotalCost,
+    ISNULL(SUM(A.TaxCost), 0) AS TaxableCost,
+    UPPER(RB.RebuiltStockNum) AS RebuiltStockNum,
+    RB.MMSStockCode,
+    RB.Keyword,
+    RB.DetailedDesc,
+    ISNULL(RB.SopNumber, ' ') AS SopNumber,
+    ISNULL(RB.JobNumber, ' ') AS JobNumber,
+    RB.CorePartNum,
+    RB.CoreCharge,
+    RB.EstimatedCost,
+    RB.DateModified,
+    RB.Active,
+    RB.RowId
+FROM 
+    CombinedParts A
+LEFT JOIN SBCES.CostCentres C 
+    ON A.CostCentre = C.CostCentre
+LEFT JOIN SBCES.RbMasterList RB 
+    ON UPPER(RB.RebuiltStockNum) = UPPER(@RebuiltStockNum)
+WHERE 
+    UPPER(RB.LinkType) = 'RB'
+GROUP BY 
+    A.CostCentre,
+    C.Name,
+    RB.RebuiltStockNum,
+    RB.MMSStockCode,
+    RB.Keyword,
+    RB.DetailedDesc,
+    RB.SopNumber,
+    RB.JobNumber,
+    RB.CorePartNum,
+    RB.CoreCharge,
+    RB.EstimatedCost,
+    RB.DateModified,
+    RB.Active,
+    RB.RowId
+ORDER BY 
+    A.CostCentre;
