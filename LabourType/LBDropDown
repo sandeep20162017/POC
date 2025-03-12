@@ -1,0 +1,350 @@
+You are ASP.NET Core, Telerik ASP.NET Core and MS SQL expert.
+InLabourType.cshtml, I want to use Telerik ASP.NET core drop down for column :
+columns.Bound(p => p.RatePerHr).Title("Rate Per Hr")
+This drop down should be populated using SQL :
+SELECT WAGEGROUP AS "WAGEGROUP", RATEPERHOUR AS "RATEPERHR" FROM SBCES.EMPLOYEESALARIES
+Assign WAGEGROUP for the selected RATEPERHOUR in the controller where required.
+Pls give me the updated code.
+
+
+LabourTypeController.cs :
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
+using DataSourceRequest = Kendo.Mvc.UI.DataSourceRequest;
+using BCES.Data;
+using Telerik.SvgIcons;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using BCES.Controllers.Base;
+using BCES.Models.Parts;
+using BCES.Models.Common;
+using Newtonsoft.Json.Linq;
+using static System.Net.Mime.MediaTypeNames;
+using Microsoft.AspNetCore.Authorization;
+
+namespace BCES.Controllers.Admin
+{
+
+    //[Route("NscPartsUsed")]
+    public class LabourTypeController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public LabourTypeController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+            _httpContextAccessor = httpContextAccessor;
+        }
+        // GET: NscPartsUsed/Index
+        [HttpGet("LabourTypeIndex")]
+        [AllowAnonymous]
+        public IActionResult LabourTypeIndex()
+        {
+            // return View();
+            return View("~/Views/Admin/LabourType.cshtml");
+        }
+
+        // POST: NscPartsUsed/GetNscPartsUsedView
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<ActionResult> GetLabourType([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid
+            var model = await GetLabourTypeData();
+            return Json(model.ToDataSourceResult(request));
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> CreateLabourType([DataSourceRequest] DataSourceRequest request, [FromForm] LabourTypeModel model)
+        {
+            //if (!ModelState.IsValid)
+            //    return BadRequest(ModelState);
+
+            try
+            {
+                var insertQuery = @"
+            INSERT INTO [SBCES].[EmplClass] 
+            ([LabourType], [LabourDefn], [WageGroup], [HrsPerWeek], [DateEntered], [OverheadType]) 
+            VALUES 
+            (
+                (SELECT ISNULL(MAX(LabourType), 0) + 1 FROM [SBCES].[EmplClass]), 
+                @LabourDefn, 
+                @WageGroup, 
+                @HrsPerWeek, 
+                @DateEntered, 
+                @OverheadType
+            )";
+
+                var parameters = new
+                {
+                    LabourDefn = model.LabourDefn ?? (object)DBNull.Value,
+                    WageGroup = model.WageGroup,
+                    HrsPerWeek = model.HrsPerWeek ?? (object)DBNull.Value,
+                    DateEntered = DateTime.Now,
+                    OverheadType = model.OverheadType
+                };
+
+                await _dbConnection.ExecuteAsync(insertQuery, parameters);
+
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                // Log the exception for debugging
+               // _logger.LogError(ex, "An error occurred while inserting LabourType");
+                return StatusCode(500, $"An error occurred while creating the LabourType: {ex.Message}");
+            }
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> UpdateLabourType([DataSourceRequest] DataSourceRequest request, LabourTypeModel model)
+        {
+            if (model == null || model.LabourType <= 0)
+                return BadRequest("Invalid LabourType value.");
+
+            try
+            {
+                var updateQuery = @"
+            UPDATE [SBCES].[EmplClass]
+            SET 
+                LabourDefn = @LabourDefn,
+                WageGroup = @WageGroup,
+                HrsPerWeek = @HrsPerWeek,
+                DateEntered = @DateEntered,
+                OverheadType = @OverheadType
+            WHERE 
+                LabourType = @LabourType";
+
+                var parameters = new
+                {
+                    LabourType = model.LabourType,
+                    LabourDefn = model.LabourDefn ?? (object)DBNull.Value,
+                    WageGroup = model.WageGroup,
+                    HrsPerWeek = model.HrsPerWeek ?? (object)DBNull.Value,
+                    DateEntered = DateTime.Now,
+                    OverheadType = model.OverheadType
+                };
+
+                var rowsAffected = await _dbConnection.ExecuteAsync(updateQuery, parameters);
+
+                if (rowsAffected > 0)
+                {
+                    return Json(new { success = true });
+                }
+                else
+                {
+                    return NotFound("LabourType not found.");
+                }
+            }
+            catch (Exception ex)
+            {
+               // _logger.LogError(ex, "An error occurred while updating LabourType with ID {LabourType}", model.LabourType);
+                return StatusCode(500, $"An error occurred while updating the LabourType: {ex.Message}");
+            }
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> DeleteLabourType([DataSourceRequest] DataSourceRequest request, LabourTypeModel labourTypeModel)
+        {
+            if (labourTypeModel == null || labourTypeModel.LabourType <= 0)
+                return BadRequest("Invalid LabourType value.");
+
+            try
+            {
+                var deleteQuery = @"
+            DELETE FROM [SBCES].[EmplClass] 
+            WHERE LabourType = @LabourType";
+
+                var parameters = new
+                {
+                    LabourType = labourTypeModel.LabourType
+                };
+
+                var rowsAffected = await _dbConnection.ExecuteAsync(deleteQuery, parameters);
+
+                if (rowsAffected > 0)
+                {
+                    return Json(new { success = true });
+                }
+                else
+                {
+                    return NotFound("LabourType not found.");
+                }
+            }
+            catch (Exception ex)
+            {
+               // _logger.LogError(ex, "An error occurred while deleting LabourType with ID {LabourType}", labourTypeModel.LabourType);
+                return StatusCode(500, $"An error occurred while deleting the LabourType: {ex.Message}");
+            }
+        }
+
+        private async Task<IEnumerable<LabourTypeModel>> GetLabourTypeData()
+        {
+            try
+            {
+                var query = @"
+                           SELECT EMPLCLASS.LABOURTYPE as LabourType
+                            , EMPLCLASS.LABOURDEFN as LabourDefn
+                            , EMPLCLASS.WAGEGROUP AS WageGroup
+                            , EMPLOYEESALARIES.RATEPERHOUR AS RatePerHr
+                            , EMPLCLASS.HRSPERWEEK AS HrsPerWeek
+                            , EMPLCLASS.OVERHEADTYPE AS OverheadType
+                            FROM SBCES.EMPLCLASS, SBCES.EMPLOYEESALARIES 
+                            WHERE EMPLCLASS.WAGEGROUP = EMPLOYEESALARIES.WAGEGROUP
+                        ";
+
+
+                return await _dbConnection.QueryAsync<LabourTypeModel>(query);
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+
+        }
+
+    }
+}
+LabourType.cshtml :
+@model IEnumerable<BCES.Models.Admin.LabourTypeModel>
+
+@{
+    ViewData["Title"] = "Labour Type";
+}
+
+<h4>Labour Type</h4>
+
+@(
+Html.Kendo().Grid<BCES.Models.Admin.LabourTypeModel>()
+                            .Name("LabourTypeGrid")
+                            .Columns(columns =>
+                            {
+                                columns.Bound(p => p.LabourType).Title("Labour Type").Hidden(true);
+                                columns.Bound(p => p.LabourDefn).Title("Labour Defn").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+                                columns.Bound(p => p.WageGroup).Title("Wage Group").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+                                columns.Bound(p => p.RatePerHr).Title("Rate Per Hr").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+                                columns.Bound(p => p.HrsPerWeek).Title("Hrs Per Week");
+                                columns.Bound(p => p.OverheadType).Title("OverHead Type").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte")));
+                                
+                                columns.Command(command =>
+                                {
+                                    if (@ViewBag.RoleId == 1)
+                                    {
+                                        command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+                                    }
+                                    if (@ViewBag.RoleId == 1)
+                                    {
+
+                                        command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Edit button with tooltip
+                                    }
+                                }).Width(200);
+                            })
+                    .ToolBar(toolbar =>
+                    {
+                        if (@ViewBag.RoleId == 1)
+                        {
+                            toolbar.Create();
+                        }
+                    })
+                .Editable(editable => editable.Mode(GridEditMode.InLine)) 
+
+                .Pageable()
+                .Sortable()
+                .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+                .DataSource(dataSource => dataSource
+                    .Ajax()
+                    .Events(events => events
+                    .Error("onDataSourceError")
+                    .RequestEnd("onRequestEnd")
+                     )
+                    .Model(model =>
+                    {
+                        model.Id(u => u.LabourType);
+                        model.Field(c => c.LabourType);
+                      
+
+                    })
+
+                    .Read(read => read.Url(Url.Action("GetLabourType", "LabourType")).Type(HttpVerbs.Get))
+                    .Create(create => create.Url(Url.Action("CreateLabourType", "LabourType")).Type(HttpVerbs.Post))
+                    .Update(update => update.Url(Url.Action("UpdateLabourType", "LabourType")).Type(HttpVerbs.Post))
+                    .Destroy(delete => delete.Url(Url.Action("DeleteLabourType", "LabourType")).Type(HttpVerbs.Post))
+
+                   )
+
+            )
+<div id="notification"></div>
+@section Scripts {
+    <script>
+        function getAutoCompleteParams() {
+            var input = $("input[data-role='autocomplete']:focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || "" // Handle empty search text
+            };
+        }
+    </script>
+
+    @* notification - add following JS, add div, add in grid .Error("onDataSourceError"),  .RequestEnd("onRequestEnd"), change contoller action to return json *@
+    <script>
+        // Initialize notification FIRST
+        var notification = $("#notification").kendoNotification({
+            position: {
+                pinned: true,
+                top: 50,
+                right: 30
+            },
+            autoHideAfter: 4000,
+            stacking: "down"
+        }).data("kendoNotification");
+
+        // Error handler
+        function onDataSourceError(e) {
+            let errorMessage = "Operation failed: ";
+
+            if (e.errorThrown) {
+                errorMessage += e.errorThrown;
+            } else if (e.xhr && e.xhr.responseText) {
+                errorMessage += e.xhr.responseText;
+            }
+
+            notification.error(errorMessage);
+        }
+
+        // Success handler
+        function onRequestEnd(e) {
+            if (e.type === "create") {
+                notification.success("Record created successfully");
+            } else if (e.type === "update") {
+                notification.success("Record updated successfully");
+            } else if (e.type === "destroy") {
+                notification.success("Record deleted successfully");
+            }
+        }
+    </script>
+
+}
+
+
+
