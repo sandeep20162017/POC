@@ -1,0 +1,42 @@
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> CreateLabourType([DataSourceRequest] DataSourceRequest request, [FromForm] LabourTypeModel model)
+{
+    if (!ModelState.IsValid)
+        return BadRequest(ModelState);
+
+    try
+    {
+        var insertQuery = @"
+            INSERT INTO [SBCES].[EmplClass] 
+            ([LabourType], [LabourDefn], [WageGroup], [HrsPerWeek], [DateEntered], [OverheadType]) 
+            VALUES 
+            (
+                (SELECT ISNULL(MAX(LabourType), 0) + 1 FROM [SBCES].[EmplClass]), 
+                @LabourDefn, 
+                @WageGroup, 
+                @HrsPerWeek, 
+                @DateEntered, 
+                @OverheadType
+            )";
+
+        var parameters = new
+        {
+            LabourDefn = model.LabourDefn ?? (object)DBNull.Value,
+            WageGroup = model.WageGroup ?? (object)DBNull.Value,
+            HrsPerWeek = model.HrsPerWeek ?? (object)DBNull.Value,
+            DateEntered = DateTime.Now,
+            OverheadType = model.OverheadType
+        };
+
+        await _dbConnection.ExecuteAsync(insertQuery, parameters);
+
+        return Json(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        // Log the exception for debugging
+        _logger.LogError(ex, "An error occurred while inserting LabourType");
+        return StatusCode(500, $"An error occurred while creating the LabourType: {ex.Message}");
+    }
+}
