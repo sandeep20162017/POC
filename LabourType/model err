@@ -1,0 +1,211 @@
+ReferenceError: model is not defined, for RatePerHourdropdown.cshtml.
+@model decimal?
+
+@(Html.Kendo().DropDownListFor(m => m)
+    .DataValueField("RatePerHr")
+    .DataTextField("RatePerHr")
+    .HtmlAttributes(new { style = "width:100%", required = "required" })
+    .Filter(FilterType.Contains)
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Action("GetRatePerHrOptions", "LabourType");
+               // .Data("function() { return { antiForgeryToken: $('input[name=__RequestVerificationToken]').val() }; }");
+        })
+        .ServerFiltering(true);
+    })
+    .Events(e => e.DataBound("function(e) { e.sender.value(model); }"))
+    )
+
+For controller :
+wageGroup.HasValue is false and value is 0. Model doesn't have drop down selected value.
+
+ [HttpPost]
+ [AllowAnonymous]
+ public async Task<IActionResult> CreateLabourType([DataSourceRequest] DataSourceRequest request, [FromForm] LabourTypeModel model)
+ {
+     try
+     {
+         //if (!ModelState.IsValid)
+         //{
+         //    var errors = ModelState.Values
+         //        .SelectMany(v => v.Errors)
+         //        .Select(e => e.ErrorMessage)
+         //        .ToList();
+         //    return BadRequest(new { errors });
+         //}
+
+         // Validate RatePerHr
+         if (!model.RatePerHr.HasValue)
+         {
+             return BadRequest(new { errors = new[] { "Rate Per Hour is required" } });
+         }
+
+         // Get WageGroup
+         var wageGroupQuery = @"SELECT TOP 1 WAGEGROUP 
+                      FROM SBCES.EMPLOYEESALARIES 
+                      WHERE RATEPERHOUR = @RatePerHr
+                      ORDER BY WAGEGROUP";
+
+         var wageGroup = await _dbConnection.QueryFirstOrDefaultAsync<int?>(
+             wageGroupQuery,
+             new { RatePerHr = model.RatePerHr.Value }
+         );
+
+         if (!wageGroup.HasValue)
+         {
+             return BadRequest(new { errors = new[] { "Invalid Rate Per Hour selected" } });
+         }
+
+         var insertQuery = @"INSERT INTO [SBCES].[EmplClass] 
+                   ([LabourType], [LabourDefn], [WageGroup], [HrsPerWeek], [DateEntered], [OverheadType]) 
+                   VALUES 
+                   ((SELECT ISNULL(MAX(LabourType), 0) + 1 FROM [SBCES].[EmplClass]), 
+                   @LabourDefn, @WageGroup, @HrsPerWeek, @DateEntered, @OverheadType)";
+
+         var parameters = new
+         {
+             LabourDefn = model.LabourDefn ?? (object)DBNull.Value,
+             WageGroup = wageGroup.Value,
+             HrsPerWeek = model.HrsPerWeek ?? (object)DBNull.Value,
+             DateEntered = DateTime.Now,
+             OverheadType = model.OverheadType
+         };
+
+         await _dbConnection.ExecuteAsync(insertQuery, parameters);
+         return Json(new { success = true });
+     }
+     catch (Exception ex)
+     {
+         // Log error here
+         return StatusCode(500, new { errors = new[] { $"Create failed: {ex.Message}" } });
+     }
+ }
+LabourType.cshtml (removed column WageGroup, as it should get frm selcted drop down):
+  @model IEnumerable<BCES.Models.Admin.LabourTypeModel>
+
+@{
+    ViewData["Title"] = "Labour Type";
+}
+
+<h4>Labour Type</h4>
+
+@(
+Html.Kendo().Grid<BCES.Models.Admin.LabourTypeModel>()
+                            .Name("LabourTypeGrid")
+                            .Columns(columns =>
+                            {
+                                columns.Bound(p => p.LabourType).Title("Labour Type").Hidden(true);
+                                columns.Bound(p => p.LabourDefn).Title("Labour Defn").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)));
+                              
+                                columns.Bound(p => p.RatePerHr)
+                                            .Title("Rate Per Hr")
+                                            .Format("{0:C2}")
+                                            .EditorTemplateName("RatePerHrDropdown")
+                                            .ClientTemplate("#: kendo.format('{0:C2}', RatePerHr) #");
+
+                                columns.Bound(p => p.HrsPerWeek).Title("Hrs Per Week");
+                                columns.Bound(p => p.OverheadType).Title("OverHead Type").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte")));
+                                
+                                columns.Command(command =>
+                                {
+                                    if (@ViewBag.RoleId == 1)
+                                    {
+                                        command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+                                    }
+                                    if (@ViewBag.RoleId == 1)
+                                    {
+
+                                        command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Edit button with tooltip
+                                    }
+                                }).Width(200);
+                            })
+                    .ToolBar(toolbar =>
+                    {
+                        if (@ViewBag.RoleId == 1)
+                        {
+                            toolbar.Create();
+                        }
+                    })
+                .Editable(editable => editable.Mode(GridEditMode.InLine)) 
+
+                .Pageable()
+                .Sortable()
+                .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+                .DataSource(dataSource => dataSource
+                    .Ajax()
+                    .Events(events => events
+                    .Error("onDataSourceError")
+                    .RequestEnd("onRequestEnd")
+                     )
+                    .Model(model =>
+                    {
+                        model.Id(u => u.LabourType);
+                        model.Field(c => c.LabourType);
+                      
+
+                    })
+
+                    .Read(read => read.Url(Url.Action("GetLabourType", "LabourType")).Type(HttpVerbs.Get))
+                    .Create(create => create.Url(Url.Action("CreateLabourType", "LabourType")).Type(HttpVerbs.Post))
+                    .Update(update => update.Url(Url.Action("UpdateLabourType", "LabourType")).Type(HttpVerbs.Post))
+                    .Destroy(delete => delete.Url(Url.Action("DeleteLabourType", "LabourType")).Type(HttpVerbs.Post))
+
+                   )
+
+            )
+<div id="notification"></div>
+@section Scripts {
+    <script>
+        function getAutoCompleteParams() {
+            var input = $("input[data-role='autocomplete']:focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || "" // Handle empty search text
+            };
+        }
+    </script>
+
+    @* notification - add following JS, add div, add in grid .Error("onDataSourceError"),  .RequestEnd("onRequestEnd"), change contoller action to return json *@
+    <script>
+        // Initialize notification FIRST
+        var notification = $("#notification").kendoNotification({
+            position: {
+                pinned: true,
+                top: 50,
+                right: 30
+            },
+            autoHideAfter: 4000,
+            stacking: "down"
+        }).data("kendoNotification");
+
+        // Error handler
+        function onDataSourceError(e) {
+            let errorMessage = "Operation failed: ";
+
+            if (e.errorThrown) {
+                errorMessage += e.errorThrown;
+            } else if (e.xhr && e.xhr.responseText) {
+                errorMessage += e.xhr.responseText;
+            }
+
+            notification.error(errorMessage);
+        }
+
+        // Success handler
+        function onRequestEnd(e) {
+            if (e.type === "create") {
+                notification.success("Record created successfully");
+            } else if (e.type === "update") {
+                notification.success("Record updated successfully");
+            } else if (e.type === "destroy") {
+                notification.success("Record deleted successfully");
+            }
+        }
+    </script>
+
+}
+
+
+
