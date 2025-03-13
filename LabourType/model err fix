@@ -1,0 +1,141 @@
+Let's fix these issues systematically:
+
+1. Fixing the "model is not defined" error in the dropdown template:
+
+Update RatePerHrDropdown.cshtml:
+
+html
+Copy
+@model decimal?
+
+@(Html.Kendo().DropDownListFor(m => m)
+    .DataValueField("RatePerHr")
+    .DataTextField("RatePerHr")
+    .HtmlAttributes(new { style = "width:100%", required = "required" })
+    .Filter(FilterType.Contains)
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Action("GetRatePerHrOptions", "LabourType");
+        })
+        .ServerFiltering(true);
+    })
+    .Value(Model?.ToString()) // Set current value properly
+)
+Run HTML
+2. Fixing WageGroup retrieval in the controller:
+
+Update your Create and Update methods:
+
+csharp
+Copy
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> CreateLabourType([DataSourceRequest] DataSourceRequest request, [FromForm] LabourTypeModel model)
+{
+    try
+    {
+        // Validate required fields
+        var errors = new List<string>();
+        
+        if (!model.RatePerHr.HasValue)
+        {
+            errors.Add("Rate Per Hour is required");
+        }
+
+        if (errors.Any())
+        {
+            return BadRequest(new { errors });
+        }
+
+        // Get WageGroup with proper null handling
+        var wageGroupQuery = @"
+            SELECT TOP 1 WAGEGROUP 
+            FROM SBCES.EMPLOYEESALARIES 
+            WHERE RATEPERHOUR = @RatePerHr
+            ORDER BY WAGEGROUP DESC"; // Get highest wage group if multiple exist
+
+        var wageGroup = await _dbConnection.QueryFirstOrDefaultAsync<int?>(
+            wageGroupQuery,
+            new { RatePerHr = model.RatePerHr.Value }
+        );
+
+        if (!wageGroup.HasValue)
+        {
+            return BadRequest(new { 
+                errors = new[] { $"No Wage Group found for Rate {model.RatePerHr.Value}" } 
+            });
+        }
+
+        // Rest of your insert code...
+    }
+    catch (Exception ex)
+    {
+        // Log error
+        return StatusCode(500, new { 
+            errors = new[] { $"Create failed: {ex.Message}" } 
+        });
+    }
+}
+3. Update your SQL query in GetLabourTypeData:
+
+csharp
+Copy
+private async Task<IEnumerable<LabourTypeModel>> GetLabourTypeData()
+{
+    var query = @"
+        SELECT 
+            ec.LABOURTYPE as LabourType,
+            ec.LABOURDEFN as LabourDefn,
+            ec.WAGEGROUP AS WageGroup,
+            es.RATEPERHOUR AS RatePerHr,
+            ec.HRSPERWEEK AS HrsPerWeek,
+            ec.OVERHEADTYPE AS OverheadType
+        FROM SBCES.EMPLCLASS ec
+        INNER JOIN SBCES.EMPLOYEESALARIES es 
+            ON ec.WAGEGROUP = es.WAGEGROUP";
+    
+    return await _dbConnection.QueryAsync<LabourTypeModel>(query);
+}
+4. Add validation to your model:
+
+csharp
+Copy
+public class LabourTypeModel
+{
+    public int LabourType { get; set; }
+    
+    [Required(ErrorMessage = "Labour Definition is required")]
+    public string LabourDefn { get; set; }
+
+    public int WageGroup { get; set; }  // Remove nullable
+
+    [Required(ErrorMessage = "Rate Per Hour is required")]
+    [Range(0.01, double.MaxValue, ErrorMessage = "Rate must be positive")]
+    public decimal? RatePerHr { get; set; }
+
+    [Range(0, 168, ErrorMessage = "Hours must be between 0-168")]
+    public decimal? HrsPerWeek { get; set; }
+    
+    [Required(ErrorMessage = "Overhead Type is required")]
+    public decimal? OverheadType { get; set; }
+}
+5. Add anti-forgery protection to your view:
+
+Add this at the top of your LabourType.cshtml:
+
+html
+Copy
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Xsrf
+@Html.AntiForgeryToken()
+Run HTML
+Key changes explained:
+
+Dropdown Template Fix:
+
+Removed the problematic DataBound event
+
+Added explicit value setting using Model?.ToString()
+
+Proper null handling for decimal? type
