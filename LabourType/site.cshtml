@@ -1,0 +1,297 @@
+When user clicks on delete button, pop up appears but in the grid cell, SiteId is displayed.
+How to avoid display of siteid in the grid column?
+
+Site.cshtml :
+@model IEnumerable<BCES.Models.Admin.UserViewModel>
+
+@{
+    ViewData["Title"] = "User Management";
+
+}
+
+
+<h6>User Management</h6>
+
+
+@(
+Html.Kendo().Grid<BCES.Models.Admin.UserViewModel>()
+                    .Name("userGrid")
+                    .Columns(columns =>
+                    {
+                        columns.Bound(u => u.UserADId).Title("User ID");
+                        columns.Bound(u => u.UserName).Title("User Name");
+                        // columns.Bound(u => u.UserContactNo).Title("Phone Number");
+
+                        columns.Bound(u => u.RoleName) // Display RoleName
+                            .Title("Role Name")
+                            .EditorTemplateName("RoleNameDropDown");
+
+                        columns.Bound(u => u.SiteIds).Title("Site Name")
+
+                        @* .ClientTemplate("#= Sites.map(site=>site.SiteName).join(' , ') #") *@
+                        @* .ClientTemplate("#= Sites.map(site=>site.SiteName) #") *@
+                        .ClientTemplate("# if (typeof Sites != 'undefined' && Sites && Sites.length > 0) { # #= Sites.map(site => site.SiteName).join(', ') # # } else { # Select Site # } #")
+                                                 .EditorTemplateName("SiteCheckBoxGroup");
+
+                         // Replace Command column with Custom Delete Button
+                         columns.Bound(u => u.UserID)
+                        .ClientTemplate("<button class='custom-delete-btn k-button k-button-icon'>Delete</button>")
+                        .Title("Actions");
+
+                       
+                    })
+                            .ToolBar(toolbar =>
+                            {
+                                toolbar.Create();
+                                toolbar.Save();
+                            })
+                            .Editable(editable => editable.Mode(GridEditMode.InCell))
+                            .Pageable()
+                            .Sortable()
+                            
+
+                            //.Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+                            // .Scrollable()
+
+                            .DataSource(dataSource => dataSource
+                                .Ajax()                               
+                .Events(events =>
+                    {
+                        events.RequestEnd("onRequestEnd"); 
+                        events.Error("onDataSourceError");
+                        
+                    })
+                    .Read(read => read.Url(Url.Action("ReadUsers", "UserManagementGrid")).Type(HttpVerbs.Get))
+                        .Create(create => create.Url(Url.Action("AddUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+                        .Update(update => update.Url(Url.Action("UpdateUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+                        .Destroy(delete => delete.Url(Url.Action("DeleteUser", "UserManagementGrid", new { userID = "{0}" })).Type(HttpVerbs.Post))
+                        @* .Destroy(delete => delete.Url(Url.Action("DeleteUser", "UserManagementGrid", new { userID = "{0}" }))
+                                .Type(HttpVerbs.Post) *@
+                    
+                   
+                    .Model(model =>
+                    {
+                        model.Id(u => u.UserID);
+                        model.Field(u => u.UserName).Editable(true);
+                        model.Field(u => u.RoleId).DefaultValue(0); 
+                        model.Field(u => u.RoleName).Editable(true);
+                        
+                        model.Field(u => u.SiteIds).DefaultValue(new List<int>());
+                    model.Field(u => u.SiteNames).DefaultValue(new List<string>());
+
+        })
+        
+    )
+)
+<!-- Add the notification element -->
+<div id="notification"></div>
+<input type="hidden" name="SelectedSites" id="SelectedSitesHidden" value="" />
+@section Scripts {
+    <script>
+          $(document).ready(function() {
+            var notification = $("#notification").kendoNotification({
+                position: {
+                    pinned: true,
+                    top: 50,
+                    right: 30
+                },
+                autoHideAfter: 4000,
+                stacking: "down"
+            }).data("kendoNotification");
+
+            //Delete
+            // Use event delegation for dynamically generated delete buttons
+            // Custom Delete Button Handler
+            $("#userGrid").on("click", ".custom-delete-btn", function(e) {
+                e.preventDefault();
+
+                var grid = $("#userGrid").data("kendoGrid");
+                var row = $(this).closest("tr");
+                var dataItem = grid.dataItem(row);
+
+                // Show custom confirmation dialog
+                kendo.confirm("Are you sure you want to delete this record?")
+                    .then(function() {
+                        grid.dataSource.remove(dataItem); // Mark for deletion
+                        grid.dataSource.sync(); // Immediate sync
+                    })
+                    .fail(function() {
+                        grid.cancelRow(row);
+                    });
+            });
+
+        });
+        //sites       
+
+        function onSiteChange(e) {
+           // debugger;
+            var model = e.model;
+
+            console.log("event: sitechange");
+            var selectedSites = this.value();
+            console.log("selected sites :");
+            console.log(selectedSites);
+            
+            $.ajax({
+                url: '@Url.Action("GetSelectedSites", "UserManagementGrid")',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ sites: selectedSites }),
+                beforeSend: function (xhr) {
+                    console.log("Sending data :", JSON.stringify({ sites: selectedSites }));
+                },
+                success: function (data) {
+                    console.log('GetSelectedSites : Success:', data);
+                    // Optionally, update the UI with the response
+                },
+
+                error: function (error, data) {
+                    console.log(':GetSelectedSites : datasent : ', data);
+                    console.error('GetSelectedSites : Error:', error);
+                }
+            });
+            ////
+        }
+
+
+        function onSiteDataBound() {
+            console.log("event: sitedataBound");          
+
+        }
+
+
+        function onRoleChange(e) {
+            var selectedRoleId = this.value();
+            var selectedRoleName = this.text();
+
+            var grid = $("#userGrid").data("kendoGrid");
+            var currentModel = grid.dataItem($(e.sender.element).closest("tr"));
+            currentModel.set("RoleId", selectedRoleId);
+            currentModel.set("RoleName", selectedRoleName);
+        }
+              
+
+        
+        function errorHandler(e) {
+            if (e.errors) {
+                var message = "Errors:\n";
+                $.each(e.errors, function (key, value) {
+                    if ('errors' in value) {
+                        $.each(value.errors, function () {
+                            message += this + "\n";
+                        });
+                    }
+                });
+                alert(message);
+            }
+        }
+    </script>
+   
+    @* Start : Add following for validation *@
+    <script>
+    function onSave(e) {
+        // debugger;
+            var model = e.model;
+
+            // Bind RoleName dropdown to RoleId
+            var roleNameDropdown = e.container.find("input[name='RoleName']").data("kendoDropDownList");
+            if (roleNameDropdown) {
+                roleNameDropdown.value(model.RoleId); // Set the selected value based on RoleId
+            }
+
+            // Validation for RoleName and SiteIds
+            if (!model.RoleId || model.RoleId === 0) {
+                e.preventDefault();
+                var notification = $("#notification").data("kendoNotification");
+                notification.error("Role Name is required.");
+            }
+
+            if (!model.SiteIds || model.SiteIds.length === 0) {
+                e.preventDefault();
+                var notification = $("#notification").data("kendoNotification");
+                notification.error("At least one Site must be selected.");
+            }
+    }
+
+//  Edit Validation
+        function onEdit(e) {
+            const validationRules = {
+                "UserADId": {
+                    regex: /^[a-zA-Z\s]*$/,
+                    error: "Invalid User AD Id, check for special characters"
+                },
+                "UserName": {
+                    regex: /^[a-zA-Z\s]*$/,
+                    error: "Invalid User Name, check for special characters"
+                }
+            };
+            /////////////////////////////////////////////////////////
+           
+
+            ////////////////////////////////////////////////////////
+
+            Object.entries(validationRules).forEach(([field, rule]) => {
+                const input = e.container.find(`input[name='${field}']`);
+                input.on("input", function() {
+                    if (!rule.regex.test(this.value)) {
+                        notification.error(rule.error);
+                        $(this).addClass("k-invalid");
+                    } else {
+                        $(this).removeClass("k-invalid");
+                    }
+                });
+            });
+        }
+
+        // Keep existing notification and error handlers
+    </script>
+    @* End : Add  validation *@
+   
+
+    @* notification - add following JS, add div, add in grid .Error("onDataSourceError"),  .RequestEnd("onRequestEnd"), change contoller action to return json *@
+    <script>
+             
+        // Error handler
+        function onDataSourceError(e) {
+            //debugger;
+                let errorMessage = "Operation failed. ";
+
+                if (e.errors) {
+                    // Display validation errors
+                    $.each(e.errors, function (key, value) {
+                        if (value.errors) {
+                            errorMessage += value.errors.join(", ");
+                        }
+                    });
+                } 
+                // else if (e.errorThrown) {
+                //     errorMessage += e.errorThrown;
+                // } else if (e.xhr && e.xhr.responseText) {
+                //     errorMessage += e.xhr.responseText;
+                // }
+
+                var notification = $("#notification").data("kendoNotification");
+                notification.error(errorMessage);
+            }
+
+        // Success handler
+        function onRequestEnd(e) {
+           // debugger;
+          // Initialize notification FIRST
+       
+                if (e.type === "create") {
+                    var notification = $("#notification").data("kendoNotification");
+                    notification.success("Record created successfully");
+                    $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+                } else if (e.type === "update") {
+                   var notification = $("#notification").data("kendoNotification");
+                    notification.success("Record updated successfully");
+                     $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+                } else if (e.type === "destroy") {
+                    var notification = $("#notification").data("kendoNotification");
+                     notification.success("Record deleted successfully");
+                    $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+                } 
+            }
+    </script>
+}
