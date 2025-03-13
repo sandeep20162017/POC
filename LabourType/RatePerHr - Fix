@@ -1,0 +1,82 @@
+1. Update the Editor Template (~/Views/Shared/EditorTemplates/RatePerHrDropdown.cshtml):
+
+html
+Copy
+@model decimal?
+
+@(Html.Kendo().DropDownListFor(m => m)
+    .DataValueField("RatePerHr")  // Ensure case matches JSON response
+    .DataTextField("RatePerHr")
+    .HtmlAttributes(new { style = "width:100%", required = "required" })
+    .Filter(FilterType.Contains)
+    .Value(Model.HasValue ? Model.Value.ToString() : "") // Handle decimal formatting
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Action("GetRatePerHrOptions", "LabourType")
+                .DataType("json");
+        })
+        .ServerFiltering(true);
+    })
+    .Events(e => e
+        .DataBound("function(e) { 
+            var currentValue = this.value();
+            if (currentValue) {
+                this.value(parseFloat(currentValue).toFixed(2)); 
+            }
+        }")
+    )
+)
+Run HTML
+2. Update Grid Model Configuration in LabourType.cshtml:
+
+csharp
+Copy
+.DataSource(dataSource => dataSource
+    .Ajax()
+    .Model(model =>
+    {
+        model.Id(u => u.LabourType);
+        model.Field(p => p.RatePerHr); // Explicitly declare RatePerHr field
+        model.Field(p => p.LabourType).Editable(false); // If LabourType is auto-generated
+    })
+)
+3. Add Model Binding Support in Startup.cs (if using .NET Core 3.1+):
+
+csharp
+Copy
+services.AddControllersWithViews()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.NumberHandling = 
+            System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString;
+    });
+4. Verify Controller Endpoint Returns Proper Decimal Format:
+
+Ensure your GetRatePerHrOptions endpoint returns numeric values, not strings:
+
+csharp
+Copy
+[HttpGet]
+[AllowAnonymous]
+public async Task<IActionResult> GetRatePerHrOptions()
+{
+    var query = @"SELECT 
+                    CAST(RATEPERHOUR AS DECIMAL(18,2)) AS RatePerHr,
+                    WAGEGROUP 
+                 FROM SBCES.EMPLOYEESALARIES";
+    var options = await _dbConnection.QueryAsync(query);
+    return Json(options);
+}
+5. Debugging Tip - Check Network Payload:
+Use browser dev tools to inspect the request payload. You should see:
+
+json
+Copy
+{
+  "LabourDefn": "Test Worker",
+  "RatePerHr": 25.50,
+  "HrsPerWeek": 40,
+  "OverheadType": 1
+}
