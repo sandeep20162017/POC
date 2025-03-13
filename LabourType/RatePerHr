@@ -1,0 +1,69 @@
+Made above changes
+Update is working fine, no JS errors
+But model.RatePerHr.HasValue is still false.
+Drop down is not passing selected RateperHr value to model, so model is not upto date.
+
+
+ [HttpPost]
+ [AllowAnonymous]
+ public async Task<IActionResult> CreateLabourType([DataSourceRequest] DataSourceRequest request, [FromForm] LabourTypeModel model)
+ {
+     try
+     {
+         // Validate required fields
+         var errors = new List<string>();
+
+         if (!model.RatePerHr.HasValue)
+         {
+             errors.Add("Rate Per Hour is required");
+         }
+
+         if (errors.Any())
+         {
+             return BadRequest(new { errors });
+         }
+
+         // Get WageGroup with proper null handling
+         var wageGroupQuery = @"
+                             SELECT TOP 1 WAGEGROUP 
+                             FROM SBCES.EMPLOYEESALARIES 
+                             WHERE RATEPERHOUR = @RatePerHr
+                             ORDER BY WAGEGROUP DESC"; // Get highest wage group if multiple exist
+
+         var wageGroup = await _dbConnection.QueryFirstOrDefaultAsync<int?>(
+             wageGroupQuery,
+             new { RatePerHr = model.RatePerHr.Value }
+         );
+
+         if (!wageGroup.HasValue)
+         {
+             return BadRequest(new
+             {
+                 errors = new[] { $"No Wage Group found for Rate {model.RatePerHr.Value}" }
+             });
+         }
+
+         var insertQuery = @"INSERT INTO [SBCES].[EmplClass] 
+                   ([LabourType], [LabourDefn], [WageGroup], [HrsPerWeek], [DateEntered], [OverheadType]) 
+                   VALUES 
+                   ((SELECT ISNULL(MAX(LabourType), 0) + 1 FROM [SBCES].[EmplClass]), 
+                   @LabourDefn, @WageGroup, @HrsPerWeek, @DateEntered, @OverheadType)";
+
+         var parameters = new
+         {
+             LabourDefn = model.LabourDefn ?? (object)DBNull.Value,
+             WageGroup = wageGroup.Value,
+             HrsPerWeek = model.HrsPerWeek ?? (object)DBNull.Value,
+             DateEntered = DateTime.Now,
+             OverheadType = model.OverheadType
+         };
+
+         await _dbConnection.ExecuteAsync(insertQuery, parameters);
+         return Json(new { success = true });
+     }
+     catch (Exception ex)
+     {
+         // Log error here
+         return StatusCode(500, new { errors = new[] { $"Create failed: {ex.Message}" } });
+     }
+ }
