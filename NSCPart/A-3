@@ -1,0 +1,164 @@
+1. Update Index.cshtml Scripts Section
+javascript
+Copy
+@section Scripts {
+    <script>
+        $(document).ready(function() {
+            var grid = $("#userGrid").data("kendoGrid");
+            var notification = $("#notification").data("kendoNotification");
+
+            // New: Clear validation when editing starts
+            grid.bind("edit", function(e) {
+                e.container.find(".k-invalid").removeClass("k-invalid");
+                notification.hide();
+            });
+
+            // Modified save handler
+            grid.bind("save", function(e) {
+                var model = e.model;
+                var errors = [];
+                
+                // Clear previous errors
+                notification.hide();
+
+                // Validate fields
+                if (!model.UserADId?.trim()) {
+                    errors.push("User ID is required");
+                    highlightInvalidCell(e.container.find("[name='UserADId']"));
+                }
+                if (!model.UserName?.trim()) {
+                    errors.push("User Name is required");
+                    highlightInvalidCell(e.container.find("[name='UserName']"));
+                }
+                if (!model.RoleName?.trim() || model.RoleId === 0) {
+                    errors.push("Role Name is required");
+                    highlightInvalidCell(e.container.find("[name='RoleId']"));
+                }
+
+                if (errors.length) {
+                    e.preventDefault();
+                    errors.forEach(msg => notification.error(msg));
+                    return;
+                }
+
+                // New: Force refresh model values
+                grid.refresh();
+            });
+
+            function highlightInvalidCell(input) {
+                var cell = input.closest("td");
+                grid.closeCell(cell);
+                grid.editCell(cell);
+                input.addClass("k-invalid");
+            }
+        });
+
+        // Modified role change handler
+        function onRoleChange(e) {
+            var dropdown = e.sender;
+            var dataItem = dropdown.dataItem();
+            var grid = $("#userGrid").data("kendoGrid");
+            var row = dropdown.element.closest("tr");
+            var gridDataItem = grid.dataItem(row);
+
+            if (dataItem) {
+                gridDataItem.set("RoleId", dataItem.RoleId);
+                gridDataItem.set("RoleName", dataItem.RoleName);
+                
+                // New: Clear role validation immediately
+                row.find(".k-invalid[data-val-msg-for='RoleId']").hide();
+            }
+            
+            // New: Force grid to update
+            grid.trigger("dataBound");
+        }
+    </script>
+
+    <style>
+        .k-grid .k-invalid {
+            border: 1px solid #ff0000 !important;
+            background: #ffe0e0 !important;
+        }
+        .k-invalid-msg {
+            display: none !important;
+        }
+    </style>
+}
+2. Update RoleNameDropDown.cshtml
+html
+Copy
+@model int
+
+@(Html.Kendo().DropDownList()
+    .Name("RoleId")
+    .DataTextField("RoleName")
+    .DataValueField("RoleId")
+    .BindTo((IEnumerable<BCES.Models.Admin.RoleModel>)ViewData["Roles"])
+    .OptionLabel("Select Role")
+    .HtmlAttributes(new { 
+        required = "required",
+        data_role_required = "true",
+        data_val_msg_container = "#roleValidationMessage"
+    })
+    .Events(e => {
+        e.Change("onRoleChange");
+        e.DataBound("function(e) { e.sender.value(0); }"); // Force clear on load
+    })
+)
+
+<span id="roleValidationMessage" class="k-invalid-msg" style="display: none;"></span>
+Run HTML
+3. Update UserViewModel.cs
+csharp
+Copy
+public class UserViewModel
+{
+    public int UserID { get; set; }
+
+    [Required(ErrorMessage = "User ID is required")]
+    [Display(Name = "User ID")]
+    public string UserADId { get; set; }
+
+    [Required(ErrorMessage = "User Name is required")]
+    [Display(Name = "User Name")]
+    public string UserName { get; set; }
+
+    [Required(ErrorMessage = "Role Name is required")]
+    [Display(Name = "Role")]
+    public string RoleName { get; set; }
+
+    [Range(1, int.MaxValue, ErrorMessage = "Role Name is required")]
+    public int RoleId { get; set; }
+}
+Key Fixes Explained:
+Double Role Selection Fix:
+
+Added grid.trigger("dataBound") in role change handler
+
+Added data_role_required attribute to dropdown
+
+Clear previous validation immediately on role selection
+
+Persistent Validation Messages:
+
+Added grid edit event to clear previous validation
+
+Added grid.refresh() after successful validation
+
+Modified validation logic to use null-conditional operator (?.)
+
+Data Not Persisting:
+
+Added Display attributes to ViewModel
+
+Forced dropdown reset on data bound
+
+Added proper range validation for RoleId
+
+Visual Improvements:
+
+Made validation styles more specific
+
+Hid default validation messages in favor of notifications
+
+Added !important to override Kendo styles
