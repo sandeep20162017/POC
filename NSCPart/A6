@@ -1,0 +1,142 @@
+Update Index.cshtml (Key Changes)
+html
+Copy
+@(
+Html.Kendo().Grid<BCES.Models.Admin.UserViewModel>()
+    .Name("userGrid")
+    // ... existing columns configuration ...
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(true) // Enable batch mode
+        .Events(events => events
+            .RequestEnd("onRequestEnd")
+            .Error("onDataSourceError")
+            .Sync("onSync") // Add sync handler
+        )
+        .Model(model => {
+            model.Id(u => u.UserID);
+            model.Field(u => u.UserADId).Editable(true);
+            model.Field(u => u.UserName).Editable(true);
+            model.Field(u => u.RoleId).DefaultValue(0);
+            model.Field(u => u.RoleName).Editable(true);
+        })
+    )
+)
+Run HTML
+2. Update Script Section
+javascript
+Copy
+@section Scripts {
+    <script>
+        $(document).ready(function() {
+            var grid = $("#userGrid").data("kendoGrid");
+            var notification = $("#notification").data("kendoNotification");
+
+            // Handle save button click
+            grid.bind("save", function(e) {
+                e.preventDefault(); // Prevent default save behavior
+                
+                // Validate all dirty items
+                var hasErrors = validateAllItems(grid);
+                
+                if (!hasErrors) {
+                    grid.dataSource.sync(); // Manually trigger sync
+                }
+            });
+        });
+
+        // Validate all items in the grid
+        function validateAllItems(grid) {
+            var hasErrors = false;
+            grid.tbody.find("tr").each(function() {
+                var row = $(this);
+                var dataItem = grid.dataItem(row);
+                
+                // Clear previous validation
+                row.find(".invalid-cell").removeClass("invalid-cell");
+
+                // Validate UserADId
+                if (!dataItem.UserADId?.trim()) {
+                    markInvalid(row.find("[name='UserADId']"));
+                    hasErrors = true;
+                }
+
+                // Validate UserName
+                if (!dataItem.UserName?.trim()) {
+                    markInvalid(row.find("[name='UserName']"));
+                    hasErrors = true;
+                }
+
+                // Validate Role
+                if (!dataItem.RoleName?.trim() || dataItem.RoleId === 0) {
+                    markInvalid(row.find("[name='RoleId']"));
+                    hasErrors = true;
+                }
+            });
+
+            return hasErrors;
+        }
+
+        // Role dropdown change handler
+        function onRoleChange(e) {
+            var dropdown = e.sender;
+            var row = dropdown.element.closest("tr");
+            var grid = $("#userGrid").data("kendoGrid");
+            var dataItem = grid.dataItem(row);
+            var selectedData = dropdown.dataItem();
+
+            if (dataItem && selectedData) {
+                dataItem.set("RoleId", selectedData.RoleId);
+                dataItem.set("RoleName", selectedData.RoleName);
+                row.find("[name='RoleId']").removeClass("invalid-cell");
+            }
+        }
+
+        // Mark invalid fields
+        function markInvalid(input) {
+            input.addClass("invalid-cell")
+                .closest("td").addClass("invalid-cell");
+        }
+
+        // Sync handler
+        function onSync(e) {
+            if (e.type !== "sync") return;
+            $("#userGrid").data("kendoGrid").dataSource.read();
+        }
+    </script>
+
+    <style>
+        .invalid-cell {
+            background-color: #ffe0e0 !important;
+            position: relative;
+            box-shadow: inset 0 0 0 2px red;
+        }
+        .invalid-cell::after {
+            content: "!";
+            color: red;
+            position: absolute;
+            right: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-weight: bold;
+        }
+    </style>
+}
+3. Update RoleNameDropDown.cshtml
+html
+Copy
+@model int
+
+@(Html.Kendo().DropDownList()
+    .Name("RoleId")
+    .DataTextField("RoleName")
+    .DataValueField("RoleId")
+    .BindTo((IEnumerable<BCES.Models.Admin.RoleModel>)ViewData["Roles"])
+    .OptionLabel("Select Role")
+    .HtmlAttributes(new { 
+        @class = "role-dropdown",
+        required = "required",
+        data_role_required = "true"
+    })
+    .Events(e => e.Change("onRoleChange"))
