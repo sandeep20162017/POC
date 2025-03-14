@@ -1,112 +1,52 @@
-1. Use HtmlAttributes for validation and styling
-You can apply the required attribute and set a validation message like this:
+JavaScript: Open All Cells on "Add New"
+Use the edit event to programmatically open all editable cells when a new row is added.
 
-csharp
-Copy
-Edit
-@(Html.Kendo().Grid<BCES.Models.Admin.UserViewModel>()
-    .Name("userGrid")
-    .Columns(columns =>
-    {
-        columns.Bound(u => u.UserADId)
-            .Title("User ID")
-            .HtmlAttributes(new { required = "required", @class = "required-cell", data_val_required = "User ID is required" });
-
-        columns.Bound(u => u.UserName)
-            .Title("User Name")
-            .HtmlAttributes(new { required = "required", @class = "required-cell", data_val_required = "User Name is required" });
-
-        columns.Bound(u => u.RoleName)
-            .Title("Role Name")
-            .EditorTemplateName("RoleNameDropDown")
-            .HtmlAttributes(new { required = "required", @class = "required-cell", data_val_required = "Role is required" });
-
-        columns.Command(command =>
-        {
-            command.Custom("Delete")
-                .Click("showDeleteConfirmation")
-                .Text(" ")
-                .IconClass("k-icon k-i-delete")
-                .HtmlAttributes(new { @class = "text-danger", title = "Delete" });
-        }).Title("Actions");
-    })
-    .ToolBar(toolbar =>
-    {
-        toolbar.Create();
-        toolbar.Save();
-    })
-    .Editable(editable => editable.Mode(GridEditMode.InCell))
-    .Pageable()
-    .Sortable()
-    .DataSource(dataSource => dataSource
-        .Ajax()
-        .Events(events =>
-        {
-            events.RequestEnd("onRequestEnd");
-            events.Error("onDataSourceError");
-        })
-        .Read(read => read.Url(Url.Action("ReadUsers", "UserManagementGrid")).Type(HttpVerbs.Get))
-        .Create(create => create.Url(Url.Action("AddUser", "UserManagementGrid")).Type(HttpVerbs.Post))
-        .Update(update => update.Url(Url.Action("UpdateUser", "UserManagementGrid")).Type(HttpVerbs.Post))
-        .Destroy(delete => delete.Url(Url.Action("DeleteUser", "UserManagementGrid", new { userID = "{0}" })).Type(HttpVerbs.Post))
-        .Model(model =>
-        {
-            model.Id(u => u.UserID);
-            model.Field(u => u.UserADId).Editable(true);
-            model.Field(u => u.UserName).Editable(true);
-            model.Field(u => u.RoleId).DefaultValue(0);
-            model.Field(u => u.RoleName).Editable(true);
-        })
-    )
-)
-2. Fix the JavaScript
-Update the JavaScript to handle these validation rules properly by checking the model and DOM attributes:
-
+👉 Here’s the JavaScript:
+When the user clicks "Add New", the grid will fire the edit event.
+Use editCell() to open all editable cells in the row.
 javascript
 Copy
 Edit
 $(document).ready(function () {
     var grid = $("#userGrid").data("kendoGrid");
 
-    grid.bind("save", function (e) {
-        var model = e.model;
-        var isValid = true;
-
-        // Clear previous errors
-        $(".k-invalid-msg").remove();
-        $(".k-grid td").removeClass("k-invalid");
-
-        // Validate UserName
-        if (!model.UserName) {
-            isValid = false;
-            var cell = e.container.closest("td");
-            showError(cell, "User Name is required");
-        }
-
-        // Validate RoleName (since it's from a dropdown, check RoleId)
-        if (!model.RoleId || model.RoleId === 0) {
-            isValid = false;
-            var cell = e.container.closest("tr").find("td[data-field='RoleName']");
-            showError(cell, "Role is required");
-        }
-
-        // Stop save if validation fails
-        if (!isValid) {
-            e.preventDefault();
+    // When a row goes into edit mode (new row or existing)
+    grid.bind("edit", function (e) {
+        if (e.model.isNew()) {
+            // Delay to ensure row is fully initialized before editing cells
+            setTimeout(function () {
+                openAllCells(e.container);
+            }, 100);
         }
     });
 
-    function showError(cell, message) {
-        cell.addClass("k-invalid");
-        $("<span class='k-invalid-msg'>" + message + "</span>").appendTo(cell);
+    // Function to open all cells for editing
+    function openAllCells(row) {
+        var grid = $("#userGrid").data("kendoGrid");
+
+        row.find("td").each(function () {
+            var cell = $(this);
+            var column = grid.columns[cell.index()];
+
+            // Only open editable fields
+            if (column && column.field && column.editable !== false) {
+                grid.editCell(cell);
+            }
+        });
     }
 });
-3. Update Styling for Better Feedback
-Make sure the error styling is visible and consistent:
+✅ Styling for Better Visibility
+To highlight the editable row and cells, use some clean CSS:
 
 css
 Copy
 Edit
+/* Highlight the row being edited */
+.k-grid-edit-row {
+    background-color: #f9f9f9;
+}
+
+/* Highlight invalid fields */
 .k-invalid {
     border-color: red !important;
     background-color: #ffe6e6 !important;
