@@ -1,0 +1,180 @@
+1. Update Index.cshtml Script Section
+javascript
+Copy
+@section Scripts {
+    <script>
+        $(document).ready(function() {
+            var grid = $("#userGrid").data("kendoGrid");
+            var notification = $("#notification").data("kendoNotification");
+
+            // Initialize new items properly
+            grid.dataSource.bind("change", function(e) {
+                if (e.action === "add") {
+                    var newItem = e.items[0];
+                    newItem.set("RoleId", 0);
+                    newItem.set("RoleName", "");
+                }
+            });
+
+            // Modified save handler
+            grid.bind("save", function(e) {
+                if (!validateRow(e.model, e.container)) {
+                    e.preventDefault();
+                } else {
+                    // Force commit changes
+                    grid.dataSource.sync();
+                }
+            });
+
+            // Handle cell edits
+            grid.bind("edit", function(e) {
+                e.container.find("input").blur(function() {
+                    grid.dataSource.sync();
+                });
+            });
+        });
+
+        // Fixed role change handler
+        function onRoleChange(e) {
+            var dropdown = e.sender;
+            var row = dropdown.element.closest("tr");
+            var grid = $("#userGrid").data("kendoGrid");
+            var dataItem = grid.dataItem(row);
+            var selectedData = dropdown.dataItem();
+
+            if (dataItem && selectedData) {
+                dataItem.set("RoleId", selectedData.RoleId);
+                dataItem.set("RoleName", selectedData.RoleName);
+                
+                // Force immediate refresh
+                grid.refresh();
+                grid.dataSource.sync();
+            }
+        }
+
+        // Robust validation functions
+        function validateRow(model, container) {
+            var isValid = true;
+            
+            if (!model) {
+                console.error("Validation failed: model is undefined");
+                return false;
+            }
+
+            clearValidation(container);
+
+            // Validate UserADId
+            if (!model.UserADId?.trim()) {
+                markInvalid(container.find("[name='UserADId']"));
+                isValid = false;
+            }
+
+            // Validate UserName
+            if (!model.UserName?.trim()) {
+                markInvalid(container.find("[name='UserName']"));
+                isValid = false;
+            }
+
+            // Validate Role
+            if (!model.RoleName?.trim() || model.RoleId === 0) {
+                markInvalid(container.find("[name='RoleId']"));
+                isValid = false;
+            }
+
+            return isValid;
+        }
+
+        function validateField(field, model, grid) {
+            if (!model || !model.uid) {
+                console.warn("Skipping validation for undefined model");
+                return;
+            }
+
+            var row = grid.tbody.find(`tr[data-uid='${model.uid}']`);
+            if (!row.length) return;
+
+            clearValidation(row);
+            
+            if (field === "UserADId" && !model.UserADId?.trim()) {
+                markInvalid(row.find("[name='UserADId']"));
+            }
+            if (field === "UserName" && !model.UserName?.trim()) {
+                markInvalid(row.find("[name='UserName']"));
+            }
+            if (field === "RoleId" && (model.RoleId === 0 || !model.RoleName?.trim())) {
+                markInvalid(row.find("[name='RoleId']"));
+            }
+        }
+
+        function markInvalid(input) {
+            if (input.length) {
+                input.addClass("k-invalid")
+                    .closest("td").addClass("invalid-cell");
+            }
+        }
+
+        function clearValidation(container) {
+            container.find(".k-invalid").removeClass("k-invalid");
+            container.find(".invalid-cell").removeClass("invalid-cell");
+        }
+    </script>
+
+    <style>
+        .invalid-cell {
+            background-color: #ffe0e0 !important;
+            position: relative;
+        }
+        .invalid-cell::after {
+            content: "⚠";
+            color: red;
+            position: absolute;
+            right: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+    </style>
+}
+2. Update RoleNameDropDown.cshtml
+html
+Copy
+@model int
+
+@(Html.Kendo().DropDownList()
+    .Name("RoleId")
+    .DataTextField("RoleName")
+    .DataValueField("RoleId")
+    .BindTo((IEnumerable<BCES.Models.Admin.RoleModel>)ViewData["Roles"])
+    .OptionLabel("Select Role")
+    .HtmlAttributes(new { 
+        @class = "role-dropdown",
+        required = "required",
+        data_role_required = "true"
+    })
+    .Events(e => {
+        e.Change("onRoleChange");
+        e.DataBound("function(e) { e.sender.value(e.sender.dataItem().RoleId); }");
+    })
+)
+Run HTML
+3. Update UserViewModel.cs
+csharp
+Copy
+public class UserViewModel
+{
+    public int UserID { get; set; }
+
+    [Required(ErrorMessage = "User ID is required")]
+    [Display(Name = "User ID")]
+    public string UserADId { get; set; } = string.Empty;  // Initialize with empty string
+
+    [Required(ErrorMessage = "User Name is required")]
+    [Display(Name = "User Name")]
+    public string UserName { get; set; } = string.Empty;  // Initialize with empty string
+
+    [Required(ErrorMessage = "Role Name is required")]
+    [Display(Name = "Role")]
+    public string RoleName { get; set; } = string.Empty;  // Initialize with empty string
+
+    [Range(1, int.MaxValue, ErrorMessage = "Role Name is required")]
+    public int RoleId { get; set; }
+}
