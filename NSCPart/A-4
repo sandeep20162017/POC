@@ -1,0 +1,163 @@
+Let's fix these issues with a focused approach that highlights cells instead of using notifications:
+
+1. Update Index.cshtml Scripts
+javascript
+Copy
+@section Scripts {
+    <script>
+        // Initialize grid and validation
+        $(document).ready(function() {
+            var grid = $("#userGrid").data("kendoGrid");
+            var notification = $("#notification").data("kendoNotification");
+
+            // Clear validation when editing starts
+            grid.bind("edit", function(e) {
+                clearValidation(e.container);
+            });
+
+            // Validate before save
+            grid.bind("save", function(e) {
+                if (!validateRow(e.model, e.container)) {
+                    e.preventDefault();
+                }
+            });
+
+            // Handle grid data changes
+            grid.dataSource.bind("change", function(e) {
+                if (e.action === "itemchange") {
+                    validateField(e.field, e.item, grid);
+                }
+            });
+        });
+
+        // Role dropdown change handler
+        function onRoleChange(e) {
+            var dropdown = e.sender;
+            var row = dropdown.element.closest("tr");
+            var grid = $("#userGrid").data("kendoGrid");
+            var dataItem = grid.dataItem(row);
+            
+            if (!dataItem) {
+                // Handle new items
+                var newRow = grid.tbody.find("tr.k-grid-edit-row");
+                dataItem = grid.dataItem(newRow);
+            }
+
+            if (dataItem) {
+                var selectedData = dropdown.dataItem();
+                if (selectedData) {
+                    dataItem.set("RoleId", selectedData.RoleId);
+                    dataItem.set("RoleName", selectedData.RoleName);
+                    clearValidation(row);
+                }
+            }
+        }
+
+        // Validation functions
+        function validateRow(model, container) {
+            var isValid = true;
+            clearValidation(container);
+
+            if (!model.UserADId?.trim()) {
+                markInvalid(container.find("[name='UserADId']"));
+                isValid = false;
+            }
+            if (!model.UserName?.trim()) {
+                markInvalid(container.find("[name='UserName']"));
+                isValid = false;
+            }
+            if (!model.RoleName?.trim() || model.RoleId === 0) {
+                markInvalid(container.find("[name='RoleId']"));
+                isValid = false;
+            }
+
+            return isValid;
+        }
+
+        function validateField(field, model, grid) {
+            var row = grid.tbody.find("tr[data-uid='" + model.uid + "']");
+            var inputs = {
+                UserADId: row.find("[name='UserADId']"),
+                UserName: row.find("[name='UserName']"),
+                RoleId: row.find("[name='RoleId']")
+            };
+
+            clearValidation(row);
+
+            if (field === "UserADId" && !model.UserADId?.trim()) {
+                markInvalid(inputs.UserADId);
+            }
+            if (field === "UserName" && !model.UserName?.trim()) {
+                markInvalid(inputs.UserName);
+            }
+            if (field === "RoleId" && (model.RoleId === 0 || !model.RoleName?.trim())) {
+                markInvalid(inputs.RoleId);
+            }
+        }
+
+        function markInvalid(input) {
+            input.addClass("k-invalid")
+                .closest("td").addClass("invalid-cell");
+        }
+
+        function clearValidation(container) {
+            container.find(".k-invalid").removeClass("k-invalid");
+            container.find(".invalid-cell").removeClass("invalid-cell");
+        }
+    </script>
+
+    <style>
+        .invalid-cell {
+            background-color: #ffe0e0 !important;
+            box-shadow: inset 0 0 0 2px #ff0000;
+        }
+        .k-invalid {
+            background-color: transparent !important;
+        }
+        .k-grid .invalid-cell input {
+            background-color: #ffe0e0;
+        }
+    </style>
+}
+2. Update RoleNameDropDown.cshtml
+html
+Copy
+@model int
+
+@(Html.Kendo().DropDownList()
+    .Name("RoleId")
+    .DataTextField("RoleName")
+    .DataValueField("RoleId")
+    .BindTo((IEnumerable<BCES.Models.Admin.RoleModel>)ViewData["Roles"])
+    .OptionLabel("Select Role")
+    .HtmlAttributes(new { 
+        @class = "role-dropdown",
+        required = "required",
+        data_role_required = "true"
+    })
+    .Events(e => e.Change("onRoleChange"))
+Run HTML
+3. Fixes Explained:
+Null Reference Fix:
+
+Added proper row selection logic
+
+Added null checks for dataItem
+
+Special handling for new rows
+
+Cell Highlighting:
+
+Uses CSS classes instead of notifications
+
+Clear validation when editing starts
+
+Field-level validation during edits
+
+Data Persistence:
+
+Immediate validation on field changes
+
+Proper model binding for dropdown
+
+Force clear validation after valid selections
