@@ -1,0 +1,130 @@
+Here's the complete solution to enforce validation for all required fields (UserADId, UserName, RoleName) in the Kendo Grid:
+
+1. Update Index.cshtml (Add Validation Logic)
+html
+Copy
+@section Scripts {
+    <script>
+        $(document).ready(function() {
+            var grid = $("#userGrid").data("kendoGrid");
+            var notification = $("#notification").data("kendoNotification");
+
+            // Intercept save event for entire grid
+            grid.bind("save", function(e) {
+                var model = e.model;
+                var errors = [];
+
+                // Validate UserADId
+                if (!model.UserADId || model.UserADId.trim() === "") {
+                    errors.push("User ID is required");
+                    highlightInvalidCell(grid, e.container.find("[name='UserADId']"));
+                }
+
+                // Validate UserName
+                if (!model.UserName || model.UserName.trim() === "") {
+                    errors.push("User Name is required");
+                    highlightInvalidCell(grid, e.container.find("[name='UserName']"));
+                }
+
+                // Validate Role
+                if (model.RoleId === 0 || !model.RoleName || model.RoleName.trim() === "") {
+                    errors.push("Role Name is required");
+                    highlightInvalidCell(grid, e.container.find("[name='RoleId']"));
+                }
+
+                if (errors.length > 0) {
+                    e.preventDefault();
+                    errors.forEach(msg => notification.error(msg));
+                    return;
+                }
+            });
+
+            function highlightInvalidCell(grid, input) {
+                setTimeout(() => {
+                    grid.closeCell(input.closest("td"));
+                    grid.editCell(input.closest("td"));
+                    input.addClass("k-invalid");
+                }, 50);
+            }
+        });
+
+        // Update role change handler
+        function onRoleChange(e) {
+            var dropdown = e.sender;
+            var dataItem = dropdown.dataItem();
+            var grid = $("#userGrid").data("kendoGrid");
+            var row = dropdown.closest("tr");
+            var gridDataItem = grid.dataItem(row);
+
+            if (dataItem) {
+                gridDataItem.set("RoleId", dataItem.RoleId);
+                gridDataItem.set("RoleName", dataItem.RoleName);
+            } else {
+                gridDataItem.set("RoleId", 0);
+                gridDataItem.set("RoleName", "");
+            }
+        }
+    </script>
+    
+    <!-- Add CSS for invalid fields -->
+    <style>
+        .k-grid .k-invalid {
+            border: 1px solid #ff0000;
+            background: #ffe0e0;
+        }
+        .k-grid .k-edit-cell .k-invalid {
+            box-shadow: inset 0 0 0 2px #ff0000;
+        }
+    </style>
+}
+Run HTML
+2. Update RoleNameDropDown.cshtml
+html
+Copy
+@model int
+
+@(Html.Kendo().DropDownList()
+    .Name("RoleId")
+    .DataTextField("RoleName")
+    .DataValueField("RoleId")
+    .BindTo((IEnumerable<BCES.Models.Admin.RoleModel>)ViewData["Roles"])
+    .OptionLabel("Select Role")
+    .HtmlAttributes(new { required = "required", validationMessage = "Role Name is required" })
+    .Events(e => e.Change("onRoleChange"))
+Run HTML
+3. Update UserViewModel.cs
+csharp
+Copy
+public class UserViewModel
+{
+    public int UserID { get; set; }
+
+    [Required(ErrorMessage = "User ID is required")]
+    public string UserADId { get; set; }
+
+    [Required(ErrorMessage = "User Name is required")]
+    public string UserName { get; set; }
+
+    [Required(ErrorMessage = "Role Name is required")]
+    public string RoleName { get; set; }
+
+    public int RoleId { get; set; }
+}
+4. Update Grid Configuration
+csharp
+Copy
+@(
+Html.Kendo().Grid<BCES.Models.Admin.UserViewModel>()
+    // ... existing configuration ...
+    .Editable(editable => editable.Mode(GridEditMode.InCell).DisplayDeleteConfirmation(false))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model => {
+            model.Id(u => u.UserID);
+            model.Field(u => u.UserADId).Editable(true);
+            model.Field(u => u.UserName).Editable(true);
+            model.Field(u => u.RoleId).DefaultValue(0);
+            model.Field(u => u.RoleName).Editable(true);
+        })
+    )
+)
