@@ -1,0 +1,127 @@
+### 1. Model Setup (Ensure Required Attributes)
+In your model, you already have the [Required] attributes, which are picked up by Kendo's default validation.
+
+### 2. Modify the Grid Configuration
+Enhance the Editable configuration and define validation rules directly in the grid:
+
+csharp
+Copy
+Edit
+@(Html.Kendo().Grid<BCES.Models.Admin.UserViewModel>()
+    .Name("userGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(u => u.UserADId)
+            .Title("User ID")
+            .HtmlAttributes(new { @class = "required-cell" })
+            .EditorHtmlAttributes(new { required = "required" });
+
+        columns.Bound(u => u.UserName)
+            .Title("User Name")
+            .HtmlAttributes(new { @class = "required-cell" })
+            .EditorHtmlAttributes(new { required = "required", validationmessage = "User Name is required" });
+
+        columns.Bound(u => u.RoleName)
+            .Title("Role Name")
+            .EditorTemplateName("RoleNameDropDown")
+            .HtmlAttributes(new { @class = "required-cell" })
+            .EditorHtmlAttributes(new { required = "required", validationmessage = "Role is required" });
+
+        columns.Command(command =>
+        {
+            command.Custom("Delete")
+                .Click("showDeleteConfirmation")
+                .Text(" ")
+                .IconClass("k-icon k-i-delete")
+                .HtmlAttributes(new { @class = "text-danger", title = "Delete" });
+        }).Title("Actions");
+    })
+    .ToolBar(toolbar =>
+    {
+        toolbar.Create();
+        toolbar.Save();
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Events(events =>
+        {
+            events.RequestEnd("onRequestEnd");
+            events.Error("onDataSourceError");
+        })
+        .Read(read => read.Url(Url.Action("ReadUsers", "UserManagementGrid")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("AddUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateUser", "UserManagementGrid")).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteUser", "UserManagementGrid", new { userID = "{0}" })).Type(HttpVerbs.Post))
+        .Model(model =>
+        {
+            model.Id(u => u.UserID);
+            model.Field(u => u.UserADId).Editable(true);
+            model.Field(u => u.UserName).Editable(true);
+            model.Field(u => u.RoleId).DefaultValue(0);
+            model.Field(u => u.RoleName).Editable(true);
+        })
+    )
+)
+### 3. JavaScript for Inline Error Handling and Cell Highlighting
+Here’s the script to handle errors and highlight invalid fields:
+
+javascript
+Copy
+Edit
+$(document).ready(function () {
+    var grid = $("#userGrid").data("kendoGrid");
+
+    grid.bind("save", function (e) {
+        var model = e.model;
+        var isValid = true;
+
+        // Clear previous errors
+        $(".k-invalid-msg").remove();
+        $(".k-grid td").removeClass("k-invalid");
+
+        // Check for empty UserName
+        if (!model.UserName) {
+            isValid = false;
+            var cell = e.container.closest("td");
+            showError(cell, "User Name is required");
+        }
+
+        // Check for empty RoleName
+        if (!model.RoleId || model.RoleId === 0) {
+            isValid = false;
+            var cell = e.container.closest("tr").find("td[data-field='RoleName']");
+            showError(cell, "Role is required");
+        }
+
+        // Cancel saving if any validation fails
+        if (!isValid) {
+            e.preventDefault();
+        }
+    });
+
+    function showError(cell, message) {
+        cell.addClass("k-invalid");
+        $("<span class='k-invalid-msg'>" + message + "</span>").appendTo(cell);
+    }
+
+});
+### 4. Styling for Error Highlighting
+Add CSS to highlight invalid cells and make the error message clear:
+
+css
+Copy
+Edit
+.k-invalid {
+    border-color: red !important;
+    background-color: #ffe6e6 !important;
+}
+
+.k-invalid-msg {
+    color: red;
+    font-size: 12px;
+    display: block;
+    margin-top: 2px;
+}
