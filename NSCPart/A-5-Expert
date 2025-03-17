@@ -1,36 +1,152 @@
-$(document).ready(function () {
-    setTimeout(function () {
-        var grid = $("#NscPartsUsedGrid").data("kendoGrid");
+🚀 1. DropDownListEditor.cshtml
+This file defines the Kendo DropDownList as a reusable editor template.
 
-        if (grid) {
-            console.error('found grid');
+✅ Create this file in:
+📁 /Views/Shared/EditorTemplates/DropDownListEditor.cshtml
 
-            grid.bind("edit", function (e) {
-                console.error('inside edit');
+csharp
+Copy
+Edit
+@model object
 
-                var fieldName = e.container.find("input[data-role='combobox']").attr("name");
-                currentColumnName = fieldName || "";
-                console.error("Current Column:", currentColumnName);
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
 
-                // ✅ Get ComboBox instance from the edited cell
-                var combobox = e.container.find("input[data-role='combobox']").data("kendoComboBox");
+@(Html.Kendo().DropDownList()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains) // ✅ Allow typing suggestions
+    .IgnoreCase(true) // ✅ Case-insensitive filtering
+    .Placeholder("Select...")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-role", "dropdownlist" },
+        { "data-column", fieldName }
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data(getDropDownListParams); // ✅ Pass the correct function reference
+        })
+        .ServerFiltering(true); // ✅ Server-side filtering
+    })
+    .AutoBind(false) // ✅ Avoid premature loading
+    .ClearButton(false) // ✅ Optionally remove the clear button
+)
+🚀 2. JavaScript Code
+✅ Add this to the bottom of your layout or directly in Index.cshtml
 
-                if (combobox) {
-                    console.log("ComboBox initialized in cell:", combobox);
+html
+Copy
+Edit
+<script>
+    var currentColumnName = "";
+    var currentDropDown = null;
 
-                    // ✅ Block typing but keep dropdown clickable
-                    combobox.input.on("keydown", function(e) {
-                        e.preventDefault(); // Block typing
-                    });
+    $(document).ready(function () {
+        setTimeout(function () {
+            var grid = $("#NscPartsUsedGrid").data("kendoGrid");
 
-                    // ✅ Optionally open the dropdown when the input is focused
-                    combobox.input.on("focus", function() {
-                        combobox.open();
-                    });
-                }
-            });
-        } else {
-            console.error('Grid not found');
+            if (grid) {
+                console.error('found grid');
+
+                grid.bind("edit", function (e) {
+                    console.error('inside edit');
+
+                    // ✅ Target the DropDownList input correctly
+                    var fieldName = e.container.find(".k-dropdown-wrap input").attr("name");
+                    currentColumnName = fieldName || "";
+                    console.error("Current Column:", currentColumnName);
+
+                    // ✅ Get DropDownList instance from the container
+                    currentDropDown = e.container.find("input[data-role='dropdownlist']").data("kendoDropDownList");
+
+                    if (currentDropDown) {
+                        console.log("DropDownList initialized in cell:", currentDropDown);
+
+                        // ✅ Optionally open dropdown when input is focused
+                        currentDropDown.input.on("focus", function () {
+                            currentDropDown.open();
+                        });
+                    } else {
+                        console.warn("DropDownList not found!");
+                    }
+                });
+            } else {
+                console.error('Grid not found');
+            }
+        }, 100);
+    });
+
+    // ✅ Updated function to pass params to the server
+    function getDropDownListParams() {
+        console.log("inside getDropDownListParams", currentColumnName);
+
+        if (currentDropDown) {
+            console.log("inside if dropdown", currentColumnName);
+            var params = {
+                columnName: currentColumnName,
+                searchText: currentDropDown.text() || "" // ✅ Pass the selected value to the server
+            };
+
+            console.log("Sending params:", params);
+            return params;
         }
-    }, 100);
-});
+
+        console.warn("No active DropDownList found!");
+        return {};
+    }
+</script>
+🚀 3. Index.cshtml
+✅ Modify your grid definition to reference the new DropDownListEditor template:
+
+csharp
+Copy
+Edit
+@(Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+    .Name("NscPartsUsedGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(p => p.NscPartsUsedId).Title("Part Id").Hidden(true);
+
+        columns.Bound(p => p.OrigSuppNum)
+            .Title("Supplier Number")
+            .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+            .EditorTemplateName("DropDownListEditor"); // ✅ Reference to the new DropDownListEditor
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell).TemplateName("NscPartsAddUpdate"))
+    .Model(model =>
+    {
+        model.Id(u => u.NscPartsUsedId);
+        model.Field(c => c.NscPartsUsedId);
+        model.Field(c => c.OrigSupplierName);
+        model.Field(c => c.OrigSuppNum);
+    })
+    .Read(read => read.Url(Url.Action("GetNscPartsUsedView", "NscPartsUsed")).Type(HttpVerbs.Get))
+    .Create(create => create.Url(Url.Action("CreateNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+    .Update(update => update.Url(Url.Action("UpdateNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+    .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+)
+🚀 4. AutoCompleteController.cs
+✅ No changes needed here — just make sure the controller parameters match exactly:
+
+csharp
+Copy
+Edit
+[HttpGet]
+public IActionResult GetAutoCompleteData(string columnName, string searchText)
+{
+    if (!string.IsNullOrEmpty(columnName))
+    {
+        Console.WriteLine($"Column: {columnName}, Search Text: {searchText}");
+    }
+    
+    var data = _service.GetAutoCompleteResults(columnName, searchText);
+    return Json(data);
+}
