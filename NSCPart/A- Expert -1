@@ -1,0 +1,97 @@
+Improved ComboBox Editor Template
+Here’s a refined version of your ComboBoxEditor.cshtml:
+
+ComboBoxEditor.cshtml
+csharp
+Copy
+Edit
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .Placeholder("Select...")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-role", "combobox" }, // Correct data-role for ComboBox
+        { "data-column", fieldName } // Pass column name
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getAutoCompleteParams"); // Pass additional params
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #")
+)
+✅ JavaScript for Passing Parameters
+Instead of relying on focus, you can dynamically grab the correct element tied to the ComboBox:
+
+Updated getAutoCompleteParams Function
+javascript
+Copy
+Edit
+function getAutoCompleteParams() {
+    var combobox = $(".k-combobox").data("kendoComboBox"); // Grab active ComboBox instance
+    if (combobox) {
+        return {
+            columnName: combobox.element.attr("name"),
+            searchText: combobox.text() || "" // Ensure it's a string, even if empty
+        };
+    }
+    return {};
+}
+✅ Grid Configuration Fixes
+Make sure the grid column is properly wired to use the template:
+
+Grid Definition Update
+csharp
+Copy
+Edit
+@(Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+    .Name("NscPartsUsedGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(p => p.NscPartsUsedId).Title("Part Id").Hidden(true);
+        columns.Bound(p => p.OrigSuppNum)
+            .Title("Supplier Number")
+            .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+            .EditorTemplateName("ComboBoxEditor"); // Ensure it’s bound to the template
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell).TemplateName("NscPartsAddUpdate"))
+    .Model(model =>
+    {
+        model.Id(u => u.NscPartsUsedId);
+        model.Field(c => c.NscPartsUsedId);
+        model.Field(c => c.OrigSupplierName);
+        model.Field(c => c.OrigSuppNum);
+    })
+    .Read(read => read.Url(Url.Action("GetNscPartsUsedView", "NscPartsUsed")).Type(HttpVerbs.Get))
+    .Create(create => create.Url(Url.Action("CreateNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+    .Update(update => update.Url(Url.Action("UpdateNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+    .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+)
+✅ Controller Action
+Here’s an example of how the server-side action should receive the params:
+
+Controller Example
+csharp
+Copy
+Edit
+public JsonResult GetAutoCompleteData(string columnName, string searchText)
+{
+    var data = _service.GetAutoCompleteResults(columnName, searchText);
+    return Json(data);
+}
+🚀 What’s Fixed/Improved:
