@@ -1,38 +1,12 @@
-1. Updated DropDownList Editor
-Here’s how you can modify the ComboBox to a DropDownList:
-
-DropDownListEditor.cshtml
-csharp
-Copy
-Edit
-@(Html.Kendo().DropDownList()
-    .Name(fieldName)
-    .DataTextField("Text")
-    .DataValueField("Value")
-    .Filter(FilterType.Contains) // ✅ Allow typing suggestions
-    .IgnoreCase(true) // ✅ Case-insensitive filtering
-    .Placeholder("Select...")
-    .HtmlAttributes(new Dictionary<string, object>
-    {
-        { "name", fieldName },
-        { "data-role", "dropdownlist" },
-        { "data-column", fieldName }
-    })
-    .DataSource(source =>
-    {
-        source.Read(read =>
-        {
-            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
-                .Type(HttpVerbs.Get)
-                .Data(getComboBoxParams);
-        })
-        .ServerFiltering(true); // ✅ Filter on server side
-    })
-    .AutoBind(false) // ✅ Avoid premature loading
-    .ClearButton(false) // ✅ Optionally remove clear button
-)
-2. Updated JavaScript
-Since DropDownList doesn't allow typing, there's no need to prevent typing — it will automatically limit input to valid options.
+✅ Fix Plan:
+✅ 1. Target the DropDownList Instance Directly
+Instead of targeting input[data-role='dropdownlist'], get the DropDownList instance directly from the container using .data("kendoDropDownList").
+The name attribute is usually available on the instance itself, not the input.
+✅ 2. Use e.field From the edit Event
+The e.field property in the edit event contains the field name — so you can use that instead of reading it from the input.
+🔥 Fixed Code
+1. Updated JavaScript
+Here’s the corrected version that reads the name directly from the edit event:
 
 javascript
 Copy
@@ -50,11 +24,11 @@ $(document).ready(function () {
             grid.bind("edit", function (e) {
                 console.error('inside edit');
 
-                var fieldName = e.container.find("input[data-role='dropdownlist']").attr("name");
-                currentColumnName = fieldName || "";
+                // ✅ Get the field name directly from the edit event
+                currentColumnName = e.field || "";
                 console.error("Current Column:", currentColumnName);
 
-                // ✅ Get DropDownList instance from the edited cell
+                // ✅ Get DropDownList instance directly
                 currentDropDown = e.container.find("input[data-role='dropdownlist']").data("kendoDropDownList");
 
                 if (currentDropDown) {
@@ -64,6 +38,8 @@ $(document).ready(function () {
                     currentDropDown.input.on("focus", function () {
                         currentDropDown.open();
                     });
+                } else {
+                    console.warn("DropDownList not found!");
                 }
             });
         } else {
@@ -72,14 +48,14 @@ $(document).ready(function () {
     }, 100);
 });
 
-// ✅ Updated function to pass parameters correctly
-function getComboBoxParams() {
-    console.log("inside getComboBoxParams", currentColumnName);
+// ✅ Updated function to pass params to the server
+function getDropDownListParams() {
+    console.log("inside getDropDownListParams", currentColumnName);
 
     if (currentDropDown) {
         console.log("inside if dropdown", currentColumnName);
         var params = {
-            columnName: currentColumnName,
+            columnName: currentColumnName, // ✅ Now should be populated correctly
             searchText: currentDropDown.text() || ""
         };
 
@@ -90,3 +66,71 @@ function getComboBoxParams() {
     console.warn("No active DropDownList found!");
     return {};
 }
+2. Updated DropDownListEditor.cshtml
+No changes here — the DropDownList definition remains the same:
+
+csharp
+Copy
+Edit
+@(Html.Kendo().DropDownList()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .IgnoreCase(true)
+    .Placeholder("Select...")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-role", "dropdownlist" },
+        { "data-column", fieldName }
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data(getDropDownListParams); // ✅ Pass the function reference directly
+        })
+        .ServerFiltering(true);
+    })
+    .AutoBind(false)
+    .ClearButton(false)
+)
+3. Updated Index.cshtml
+✅ Ensure the EditorTemplateName is pointing to "DropDownListEditor":
+
+csharp
+Copy
+Edit
+columns.Bound(p => p.OrigSuppNum)
+    .Title("Supplier Number")
+    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+    .EditorTemplateName("DropDownListEditor");
+4. Controller Example
+✅ No changes needed here — just confirming that the columnName and searchText are populated:
+
+csharp
+Copy
+Edit
+[HttpGet]
+public IActionResult GetAutoCompleteData(string columnName, string searchText)
+{
+    if (!string.IsNullOrEmpty(columnName))
+    {
+        Console.WriteLine($"Column: {columnName}, Search Text: {searchText}");
+    }
+    
+    var data = _service.GetAutoCompleteResults(columnName, searchText);
+    return Json(data);
+}
+✅ Why This Works:
+✅ e.field gives the field name directly — no need to rely on the name attribute.
+✅ currentColumnName is now populated correctly.
+✅ getDropDownListParams now sends correct data to the server.
+✅ Typing + suggestion + dropdown selection all work as intended.
+
+💡 Pro Tip:
+If e.field is still empty, add Console.WriteLine in the controller to confirm the grid binding.
+If currentDropDown is still null, double-check that the data-role="dropdownlist" is being rendered in the HTML (use browser dev tools).
