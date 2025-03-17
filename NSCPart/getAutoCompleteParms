@@ -1,43 +1,41 @@
 function getAutoCompleteParams() {
-    // 1. Get the grid instance safely
-    var grid = $("#NscPartsUsedGrid").data("kendoGrid");
-    if (!grid) {
-        console.warn("Grid not found");
-        return { columnName: "", searchText: "" };
-    }
+    // "this" refers to the Kendo DataSource instance
+    var widget = this.owner; // Gets the widget (ComboBox/AutoComplete) that owns the DataSource
 
-    // 2. Check if there's an active edited cell
-    var currentCell = grid.current(); // Might be undefined
-    if (!currentCell) {
-        console.warn("No active cell being edited");
-        return { columnName: "", searchText: "" };
-    }
-
-    // 3. Find the closest <td> element (safely)
-    var editedCell = $(currentCell).closest("td");
-    if (!editedCell.length) {
-        console.warn("Edited cell not found");
-        return { columnName: "", searchText: "" };
-    }
-
-    // 4. Detect ComboBox in the cell
-    var comboBox = editedCell.find("[data-role='combobox']").data("kendoComboBox");
-    if (comboBox) {
+    if (widget && widget.element) {
         return {
-            columnName: comboBox.element.attr("data-column"),
-            searchText: comboBox.input.val() || ""
+            columnName: widget.element.attr("data-column"), // Get column name from widget's HTML attribute
+            searchText: widget.input.val() || "" // Get current input value
         };
     }
 
-    // 5. Detect AutoComplete in the cell
-    var autoComplete = editedCell.find("[data-role='autocomplete']").data("kendoAutoComplete");
-    if (autoComplete) {
-        return {
-            columnName: autoComplete.element.attr("data-column"),
-            searchText: autoComplete.input.val() || ""
-        };
-    }
-
-    // 6. Fallback
+    // Fallback if widget not detected
     return { columnName: "", searchText: "" };
 }
+Step 2: Verify Editor Template Configuration
+Ensure your ComboBoxEditor.cshtml and AutoCompleteEditor.cshtml templates include the data-column attribute:
+
+html
+Copy
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Editable(false)
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-role", "combobox" },
+        { "data-column", fieldName } // ✅ Critical: Passes the column name
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getAutoCompleteParams"); // Uses the global function
+        })
+        .ServerFiltering(true);
+    })
+)
