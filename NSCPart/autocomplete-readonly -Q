@@ -1,0 +1,323 @@
+You are ASP.NET core and Telerik ASP.NET core expert.
+Below Index.cshtml for column OrigSupplierName uses Autocomplete. I want to make this . User should not be
+able to type anything, it must get the values from the autocomplete selection.
+Is it possible using css or javascript or any changes in the autocomplete?
+If not can we use Combobox to have the same functionality?
+Pls suggest how can I use existing autocomplete functionality in Combobox.
+If we can make autocomplte as read only then combobox will not be required.
+
+AutoCompleteEditor.cshtml :
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().AutoComplete()
+    .Name(fieldName)
+    .DataTextField("Text") // Changed from "this" to "Text"
+    .Filter("contains")
+    .Placeholder("Type to search...")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-role", "autocomplete" },
+        { "data-column", fieldName }
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getAutoCompleteParams");
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #") // Explicit template to display data
+    //.Events(e => e.Change("validateAutoCompleteSelection"))
+)
+Index.csmhtml :
+
+@model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+
+@{
+    ViewData["Title"] = "Non Stock Coded Parts";
+}
+
+ <h6>Non Stock Coded Parts</h6>
+
+@(
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+                                .Name("NscPartsUsedGrid")
+                                .Columns(columns =>
+                            {
+                                columns.Bound(p => p.NscPartsUsedId).Title("Part Id").Hidden(true); 
+                                columns.Bound(p => p.OrigSuppNum)
+                                                .Title("Supplier Number")
+                                                .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains")))
+                                                .EditorTemplateName("ComboBoxEditor"); // Use ComboBox template
+
+
+                                columns.Bound(p => p.OrigSupplierName).Title("Supplier Name").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+                                columns.Bound(p => p.KeyWord).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+                                columns.Bound(p => p.Description).Title("Description").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("AutoCompleteEditor");
+                                columns.Bound(p => p.OemPartCost).Title("OEM Part Cost").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Format("{0:C2}").EditorTemplateName("Currency");
+                                columns.Command(command =>
+                                  {
+                                      command.Custom("Delete")
+                                         .Click("showDeleteConfirmation")
+                                         .Text(" ")
+                                         .IconClass("k-icon k-i-delete")
+                                         .HtmlAttributes(new { @class = "text-danger", title = "Delete" });
+                                  }).Title("Actions");
+                            })
+                 //InCell
+                 .ToolBar(toolbar =>
+                    {
+                        toolbar.Create();
+                        toolbar.Save();
+                    })
+                .Editable(editable => editable.Mode(GridEditMode.InCell).TemplateName("NscPartsAddUpdate"))
+                
+                .Pageable()
+                .Sortable()
+                .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+                .DataSource(dataSource => dataSource
+                    .Ajax()
+                    .Events(events => events
+                    .Error("onDataSourceError")
+                    .RequestEnd("onRequestEnd")
+                     )
+                    .Model(model =>
+                    {
+                        model.Id(u => u.NscPartsUsedId);
+                        model.Field(c => c.OrigSuppNum);
+                        model.Field(c => c.OrigSupplierName);
+                        model.Field(c => c.KeyWord);
+                        model.Field(c => c.Description);
+                        model.Field(c => c.OrigSuppNum);
+                        model.Field(c => c.OemPartCost);                       
+                                                                       
+                    })
+                   
+                    .Read(read => read.Url(Url.Action("GetNscPartsUsedView", "NscPartsUsed")).Type(HttpVerbs.Get))
+                    .Create(create => create.Url(Url.Action("CreateNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+                    .Update(update => update.Url(Url.Action("UpdateNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+                    .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsed", "NscPartsUsed")).Type(HttpVerbs.Post))
+                        
+                   )
+                
+            )
+<!-- Custom Delete Confirmation Dialog -->
+<div id="deleteConfirmationDialog" style="display: none;">
+    <div class="confirmation-message">
+        <span class="k-icon k-i-warning confirmation-icon"></span>
+        <!-- Edit this span text  -->
+        <span>Are you sure you want to delete this item?</span>
+    </div>
+    <div class="confirmation-buttons">
+        <button type="button" class="k-button cancel-btn">Cancel</button>
+        <button type="button" class="k-button confirm-btn">Delete</button>
+    </div>
+</div>
+<div id="notification"></div>
+  @section Scripts {
+    <script>
+        function getAutoCompleteParams() {
+            // Target both AutoComplete and ComboBox inputs
+            var input = $("input[data-role='autocomplete'], input[data-role='combobox']").filter(":focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || ""
+            };
+        }
+
+    </script>
+    
+        @* notification - add following JS, add div, add in grid .Error("onDataSourceError"),  .RequestEnd("onRequestEnd"), change contoller action to return json *@
+     <script>
+            // Initialize notification FIRST
+            var notification = $("#notification").kendoNotification({
+                position: {
+                pinned: true,
+            top: 50,
+            right: 30
+                    },
+            autoHideAfter: 4000,
+            stacking: "down"
+                }).data("kendoNotification");
+
+            // Error handler
+            function onDataSourceError(e) {
+                let errorMessage = "Operation failed: ";
+
+            if (e.errorThrown) {
+                errorMessage += e.errorThrown;
+                    } else if (e.xhr && e.xhr.responseText) {
+                errorMessage += e.xhr.responseText;
+                    }
+
+            notification.error(errorMessage);
+                }
+
+            // Success handler
+            function onRequestEnd(e) {
+                    if (e.type === "create") {
+                notification.success("Record created successfully");
+                    } else if (e.type === "update") {
+                notification.success("Record updated successfully");
+                    } else if (e.type === "destroy") {
+                notification.success("Record deleted successfully");
+                    }
+                }
+    </script>
+
+    <script>
+
+        // Initialize custom confirmation dialog
+        var deleteDialog = $("#deleteConfirmationDialog").kendoWindow({
+            width: "400px",
+            title: "Confirm Delete",
+            modal: true,
+            visible: false,
+            actions: ["Close"]
+        }).data("kendoWindow");
+
+        function showDeleteConfirmation(e) {
+            e.preventDefault();
+            var grid = $("#NscPartsUsedGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+
+            // Store reference to the dataItem
+            deleteDialog.dataItem = dataItem;
+
+            deleteDialog.center().open();
+        }
+
+        // Handle dialog buttons
+        $(document).on("click", "#deleteConfirmationDialog .confirm-btn", function () {
+            var grid = $("#NscPartsUsedGrid").data("kendoGrid");
+            var dataItem = deleteDialog.dataItem;
+
+            $.ajax({
+                url: '@Url.Action("DeleteNscPartsUsed", "NscPartsUsed")',
+                type: 'POST',
+                data: { NscPartsUsedId: dataItem.NscPartsUsedId },
+                success: function () {
+                    grid.dataSource.remove(dataItem);
+                    notification.success("Record deleted successfully");
+                    deleteDialog.close();
+                },
+                error: function (xhr) {
+                    notification.error("Delete failed: " + xhr.responseText);
+                    deleteDialog.close();
+                }
+            });
+        });
+
+        $(document).on("click", "#deleteConfirmationDialog .cancel-btn", function () {
+            deleteDialog.close();
+        });
+
+    </script>
+    
+
+  
+
+       
+  }
+
+         
+
+        
+
+ AutoCompleteController.cs :
+        [HttpGet]
+        public IActionResult GetAutoCompleteData(string columnName, string searchText)
+        {
+            // 1. Validate parameters
+            if (string.IsNullOrEmpty(columnName))
+                return BadRequest("Column name is required.");
+
+            // 2. Column whitelist
+            var columnMappings = new Dictionary<string, (string SqlColumn, string Table)>
+            {
+                //Admin Labour Tasks
+                { "TaskDescription", ("TaskDescription", "[SBCES].[LabourTaskDescriptions]") },
+                //NSC Parts 
+                { "OrigSuppNum", ("OrigSupplierNum", "[SBCES].[NonStockCodedParts]") },
+                { "OrigSupplierName", ("OrigSupplierName", "[SBCES].[NonStockCodedParts]") },
+                { "Description", ("DetailedDesc", "[SBCES].[NonStockCodedParts]") },
+                { "KeyWord", ("KeyWord", "[SBCES].[NonStockCodedParts]") },
+                //RB Parts
+                { "DetailedDesc", ("DetailedDesc", "[SBCES].[RbMasterlist]") },
+                { "LabourDefn", ("LABOURDEFN", "[SBCES].[EMPLCLASS]") },
+                { "CC", ("COSTCENTRE", "[SBCES].[COSTCENTRES]") },
+                { "CostCentre", ("COSTCENTRE", "[SBCES].[COSTCENTRES]") },
+                { "Task", ("TaskDescription", "[SBCES].[LabourTaskDescriptions]") },
+                { "MMSStockCode", ("MMSSTOCKCODE", "[SBCES].[STOCKCODEDPARTS]") },
+                //LabourType
+                 { "WAGEGROUP", ("WAGEGROUP", "[SBCES].[EMPLCLASS]") },
+                
+
+                //{ "KeyWord", ("KeyWord", "[SBCES].[RbMasterlist]") }
+            };
+
+            if (!columnMappings.TryGetValue(columnName, out var mapping))
+                return BadRequest("Invalid column name.");
+
+            // 3. Parameterized query
+            using (var connection = _dbConnection)
+            {
+                var sql = $@"
+            SELECT DISTINCT {mapping.SqlColumn} AS Text
+            FROM {mapping.Table} 
+            WHERE {mapping.SqlColumn} LIKE @SearchText + '%'";
+
+                var results = connection.Query<string>(sql, new { SearchText = searchText ?? "" });
+
+                // Wrap results in objects with "Text" property
+                var data = results.Select(x => new { Text = x }).ToList();
+                return Json(data);
+            }
+
+        }
+
+
+
+    }
+
+}
+ComboBoxEditor.cshtml :
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .Placeholder("Select...")
+   // .HtmlAttributes(new { style = "width:100%;", @class = "readonly-combobox" })
+     .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-role", "autocomplete" },
+        { "data-column", fieldName }
+    })
+   // .ReadOnly(true) // Makes the ComboBox input read-only (can't type)
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getAutoCompleteParams");
+        })
+        .ServerFiltering(true);
+    })
+)
