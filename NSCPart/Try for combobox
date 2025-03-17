@@ -1,0 +1,125 @@
+Solution: Enforce Selection from Dropdown (No Free Text)
+1. Use ComboBox with Server Filtering and Custom Validation
+Configure the ComboBox to force selection by validating against the server data:
+
+ComboBoxEditor.cshtml
+html
+Copy
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .Placeholder("Search...")
+    .AutoBind(false) // Only bind data when user types
+    .MinLength(1)    // Trigger server filtering after 1 character
+    .HtmlAttributes(new { 
+        data_column = fieldName 
+    })
+    .Events(e => {
+        e.Change("validateSelection"); // Validate on selection
+        e.DataBound("clearInvalidInput"); // Optional cleanup
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+)
+Run HTML
+2. JavaScript Validation
+Add client-side logic to enforce valid selections:
+
+javascript
+Copy
+function validateSelection(e) {
+    var comboBox = e.sender;
+    var selectedValue = comboBox.value();
+    var dataItem = comboBox.dataItem();
+
+    // If no valid item is selected, clear the input
+    if (!dataItem || dataItem.Text !== selectedValue) {
+        comboBox.value("");
+        comboBox.trigger("change"); // Force UI update
+    }
+}
+
+function clearInvalidInput(e) {
+    var comboBox = e.sender;
+    // Optional: Clear input if no matching items
+    if (comboBox.dataItems().length === 0) {
+        comboBox.value("");
+    }
+}
+3. Server-Side Validation
+In your controller action, validate the submitted value:
+
+csharp
+Copy
+[HttpPost]
+public ActionResult UpdateNscPartsUsed(NscPartsUsedViewModel model)
+{
+    // Validate if OrigSupplierName exists in the database
+    bool isValid = _dbContext.NonStockCodedParts
+        .Any(p => p.OrigSupplierName == model.OrigSupplierName);
+
+    if (!isValid)
+    {
+        ModelState.AddModelError("OrigSupplierName", "Invalid selection.");
+        return Json(ModelState.ToDataSourceResult());
+    }
+
+    // Save valid data
+    // ...
+}
+Key Behavior:
+User types → ComboBox fetches server-filtered results (e.g., typing supp shows matches).
+
+User must select → If they type a value not in the list, the input is cleared.
+
+No free text allowed → Only pre-defined server values are accepted.
+
+Why This Works:
+Client-Side Validation: The validateSelection function checks if the input matches a valid item from the DataSource.
+
+Server Filtering: Ensures the dropdown only shows valid options as the user types.
+
+Server Validation: Backend double-checks the value to prevent invalid submissions.
+
+Alternative: Use DropDownList
+If you don’t need server-side filtering as the user types, switch to the DropDownList, which inherently restricts input to the dropdown:
+
+html
+Copy
+@(Html.Kendo().DropDownList()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .HtmlAttributes(new { data_column = fieldName })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Data("getDropdownParams");
+        });
+    })
+)
+Run HTML
+Final Recommendation:
+Use ComboBox if you need search-as-you-type with server filtering.
+
+Use DropDownList if you need a static list and no typing.
+
+Choose the ComboBox with the provided validation logic to meet your requirement. 😊
