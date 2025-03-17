@@ -1,0 +1,92 @@
+1. Updated DropDownList Editor
+Here’s how you can modify the ComboBox to a DropDownList:
+
+DropDownListEditor.cshtml
+csharp
+Copy
+Edit
+@(Html.Kendo().DropDownList()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains) // ✅ Allow typing suggestions
+    .IgnoreCase(true) // ✅ Case-insensitive filtering
+    .Placeholder("Select...")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-role", "dropdownlist" },
+        { "data-column", fieldName }
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data(getComboBoxParams);
+        })
+        .ServerFiltering(true); // ✅ Filter on server side
+    })
+    .AutoBind(false) // ✅ Avoid premature loading
+    .ClearButton(false) // ✅ Optionally remove clear button
+)
+2. Updated JavaScript
+Since DropDownList doesn't allow typing, there's no need to prevent typing — it will automatically limit input to valid options.
+
+javascript
+Copy
+Edit
+var currentColumnName = "";
+var currentDropDown = null;
+
+$(document).ready(function () {
+    setTimeout(function () {
+        var grid = $("#NscPartsUsedGrid").data("kendoGrid");
+
+        if (grid) {
+            console.error('found grid');
+
+            grid.bind("edit", function (e) {
+                console.error('inside edit');
+
+                var fieldName = e.container.find("input[data-role='dropdownlist']").attr("name");
+                currentColumnName = fieldName || "";
+                console.error("Current Column:", currentColumnName);
+
+                // ✅ Get DropDownList instance from the edited cell
+                currentDropDown = e.container.find("input[data-role='dropdownlist']").data("kendoDropDownList");
+
+                if (currentDropDown) {
+                    console.log("DropDownList initialized in cell:", currentDropDown);
+
+                    // ✅ Optionally open dropdown when input is focused
+                    currentDropDown.input.on("focus", function () {
+                        currentDropDown.open();
+                    });
+                }
+            });
+        } else {
+            console.error('Grid not found');
+        }
+    }, 100);
+});
+
+// ✅ Updated function to pass parameters correctly
+function getComboBoxParams() {
+    console.log("inside getComboBoxParams", currentColumnName);
+
+    if (currentDropDown) {
+        console.log("inside if dropdown", currentColumnName);
+        var params = {
+            columnName: currentColumnName,
+            searchText: currentDropDown.text() || ""
+        };
+
+        console.log("Sending params:", params);
+        return params;
+    }
+
+    console.warn("No active DropDownList found!");
+    return {};
+}
