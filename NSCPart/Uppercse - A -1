@@ -1,27 +1,71 @@
-[RegularExpression(@"^[A-Z\s]+$", ErrorMessage = "Must be uppercase letters only.")]
+Here's how to modify the onEdit function to enforce uppercase conversion for LabourDefn and prevent negative values for OverheadType:
 
+javascript
+Copy
 function onEdit(e) {
-    // Get the grid instance
     var grid = e.sender;
-    
-    // Find the edited cell/column index
     var cell = e.container.closest("td");
     var columnIndex = cell.index();
-    
-    // Get the column definition for the edited cell
     var column = grid.columns[columnIndex];
-    
-    // Extract the field name from the column's `field` property
     var fieldName = column.field;
+    var input = e.container.find("input");
 
-    // Check if the edited column is "LabourDefn"
+    // 1. Handle LabourDefn (uppercase conversion)
     if (fieldName === "LabourDefn") {
-        // Find the input element in the editor container
-        var input = e.container.find("input");
-        
-        // Convert input value to uppercase as the user types
         input.on("input", function() {
             this.value = this.value.toUpperCase();
         });
     }
+
+    // 2. Handle OverheadType (prevent negative values)
+    if (fieldName === "OverheadType") {
+        // Prevent negative sign input
+        input.on("keypress", function(e) {
+            if (e.which === 45) { // ASCII for '-'
+                e.preventDefault();
+                notification.error("Negative values are not allowed.");
+            }
+        });
+
+        // Validate on input
+        input.on("input", function() {
+            var value = parseFloat(this.value);
+            
+            if (isNaN(value)) {
+                notification.error("Please enter a valid number.");
+                this.value = ""; // Clear invalid input
+            } else if (value < 0) {
+                notification.error("OverheadType cannot be negative.");
+                this.value = ""; // Clear negative value
+            }
+        });
+    }
+}
+Key Enhancements
+Uppercase Enforcement:
+
+Converts LabourDefn input to uppercase in real-time.
+
+Negative Value Prevention:
+
+Blocks - character entry
+
+Validates input value on every keystroke
+
+Shows error notifications using your existing Kendo notification system
+
+Server-Side Validation (Recommended)
+Add these annotations to your model class for backup validation:
+
+csharp
+Copy
+public class LabourTypeModel 
+{
+    // Uppercase validation
+    [RegularExpression(@"^[A-Z\s]+$", ErrorMessage = "Must be uppercase.")]
+    public string LabourDefn { get; set; }
+
+    // Non-negative validation
+    [Range(0, double.MaxValue, ErrorMessage = "Cannot be negative.")]
+    public decimal OverheadType { get; set; } // Ensure numeric type
 }
