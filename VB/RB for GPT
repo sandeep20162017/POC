@@ -1,0 +1,4742 @@
+you are Visual basic 6.0 expert.
+My task is to understand the following code first including any business rules?
+Can you pls help me in this journey?
+
+frmRebuiltPrtsMain.frm is the entry point.
+
+
+
+frmRebuiltPartsMain.frm :
+Option Explicit
+
+Private m_str_Msg As String
+Private l_Result As Long
+Private l_RetVal As Long
+
+Public m_str_LinkNumber As String
+Public m_str_RBNumber As String
+Public m_var_RowID As Variant
+Public m_isRB As Boolean
+Public m_silent_mode As Boolean
+
+
+Public Sub PassValues(ByVal str_LinkNumber As String, ByVal str_RBNumber As String, var_RowID As Variant)
+   On Error GoTo Error_Handler
+    
+    ' Close the existing show all labour form
+    If Not frmViewAllLabour Is Nothing Then
+        Unload frmViewAllLabour
+    End If
+    
+    m_str_LinkNumber = str_LinkNumber
+    m_str_RBNumber = str_RBNumber
+    m_var_RowID = var_RowID
+    Call RefreshForm
+    
+    If g_str_UseOverheadFringe = "F" Then
+        lblLabourOverheadAmount.Caption = "Fringe Value Total"
+    End If
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PassValues", g_l_ErrorLineNumber
+End Sub
+
+Public Sub RefreshForm()
+    On Error GoTo Error_Handler
+
+    Call SetWaitCursor
+    frmRebuiltPartsAddMaterials.PassValues m_str_RBNumber, m_str_LinkNumber
+    Call Populate
+    Call PopulateChangesMadeBy
+    Call UserPermissions
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "RefreshForm", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub UserPermissions()
+    On Error GoTo Error_Handler
+    
+    If g_l_AccessLevel = 1 Then
+        'Menu <Add a Labour Task> is disabled.
+        tbMenu.Buttons(2).ButtonMenus(1).Enabled = False
+        'Menu <View><Archived Database> is disabled.
+        tbMenu.Buttons(3).ButtonMenus(3).Enabled = False
+
+        'Menu <Edit><Archive> is disabled.
+        tbMenu.Buttons(2).ButtonMenus(3).Enabled = False
+        
+        If grdLabour.Columns.Count > 2 Then
+            'Grid "Labour". Columns "Time", "Wrench Time" are invisible.
+            grdLabour.Columns("TIME").Visible = False
+            grdLabour.Columns("WRENCH TIME").Visible = False
+        End If
+        'Grid "Materials Cost Centre Totals". Column "Total Cost" is invisible.
+        grdMaterialsCostCentreTotals.Columns("TOTAL COST").Visible = False
+        'Controls in the right bottom corner of the form are invisible.
+        lblLabourSubtotal.Visible = False
+        lblLabourOverheadAmount.Visible = False
+        lblLabourTotal.Visible = False
+        lblMaterialsTotal.Visible = False
+        lblTotalRebuiltPartCost.Visible = False
+        txtLabourSubtotal.Visible = False
+        txtLabourOverheadAmount.Visible = False
+        txtLabourTotal.Visible = False
+        txtMaterialTotal.Visible = False
+        txtTotalRebuiltPartCost.Visible = False
+        lblCoreCost.Visible = False
+        txtCoreCost.Visible = False
+        lblTaxTotal.Visible = False
+        txtTaxTotal.Visible = False
+        lblTotalWithTax.Visible = False
+        txtTotalRebuiltPartCostWithTax.Visible = False
+        'Button "Edit Rebuilt Part Info" is invisible.
+        'btnRebuiltPartEdit.Visible = False
+        'tbMenu.Buttons.Item.Enabled
+        tbMenu.Buttons(2).ButtonMenus(2).Enabled = False
+        'Edit-box "S.O.P. Number" is disabled
+        txtSOPNumber.Enabled = False
+        'Edit-boxes at the top of the form are disabled.
+        txtRebuiltCode.Enabled = False
+        txtKeyword.Enabled = False
+        txtDescription.Enabled = False
+    ElseIf g_l_AccessLevel = 2 Then
+        'Menu <Add a Labour Task> is disabled.
+        tbMenu.Buttons(2).ButtonMenus(1).Enabled = False
+        'Menu <View><Archived Database> is disabled.
+        tbMenu.Buttons(3).ButtonMenus(3).Enabled = False
+         'Menu <Edit><Archive> is disabled.
+        tbMenu.Buttons(2).ButtonMenus(3).Enabled = False
+        'Button "Edit Rebuilt Part Info" is invisible.
+        tbMenu.Buttons(2).ButtonMenus(2).Enabled = False
+        
+        'All controls except grids, are disabled.
+        txtRebuiltCode.Enabled = False
+        txtKeyword.Enabled = False
+        txtDescription.Enabled = False
+        txtLabourSubtotal.Enabled = False
+        txtLabourOverheadAmount.Enabled = False
+        txtLabourTotal.Enabled = False
+        txtMaterialTotal.Enabled = False
+        txtTotalRebuiltPartCost.Enabled = False
+        txtSOPNumber.Enabled = False
+    End If
+    
+    If g_l_AccessLevel < 4 Then
+        tbMenu.Buttons(3).ButtonMenus(2).Enabled = False
+        lblChangesMadeBy.Visible = False
+        cboChangesMadeBy.Visible = False
+    End If
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "UserPermissions", g_l_ErrorLineNumber
+End Sub
+
+'Populates the grids on the form
+Public Sub Populate()
+    Dim var_MMSStockCode As String
+    Dim cur_MMSCost As String
+    Dim var_NSCRowID As Variant
+    Dim str_OrigSuppNum As String
+    Dim str_FileText As String
+    Dim FSO As FileSystemObject
+    Dim TS As TextStream
+    Dim RS As ADODB.Recordset
+    Dim RS2 As ADODB.Recordset
+    Dim RSNewStock As Recordset
+    Dim str_LabourTotal As String
+    Dim str_MaterialTotal As String
+    Dim str_CoreCost As String
+    Dim str_TotalRebuiltPartCost As String
+    Dim dbl_TaxRate As Double
+    Dim l_Hours As Long
+    Dim l_Minutes As Long
+    Dim l_Count As Long
+    Dim duplicate As Boolean
+    
+    On Error GoTo Error_Handler
+    
+    'First populate the rebuilt information
+    Set RS = New ADODB.Recordset
+    duplicate = False 'initialize as false
+    Set RS = modDBHelper.RetrieveRB("CES_INQUIRY.RETRIEVE_RB")
+    If RS.RecordCount > 0 Then
+        RS.Filter = "mms_stock_code = '" + m_str_LinkNumber + "' and rebuilt_stock_num = '" + m_str_RBNumber + "'"
+        txtRebuiltCode.Text = RS.Fields.Item("REBUILT_STOCK_NUM")
+        txtKeyword.Text = RS.Fields.Item("KEYWORD")
+        txtDescription.Text = RS.Fields.Item("DETAILED_DESC")
+        txtSOPNumber.Text = RS.Fields.Item("SOP_NUMBER")
+        txtJobNumber.Text = RS.Fields.Item("JOB_NUMBER")
+        txtMMSBuyCode.Text = RS.Fields.Item("MMS_STOCK_CODE")
+        txtCoreCode.Text = RS.Fields.Item("CORE_PART_NUM")
+        If Trim(RS.Fields.Item("CORE_CHARGE")) = "" Then
+            txtCoreCost.Text = Format("0", "currency")
+        Else
+            txtCoreCost.Text = Format(RS.Fields.Item("CORE_CHARGE"), "currency")
+        End If
+         If IsNull(Trim(RS.Fields.Item("ACTIVE"))) Then
+            txtNonActive.Caption = ""
+        Else
+            txtNonActive.Caption = "NON-ACTIVE"
+        End If
+    End If
+    m_str_RBNumber = txtRebuiltCode.Text 'used when opening materials page from menu
+    'Determine which non stock coded items have since been converted into stock coded
+    'items.
+    'First get the table containing each of the non stock coded items
+    Set RS = modDBHelper.RetrieveNSCPUsed("CES_INQUIRY.RETRIEVE_NSCP_USED", _
+                                          m_str_RBNumber, _
+                                          "RB")
+        
+    'Loop through each of the non stock coded items
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        Set RSNewStock = New ADODB.Recordset
+        While Not RS.EOF
+            'Get the original supplier number and row id
+            str_OrigSuppNum = IIf(IsNull(RS.Fields.Item("SUPPLIER NUMBER").Value), "", RS.Fields.Item("SUPPLIER NUMBER").Value)
+            var_NSCRowID = RS.Fields.Item("RowID")
+            'Now attempt to get a stock coded part which matches the original supplier
+            'number
+            Set RSNewStock = modDBHelper.RetrieveSCOrigSupplierNum( _
+                                        "CES_INQUIRY.RETRIEVE_SC_ORIG_SUPPLIER_NUM", _
+                                        str_OrigSuppNum)
+            
+           If RSNewStock.RecordCount > 0 Then
+                'There is a match
+                'Get the MMS Stock Code for the item
+                RSNewStock.MoveFirst
+                var_MMSStockCode = RSNewStock.Fields.Item("mms_stock_code")
+                cur_MMSCost = RSNewStock.Fields.Item("MMS_New_Cost")
+                'Append the text entry to be logged
+                str_FileText = str_FileText & Trim(str_OrigSuppNum) & " to " & _
+                               Trim(var_MMSStockCode) & Chr(13) & Chr(10)
+                
+                'ensure a stockcoded part is not already attached to the estimate
+                
+                 Set RS2 = New ADODB.Recordset
+        
+                 Set RS2 = modDBHelper.RetrieveSCPUsed("CES_INQUIRY.RETRIEVE_SCP_USED", _
+                                             m_str_RBNumber, _
+                                             "N", _
+                                             "RB")
+                    If RS2.RecordCount > 0 Then
+                        RS2.MoveFirst
+                        For l_Count = 0 To RS2.RecordCount - 1
+                            If RS2.Fields.Item("STOCK CODE") = Trim(var_MMSStockCode) Then
+                                Call SetDefaultCursor
+                                'Set RS2 = Nothing
+                                'm_str_Msg = "Did not convert Non-Stocked-Coded part to Stocked-Coded-Part since MMS Stock Code"
+                                'm_str_Msg = m_str_Msg + " " + var_MMSStockCode + " is already used in this estimate"
+                                'MsgBox m_str_Msg, vbOKOnly Or vbExclamation, "Warning"
+                                duplicate = True
+                                Exit For
+                            End If
+                            RS2.MoveNext
+                        Next l_Count
+                   
+                    End If
+                    Set RS2 = Nothing
+                
+                'Transfer the entry to the stock coded make buy
+                If duplicate = False Then
+                l_Result = modDBHelper.TransferPartsUsed( _
+                                                    "CES_UPDATE.TRANSFER_PARTS_USED", _
+                                                    l_RetVal, _
+                                                    var_MMSStockCode, _
+                                                    cur_MMSCost, _
+                                                    g_str_UserName, _
+                                                    var_NSCRowID)
+                                                    
+                  ' Now if there have been any conversions log them in text file and inform the user
+                If str_FileText <> "" Then
+                    'Set FSO = New FileSystemObject
+                    'Set TS = FSO.CreateTextFile("rb.log")
+                    'TS.Write ("Rebuilt Part #" & Trim(m_str_LinkNumber) & " Part Conversions:" & _
+                              Chr(13) & Chr(10) & Chr(13) & Chr(10) & _
+                              "Vendor Part Number to Stock Code" & Chr(13) & Chr(10) & _
+                              "--------------------------------" & Chr(13) & Chr(10) & str_FileText)
+                    m_str_Msg = "Parts in the Rebuilt Part have been converted to Stock Coded Parts."
+                    m_str_Msg = m_str_Msg + Chr(13) + "Please see the log for details."
+                    MsgBox m_str_Msg, vbOKOnly Or vbInformation, "Rebuilt Part Estimate"
+                    
+                    'The code below was added to prevent a permission error when attempting
+                    'to run FSO's CreateTextFile
+                    Dim frmNoticeMessage As frmNotice
+                    Set frmNoticeMessage = New frmNotice
+                    frmNoticeMessage.SetMessage "rb.log", "Rebuilt Part #" & Trim(m_str_LinkNumber) & " Part Conversions:" & _
+                        Chr(13) & Chr(10) & Chr(13) & Chr(10) & _
+                        "Vendor Part Number to Stock Code" & Chr(13) & Chr(10) & _
+                        "--------------------------------" & Chr(13) & Chr(10) & str_FileText
+                    frmNoticeMessage.Show vbModal
+                    
+                    'TS.Close
+                    'ShellExecute GetDesktopWindow(), "Open", App.Path & "\rb.log", "", "C:\", 6
+                    
+                End If
+                
+                End If
+            End If
+            duplicate = False 'reset duplicate flag for next non-stock-coded part we check
+            RSNewStock.Close
+            RS.MoveNext
+            
+        Wend
+    End If
+    Set RSNewStock = Nothing
+            
+  
+    'Then populate the labour information
+    Set RS = modDBHelper.RetrieveMBLabour("CES_INQUIRY.RETRIEVE_MB_LABOUR", _
+                                          m_str_RBNumber, _
+                                          "RB")
+    If RS.RecordCount > 0 Then
+        Set grdLabour.DataSource = RS
+    Else
+        Set grdLabour.DataSource = Nothing
+    End If
+    
+    
+    Set RS = modDBHelper.RetrieveAllLabourHours("CES_INQUIRY.RETRIEVE_ALL_LABOUR", m_str_RBNumber, "RB")
+    
+    If RS.RecordCount > 0 Then
+        txtLabourSubtotal.Text = Format(ColumnTotals(RS, "TOTAL COST"), "currency")
+        RS.MoveFirst
+        Set grdTotalTime.DataSource = RS
+    Else
+        txtLabourSubtotal.Text = Format(0#, "currency")
+         Set grdTotalTime.DataSource = Nothing
+    End If
+
+    'Populate the ALL_LABOUR_SUMMARY table
+    
+    'Populate the ALL_MATERIALS_SUMMARY table
+    
+    'Set RS = modMain.CalculateAllMaterials(m_str_RBNumber, "RB")
+        
+    Set RS = modDBHelper.RetrieveRBPTotalCost2("CES_INQUIRY.RETRIEVE_RBP_TOTAL_COST2", m_str_RBNumber, "RB")
+        
+    If RS.RecordCount > 0 Then
+          txtMaterialTotal.Text = Format(ColumnTotals(RS, "TOTAL COST"), "currency")
+          RS.MoveFirst
+    Else
+        txtMaterialTotal.Text = Format(0#, "currency")
+    End If
+ 
+   'Set RS = RetrieveAllMaterialSummary("CES_INQUIRY.RETRIEVE_ALL_MATERIAL_SUMMARY")
+
+    If RS.RecordCount > 0 Then
+        Set grdMaterialsCostCentreTotals.DataSource = RS
+    Else
+        Set grdMaterialsCostCentreTotals.DataSource = Nothing
+    End If
+    
+    'Total each of the sections
+    txtLabourOverheadAmount.Text = Format(CCur(txtLabourSubtotal.Text) * _
+                                          CCur(g_dbl_OverheadFringeValue), _
+                                          "Currency")
+    'cboBusSeries
+    Set RS = modDBHelper.RetrieveRBListOfBuses("CES_INQUIRY.RB_LIST_BUSES", _
+                                               Trim(txtRebuiltCode.Text))
+        
+    If RS.RecordCount > 0 Then
+        Do While Not RS.EOF
+        cboBusSeries.AddItem (RS.Fields(1).Value)
+        RS.MoveNext
+        Loop
+        cboBusSeries.Text = cboBusSeries.List(0)
+    End If
+    
+    
+    ' Retrieve the tax rate
+    Set RS = modDBHelper.RetrieveCESSettings("CES_INQUIRY.RETRIEVE_CES_SETTI", _
+                                             "TAX_RATE")
+    If RS.RecordCount > 0 Then
+        dbl_TaxRate = CDbl(Replace(RS.Fields("VALUE").Value, ",", "."))
+    Else
+        dbl_TaxRate = 0
+    End If
+    Set RS = Nothing
+    
+    txtLabourTotal.Text = Format(CCur(txtLabourSubtotal.Text) + _
+                                 CCur(txtLabourOverheadAmount.Text), _
+                                 "Currency")
+                                 
+    'txtMaterialTotal.Text = frmRebuiltPartsAddMaterials.txtTotalMaterialsCost.Text
+    
+    str_LabourTotal = Trim(txtLabourTotal.Text)
+    
+    If str_LabourTotal = "" Then
+        str_LabourTotal = "0"
+    Else
+        If IsNumeric(str_LabourTotal) = False Then
+            str_LabourTotal = "0"
+        End If
+    End If
+    
+    str_MaterialTotal = Trim(txtMaterialTotal.Text)
+    If str_MaterialTotal = "" Then
+        str_MaterialTotal = "0"
+    Else
+        If IsNumeric(str_MaterialTotal) = False Then
+            str_MaterialTotal = "0"
+        End If
+    End If
+    
+    str_CoreCost = Trim(txtCoreCost.Text)
+    If str_CoreCost = "" Then
+        str_CoreCost = "0"
+    Else
+        If IsNumeric(str_CoreCost) = False Then
+            str_CoreCost = "0"
+        End If
+    End If
+    
+    txtTaxTotal.Text = Format(dbl_TaxRate * CCur(txtMaterialTotal), "currency")
+    
+    txtTotalRebuiltPartCost.Text = Format(CCur(str_LabourTotal) + CCur(str_MaterialTotal) - CCur(str_CoreCost), "currency")
+        
+    str_TotalRebuiltPartCost = Trim(txtTotalRebuiltPartCost.Text)
+    If str_TotalRebuiltPartCost = "" Then
+        str_TotalRebuiltPartCost = "0.00"
+    End If
+ 
+    txtTotalRebuiltPartCostWithTax.Text = Format(CCur(txtTaxTotal.Text) + CCur(txtTotalRebuiltPartCost.Text), "currency")
+
+    'PropagateRebuiltPartChanges m_str_RBNumber, False
+    
+    'Format the columns of the data grids
+    Call FormatColumns
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Populate", g_l_ErrorLineNumber
+    If Not RSNewStock Is Nothing Then
+        Set RSNewStock = Nothing
+    End If
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub FormatColumns()
+    On Error GoTo Error_Handler
+    
+    If Not grdLabour.Row Then
+        grdLabour.Columns("CC").Width = 500
+        'grdLabour.Columns("CC").Visible = False
+        grdLabour.Columns("TASK").Width = 1600
+        grdLabour.Columns("LABOUR TYPE").Width = 2120
+        grdLabour.Columns("USAGE").Width = 620
+        grdLabour.Columns("USAGE").Alignment = dbgRight
+        grdLabour.Columns("TIME").Width = 600
+        grdLabour.Columns("TIME").Alignment = dbgRight
+        grdLabour.Columns("WRENCH TIME").Width = 1200
+        grdLabour.Columns("WRENCH TIME").Alignment = dbgRight
+        grdLabour.Columns("DATE REVISED").Width = 1900 '1725
+        grdLabour.Columns("DATE REVISED").Alignment = dbgRight
+        grdLabour.Columns("DATE REVISED").NumberFormat = "yyyy-mmm-dd hh:mm AMPM"
+        grdLabour.Columns("TIME ADDITION").Visible = False
+        grdLabour.Columns("VALUE").Visible = False
+        grdLabour.Columns("ROWID").Visible = False
+    End If
+
+    If Not grdMaterialsCostCentreTotals.Row Then
+        With grdMaterialsCostCentreTotals
+            .Columns("CC").Width = 500
+            .Columns("CC").Caption = "CC"
+            .Columns("TOTAL COST").Alignment = dbgRight
+            .Columns("TOTAL COST").NumberFormat = "$#,##0.00;($#,##0.00)"
+            .Columns("TOTAL COST").Width = 1400
+            .Columns("TAXABLE COST").Visible = False
+        End With
+    End If
+    
+    If Not grdTotalTime.Row Then
+        grdTotalTime.Columns("COST CENTRE").Width = 500
+        grdTotalTime.Columns("COST CENTRE").Caption = "CC"
+        grdTotalTime.Columns("LABOUR HRS").Width = 1200
+        grdTotalTime.Columns("LABOUR HRS").Alignment = dbgRight
+          grdTotalTime.Columns("TOTAL COST").Visible = False
+    End If
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "FormatColumns", g_l_ErrorLineNumber
+End Sub
+
+Private Sub btnRebuiltPartEdit_Click()
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+    frmAddRebuiltPart.m_str_MMSStockCode = m_str_LinkNumber
+    frmAddRebuiltPart.m_str_RebuiltCode = m_str_RBNumber
+    frmAddRebuiltPart.m_str_AuditReference = m_str_RBNumber
+    frmAddRebuiltPart.Show vbModal
+    
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "btnRebuiltPartEdit_Click", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub cmdArchive_Click()
+    
+    On Error GoTo Error_Handler
+    
+    Archive_RB False
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdArchive_Click", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+Public Sub Archive_RB(ByVal silent_mode As Boolean)
+    Dim l_Result As Long
+    Dim l_RetVal As Long
+    Dim RS As ADODB.Recordset
+    
+    On Error GoTo Error_Handler
+    
+    If Not silent_mode Then
+        m_str_Msg = "Are you sure you want to Archive Rebuilt Part # " + m_str_RBNumber + "?"
+        l_Result = MsgBox(m_str_Msg, vbOKCancel Or vbQuestion, "Archive Rebuit Part?")
+    Else
+        l_Result = vbOK
+        
+        Set RS = New ADODB.Recordset
+        Set RS = modDBHelper.RetrieveRBPUsed("CES_INQUIRY.RETRIEVE_RBP_USED", _
+                                         txtRebuiltCode.Text, _
+                                         "RB")
+                                         
+        '''Loops through any underlying RB parts and archives them, as well.
+        If RS.RecordCount > 0 Then
+            Do While RS.EOF = False
+               
+               'Calls up details and Archives
+               ArchRBPSubsets (RS.Fields.Item("REBUILT NUMBER"))
+               RS.MoveNext
+            Loop
+            
+        End If
+        Set RS = Nothing
+        
+    End If
+     
+     
+    
+    If l_Result = vbOK Then
+        Call SetWaitCursor
+             
+        
+        l_Result = modDBHelper.ArchiveRB("CES_ARCHIVE.ARCHIVE_RB", _
+                                    l_RetVal, _
+                                    txtRebuiltCode.Text, _
+                                    g_str_UserName, _
+                                    m_str_RBNumber, _
+                                    "RB", _
+                                    Trim(txtLabourSubtotal.Text), _
+                                    Trim(txtLabourOverheadAmount.Text), _
+                                    Trim(txtLabourTotal.Text), _
+                                    Trim(txtMaterialTotal.Text), _
+                                    Trim(txtTotalRebuiltPartCost.Text), _
+                                    Trim(txtTaxTotal.Text), _
+                                    Trim(txtTotalRebuiltPartCostWithTax.Text))
+        
+        If l_Result = 0 Then
+            'Call SetDefaultCursor
+            If Not silent_mode Then
+                m_str_Msg = "Archiving Rebuilt Part Number = " + txtRebuiltCode.Text + " is complete."
+                MsgBox m_str_Msg, vbOKOnly Or vbInformation, "Rebuilt Part Archiving"
+            End If
+        Else
+            Call SetDefaultCursor
+            m_str_Msg = "Archiving Rebuilt Part Number = " + txtRebuiltCode.Text + " has failed."
+            MsgBox m_str_Msg, vbInformation Or vbOKOnly, "Rebuilt Part Archiving"
+        End If
+       
+        
+        
+        '''''
+    End If
+    
+    Call SetDefaultCursor
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdArchive_Click", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+
+End Sub
+
+
+
+Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
+    Dim str_TotalRebuiltPartCost As String
+    
+    On Error GoTo Error_Handler
+    
+    Call SetDefaultCursor
+    
+    'Unload the add materials form
+    Unload frmRebuiltPartsAddMaterials
+    
+    ' Close the existing show all labour form
+    If Not frmViewAllLabour Is Nothing Then
+        Unload frmViewAllLabour
+    End If
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_QueryUnload", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub grdLabour_DblClick()
+    On Error GoTo Error_Handler
+    
+    If g_l_AccessLevel = 1 Or g_l_AccessLevel = 2 Then
+        'Do not allow user go further, just exit sub.
+        Exit Sub
+    End If
+    
+    'Update the Labour in the Rebuilt Part
+    If Not grdLabour.Row Then
+        Call SetWaitCursor
+        m_var_RowID = grdLabour.Columns("ROWID").Text
+        frmAddLabourTask.m_str_AuditReference = Trim(txtRebuiltCode.Text)
+        frmAddLabourTask.m_str_LinkNumber = m_str_RBNumber
+        frmAddLabourTask.m_str_PartID = m_var_RowID
+        frmAddLabourTask.m_str_TypeID = "RB"
+        frmAddLabourTask.Show vbModal
+        Call Populate
+    End If
+
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "grdLabour_DblClick", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub grdLabour_KeyDown(KeyCode As Integer, Shift As Integer)
+    'Delete the Labour from the Rebuilt Part
+    Dim str_PartID As String
+    Dim RS As ADODB.Recordset
+    Dim l_Count As Long
+    
+    On Error GoTo Error_Handler
+    
+    If g_l_AccessLevel = 1 Or g_l_AccessLevel = 2 Then
+        'Do not allow user go further, just exit sub.
+        Exit Sub
+    End If
+    
+    If KeyCode = vbKeyDelete Then
+        m_str_Msg = "Are you sure you want to delete this item?"
+        l_Result = MsgBox(m_str_Msg, vbOKCancel Or vbQuestion, "Rebuit Part")
+        If l_Result = vbOK Then
+            Call SetWaitCursor
+            str_PartID = grdLabour.Columns("ROWID").Text
+            l_Result = modDBHelper.DeleteMBLabour("CES_DELETE.DELETE_MBLABOUR", _
+                                                  l_RetVal, _
+                                                  str_PartID)
+            '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT Begin >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            'Add record to the AUDIT_MODIFY_HISTORY table.
+            l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                                        "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                                        l_RetVal, _
+                                        "Delete Labour", _
+                                        txtRebuiltCode.Text, _
+                                        "RB", _
+                                        "LABOUR TYPE ---> " + grdLabour.Columns("LABOUR TYPE").Text, _
+                                        "CC ---> " + grdLabour.Columns("CC").Text, _
+                                        "TASK ---> " + grdLabour.Columns("TASK").Text, _
+                                        "USAGE ---> " + grdLabour.Columns("USAGE").Text, _
+                                        "TIME ---> " + grdLabour.Columns("TIME").Text, _
+                                        "WRENCH TIME ---> " + grdLabour.Columns("WRENCH TIME").Text, _
+                                        "DATE REVISED ---> " + grdLabour.Columns("DATE REVISED").Text)
+            
+            Set RS = New ADODB.Recordset
+            
+            'In the SC_PARTS_USED table find all Estimates where the current RBE is present.
+            Set RS = modDBHelper.RetrieveESTToPropagateRB("CES_INQUIRY.RETRIEVE_EST_TO_PROPAGATE_RB", _
+                                                          txtRebuiltCode.Text)
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                    For l_Count = 0 To RS.RecordCount - 1
+                        'Add records to the AUDIT_MODIFY_HISTORY table.
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Labour was deleted from the Rebuilt Part Estimate " + m_str_RBNumber, _
+                            RS.Fields.Item("link_code"), _
+                            RS.Fields.Item("link_type"), _
+                            "LABOUR TYPE ---> " + grdLabour.Columns("LABOUR TYPE").Text, _
+                            "CC ---> " + grdLabour.Columns("CC").Text, _
+                            "TASK ---> " + grdLabour.Columns("TASK").Text, _
+                            "USAGE ---> " + grdLabour.Columns("USAGE").Text, _
+                            "TIME ---> " + grdLabour.Columns("TIME").Text, _
+                            "WRENCH TIME ---> " + grdLabour.Columns("WRENCH TIME").Text, _
+                            "DATE REVISED ---> " + grdLabour.Columns("DATE REVISED").Text)
+                        
+                        RS.MoveNext
+                    Next l_Count
+            End If
+    
+            Set RS = Nothing
+            '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT End >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            Call RefreshForm
+            Call SetDefaultCursor
+        End If
+    End If
+    
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "grdLabour_KeyDown", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+    Call SetDefaultCursor
+End Sub
+
+Private Sub PopulateChangesMadeBy()
+    Dim l_Count As Long
+    Dim str_Temp As String
+    Dim RS As ADODB.Recordset
+
+    On Error GoTo Error_Handler
+    
+    cboChangesMadeBy.Clear
+    
+    Set RS = New ADODB.Recordset
+    'Populate cboChangesMadeBy combo-box. Show only 5 recent items.
+    Set RS = modDBHelper.RetrieveAudit6( _
+                    "CES_INQUIRY.RETRIEVE_AUDIT_6", _
+                    txtRebuiltCode.Text, _
+                    "RB")
+    
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 0 To RS.RecordCount - 1
+            If l_Count = 5 Then
+                Exit For
+            End If
+            str_Temp = Format(RS.Fields.Item("DATE_CHANGED"), "yyyy-mmm-dd hh:mm:ss AMPM")
+            str_Temp = CStr(str_Temp)
+            str_Temp = str_Temp + " ---> "
+            str_Temp = str_Temp + CStr(RS.Fields.Item("USER_NAME"))
+            cboChangesMadeBy.AddItem str_Temp
+            RS.MoveNext
+        Next l_Count
+    End If
+    
+    If RS.RecordCount > 0 Then
+        cboChangesMadeBy.Text = cboChangesMadeBy.List(0)
+    End If
+    
+    Set RS = Nothing
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PopulateChangesMadeBy", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub tbMenu_ButtonMenuClick(ByVal ButtonMenu As MSComctlLib.ButtonMenu)
+    Dim str_Temp As String
+    
+    On Error GoTo Error_Handler
+    
+    Select Case ButtonMenu
+        Case "Send To Mail Recipient"
+            Call modMain.SendEmail
+        Case "Close"
+            Unload Me
+        Case "Add a Labour Task"
+            Call SetWaitCursor
+            frmAddLabourTask.m_str_AuditReference = Trim(txtRebuiltCode.Text)
+            frmAddLabourTask.m_str_LinkNumber = m_str_RBNumber
+            frmAddLabourTask.m_str_TypeID = "RB"
+            frmAddLabourTask.Show vbModal
+            Call RefreshForm
+            Call SetDefaultCursor
+        Case "Materials Listing"
+            If frmRebuiltPartsAddMaterials.WindowState = 1 Then
+                frmRebuiltPartsAddMaterials.WindowState = 0
+            End If
+            frmRebuiltPartsAddMaterials.Show
+            frmRebuiltPartsAddMaterials.SetFocus
+        Case "Modify History"
+            'Close the Audit form if it is opened.
+            If Not frmViewAudit Is Nothing Then
+                Unload frmViewAudit
+            End If
+            str_Temp = " - Rebuilt Part Estimate for Rebuilt Number: " + txtRebuiltCode.Text
+            frmViewAudit.m_str_EstimateNumber = txtRebuiltCode.Text
+            frmViewAudit.m_b_FromAdministration = False
+            frmViewAudit.m_str_EstimateType = "RB"
+            frmViewAudit.Caption = frmViewAudit.Caption + str_Temp
+            frmViewAudit.Show
+         Case "Archived Database"
+            frmArchivedHistory.m_str_LinkCode = txtRebuiltCode.Text
+            frmArchivedHistory.m_str_EstimateType = "RB"
+            frmArchivedHistory.Show
+         Case "All Labour"
+            frmViewAllLabour.PassValues m_str_RBNumber, "RB"
+            If frmViewAllLabour.WindowState = 1 Then
+                frmViewAllLabour.WindowState = 0
+            End If
+            frmViewAllLabour.Show
+            frmViewAllLabour.SetFocus
+          Case "Edit Rebuilt Part Information"
+         
+                frmAddRebuiltPart.m_str_MMSStockCode = m_str_LinkNumber
+                frmAddRebuiltPart.m_str_RebuiltCode = m_str_RBNumber
+                frmAddRebuiltPart.m_str_AuditReference = m_str_RBNumber
+                frmAddRebuiltPart.Show vbModal
+        
+        Case "Archive Rebuilt Part"
+            Archive_RB False
+        
+        Case "Print"
+            showRebuiltCostEstimateReport m_str_RBNumber, m_str_LinkNumber
+    End Select
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "tbMenu_ButtonMenuClick", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+frmRebuiltPartAddMaterials.frm :
+Option Explicit
+
+Private m_str_Msg As String
+Private m_str_RBNumber As String
+Private m_str_LinkNumber As String
+
+' Holds the previous search string
+Private m_str_PreviousSearch As String
+Private m_str_PreviousSearchType As String
+Private m_var_RowSelected As Variant
+
+Public Sub PassValues(ByVal str_RBNumber, ByVal str_LinkNumber)
+    On Error GoTo Error_Handler
+    
+    m_str_RBNumber = str_RBNumber
+    m_str_LinkNumber = m_str_RBNumber
+    Call Populate
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PassValues", g_l_ErrorLineNumber
+End Sub
+
+Private Sub UserPermissions()
+    On Error GoTo Error_Handler
+        
+    If g_l_AccessLevel = 1 Then
+        'Button <Add Part> is invisible.
+        cmdAddPart.Visible = False
+        'Controls at the bottom of the form are invisible.
+        lblRebuiltPartsTotal.Visible = False
+        lblStockCodedPartsTotal.Visible = False
+        lblNonStockCodedPartsTotal.Visible = False
+        lblCoreCostTotal.Visible = False
+        lblTotalMaterialsCost.Visible = False
+        txtRebuiltPartsTotal.Visible = False
+        txtStockCodedPartsTotal.Visible = False
+        txtNonStockCodedPartsTotal.Visible = False
+        txtCoreCostTotal.Visible = False
+        txtTotalMaterialsCost.Visible = False
+        If grdRebuiltPartsList.Columns.Count > 2 Then
+            'Grid "Rebuilt Parts List". Columns"UNIT_COST", "TOTAL_COST" are
+            'invisible.
+            grdRebuiltPartsList.Columns("UNIT COST").Visible = False
+'            grdRebuiltPartsList.Columns("CORE COST").Visible = False
+            grdRebuiltPartsList.Columns("TOTAL COST").Visible = False
+        End If
+        If grdStockCodedPartsList.Columns.Count > 2 Then
+            'Grid "Stock Coded Parts List". Columns"UNIT_COST", "CORE COST", "TOTAL_COST"
+            'are invisible.
+            grdStockCodedPartsList.Columns("UNIT COST").Visible = False
+            grdStockCodedPartsList.Columns("CORE COST").Visible = False
+            grdStockCodedPartsList.Columns("TOTAL COST").Visible = False
+        End If
+        If grdNonStockCodedPartsList.Columns.Count > 2 Then
+            'Grid "Non-Stock Coded Parts List". Columns"COST", "CORE COST", "TOTAL_COST"
+            'are invisible.
+            grdNonStockCodedPartsList.Columns("UNIT COST").Visible = False
+            grdNonStockCodedPartsList.Columns("CORE COST").Visible = False
+            grdNonStockCodedPartsList.Columns("TOTAL COST").Visible = False
+        End If
+    ElseIf g_l_AccessLevel = 2 Then
+        'Button <Add Part> is invisible.
+        cmdAddPart.Visible = False
+    End If
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "UserPermissions", g_l_ErrorLineNumber
+End Sub
+
+Private Sub cmdAddPart_Click()
+    On Error GoTo Error_Handler
+    
+    If frmTypeOfPart.WindowState = 1 Or frmTypeOfPart.WindowState = 2 Then
+        frmTypeOfPart.WindowState = 0
+    End If
+    frmTypeOfPart.m_str_LinkNumber = m_str_RBNumber
+    frmTypeOfPart.m_str_AuditReference = Trim(txtRebuiltCode.Text)
+    frmTypeOfPart.m_str_FormType = "Rebuilt"
+    frmTypeOfPart.Show vbModal
+    'Call frmRebuiltPartsMain.RefreshForm
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdAddPart_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub Populate()
+    On Error GoTo Error_Handler
+    
+    txtRebuiltCode.Text = m_str_RBNumber
+    
+    Call PopulateGrids
+    Call FormatGrids
+    Call UserPermissions
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Populate", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub cmdRefresh_Click()
+    On Error GoTo Error_Handler
+    
+    Call frmRebuiltPartsMain.RefreshForm
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdRefresh_click", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+    
+End Sub
+
+Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
+    On Error GoTo Error_Handler
+
+    Call SetWaitCursor
+    'Keep the form open until the frmRebuiltPartsMain closes
+    If UnloadMode = 0 Then
+        Cancel = True
+        Call SetDefaultCursor
+        Me.Hide
+    End If
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_QueryUnload", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub PopulateGrids()
+    Dim RS As ADODB.Recordset
+'    Dim curr_RBCoreCostTotal As Currency
+    Dim curr_SCPCoreCostTotal As Currency
+    Dim curr_NSPCoreCostTotal As Currency
+    Dim curr_CoreCostTotal As Currency
+    Dim l_RetVal As Long
+    Dim l_Result As Long
+        
+    On Error GoTo Error_Handler
+        
+    Set RS = New ADODB.Recordset
+    
+    'Populate the non-stock coded items
+    Set RS = modDBHelper.RetrieveNSCPUsed("CES_INQUIRY.RETRIEVE_NSCP_USED", _
+                                          m_str_LinkNumber, _
+                                          "RB")
+    
+    If RS.RecordCount > 0 Then
+        Set grdNonStockCodedPartsList.DataSource = RS
+        curr_NSPCoreCostTotal = Format(ColumnTotals(RS, "core cost"), "currency")
+        RS.MoveFirst
+        txtNonStockCodedPartsTotal.Text = Format(ColumnTotals(RS, "total cost"), "currency")
+    Else
+        Set grdNonStockCodedPartsList.DataSource = Nothing
+        curr_NSPCoreCostTotal = Format(0#, "currency")
+        txtNonStockCodedPartsTotal.Text = Format(0#, "currency")
+    End If
+    
+    'Populate the stock coded items
+    Set RS = modDBHelper.RetrieveSCPUsed("CES_INQUIRY.RETRIEVE_SCP_USED", _
+                                         m_str_LinkNumber, _
+                                         "N", _
+                                         "RB")
+    
+    If RS.RecordCount > 0 Then
+        Set grdStockCodedPartsList.DataSource = RS
+        curr_SCPCoreCostTotal = Format(ColumnTotals(RS, "CORE COST"), "currency")
+        
+        RS.MoveFirst
+        txtStockCodedPartsTotal.Text = Format( _
+                                    ColumnTotals(RS, "total cost"), "currency")
+    Else
+        Set grdStockCodedPartsList.DataSource = Nothing
+        curr_SCPCoreCostTotal = Format(0#, "currency")
+        txtStockCodedPartsTotal.Text = Format(0#, "currency")
+    End If
+
+    Set RS = modDBHelper.RetrieveRBPUsed("CES_INQUIRY.RETRIEVE_RBP_USED", _
+                                         m_str_LinkNumber, _
+                                         "RB")
+    If RS.RecordCount > 0 Then
+        Set grdRebuiltPartsList.DataSource = RS
+'       curr_RBCoreCostTotal = Format(ColumnTotals(RS, "core cost"), "currency")
+        RS.MoveFirst
+        txtRebuiltPartsTotal.Text = Format(ColumnTotals(RS, "total cost"), "currency")
+    Else
+        Set grdRebuiltPartsList.DataSource = Nothing
+'       curr_RBCoreCostTotal = Format(0#, "currency")
+        txtRebuiltPartsTotal.Text = Format(0#, "currency")
+    End If
+        
+    curr_CoreCostTotal = curr_SCPCoreCostTotal + curr_NSPCoreCostTotal
+    
+    'Calculate the materials total
+    txtCoreCostTotal.Text = Format((curr_CoreCostTotal * -1), "currency")
+    txtTotalMaterialsCost.Text = Format( _
+                                CCur(txtRebuiltPartsTotal.Text) + _
+                                CCur(txtNonStockCodedPartsTotal.Text) + _
+                                CCur(txtStockCodedPartsTotal.Text) - curr_CoreCostTotal, "currency")
+
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PopulateGrids", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub FormatGrids()
+    On Error GoTo Error_Handler
+     
+    If grdNonStockCodedPartsList.Columns.Count > 2 Then
+        With grdNonStockCodedPartsList
+            .Columns("SUPPLIER NUMBER").Width = 1900
+            .Columns("SUPPLIER NAME").Width = 1700
+            .Columns("CC").Width = 500
+            .Columns("QTY").Alignment = dbgRight
+            .Columns("QTY").Width = 500
+            .Columns("%").Alignment = dbgRight
+            .Columns("%").Width = 500
+            .Columns("UNIT COST").Alignment = dbgRight
+            .Columns("UNIT COST").NumberFormat = "$#,##0.00;($#,##0.00)"
+            .Columns("UNIT COST").Width = 1200
+
+            .Columns("CORE COST").NumberFormat = "$#,##0.00;($#,##0.00)"
+            .Columns("CORE COST").Width = 1200
+            .Columns("TOTAL COST").Alignment = dbgRight
+            .Columns("TOTAL COST").NumberFormat = "$#,##0.00;($#,##0.00)"
+            .Columns("TOTAL COST").Width = 1200
+            .Columns("DESCRIPTION").Width = 4000
+            .Columns("LAST MODIFIED DATE").Alignment = dbgRight
+            .Columns("LAST MODIFIED DATE").Width = 2400
+            .Columns("LAST MODIFIED DATE").NumberFormat = "yyyy-mmm-dd hh:mm:ss AMPM"
+            .Columns("ID").Visible = False
+            .Columns("ROWID").Visible = False
+        End With
+    End If
+    
+    If grdStockCodedPartsList.Columns.Count > 2 Then
+        With grdStockCodedPartsList
+            .Columns("UNIT COST").Alignment = dbgRight
+            .Columns("UNIT COST").NumberFormat = "$#,##0.00;($#,##0.00)"
+            .Columns("UNIT COST").Width = 1100
+            .Columns("CC").Width = 500
+            .Columns("QTY").Alignment = dbgRight
+            .Columns("QTY").Width = 500
+            .Columns("%").Alignment = dbgRight
+            .Columns("%").Width = 500
+            .Columns("CORE COST").Alignment = dbgRight
+            .Columns("CORE COST").NumberFormat = "$#,##0.00;($#,##0.00)"
+            .Columns("CORE COST").Width = 1200
+            .Columns("TOTAL COST").Alignment = dbgRight
+            .Columns("TOTAL COST").NumberFormat = "$#,##0.00;($#,##0.00)"
+            .Columns("TOTAL COST").Width = 1200
+            .Columns("DESCRIPTION").Width = 4000
+            .Columns("DESCRIPTION").Caption = "DESCRIPTION"
+            .Columns("OEM COST").Visible = False
+            .Columns("MMS REBUILT CODE").Visible = False
+            .Columns("REBUILT PART COST").Visible = False
+            .Columns("REBUILT PART").Visible = False
+            .Columns("ROWID").Visible = False
+        End With
+    End If
+    
+    If grdRebuiltPartsList.Columns.Count > 2 Then
+        With grdRebuiltPartsList
+            '.Columns("CC").Width = 500
+            .Columns("CC").Visible = False
+            .Columns("QTY").Alignment = dbgRight
+            .Columns("QTY").Width = 500
+            .Columns("%").Alignment = dbgRight
+            .Columns("%").Width = 500
+            .Columns("UNIT COST").Alignment = dbgRight
+            .Columns("UNIT COST").NumberFormat = "$#,##0.00;($#,##0.00)"
+            .Columns("UNIT COST").Width = 1200
+'            .Columns("CORE COST").Alignment = dbgRight
+'            .Columns("CORE COST").NumberFormat = "$#,##0.00;($#,##0.00)"
+'            .Columns("CORE COST").Width = 1200
+            .Columns("CORE COST").Visible = False
+            .Columns("TOTAL COST").Alignment = dbgRight
+            .Columns("TOTAL COST").NumberFormat = "$#,##0.00;($#,##0.00)"
+            .Columns("TOTAL COST").Width = 1200
+            .Columns("DESCRIPTION").Width = 4000
+            .Columns("ROWID").Visible = False
+        End With
+    End If
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "FormatGrids", g_l_ErrorLineNumber
+End Sub
+
+Private Sub grdNonStockCodedPartsList_DblClick()
+    On Error GoTo Error_Handler
+    
+    If g_l_AccessLevel = 1 Or g_l_AccessLevel = 2 Then
+        'Do not allow user go further, just exit sub.
+        Exit Sub
+    End If
+    
+    'Update the non stock coded part
+    If grdNonStockCodedPartsList.Row >= 0 Then
+          m_var_RowSelected = grdNonStockCodedPartsList.Bookmark
+        Dim formshow As New frmAddNSCPToEstimate
+        Call SetWaitCursor
+        formshow.m_str_LinkNumber = m_str_LinkNumber
+        formshow.Caption = "Edit a Non-Stock Coded Part in the Rebuilt Part Estimate"
+        formshow.m_str_TypeCode = "RB"
+        formshow.m_str_AuditReference = Trim(txtRebuiltCode.Text)
+        formshow.PassValues grdNonStockCodedPartsList.Columns("SUPPLIER NUMBER").Value, _
+                            grdNonStockCodedPartsList.Columns("SUPPLIER NAME").Value, _
+                            grdNonStockCodedPartsList.Columns("CC").Value, _
+                            grdNonStockCodedPartsList.Columns("%").Value, _
+                            grdNonStockCodedPartsList.Columns("QTY").Value, _
+                            grdNonStockCodedPartsList.Columns("ROWID").Value, _
+                            grdNonStockCodedPartsList.Columns("CORE COST").Value
+        formshow.cboSupplierName.Enabled = False
+        formshow.cmdAdd.Enabled = True
+        formshow.Show vbModal
+        Call frmRebuiltPartsMain.RefreshForm
+          grdNonStockCodedPartsList.Bookmark = m_var_RowSelected
+        Call SetDefaultCursor
+    End If
+        
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "grdNonStockCodedPartsList_DblClick", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub grdNonStockCodedPartsList_KeyDown(KeyCode As Integer, Shift As Integer)
+    Dim l_Result As Long
+    Dim l_RetVal As Long
+    Dim l_Count As Long
+    Dim str_PartID As String
+    Dim RS As ADODB.Recordset
+    
+    On Error GoTo Error_Handler
+
+    If g_l_AccessLevel = 1 Or g_l_AccessLevel = 2 Then
+        'Do not allow user go further, just exit sub.
+        Exit Sub
+    End If
+    
+    If KeyCode = vbKeyDelete And grdNonStockCodedPartsList.Row >= 0 Then
+        m_str_Msg = "Are you sure you want to delete this item?"
+        l_Result = MsgBox(m_str_Msg, vbOKCancel Or vbQuestion, _
+                          "Delete Materials of this Rebuilt Part")
+        If l_Result = vbOK Then
+            str_PartID = grdNonStockCodedPartsList.Columns("ROWID").Text
+            Call SetWaitCursor
+            l_Result = modDBHelper.DeleteNSCPUsed("CES_DELETE.DELETE_NSCP_USED", _
+                                                  l_RetVal, _
+                                                  str_PartID)
+                                                  
+            '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT Begin >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            
+            'Insert record into the AUDIT_MODIFY_HISTORY table.
+            l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                    "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                    l_RetVal, _
+                    "Delete Non-Stock Coded Part", _
+                    Trim(txtRebuiltCode.Text), _
+                    "RB", _
+                    "SUPPLIER NUMBER ---> " + grdNonStockCodedPartsList.Columns("SUPPLIER NUMBER").Text, _
+                    "SUPPLIER NAME ---> " + grdNonStockCodedPartsList.Columns("SUPPLIER NAME").Text, _
+                    "CC ---> " + grdNonStockCodedPartsList.Columns("CC").Text, _
+                    "QTY ---> " + grdNonStockCodedPartsList.Columns("QTY").Text, _
+                    "% ---> " + grdNonStockCodedPartsList.Columns("%").Text, _
+                    "UNIT COST ---> " + grdNonStockCodedPartsList.Columns("UNIT COST").Text, _
+                    "CORE COST ---> " + grdNonStockCodedPartsList.Columns("CORE COST").Text, _
+                    "TOTAL COST ---> " + grdNonStockCodedPartsList.Columns("TOTAL COST").Text, _
+                    "DESCRIPTION ---> " + grdNonStockCodedPartsList.Columns("DESCRIPTION").Text, _
+                    "KEYWORD ---> " + grdNonStockCodedPartsList.Columns("KEYWORD").Text, _
+                    "LAST MODIFIED DATE ---> " + grdNonStockCodedPartsList.Columns("LAST MODIFIED DATE").Text)
+            
+            'Now find all estimates where current Rebuilt Part Estimate is present.
+            Set RS = New ADODB.Recordset
+            
+            'In the SC_PARTS_USED table find all Estimates where the current RBE is present.
+            Set RS = modDBHelper.RetrieveESTToPropagateRB("CES_INQUIRY.RETRIEVE_EST_TO_PROPAGATE_RB", _
+                                                          m_str_RBNumber)
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                    For l_Count = 0 To RS.RecordCount - 1
+                        'Add records to the AUDIT_MODIFY_HISTORY table.
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Non-Stock Coded Part was deleted from the Rebuilt Part Estimate " + m_str_RBNumber, _
+                            RS.Fields.Item("link_code"), _
+                            RS.Fields.Item("link_type"), _
+                            "SUPPLIER NUMBER ---> " + grdNonStockCodedPartsList.Columns("SUPPLIER NUMBER").Text, _
+                            "SUPPLIER NAME ---> " + grdNonStockCodedPartsList.Columns("SUPPLIER NAME").Text, _
+                            "CC ---> " + grdNonStockCodedPartsList.Columns("CC").Text, _
+                            "QTY ---> " + grdNonStockCodedPartsList.Columns("QTY").Text, _
+                            "% ---> " + grdNonStockCodedPartsList.Columns("%").Text, _
+                            "UNIT COST ---> " + grdNonStockCodedPartsList.Columns("UNIT COST").Text, _
+                            "CORE COST ---> " + grdNonStockCodedPartsList.Columns("CORE COST").Text, _
+                            "TOTAL COST ---> " + grdNonStockCodedPartsList.Columns("TOTAL COST").Text, _
+                            "DESCRIPTION ---> " + grdNonStockCodedPartsList.Columns("DESCRIPTION").Text, _
+                            "KEYWORD ---> " + grdNonStockCodedPartsList.Columns("KEYWORD").Text, _
+                            "LAST MODIFIED DATE ---> " + grdNonStockCodedPartsList.Columns("LAST MODIFIED DATE").Text)
+                        RS.MoveNext
+                    Next l_Count
+            End If
+            Set RS = Nothing
+            '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT End >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            Call frmRebuiltPartsMain.RefreshForm
+            Call SetDefaultCursor
+        End If
+    End If
+
+    Call SetDefaultCursor
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "grdNonStockCodedPartsList_KeyDown", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub grdStockCodedPartsList_DblClick()
+    On Error GoTo Error_Handler
+    
+    If g_l_AccessLevel = 1 Or g_l_AccessLevel = 2 Then
+        'Do not allow user go further, just exit sub.
+        Exit Sub
+    End If
+    
+    'Update the stock coded part
+    If grdStockCodedPartsList.Row >= 0 Then
+          m_var_RowSelected = grdStockCodedPartsList.Bookmark
+        Dim formshow As New frmAddSCPToEstimate
+        Call SetWaitCursor
+        formshow.Caption = "Edit a Stock Coded Part in the Rebuilt Part Estimate"
+        formshow.m_str_TypeCode = "RB"
+        'formshow.m_var_RowID = grdStockCodedPartsList.Columns("ROWID").Value
+        formshow.m_str_MBNumber = m_str_LinkNumber
+        formshow.m_str_AuditReference = Trim(txtRebuiltCode.Text)
+        formshow.PassValues grdStockCodedPartsList.Columns("STOCK CODE").Value, _
+                            grdStockCodedPartsList.Columns("CC").Value, _
+                            grdStockCodedPartsList.Columns("%").Value, _
+                            grdStockCodedPartsList.Columns("QTY").Value, _
+                            grdStockCodedPartsList.Columns("ROWID").Value, _
+                            grdStockCodedPartsList.Columns("CORE COST").Value
+        formshow.Show vbModal
+        Call frmRebuiltPartsMain.RefreshForm
+          grdStockCodedPartsList.Bookmark = m_var_RowSelected
+        Call SetDefaultCursor
+    End If
+
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "grdStockCodedPartsList_DblClick", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub grdStockCodedPartsList_KeyDown(KeyCode As Integer, Shift As Integer)
+    Dim l_Result As Long
+    Dim l_RetVal As Long
+    Dim l_Count As Long
+    Dim str_PartID As String
+    Dim RS As ADODB.Recordset
+    
+    On Error GoTo Error_Handler
+    
+    If g_l_AccessLevel = 1 Or g_l_AccessLevel = 2 Then
+        'Do not allow user go further, just exit sub.
+        Exit Sub
+    End If
+    
+    If KeyCode = vbKeyDelete And grdStockCodedPartsList.Row >= 0 Then
+        m_str_Msg = "Are you sure you want to delete this item?"
+        l_Result = MsgBox(m_str_Msg, vbOKCancel Or vbQuestion, _
+                          "Delete Materials of this Rebuilt Part")
+        If l_Result = vbOK Then
+            str_PartID = grdStockCodedPartsList.Columns("ROWID").Text
+            Call SetWaitCursor
+            l_Result = modDBHelper.DeleteSCPUsed("CES_DELETE.DELETE_SCP_USED", _
+                                                 l_RetVal, _
+                                                 str_PartID)
+            '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT Begin >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            'Insert record into the AUDIT_MODIFY_HISTORY table.
+            l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                    "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                    l_RetVal, _
+                    "Delete Stock Coded Part", _
+                    Trim(txtRebuiltCode.Text), _
+                    "RB", _
+                    "STOCK CODE ---> " + grdStockCodedPartsList.Columns("STOCK CODE").Text, _
+                    "UNIT COST ---> " + grdStockCodedPartsList.Columns("UNIT COST").Text, _
+                    "CC ---> " + grdStockCodedPartsList.Columns("CC").Text, _
+                    "QTY ---> " + grdStockCodedPartsList.Columns("QTY").Text, _
+                    "% ---> " + grdStockCodedPartsList.Columns("%").Text, _
+                    "CORE COST ---> " + grdStockCodedPartsList.Columns("CORE COST").Text, _
+                    "TOTAL COST ---> " + grdStockCodedPartsList.Columns("TOTAL COST").Text, _
+                    "DESCRIPTION ---> " + grdStockCodedPartsList.Columns("DESCRIPTION").Text, _
+                    "KEYWORD ---> " + grdStockCodedPartsList.Columns("KEYWORD").Text)
+            
+            'Now find all estimates where current Rebuilt Part Estimate is present.
+            Set RS = New ADODB.Recordset
+            
+            'In the SC_PARTS_USED table find all Estimates where the current RBE is present.
+            Set RS = modDBHelper.RetrieveESTToPropagateRB("CES_INQUIRY.RETRIEVE_EST_TO_PROPAGATE_RB", _
+                                                          m_str_RBNumber)
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                    For l_Count = 0 To RS.RecordCount - 1
+                        'Add records to the AUDIT_MODIFY_HISTORY table.
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Stock Coded Part was deleted from the Rebuilt Part Estimate " + m_str_RBNumber, _
+                            RS.Fields.Item("link_code"), _
+                            RS.Fields.Item("link_type"), _
+                            "STOCK CODE ---> " + grdStockCodedPartsList.Columns("STOCK CODE").Text, _
+                            "UNIT COST ---> " + grdStockCodedPartsList.Columns("UNIT COST").Text, _
+                            "CC ---> " + grdStockCodedPartsList.Columns("CC").Text, _
+                            "QTY ---> " + grdStockCodedPartsList.Columns("QTY").Text, _
+                            "% ---> " + grdStockCodedPartsList.Columns("%").Text, _
+                            "CORE COST ---> " + grdStockCodedPartsList.Columns("CORE COST").Text, _
+                            "TOTAL COST ---> " + grdStockCodedPartsList.Columns("TOTAL COST").Text, _
+                            "DESCRIPTION ---> " + grdStockCodedPartsList.Columns("DESCRIPTION").Text, _
+                            "KEYWORD ---> " + grdStockCodedPartsList.Columns("KEYWORD").Text)
+                        RS.MoveNext
+                    Next l_Count
+            End If
+            Set RS = Nothing
+            '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT End >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            Call frmRebuiltPartsMain.RefreshForm
+            Call SetDefaultCursor
+        End If
+    End If
+    
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "grdStockCodedPartsList_KeyDown", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+    Call SetDefaultCursor
+End Sub
+
+Private Sub grdRebuiltPartsList_DblClick()
+    On Error GoTo Error_Handler
+
+    If g_l_AccessLevel = 1 Or g_l_AccessLevel = 2 Then
+        'Do not allow user go further, just exit sub.
+        Exit Sub
+    End If
+
+    'Update the stock coded part
+    If grdRebuiltPartsList.Row >= 0 Then
+          m_var_RowSelected = grdRebuiltPartsList.Bookmark
+        Dim formshow As New frmAddRBPToEstimate
+        Call SetWaitCursor
+        formshow.Caption = "Edit a Rebuilt Part in the Rebuilt Part Estimate"
+        formshow.m_str_TypeCode = "RB"
+        formshow.m_str_LinkNumber = m_str_LinkNumber
+        formshow.m_str_AuditReference = Trim(txtRebuiltCode.Text)
+        formshow.PassValues grdRebuiltPartsList.Columns("REBUILT NUMBER").Value, _
+                            grdRebuiltPartsList.Columns("%").Value, _
+                            grdRebuiltPartsList.Columns("QTY").Value, _
+                            grdRebuiltPartsList.Columns("ROWID").Value
+        formshow.Show vbModal
+        Call frmRebuiltPartsMain.RefreshForm
+          grdRebuiltPartsList.Bookmark = m_var_RowSelected
+    End If
+    
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "grdRebuiltPartsList_DblClick", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub grdRebuiltPartsList_KeyDown(KeyCode As Integer, Shift As Integer)
+    Dim l_Result As Long
+    Dim l_RetVal As Long
+    Dim l_Count As Long
+    Dim str_PartID As String
+    Dim RS As ADODB.Recordset
+        
+    On Error GoTo Error_Handler
+    
+    If g_l_AccessLevel = 1 Or g_l_AccessLevel = 2 Then
+        'Do not allow user go further, just exit sub.
+        Exit Sub
+    End If
+    
+    If KeyCode = vbKeyDelete And grdRebuiltPartsList.Row >= 0 Then
+        m_str_Msg = "Are you sure you want to delete this item?"
+        l_Result = MsgBox(m_str_Msg, vbOKCancel Or vbQuestion, _
+                          "Delete Materials of this Rebuilt Part")
+        If l_Result = vbOK Then
+            str_PartID = grdRebuiltPartsList.Columns("ROWID").Text
+            Call SetWaitCursor
+            l_Result = modDBHelper.DeleteSCPUsed("CES_DELETE.DELETE_SCP_USED", _
+                                                 l_RetVal, _
+                                                 str_PartID)
+            '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT Begin >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            'Insert record into the AUDIT_MODIFY_HISTORY table.
+            l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                    "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                    l_RetVal, _
+                    "Delete Rebuilt Part", _
+                    Trim(txtRebuiltCode.Text), _
+                    "RB", _
+                    "UNIT COST ---> " + grdRebuiltPartsList.Columns("UNIT COST").Text, _
+                    "REBUILT NUMBER ---> " + grdRebuiltPartsList.Columns("REBUILT NUMBER").Text, _
+                    "CC ---> " + grdRebuiltPartsList.Columns("CC").Text, _
+                    "QTY ---> " + grdRebuiltPartsList.Columns("QTY").Text, _
+                    "% ---> " + grdRebuiltPartsList.Columns("%").Text, _
+                    "TOTAL COST ---> " + grdRebuiltPartsList.Columns("TOTAL COST").Text, _
+                    "DESCRIPTION ---> " + grdRebuiltPartsList.Columns("DESCRIPTION").Text, _
+                    "KEYWORD ---> " + grdRebuiltPartsList.Columns("KEYWORD").Text)
+            
+            'Now find all estimates where current Rebuilt Part Estimate is present.
+            Set RS = New ADODB.Recordset
+            
+            'In the SC_PARTS_USED table find all Estimates where the current RBE is present.
+            Set RS = modDBHelper.RetrieveESTToPropagateRB("CES_INQUIRY.RETRIEVE_EST_TO_PROPAGATE_RB", _
+                                                          m_str_RBNumber)
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                    For l_Count = 0 To RS.RecordCount - 1
+                        'Add records to the AUDIT_MODIFY_HISTORY table.
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Rebuilt Part was deleted from the Rebuilt Part Estimate " + m_str_RBNumber, _
+                            RS.Fields.Item("link_code"), _
+                            RS.Fields.Item("link_type"), _
+                            "UNIT COST ---> " + grdRebuiltPartsList.Columns("UNIT COST").Text, _
+                            "REBUILT NUMBER ---> " + grdRebuiltPartsList.Columns("REBUILT NUMBER").Text, _
+                            "CC ---> " + grdRebuiltPartsList.Columns("CC").Text, _
+                            "QTY ---> " + grdRebuiltPartsList.Columns("QTY").Text, _
+                            "% ---> " + grdRebuiltPartsList.Columns("%").Text, _
+                            "TOTAL COST ---> " + grdRebuiltPartsList.Columns("TOTAL COST").Text, _
+                            "DESCRIPTION ---> " + grdRebuiltPartsList.Columns("DESCRIPTION").Text, _
+                            "KEYWORD ---> " + grdRebuiltPartsList.Columns("KEYWORD").Text)
+                        RS.MoveNext
+                    Next l_Count
+            End If
+            Set RS = Nothing
+'>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT End >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            Call frmRebuiltPartsMain.RefreshForm
+            Call SetDefaultCursor
+        End If
+    End If
+    
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "grdRebuiltPartsList_KeyDown", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+    Call SetDefaultCursor
+End Sub
+
+Private Sub optNSCPart_Click()
+    On Error GoTo Error_Handler
+    
+    Call ChangeSearchLabel
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "optNSCPart_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub optRBPart_Click()
+    On Error GoTo Error_Handler
+    
+    Call ChangeSearchLabel
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "optRBPart_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub optSCPart_Click()
+    On Error GoTo Error_Handler
+    
+    Call ChangeSearchLabel
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "optSCPart_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub ChangeSearchLabel()
+    On Error GoTo Error_Handler:
+    ' As the type to part to search by is changed, we must change
+    ' the label to reflect this
+    If optRBPart.Value = True Then
+        lblKeyToSearch.Caption = "Rebuilt Number:"
+    ElseIf optSCPart.Value = True Then
+        lblKeyToSearch.Caption = "Stock Code:"
+    ElseIf optNSCPart.Value = True Then
+        lblKeyToSearch.Caption = "Supplier Number:"
+    End If
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "ChangeSearchLabel", g_l_ErrorLineNumber
+End Sub
+
+Private Function SelectedOption()
+    On Error GoTo Error_Handler:
+    ' As the type to part to search by is changed, we must change
+    ' the label to reflect this
+    If optRBPart.Value = True Then
+        SelectedOption = "RB"
+    ElseIf optSCPart.Value = True Then
+        SelectedOption = "SC"
+    ElseIf optNSCPart.Value = True Then
+        SelectedOption = "NSC"
+    Else
+        SelectedOption = ""
+    End If
+    
+    Exit Function
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "SelectedOption", g_l_ErrorLineNumber
+End Function
+
+Private Sub cmdFindNext_Click()
+    Dim RS As ADODB.Recordset
+    Dim SearchGrid As DataGrid
+    Dim str_SearchField As String
+    Dim l_Counter As Long
+    
+    On Error GoTo Error_Handler:
+        
+    ' Must enter a value to search
+    If txtKeyToSearch.Text = "" Then
+        MsgBox "Enter a part to find.", vbExclamation, "Cost Estimate System"
+        Exit Sub
+    End If
+    
+    ' Get the grid, seach filed and the record set used for searching
+    Select Case SelectedOption()
+        Case "RB"
+            Set SearchGrid = grdRebuiltPartsList
+            str_SearchField = "[REBUILT NUMBER]"
+        Case "SC"
+            Set SearchGrid = grdStockCodedPartsList
+            str_SearchField = "[STOCK CODE]"
+        Case "NSC"
+            Set SearchGrid = grdNonStockCodedPartsList
+            str_SearchField = "[SUPPLIER NUMBER]"
+    End Select
+    
+    If Not SearchGrid.DataSource Is Nothing Then
+        Set RS = SearchGrid.DataSource
+    Else
+        MsgBox "No parts to find.", vbExclamation, "Cost Estimate System"
+        Exit Sub
+    End If
+    
+    ' If the grid has lost focus then start seach again
+    If RS.AbsolutePage < 0 Then
+        m_str_PreviousSearch = ""
+        m_str_PreviousSearchType = ""
+    End If
+    
+    ' Determine whether or not they are performing the same
+    ' search again or starting a new search
+    If m_str_PreviousSearch = txtKeyToSearch.Text And m_str_PreviousSearchType = SelectedOption() Then
+        ' Continue Search
+        If RS.RecordCount > 0 Then
+            RS.AbsolutePosition = RS.Bookmark + 1
+            RS.Find str_SearchField & " LIKE '%" & txtKeyToSearch.Text & "%'"
+            If RS.EOF Then
+                MsgBox "All matching parts have been found.", vbExclamation, "Cost Estimate System"
+                m_str_PreviousSearch = ""
+                m_str_PreviousSearchType = ""
+            Else
+                With SearchGrid
+                    For l_Counter = .SelBookmarks.Count - 1 To 0 Step -1
+                        .SelBookmarks.Remove l_Counter
+                    Next
+                    .SelBookmarks.Add .RowBookmark(.Row)
+                End With
+                m_str_PreviousSearch = txtKeyToSearch.Text
+                m_str_PreviousSearchType = SelectedOption()
+            End If
+        Else
+            MsgBox "No parts to find.", vbExclamation, "Cost Estimate System"
+            m_str_PreviousSearch = txtKeyToSearch.Text
+            m_str_PreviousSearchType = SelectedOption()
+        End If
+    Else
+        ' Start New Search
+        If RS.RecordCount > 0 Then
+            RS.MoveFirst
+            RS.Find str_SearchField & " LIKE '%" & txtKeyToSearch.Text & "%'"
+            If RS.EOF Then
+                RS.MoveFirst
+                MsgBox "Part not found.", vbExclamation, "Cost Estimate System"
+                With SearchGrid
+                    For l_Counter = .SelBookmarks.Count - 1 To 0 Step -1
+                        .SelBookmarks.Remove l_Counter
+                    Next
+                End With
+                m_str_PreviousSearch = ""
+                m_str_PreviousSearchType = ""
+            Else
+                With SearchGrid
+                    For l_Counter = .SelBookmarks.Count - 1 To 0 Step -1
+                        .SelBookmarks.Remove l_Counter
+                    Next
+                    .SelBookmarks.Add .RowBookmark(.Row)
+                End With
+                m_str_PreviousSearch = txtKeyToSearch.Text
+                m_str_PreviousSearchType = SelectedOption()
+            End If
+        Else
+            MsgBox "No parts to find.", vbExclamation, "Cost Estimate System"
+            m_str_PreviousSearch = txtKeyToSearch.Text
+            m_str_PreviousSearchType = SelectedOption()
+        End If
+    End If
+            
+    Set RS = Nothing
+    Set SearchGrid = Nothing
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdFindNext_Click", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+    If Not SearchGrid Is Nothing Then
+        Set SearchGrid = Nothing
+    End If
+End Sub
+
+frmRebuiltPartEstimateOptions.frm :
+Option Explicit
+
+Public m_str_RBNumber As String
+Public m_str_MMSStockCode As String
+Public m_v_RowID As Variant
+
+Private Sub UserPermissions()
+    On Error GoTo Error_Handler
+
+    If g_l_AccessLevel = 1 Or g_l_AccessLevel = 2 Then
+        optLoadRBEstimate.Value = True
+        optCopyRBEstimate.Visible = False
+    End If
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "userPermissions", g_l_ErrorLineNumber
+End Sub
+
+Private Sub cmdContinue_Click()
+    On Error GoTo Error_Handler
+
+    Call SetWaitCursor
+    
+    If optLoadRBEstimate.Value = True Then
+        frmRebuiltPartsMain.PassValues m_str_MMSStockCode, m_str_RBNumber, m_v_RowID
+        
+        Unload Me
+        frmRebuiltPartsMain.Show
+        If frmRebuiltPartsMain.WindowState = 1 Then
+           frmRebuiltPartsMain.WindowState = 0
+        End If
+        frmRebuiltPartsMain.SetFocus
+    ElseIf optCopyRBEstimate.Value = True Then
+        Unload Me
+        frmCopyRBEstimate.PassRBNumber m_str_RBNumber, m_str_MMSStockCode
+        frmCopyRBEstimate.Show vbModal
+    End If
+    
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdContinue_Click", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub Form_Load()
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+    Call UserPermissions
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_Load", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+
+Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
+    On Error GoTo Error_Handler
+    
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_QueryUnload", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+
+frmCopyRBEstimate.frm :
+Option Explicit
+
+Private m_str_RBNumber As String
+Private m_str_MMSStockCode As String
+
+
+'-------------------------------------------------------
+' Purpose:
+'    Allows the user to pass a Rebuilt Number and a MMS Stock Code to the form
+'    and populates the form with the information corresponding to the Numbers
+'-------------------------------------------------------
+Public Sub PassRBNumber(str_RBNumber As String, strMMSStockCode As String)
+    On Error GoTo Error_Handler:
+    
+    ' Pass the RB Number
+    m_str_RBNumber = str_RBNumber
+    m_str_MMSStockCode = strMMSStockCode
+    txtRBNumber.Text = Trim(m_str_RBNumber)
+    txtMMSStockCode.Text = Trim(m_str_MMSStockCode)
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PassRBNumber", g_l_ErrorLineNumber
+End Sub
+
+
+'-------------------------------------------------------
+' Purpose:
+'    Creates a new Rebuilt Part Estimate as a copy of an
+'    existing Rebuilt Part Estimate
+'-------------------------------------------------------
+Private Sub cmdCopy_Click()
+    Dim s_NewNum As String
+    Dim l_Result As Long
+    Dim l_RetVal As Long
+    Dim l_Count As Long
+    Dim str_RBStockCodeFromDB As String
+    Dim str_MMSStockCodeFromDB As String
+    
+    Dim RS As ADODB.Recordset
+
+    On Error GoTo Error_Handler:
+
+    Call SetWaitCursor
+
+    'Make sure that new RB Number is Provided
+    If Trim(txtNewRBNumber.Text) = "" Then
+        Call SetDefaultCursor
+        MsgBox "Please provide a Rebuilt number.", vbExclamation, "Copy Rebuilt Part Estimate"
+        txtNewRBNumber.SetFocus
+        Exit Sub
+    End If
+    
+    'Make sure that new RB Number is not the same as the one to be copied.
+    If UCase(Trim(txtNewRBNumber.Text)) = UCase(Trim(txtRBNumber.Text)) Then
+        Call SetDefaultCursor
+        MsgBox "Please provide a different Rebuilt Number for the new Rebuilt Part Estimate.", vbExclamation, "Copy Rebuilt Part Estimate"
+        txtNewRBNumber.SetFocus
+        Exit Sub
+    End If
+    
+    'Make sure that new Rebuilt Number doesn't exist in the database.
+    Set RS = modDBHelper.RetrieveRB("CES_INQUIRY.RETRIEVE_RB")
+        
+    If Not IsNull(RS) And RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 1 To RS.RecordCount
+            str_RBStockCodeFromDB = RS.Fields.Item("REBUILT_STOCK_NUM")
+            If UCase(Trim(txtNewRBNumber.Text)) = str_RBStockCodeFromDB Then
+                Call SetDefaultCursor
+                MsgBox "The new Rebuilt Number alreay exists. Please provide another one.", vbExclamation, "Copy Rebuilt Part Estimate"
+                Set RS = Nothing
+                txtNewRBNumber.SetFocus
+                Exit Sub
+            End If
+            RS.MoveNext
+        Next l_Count
+        RS.MoveFirst
+    End If
+    
+    
+    'Make sure that new MMS Stock Code is Provided
+    If Trim(txtNewMMSStockCode.Text) = "" Then
+        Call SetDefaultCursor
+        MsgBox "Please provide a MMS Stock code.", vbExclamation, "Copy Rebuilt Part Estimate"
+        txtNewMMSStockCode.SetFocus
+        Exit Sub
+    End If
+    
+    'Make sure that new MMS Stock Code is not the same as the one to be copied.
+    If UCase(Trim(txtNewMMSStockCode.Text)) = UCase(Trim(txtMMSStockCode.Text)) Then
+        Call SetDefaultCursor
+        MsgBox "Please provide a different MMS Stock Code for the new Rebuilt Part Estimate.", vbExclamation, "Copy Rebuilt Part Estimate"
+        txtNewMMSStockCode.SetFocus
+        Exit Sub
+    End If
+    
+    'Make sure that new MMS Stock Code doesn't exist.
+    If Not IsNull(RS) And RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 1 To RS.RecordCount
+            str_MMSStockCodeFromDB = RS.Fields.Item("MMS_STOCK_CODE")
+            If UCase(Trim(txtNewMMSStockCode.Text)) = str_MMSStockCodeFromDB Then
+                Call SetDefaultCursor
+                MsgBox "The new MMS Stock Code alreay exists. Please provide another one.", vbExclamation, "Copy Rebuilt Part Estimate"
+                Set RS = Nothing
+                txtNewMMSStockCode.SetFocus
+                Exit Sub
+            End If
+            RS.MoveNext
+        Next l_Count
+        RS.MoveFirst
+    End If
+    
+    Set RS = Nothing
+
+    'Make sure that a Keyword is Provided
+    If Trim(cboKeyword.Text) = "" Then
+        Call SetDefaultCursor
+        MsgBox "Please select a Keyword.", vbExclamation, "Copy Rebuilt Part Estimate"
+        cboKeyword.SetFocus
+        Exit Sub
+    End If
+    
+    'Copy the Rebuilt Part Estimate
+    l_Result = CopyRBEstimate("CES_UPDATE.COPY_RB_ESTIMATE", _
+                                   l_RetVal, _
+                                   m_str_RBNumber, _
+                                   Trim(txtNewRBNumber.Text), _
+                                   Trim(cboKeyword.Text), _
+                                   Trim(txtNewMMSStockCode.Text))
+
+    ' Determine whether the copy was successful
+    If l_Result = 0 Then
+        Call SetDefaultCursor
+        s_NewNum = UCase(Trim(txtNewRBNumber.Text))
+        MsgBox "Rebuilt Part Estimate was copied successfully." & _
+                Chr(13) & "The new Rebuilt Part Number is " & _
+                Trim(s_NewNum) & ".", _
+                vbInformation, _
+                "Copy Rebuit Part Estimate"
+    Else
+        Call SetDefaultCursor
+        MsgBox "There was an error while copying Rebuilt Part Estimate information." & _
+               Chr(13) & "Rebuilt Part Estimate was not copied successfully.", _
+               vbCritical, _
+               "Copy Rebuit Part Estimate"
+    End If
+    Call SetDefaultCursor
+    Unload Me
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdCopy_Click", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+'-------------------------------------------------------
+' Purpose:
+'    When the form loads, populates the combo boxes
+'-------------------------------------------------------
+Private Sub Form_Load()
+    Dim RS As ADODB.Recordset
+    
+    On Error GoTo Error_Handler:
+    
+    Call SetWaitCursor
+    
+    ' Populate the keyword and Description combo box
+    Set RS = modDBHelper.RetrieveRB("CES_INQUIRY.RETRIEVE_RB")
+    
+    Set cboKeyword.RowSource = RS
+    
+    cboKeyword.ListField = "keyword"
+    
+    ' Populate the Keyword and Description from the RB Number
+    Set RS = modDBHelper.RetrieveRB("CES_INQUIRY.RETRIEVE_RB")
+    If RS.RecordCount > 0 Then
+        RS.Filter = "rebuilt_stock_num = '" + m_str_RBNumber + "'"
+        txtKeyword.Text = RS.Fields.Item("keyword")
+        cboKeyword.Text = RS.Fields.Item("keyword")
+    End If
+
+    Set RS = Nothing
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_Load", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+'-------------------------------------------------------
+' Purpose:
+'    Closes the form without copying the Rebuilt Part estimate.
+'-------------------------------------------------------
+Private Sub cmdCancel_Click()
+    On Error GoTo Error_Handler:
+    
+    Unload Me
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdCancel_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
+    On Error GoTo Error_Handler
+    
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_QueryUnload", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub txtNewRBNumber_KeyUp(KeyCode As Integer, Shift As Integer)
+    Dim l_CursorPosition As Long
+    Dim str_Data As String
+    
+    On Error GoTo Error_Handler
+
+    'Convert data in the txtNewRBNumber edit-box to upper case.
+    l_CursorPosition = txtNewRBNumber.SelStart
+    str_Data = txtNewRBNumber.Text
+    str_Data = UCase(str_Data)
+    txtNewRBNumber.Text = str_Data
+    txtNewRBNumber.SelStart = l_CursorPosition
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "txtNewRBNumber_KeyUp", g_l_ErrorLineNumber
+End Sub
+
+Private Sub txtNewMMSStockCode_KeyUp(KeyCode As Integer, Shift As Integer)
+    Dim l_CursorPosition As Long
+    Dim str_Data As String
+    
+    On Error GoTo Error_Handler
+
+    'Convert data in the txtNewMMSStockCode edit-box to upper case.
+    l_CursorPosition = txtNewMMSStockCode.SelStart
+    str_Data = txtNewMMSStockCode.Text
+    str_Data = UCase(str_Data)
+    txtNewMMSStockCode.Text = str_Data
+    txtNewMMSStockCode.SelStart = l_CursorPosition
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "txtNewMMSStockCode", g_l_ErrorLineNumber
+End Sub
+frmAddRBPTToEstimate.frm :
+Option Explicit
+
+Private m_str_Msg As String
+Private Const m_str_const_MsgBoxCaption As String = "Add / Update Rebuilt Parts"
+
+Private m_var_RowID As Variant
+Private m_str_MMSStockCode As String
+
+Public m_str_LinkNumber As String
+Public m_str_TypeCode As String
+Public m_str_AuditReference As String
+
+'Pass values to populate the form for editing
+Public Sub PassValues(ByVal str_RebuiltNum As String, _
+                      ByVal str_PercentUsage As String, _
+                      ByVal str_Quantity As String, _
+                      ByVal var_RowIDPass As Variant)
+     On Error GoTo Error_Handler
+     
+     cboRebuiltNumber.Text = str_RebuiltNum
+     Call ResolveRebuiltPart
+     txtQuantity.Text = str_Quantity
+     txtPercentUsage.Text = Replace(str_PercentUsage, ",", ".")
+     m_var_RowID = var_RowIDPass
+     cmdAdd.Caption = "Update"
+     cmdClose.Visible = False
+     cboRebuiltNumber.Enabled = False
+     cmdResolve.Enabled = False
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PassValues", g_l_ErrorLineNumber
+End Sub
+
+Private Sub cmdAdd_Click()
+    Dim l_RetVal As Long
+    Dim l_Result As Long
+    Dim l_Count As Long
+    Dim str_PercentUsage As String
+    Dim str_CostCentre As String
+    Dim RS As ADODB.Recordset
+    
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+    
+    If cboRebuiltNumber.Text = "" Then
+         If Not IsNumeric(cboRebuiltNumber.Text) Then
+            Call SetDefaultCursor
+            m_str_Msg = "Please enter a Rebuilt Number"
+            MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+            cboRebuiltNumber.SetFocus
+            Exit Sub
+         End If
+     End If
+    If Not IsNumeric(txtQuantity.Text) Then
+        Call SetDefaultCursor
+        m_str_Msg = "Quantity not entered correctly."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        txtQuantity.SetFocus
+        Exit Sub
+    Else
+        If Not IsValidLong(txtQuantity.Text) Then
+            Call SetDefaultCursor
+            m_str_Msg = "Quantity not entered correctly."
+            MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+            txtQuantity.SetFocus
+            Exit Sub
+        End If
+    End If
+    'Check that quantity is positive number or zero.
+    If CLng(txtQuantity.Text) < 0 Then
+        Call SetDefaultCursor
+        m_str_Msg = "Quantity not entered correctly."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        txtQuantity.SetFocus
+        Exit Sub
+    End If
+    
+    If txtPartUnitCost.Text = "" Then
+        txtPartUnitCost.Text = 0
+    End If
+    
+    'Check that user typed something into txtPercentUsage edit-box, and this data is
+    'valid percent.
+    str_PercentUsage = Trim(txtPercentUsage.Text)
+    If str_PercentUsage = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Please provide a Percent Usage. Percent Usage can be a "
+        m_str_Msg = m_str_Msg + "positive number between 0 and 100 inclusive with "
+        m_str_Msg = m_str_Msg + "possible fraction."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        txtPercentUsage.SetFocus
+        Exit Sub
+    End If
+    If CheckPercent(str_PercentUsage) = False Then
+        Call SetDefaultCursor
+        m_str_Msg = "Percent Usage is not entered correctly. Percent Usage can be a "
+        m_str_Msg = m_str_Msg + "positive number between 0 and 100 inclusive with "
+        m_str_Msg = m_str_Msg + "possible fraction."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        txtPercentUsage.SetFocus
+        Exit Sub
+    End If
+    
+    str_PercentUsage = Replace(str_PercentUsage, ".", ",")
+    
+    'Check that user typed something into the txtQuantity edit-box, and this data is
+    'valid quantity.
+
+       
+    If cmdAdd.Caption = "Add" Then
+        'Before adding check that "Rebuilt Number" is not duplicated in the estimate.
+        Set RS = New ADODB.Recordset
+        Set RS = modDBHelper.RetrieveRBPUsed("CES_INQUIRY.RETRIEVE_RBP_USED", _
+                                             m_str_LinkNumber, _
+                                             m_str_TypeCode)
+        If RS.RecordCount > 0 Then
+            RS.MoveFirst
+            For l_Count = 0 To RS.RecordCount - 1
+                If RS.Fields.Item("REBUILT NUMBER") = cboRebuiltNumber.Text Then
+                    Set RS = Nothing
+                    Call SetDefaultCursor
+                    m_str_Msg = "Record with the same Rebuilt Number is already exist "
+                    m_str_Msg = m_str_Msg + "in the current Estimate. Please choose "
+                    m_str_Msg = m_str_Msg + "another one."
+                    MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+                    cboRebuiltNumber.SetFocus
+                    Exit Sub
+                End If
+                RS.MoveNext
+            Next l_Count
+        End If
+        Set RS = Nothing
+        
+        'Add a new stock coded part
+        l_Result = modDBHelper.AddRBPUsed("CES_UPDATE.ADD_RBP_USED", _
+                                          l_RetVal, _
+                                          m_str_MMSStockCode, _
+                                          " ", _
+                                          txtQuantity.Text, _
+                                          str_PercentUsage, _
+                                          g_str_UserName, _
+                                          m_str_LinkNumber, _
+                                          CCur(txtPartUnitCost.Text), _
+                                          cboRebuiltNumber.Text, _
+                                          m_str_TypeCode, _
+                                          CCur("0.00"))
+                                          'CCur(txtCoreCost.Text))
+        
+        If (l_Result = 0) Then
+            Call SetDefaultCursor
+            m_str_Msg = "Rebuilt Part has been added."
+            MsgBox m_str_Msg, vbInformation Or vbOKOnly, m_str_const_MsgBoxCaption
+        Else
+            Call SetDefaultCursor
+            m_str_Msg = "There was an error adding Stock Coded Part. Please Contact "
+            m_str_Msg = m_str_Msg + "Administrator."
+            MsgBox m_str_Msg, vbCritical Or vbOKOnly, m_str_const_MsgBoxCaption
+        End If
+        cmdAdd.Enabled = False
+        
+        '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT Begin >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        
+        'Insert record into the AUDIT_MODIFY_HISTORY table.
+        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                l_RetVal, _
+                "Add Rebuilt Part", _
+                m_str_AuditReference, _
+                m_str_TypeCode, _
+                "Rebuilt Number ---> " + Trim(cboRebuiltNumber.Text), _
+                "Keyword ---> " + Trim(cboPartType.Text), _
+                "Description ---> " + Trim(cboPartDescription.Text), _
+                "Quantity ---> " + Trim(txtQuantity.Text), _
+                "Percent Usage ---> " + Trim(txtPercentUsage.Text), _
+                "Last Revised ---> " + Trim(txtLastRevised.Text), _
+                "Part Cost ($/unit) ---> " + Trim(txtPartUnitCost.Text))
+                
+        ' If adding a rebuilt part inside a rebuilt part then cycle
+        ' changes to all estimates containing this rebuilt part
+        If m_str_TypeCode = "RB" Then
+            
+            'Now find all estimates where current Rebuilt Part Estimate is present.
+            Set RS = New ADODB.Recordset
+            
+            'In the SC_PARTS_USED table find all Estimates where the current RBE is present.
+            Set RS = modDBHelper.RetrieveESTToPropagateRB("CES_INQUIRY.RETRIEVE_EST_TO_PROPAGATE_RB", _
+                                                          m_str_AuditReference)
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                    For l_Count = 0 To RS.RecordCount - 1
+                        'Add records to the AUDIT_MODIFY_HISTORY table.
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Rebuilt Part was added to the Rebuilt Part Estimate " + m_str_AuditReference, _
+                            RS.Fields.Item("link_code"), _
+                            RS.Fields.Item("link_type"), _
+                            "Rebuilt Number ---> " + Trim(cboRebuiltNumber.Text), _
+                            "Keyword ---> " + Trim(cboPartType.Text), _
+                            "Description ---> " + Trim(cboPartDescription.Text), _
+                            "Quantity ---> " + Trim(txtQuantity.Text), _
+                            "Percent Usage ---> " + Trim(txtPercentUsage.Text), _
+                            "Last Revised ---> " + Trim(txtLastRevised.Text), _
+                            "Part Cost ($/unit) ---> " + Trim(txtPartUnitCost.Text))
+                        RS.MoveNext
+                    Next l_Count
+            End If
+            Set RS = Nothing
+                       
+        End If
+        '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT End >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    Else
+        'Update an existing stock coded part
+        l_Result = modDBHelper.UpdateRBPUsed("CES_UPDATE.UPDATE_RBP_USED", _
+                                             l_RetVal, _
+                                             " ", _
+                                             txtQuantity.Text, _
+                                             str_PercentUsage, _
+                                             g_str_UserName, _
+                                             m_str_LinkNumber, _
+                                             CCur(txtPartUnitCost.Text), _
+                                             cboRebuiltNumber.Text, _
+                                             m_var_RowID, _
+                                             CCur("0.00"))
+                                             'CCur(txtCoreCost.Text))
+    
+        If (l_Result = 0) Then
+            Call SetDefaultCursor
+            m_str_Msg = "Rebuilt Part has been updated."
+            MsgBox m_str_Msg, vbOKOnly Or vbInformation, m_str_const_MsgBoxCaption
+        Else
+            Call SetDefaultCursor
+            m_str_Msg = "There was an error updating Rebuilt Part. Please Contact "
+            m_str_Msg = m_str_Msg + "Administrator."
+            MsgBox m_str_Msg, vbOKOnly Or vbCritical, m_str_const_MsgBoxCaption
+        End If
+        
+         '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT Begin >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        
+        'Insert record into the AUDIT_MODIFY_HISTORY table.
+        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                l_RetVal, _
+                "Update Rebuilt Part", _
+                m_str_AuditReference, _
+                m_str_TypeCode, _
+                "Rebuilt Number ---> " + Trim(cboRebuiltNumber.Text), _
+                "Keyword ---> " + Trim(cboPartType.Text), _
+                "Description ---> " + Trim(cboPartDescription.Text), _
+                "Quantity ---> " + Trim(txtQuantity.Text), _
+                "Percent Usage ---> " + Trim(txtPercentUsage.Text), _
+                "Last Revised ---> " + Trim(txtLastRevised.Text), _
+                "Part Cost ($/unit) ---> " + Trim(txtPartUnitCost.Text))
+                
+        ' If updating a rebuilt part inside a rebuilt part then cycle
+        ' changes to all estimates containing this rebuilt part
+        If m_str_TypeCode = "RB" Then
+            
+            'Now find all estimates where current Rebuilt Part Estimate is present.
+            Set RS = New ADODB.Recordset
+            
+            'In the SC_PARTS_USED table find all Estimates where the current RBE is present.
+            Set RS = modDBHelper.RetrieveESTToPropagateRB("CES_INQUIRY.RETRIEVE_EST_TO_PROPAGATE_RB", _
+                                                          m_str_AuditReference)
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                    For l_Count = 0 To RS.RecordCount - 1
+                        'Add records to the AUDIT_MODIFY_HISTORY table.
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Rebuilt Part was updated from the Rebuilt Part Estimate " + m_str_AuditReference, _
+                            RS.Fields.Item("link_code"), _
+                            RS.Fields.Item("link_type"), _
+                            "Rebuilt Number ---> " + Trim(cboRebuiltNumber.Text), _
+                            "Keyword ---> " + Trim(cboPartType.Text), _
+                            "Description ---> " + Trim(cboPartDescription.Text), _
+                            "Quantity ---> " + Trim(txtQuantity.Text), _
+                            "Percent Usage ---> " + Trim(txtPercentUsage.Text), _
+                            "Last Revised ---> " + Trim(txtLastRevised.Text), _
+                            "Part Cost ($/unit) ---> " + Trim(txtPartUnitCost.Text))
+                        RS.MoveNext
+                    Next l_Count
+            End If
+            Set RS = Nothing
+        End If
+        '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT End >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        Unload Me
+    End If
+
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdAdd_Click", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub cmdClose_Click()
+    On Error GoTo Error_Handler
+    
+    Unload Me
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdClose_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub ResolveRebuiltPart()
+    Dim RS As ADODB.Recordset
+    Dim RSCodes As ADODB.Recordset
+    Dim RSLinks As ADODB.Recordset
+    Dim RBPGraph As clsGraph
+    Dim str_Cycle As String
+    
+    'Fills in the rest of the fields from the Rebuilt Code
+    
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+
+    Set RS = New ADODB.Recordset
+    'Query the database to receive the information about the part
+    'First populate the rebuilt information
+    Set RS = modDBHelper.RetrieveRB("CES_INQUIRY.RETRIEVE_RB")
+    RS.Filter = "rebuilt_stock_num = '" + cboRebuiltNumber.Text + "'"
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        
+        ' Before resolving the rebuilt part ensure that this part can legally be
+        ' added with out creating any cycles of rebuilt parts in the system
+        If m_str_TypeCode = "RB" Then
+            ' Get all of the rebuilt part codes that are used and the links to other rebuilt parts
+            Set RSCodes = modDBHelper.RetrieveRBPUsedDistinct("CES_INQUIRY.RETRIEVE_RBP_USED_DISTINCT")
+            Set RSLinks = modDBHelper.RetrieveRBPUsedLinks("CES_INQUIRY.RETRIEVE_RBP_USED_LINKS")
+            ' Now create a Graph of all Rebuilt Parts contained and containing other
+            ' Rebuilt Parts
+            Set RBPGraph = New clsGraph
+            ' Add the vertices which are the Rebuilt Parts
+            If RSCodes.RecordCount > 0 Then
+                RSCodes.MoveFirst
+                While Not RSCodes.EOF
+                    RBPGraph.AddVertex UCase(RSCodes.Fields.Item("mms_rebuilt_code"))
+                    RSCodes.MoveNext
+                Wend
+            End If
+            ' Add the edges which show which rebuilt parts belong to which others
+            If RSLinks.RecordCount > 0 Then
+                RSLinks.MoveFirst
+                While Not RSLinks.EOF
+                    RBPGraph.AddEdge UCase(RSLinks.Fields.Item("mms_rebuilt_code")), UCase(RSLinks.Fields.Item("link_code"))
+                    RSLinks.MoveNext
+                Wend
+            End If
+            ' Now add the edge to represent the part to be added
+            If Not RBPGraph.VertexExists(UCase(RS.Fields.Item("rebuilt_stock_num"))) Then
+                RBPGraph.AddVertex UCase(RS.Fields.Item("rebuilt_stock_num"))
+            End If
+            If Not RBPGraph.VertexExists(UCase(m_str_LinkNumber)) Then
+                RBPGraph.AddVertex UCase(m_str_LinkNumber)
+            End If
+            RBPGraph.AddEdge UCase(RS.Fields.Item("rebuilt_stock_num")), UCase(m_str_LinkNumber)
+            ' Now use the graph object representing the rebuilt parts to determine
+            ' whether or not any cycles exist
+            If RBPGraph.CycleExists Then
+                ' There is a cycle.  We must identify it
+                str_Cycle = RBPGraph.FindCycle()
+                ' Clean up and show message
+                Call SetDefaultCursor
+                Set RS = Nothing
+                Set RSCodes = Nothing
+                Set RSLinks = Nothing
+                Set RBPGraph = Nothing
+                cmdAdd.Enabled = False
+                m_str_Msg = "Error. Adding this Rebuilt Part would create the following invalid cycle of Rebuilt Parts:"
+                m_str_Msg = m_str_Msg & Chr(13) & str_Cycle
+                MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+                Exit Sub
+            End If
+        End If
+        
+        'Load the values into the text boxes
+        cboRebuiltNumber.Text = RS.Fields.Item("rebuilt_stock_num")
+        cboPartType.Text = RS.Fields.Item("keyword")
+        cboPartDescription.Text = RS.Fields.Item("detailed_desc")
+      
+        txtLastRevised.Text = IIf(IsNull(RS.Fields.Item("date_modified")), "", _
+                                  RS.Fields.Item("date_modified"))
+        If IsNull(RS.Fields.Item("mms_stock_code")) = True Then
+            m_str_MMSStockCode = ""
+        Else
+            m_str_MMSStockCode = RS.Fields.Item("mms_stock_code")
+        End If
+        
+       'Retrieve the material cost of the rebuilt part resolved
+       Set RS = modDBHelper.RetrieveRBPTotalCost2("CES_INQUIRY.RETRIEVE_RBP_TOTAL_COST2", cboRebuiltNumber.Text, "RB")
+              
+       If RS.RecordCount > 0 Then
+           txtPartUnitCost.Text = Format(ColumnTotals(RS, "TOTAL COST"), "currency")
+       Else
+           txtPartUnitCost.Text = "0"
+       End If
+       cmdAdd.Enabled = True
+       cmdResolve.Default = False
+       cmdAdd.Default = True
+    Else
+        Call SetDefaultCursor
+        'Cannot find the part
+        cmdAdd.Enabled = False
+        cmdAdd.Default = False
+        cmdResolve.Default = True
+        m_str_Msg = "No information for the Rebuilt Number."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        'cboRebuiltNumber.SetFocus
+    End If
+    
+    Set RS = Nothing
+    Set RSCodes = Nothing
+    Set RSLinks = Nothing
+    Set RBPGraph = Nothing
+    
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "ResolveRebuiltPart", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+    If Not RSCodes Is Nothing Then
+        Set RSCodes = Nothing
+    End If
+    If Not RSLinks Is Nothing Then
+        Set RSLinks = Nothing
+    End If
+    If Not RBPGraph Is Nothing Then
+        Set RBPGraph = Nothing
+    End If
+End Sub
+
+Private Sub cmdResolve_Click()
+    On Error GoTo Error_Handler
+    
+    Call ResolveRebuiltPart
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdResolve_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub Form_Load()
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+    
+    cboPartDescription.Enabled = False
+    cboPartType.Enabled = False
+
+    Call PopulateFields
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_Load", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub PopulateFields()
+    Dim RS As New ADODB.Recordset
+    
+    'Populate each of the combo boxes
+    
+    On Error GoTo Error_Handler
+    
+    Set cboRebuiltNumber.RowSource = modDBHelper.PopulateRBComboBoxes( _
+                                                "CES_INQUIRY.POPULATE_RB_COMBOXES", _
+                                                "1")
+    cboRebuiltNumber.ListField = "rebuilt_stock_num"
+
+    Set cboPartType.RowSource = modDBHelper.PopulateRBComboBoxes( _
+                                                "CES_INQUIRY.POPULATE_RB_COMBOXES", _
+                                                "2")
+    cboPartType.ListField = "keyword"
+
+    Set cboPartDescription.RowSource = modDBHelper.PopulateRBComboBoxes( _
+                                                "CES_INQUIRY.POPULATE_RB_COMBOXES", _
+                                                "3")
+    cboPartDescription.ListField = "detailed_desc"
+           
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PopulateFields", g_l_ErrorLineNumber
+End Sub
+
+Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
+    On Error GoTo Error_Handler
+
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_QueryUnload", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub txtPercentUsage_GotFocus()
+    On Error GoTo Error_Handler
+
+    txtPercentUsage.SelStart = 0
+    txtPercentUsage.SelLength = Len(txtPercentUsage.Text)
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "txtPercentUsage_GotFocus", g_l_ErrorLineNumber
+End Sub
+
+Private Sub txtQuantity_GotFocus()
+    On Error GoTo Error_Handler
+
+    txtQuantity.SelStart = 0
+    txtQuantity.SelLength = Len(txtQuantity.Text)
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "txtQuantity_GotFocus", g_l_ErrorLineNumber
+End Sub
+frmAddLabourtask.frm :
+'=================================================================
+'frmAddLabourTask.frm
+'
+'Adds a non stock coded part to the cost tracking system database.
+'===============================================================
+Option Explicit
+
+Private m_str_Hours As String
+Private m_str_Minutes As String
+Private m_str_Msg As String
+Private Const m_str_const_MsgBoxCaption As String = "Add / Update Labour Tasks"
+
+Public m_str_TypeID As String
+Public m_str_PartID As String
+Public m_str_LinkNumber As String
+Public m_str_AuditReference As String
+
+Private Sub cmdClose_Click()
+    On Error GoTo Error_Handler
+    
+    Unload Me
+    Exit Sub
+    
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdClose_Click", g_l_ErrorLineNumber
+End Sub
+
+'The cmdAddLabourTask_Click button either Adds a new non-stock coded part into
+'the cost estimate system or updates an existing non-stock coded part
+Private Sub cmdAddLabourTask_Click()
+    Dim l_Result As Long
+    Dim l_RetVal As Long
+    Dim l_Count As Long
+    Dim str_FixedMins As String
+    Dim str_FixedHours As String
+    Dim str_TimeInDecimal As String
+    Dim str_AdjTimeInDecimal As String
+    Dim str_LabourType As String
+    Dim RS As ADODB.Recordset
+    Dim str_PercentUsage As String
+    Dim str_TaskDescription As String
+    Dim str_CostCentre As String
+    Dim str_LabourPosition As String
+    
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+    
+    'Make sure that user choused something from the cboTaskDescription combo-box.
+    str_TaskDescription = Trim(cboTaskDescription.Text)
+    If str_TaskDescription = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Please choose Task Description."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        cboTaskDescription.SetFocus
+        Exit Sub
+    End If
+    
+    'Make sure that user choused something from the cboLabourPosition combo-box.
+    str_LabourPosition = Trim(cboLabourPosition.Text)
+    If str_LabourPosition = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Please choose Labour Position."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        cboLabourPosition.SetFocus
+        Exit Sub
+    End If
+    
+    'Make sure that user choused something from the cboCostCentre combo-box.
+    str_CostCentre = Trim(cboCostCentre.Text)
+    If str_CostCentre = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Please choose Cost Centre."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        cboCostCentre.SetFocus
+        Exit Sub
+    End If
+        
+    'Confirm that the percent is entered correctly
+    str_PercentUsage = Trim(txtPercentUsage.Text)
+    If str_PercentUsage = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Please enter Percent Usage."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        txtPercentUsage.SetFocus
+        Exit Sub
+    End If
+    If CheckPercent(str_PercentUsage) = False Then
+        Call SetDefaultCursor
+        m_str_Msg = "Percent Usage is not entered correctly. Percent Usage can be a "
+        m_str_Msg = m_str_Msg + "positive number between 0 and 100 inclusive with "
+        m_str_Msg = m_str_Msg + "possible fraction."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        txtPercentUsage.SetFocus
+        Exit Sub
+    End If
+
+    str_PercentUsage = Replace(str_PercentUsage, ".", ",")
+    
+    'Confirm that the hours are entered correctly
+    str_FixedHours = Trim(txtHoursRequired.Text)
+    If str_FixedHours = "" Then
+        str_FixedHours = "0"
+        txtHoursRequired.Text = "0"
+    End If
+    
+    If Not IsValidLong(str_FixedHours) Or Int(str_FixedHours) < 0 Then
+        Call SetDefaultCursor
+        m_str_Msg = "Hours not entered correctly."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        txtHoursRequired.SetFocus
+        Exit Sub
+    End If
+    str_FixedHours = Round(str_FixedHours, 0)
+    
+    'Confirm that the minutes are entered correctly
+    str_FixedMins = Trim(txtMinutesRequired.Text)
+    If str_FixedMins = "" Then
+        str_FixedMins = "00"
+        txtMinutesRequired.Text = "00"
+    End If
+    If Not IsValidLong(str_FixedHours) Then
+        Call SetDefaultCursor
+        m_str_Msg = "Minutes not entered correctly."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        txtMinutesRequired.SetFocus
+        Exit Sub
+    End If
+    If Int(str_FixedMins) < 0 Or Int(str_FixedMins) > 59 Then
+        Call SetDefaultCursor
+        m_str_Msg = "Minutes must be between 0 and 59."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        txtMinutesRequired.SetFocus
+        Exit Sub
+    End If
+    str_FixedMins = Round(str_FixedMins, 0)
+    If (Len(str_FixedMins) = 1) Then
+        str_FixedMins = 0 & str_FixedMins
+    End If
+    
+    str_TimeInDecimal = str_FixedHours & "." & MinutesToDecimal(str_FixedMins)
+    
+    str_AdjTimeInDecimal = CStr(CDbl(str_TimeInDecimal) / g_dbl_NonProductiveTimeAdj)
+    
+    If cmdAddLabourTask.Caption = "Add Labour Task" Then
+        l_Result = modDBHelper.AddLabourTasks("CES_UPDATE.ADD_LABOUR_TASKS", _
+                                              l_RetVal, _
+                                              str_LabourPosition, _
+                                              m_str_LinkNumber, _
+                                              m_str_TypeID, _
+                                              str_CostCentre, _
+                                              str_TaskDescription, _
+                                              str_LabourType, _
+                                              str_PercentUsage, _
+                                              str_FixedHours & ":" & str_FixedMins, _
+                                              DecimalToMinutes(str_AdjTimeInDecimal), _
+                                              CDbl(str_TimeInDecimal), _
+                                              " ", _
+                                              g_str_UserName)
+        If (l_Result = 0) Then
+            Call SetDefaultCursor
+            m_str_Msg = "Labour Task has been added."
+            MsgBox m_str_Msg, vbInformation Or vbOKOnly, m_str_const_MsgBoxCaption
+        Else
+            Call SetDefaultCursor
+            m_str_Msg = "There was an error adding the Labour Task.  Please Contact "
+            m_str_Msg = m_str_Msg + "Administrator."
+            MsgBox m_str_Msg, vbCritical Or vbOKOnly, m_str_const_MsgBoxCaption
+            Exit Sub
+        End If
+        
+        'Add record to the AUDIT_MODIFY_HISTORY table.
+        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Add Labour Task", _
+                            m_str_AuditReference, _
+                            m_str_TypeID, _
+                            "Task Description ---> " + str_TaskDescription, _
+                            "Labour Position ---> " + str_LabourPosition, _
+                            "Cost Centre ---> " + str_CostCentre, _
+                            "Percent Usage ---> " + str_PercentUsage, _
+                            "Hours Reqired (Hours) ---> " + str_FixedHours, _
+                            "Hours Reqired (Minutes) ---> " + str_FixedMins)
+
+        ' If adding a labour task was performed inside a rebuilt part then cycle
+        ' changes to all estimates containing this rebuilt part
+        If m_str_TypeID = "RB" Then
+            
+            'Now find all estimates where current Rebuilt Part Estimate is present.
+            Set RS = New ADODB.Recordset
+            
+            'In the SC_PARTS_USED table find all Estimates where the current RBE is present.
+            Set RS = modDBHelper.RetrieveESTToPropagateRB("CES_INQUIRY.RETRIEVE_EST_TO_PROPAGATE_RB", _
+                                                          m_str_AuditReference)
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                    For l_Count = 0 To RS.RecordCount - 1
+                        'Add records to the AUDIT_MODIFY_HISTORY table.
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Labour was added from the Rebuilt Part Estimate " + m_str_AuditReference, _
+                            RS.Fields.Item("link_code"), _
+                            RS.Fields.Item("link_type"), _
+                            "Task Description ---> " + str_TaskDescription, _
+                            "Labour Position ---> " + str_LabourPosition, _
+                            "Cost Centre ---> " + str_CostCentre, _
+                            "Percent Usage ---> " + str_PercentUsage, _
+                            "Hours Reqired (Hours) ---> " + str_FixedHours, _
+                            "Hours Reqired (Minutes) ---> " + str_FixedMins)
+                        RS.MoveNext
+                    Next l_Count
+            End If
+            Set RS = Nothing
+        End If
+    Else 'If cmdAddLabourTask.Caption = "Update Labour" Then
+        l_Result = modDBHelper.UpdateLabourTasks("CES_UPDATE.UPDATE_LABOUR_TASKS", _
+                                                 l_RetVal, _
+                                                 str_LabourPosition, _
+                                                 m_str_LinkNumber, _
+                                                 m_str_TypeID, _
+                                                 str_CostCentre, _
+                                                 str_TaskDescription, _
+                                                 str_LabourType, _
+                                                 str_PercentUsage, _
+                                                 str_FixedHours & ":" & str_FixedMins, _
+                                                 DecimalToMinutes(str_AdjTimeInDecimal), _
+                                                 m_str_PartID, _
+                                                 CDbl(str_TimeInDecimal), _
+                                                 g_str_UserName)
+    
+        If (l_Result = 0) Then
+            Call SetDefaultCursor
+            m_str_Msg = "Labour Task has been updated."
+            MsgBox m_str_Msg, vbInformation Or vbOKOnly, m_str_const_MsgBoxCaption
+        Else
+            Call SetDefaultCursor
+            m_str_Msg = "There was an error Updating the Labour Task.  Please Contact "
+            m_str_Msg = m_str_Msg + "Administrator."
+            MsgBox m_str_Msg, vbCritical Or vbOKOnly, m_str_const_MsgBoxCaption
+            Exit Sub
+        End If
+        
+        'Add record to the AUDIT_MODIFY_HISTORY table.
+        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Update Labour Task", _
+                            m_str_AuditReference, _
+                            m_str_TypeID, _
+                            "Task Description ---> " + str_TaskDescription, _
+                            "Labour Position ---> " + str_LabourPosition, _
+                            "Cost Centre ---> " + str_CostCentre, _
+                            "Percent Usage ---> " + str_PercentUsage, _
+                            "Hours Reqired (Hours) ---> " + str_FixedHours, _
+                            "Hours Reqired (Minutes) ---> " + str_FixedMins)
+        
+        ' If updating a labour task was performed inside a rebuilt part then cycle
+        ' changes to all estimates containing this rebuilt part
+        If m_str_TypeID = "RB" Then
+            
+            'Now find all estimates where current Rebuilt Part Estimate is present.
+            Set RS = New ADODB.Recordset
+            
+            'In the SC_PARTS_USED table find all Estimates where the current RBE is present.
+            Set RS = modDBHelper.RetrieveESTToPropagateRB("CES_INQUIRY.RETRIEVE_EST_TO_PROPAGATE_RB", _
+                                                          m_str_AuditReference)
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                    For l_Count = 0 To RS.RecordCount - 1
+                        'Add records to the AUDIT_MODIFY_HISTORY table.
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Labour was updated from the Rebuilt Part Estimate " + m_str_AuditReference, _
+                            RS.Fields.Item("link_code"), _
+                            RS.Fields.Item("link_type"), _
+                            "Task Description ---> " + str_TaskDescription, _
+                            "Labour Position ---> " + str_LabourPosition, _
+                            "Cost Centre ---> " + str_CostCentre, _
+                            "Percent Usage ---> " + str_PercentUsage, _
+                            "Hours Reqired (Hours) ---> " + str_FixedHours, _
+                            "Hours Reqired (Minutes) ---> " + str_FixedMins)
+                        RS.MoveNext
+                    Next l_Count
+            End If
+            Set RS = Nothing
+        End If
+        Unload Me
+    End If 'If cmdAddLabourTask.Caption = "Add Labour Task" Then
+    
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdAddLabourTask_Click", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+    Call SetDefaultCursor
+End Sub
+
+Private Sub Form_Load()
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+    
+    Call PopulateDropdowns
+    If (m_str_PartID <> "") Then
+        cmdAddLabourTask.Caption = "Update Labour"
+        Me.Caption = "Update a Labour Task"
+        fraAddLabourTask.Caption = "Update a Labour Task"
+        'Prepare to retrieve data
+        Call PopulateFields
+    End If
+    
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_Load", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub PopulateDropdowns()
+    Dim RS As ADODB.Recordset
+
+    On Error GoTo Error_Handler
+
+    'Set RS = New ADODB.Recordset
+    'Load the data into the input forms for editing
+    
+    Set RS = modDBHelper.RetrieveTaskDescription("CES_INQUIRY.RETRIEVE_TASK_DESCRIPTION")
+    Set cboTaskDescription.RowSource = RS
+    cboTaskDescription.ListField = "TASK DESCRIPTION"
+    
+    Set RS = modDBHelper.RetrieveLabourPosition("CES_INQUIRY.RETRIEVE_LABOUR_POSITION")
+    Set cboLabourPosition.RowSource = RS
+    cboLabourPosition.ListField = "LABOUR_DEFN"
+    
+    Set RS = modDBHelper.RetrieveCostCentres("CES_INQUIRY.RETRIEVE_COST_CENTRES")
+    Set cboCostCentre.RowSource = RS
+    cboCostCentre.ListField = "COST_CENTRE"
+
+    Set RS = Nothing
+    
+    Exit Sub
+    
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PopulateDropdowns", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub PopulateFields()
+    Dim RS As ADODB.Recordset
+    
+    On Error GoTo Error_Handler
+    
+    m_str_Hours = " "
+    m_str_Minutes = " "
+    'Query database to load vehicle estimate
+    Set RS = New ADODB.Recordset
+    Set RS = modDBHelper.RetrieveMBAllLabour("CES_INQUIRY.RETRIEVE_MB_ALL_LABOUR", m_str_PartID)
+    If RS.RecordCount > 0 Then
+        'RS.Filter = "rowid = '" + m_str_PartID + "'"
+        ParseHours RS.Fields.Item("HRS_REQD"), m_str_Hours, m_str_Minutes
+        
+        'Load values into text boxes
+        txtHoursRequired.Text = m_str_Hours
+        txtMinutesRequired.Text = m_str_Minutes
+        txtPercentUsage.Text = Replace(RS.Fields.Item("USAGE"), ",", ".")
+        cboTaskDescription.Text = RS.Fields.Item("TASK")
+        cboCostCentre.Text = RS.Fields.Item("COSTCENTRE")
+        cboLabourPosition.Text = RS.Fields.Item("LABOUR_DEFN")
+    End If
+       
+    Set RS = Nothing
+    Exit Sub
+    
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PopulateFields", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
+    On Error GoTo Error_Handler
+    
+    Call SetDefaultCursor
+    m_str_TypeID = ""
+    m_str_PartID = ""
+    m_str_LinkNumber = ""
+    Unload Me
+        
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_QueryUnload", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub fraAddLabourTask_DragDrop(Source As Control, X As Single, Y As Single)
+
+End Sub
+frmAddNSCPartToEstimate.frm :
+'==============================================================
+'frmAddNSCPToEstimate.FRM
+'
+'Adds a vehicle estimate to the cost tracking system database.
+'User enters/updates information into the input boxes and submits the values
+'which are then saved into the database.
+'===============================================================
+Option Explicit
+
+Private m_l_ID As Long
+Private m_var_NSCPRowID As Variant
+Private m_str_Msg As String
+Private Const m_str_const_MsgBoxCaption As String = "Add / Update Non-Stock Coded Parts"
+
+Public m_str_LinkNumber As String
+Public m_str_TypeCode As String
+
+Public m_var_RowID As Variant
+
+Public m_str_AuditReference As String
+Public m_str_AuditReferenceType As String
+
+Private Sub cmdClose_Click()
+    On Error GoTo Error_Handler
+    
+    Unload Me
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdClose_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub cmdAdd_Click()
+    Dim l_Result As Long
+    Dim l_RetVal As Long
+    Dim str_PercentUsage As String
+    Dim RS As ADODB.Recordset
+    Dim l_Count As Long
+
+    On Error GoTo Error_Handler
+
+    Call SetWaitCursor
+
+    If Trim(cboSupplierNumber.Text) = "" Then
+        If Not IsNumeric(cboSupplierNumber.Text) Then
+            Call SetDefaultCursor
+            m_str_Msg = "Please provide a Supplier Number."
+            MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+            cboSupplierNumber.SetFocus
+            Exit Sub
+        End If
+    End If
+    
+    'The percent usage
+    str_PercentUsage = Trim(txtPercentUsage.Text)
+    If str_PercentUsage = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Percent Usage is not entered correctly. Percent Usage can be a "
+        m_str_Msg = m_str_Msg + "positive number between 0 and 100 inclusive with "
+        m_str_Msg = m_str_Msg + "possible fraction."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        txtPercentUsage.SetFocus
+        Exit Sub
+    End If
+    
+    If CheckPercent(str_PercentUsage) = False Then
+        Call SetDefaultCursor
+        m_str_Msg = "Percent Usage is not entered correctly. Percent Usage can be a "
+        m_str_Msg = m_str_Msg + "positive number between 0 and 100 inclusive with "
+        m_str_Msg = m_str_Msg + "possible fraction."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        txtPercentUsage.SetFocus
+        Exit Sub
+    End If
+
+    str_PercentUsage = Replace(str_PercentUsage, ".", ",")
+    
+    If Trim(cboCostCentre.Text) = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Please provide a Cost Centre."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        cboCostCentre.SetFocus
+        Exit Sub
+    End If
+    
+    'Then validate Quantity
+    If Not IsNumeric(txtQuantity.Text) Then
+        Call SetDefaultCursor
+        m_str_Msg = "Quantity not entered correctly."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        txtQuantity.SetFocus
+        Exit Sub
+    Else
+        If Not IsValidLong(txtQuantity.Text) Then
+            Call SetDefaultCursor
+            m_str_Msg = "Quantity not entered correctly."
+            MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+            txtQuantity.SetFocus
+            Exit Sub
+        End If
+    End If
+    
+    If CLng(txtQuantity.Text) < 0 Then
+        Call SetDefaultCursor
+        m_str_Msg = "Quantity not entered correctly."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        txtQuantity.SetFocus
+        Exit Sub
+    End If
+        
+    If Trim(txtCoreCost.Text) = "" Then
+        txtCoreCost.Text = "0"
+    ElseIf Not IsNumeric(Trim(txtCoreCost.Text)) Or Val(txtCoreCost.Text) < 0 Then
+        Call SetDefaultCursor
+        m_str_Msg = "Core cost not entered correctly."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        txtCoreCost.SetFocus
+        Exit Sub
+    End If
+        
+    If txtPartUnitCost.Text = "" Then
+        txtPartUnitCost.Text = "0"
+    ElseIf Not IsNumeric(Trim(txtPartUnitCost.Text)) Or Val(txtPartUnitCost.Text) < 0 Then
+        Call SetDefaultCursor
+        m_str_Msg = "Part Unit cost not entered correctly."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        txtPartUnitCost.SetFocus
+        Exit Sub
+    End If
+    
+    If cmdAdd.Caption = "Add" Then
+        'Before adding check that "Supplier Number" is not duplicated in the estimate.
+        Set RS = New ADODB.Recordset
+        Set RS = modDBHelper.RetrieveNSCPUsed("CES_INQUIRY.RETRIEVE_NSCP_USED", _
+                                              m_str_LinkNumber, _
+                                              m_str_TypeCode)
+        If RS.RecordCount > 0 Then
+            RS.MoveFirst
+            For l_Count = 0 To RS.RecordCount - 1
+                If RS.Fields.Item("SUPPLIER NUMBER") = Trim(cboSupplierNumber.Text) Then
+                    Set RS = Nothing
+                    Call SetDefaultCursor
+                    m_str_Msg = "Record with the same Supplier Number is already exist "
+                    m_str_Msg = m_str_Msg + "in the current Estimate. Please choose "
+                    m_str_Msg = m_str_Msg + "another one."
+                    MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+                    cmdResolve.Caption = "Find Supplier Name"
+                    Set cboSupplierName.RowSource = Nothing
+                    cboSupplierName.Text = ""
+                    cboSupplierName.Enabled = False
+                    cboSupplierNumber.SetFocus
+                    Exit Sub
+                End If
+                RS.MoveNext
+            Next l_Count
+        End If
+        Set RS = Nothing
+        
+        'Add new non-stock coded part
+        l_Result = modDBHelper.AddNSCPUsed("CES_UPDATE.ADD_NSCP_USED", _
+                                           l_RetVal, _
+                                           cboSupplierNumber.Text, _
+                                           cboSupplierName.Text, _
+                                           cboCostCentre.Text, _
+                                           txtQuantity.Text, _
+                                           str_PercentUsage, _
+                                           g_str_UserName, _
+                                           m_str_LinkNumber, _
+                                           CCur(txtPartUnitCost.Text), _
+                                           m_str_TypeCode, _
+                                           CCur(txtCoreCost.Text), _
+                                           m_l_ID)
+        If (l_Result = 0) Then
+            m_str_Msg = "Non-Stock Coded Part has been added."
+            MsgBox m_str_Msg, vbInformation Or vbOKOnly, m_str_const_MsgBoxCaption
+        Else
+            Call SetDefaultCursor
+            m_str_Msg = "There was an error adding Non-Stock Coded Part. Please Contact "
+            m_str_Msg = m_str_Msg + "Administrator."
+            MsgBox m_str_Msg, vbCritical Or vbOKOnly, m_str_const_MsgBoxCaption
+            Exit Sub
+        End If
+        cmdAdd.Enabled = False
+        cmdEditDetails.Enabled = False
+        cmdResolve.Caption = "Find Supplier Name"
+        
+        '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT Begin >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        
+        'Insert record into the AUDIT_MODIFY_HISTORY table.
+        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                l_RetVal, _
+                "Add Non-Stock Coded Part", _
+                m_str_AuditReference, _
+                m_str_TypeCode, _
+                "Supplier Number ---> " + Trim(cboSupplierNumber.Text), _
+                "Supplier Name ---> " + Trim(cboSupplierName.Text), _
+                "Part Description ---> " + Trim(cboPartDescription.Text), _
+                "Keyword ---> " + Trim(cboKeyword.Text), _
+                "Cost Centre ---> " + Trim(cboCostCentre.Text), _
+                "Quantity ---> " + Trim(txtQuantity.Text), _
+                "Percent Usage ---> " + Trim(txtPercentUsage.Text), _
+                "Last Revised ---> " + Trim(txtLastRevised.Text), _
+                "Part Unit Cost ($/unit) ---> " + Trim(txtPartUnitCost.Text), _
+                "Core Cost ($/unit) ---> " + Trim(txtCoreCost.Text))
+        
+        ' Now act depending on which type of estimate that the non-stock
+        ' coded part was added to.
+        If m_str_TypeCode = "KIT" Then
+            'Add the current Part to the table SUB_KITS, after the last item in the
+            'sub kit "KIT A"
+            Call modMain.AddLastPartToSubkitA(m_str_AuditReference, _
+                                              "NSC", _
+                                              Trim(cboSupplierNumber.Text), _
+                                              Trim(cboSupplierName.Text), _
+                                              " ", _
+                                              Trim(txtQuantity.Text), _
+                                              Trim(cboPartDescription.Text))
+
+            'Find all Vehicle Estimates where the current OEM Kit is presented.
+            Set RS = New ADODB.Recordset
+            Set RS = modDBHelper.RetrieveBusFromKitsUsed("CES_INQUIRY.RETRIEVE_BUS_FROM_KITS_USED", _
+                                                         m_str_AuditReference)
+            'Insert records for all Vehicle Estimates (where the current OEM Kit is
+            'presented) into the AUDIT_MODIFY_HISTORY table.
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                For l_Count = 0 To RS.RecordCount - 1
+                    If IsNull(RS.Fields.Item("link_code")) = False Then
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Non-Stock Coded Part was added to the OEM Kit " + m_str_AuditReference, _
+                            RS.Fields.Item("link_code"), _
+                            "BUS", _
+                            "Supplier Number ---> " + Trim(cboSupplierNumber.Text), _
+                            "Supplier Name ---> " + Trim(cboSupplierName.Text), _
+                            "Part Description ---> " + Trim(cboPartDescription.Text), _
+                            "Keyword ---> " + Trim(cboKeyword.Text), _
+                            "Cost Centre ---> " + Trim(cboCostCentre.Text), _
+                            "Quantity ---> " + Trim(txtQuantity.Text), _
+                            "Percent Usage ---> " + Trim(txtPercentUsage.Text), _
+                            "Last Revised ---> " + Trim(txtLastRevised.Text), _
+                            "Part Unit Cost ($/unit) ---> " + Trim(txtPartUnitCost.Text), _
+                            "Core Cost ($/unit) ---> " + Trim(txtCoreCost.Text))
+                    End If
+                    RS.MoveNext
+                Next l_Count
+            End If
+        ElseIf m_str_TypeCode = "RB" Then
+            ' If the estimate is a Rebuilt Part Estimate then cycle
+            ' though all RB, MB and Veh Estimates containing this RBP
+        
+            Set RS = New ADODB.Recordset
+            
+            'In the SC_PARTS_USED table find all Estimates where the current RBE is present.
+            Set RS = modDBHelper.RetrieveESTToPropagateRB("CES_INQUIRY.RETRIEVE_EST_TO_PROPAGATE_RB", _
+                                                          m_str_AuditReference)
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                    For l_Count = 0 To RS.RecordCount - 1
+                        'Add records to the AUDIT_MODIFY_HISTORY table.
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Non-Stock Coded Part was added to the Rebuilt Part Estimate " + m_str_AuditReference, _
+                            RS.Fields.Item("link_code"), _
+                            RS.Fields.Item("link_type"), _
+                            "Supplier Number ---> " + Trim(cboSupplierNumber.Text), _
+                            "Supplier Name ---> " + Trim(cboSupplierName.Text), _
+                            "Part Description ---> " + Trim(cboPartDescription.Text), _
+                            "Keyword ---> " + Trim(cboKeyword.Text), _
+                            "Cost Centre ---> " + Trim(cboCostCentre.Text), _
+                            "Quantity ---> " + Trim(txtQuantity.Text), _
+                            "Percent Usage ---> " + Trim(txtPercentUsage.Text), _
+                            "Last Revised ---> " + Trim(txtLastRevised.Text), _
+                            "Part Unit Cost ($/unit) ---> " + Trim(txtPartUnitCost.Text), _
+                            "Core Cost ($/unit) ---> " + Trim(txtCoreCost.Text))
+                        RS.MoveNext
+                    Next l_Count
+            End If
+            Set RS = Nothing
+        
+        End If
+        '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT End >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        
+        Set cboSupplierName.RowSource = Nothing
+        cboSupplierName.Enabled = False
+        cboSupplierName.Text = ""
+        cboSupplierNumber.SetFocus
+    Else 'If cmdAdd.Caption = "Update" Then
+        'Update existing stock coded part
+        l_Result = modDBHelper.UpdateNSCPUsed("CES_UPDATE.UPDATE_NSCP_USED", _
+                                              l_RetVal, _
+                                              cboSupplierNumber.Text, _
+                                              cboSupplierName.Text, _
+                                              cboCostCentre.Text, _
+                                              txtQuantity.Text, _
+                                              str_PercentUsage, _
+                                              g_str_UserName, _
+                                              m_str_LinkNumber, _
+                                              CCur(txtPartUnitCost.Text), _
+                                              m_var_RowID, _
+                                              CCur(txtCoreCost.Text))
+    
+        If (l_Result = 0) Then
+            m_str_Msg = "Non-Stock Coded Part has been updated."
+            MsgBox m_str_Msg, vbInformation Or vbOKOnly, m_str_const_MsgBoxCaption
+        Else
+            Call SetDefaultCursor
+            m_str_Msg = "There was an error updating Non-Stock Coded Part. Please Contact "
+            m_str_Msg = m_str_Msg + "Administrator."
+            MsgBox m_str_Msg, vbCritical Or vbOKOnly, m_str_const_MsgBoxCaption
+            Exit Sub
+        End If
+        
+        cmdResolve.Caption = "Find Supplier Name"
+        
+        '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT Begin >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        'Insert record into the AUDIT_MODIFY_HISTORY table.
+        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                    "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                    l_RetVal, _
+                    "Update Non-Stock Coded Part", _
+                    m_str_AuditReference, _
+                    m_str_TypeCode, _
+                    "Supplier Number ---> " + Trim(cboSupplierNumber.Text), _
+                    "Supplier Name ---> " + Trim(cboSupplierName.Text), _
+                    "Part Description ---> " + Trim(cboPartDescription.Text), _
+                    "Keyword ---> " + Trim(cboKeyword.Text), _
+                    "Cost Centre ---> " + Trim(cboCostCentre.Text), _
+                    "Quantity ---> " + Trim(txtQuantity.Text), _
+                    "Percent Usage ---> " + Trim(txtPercentUsage.Text), _
+                    "Last Revised ---> " + Trim(txtLastRevised.Text), _
+                    "Part Unit Cost ($/unit) ---> " + Trim(txtPartUnitCost.Text), _
+                    "Core Cost ($/unit) ---> " + Trim(txtCoreCost.Text))
+        
+        ' Now act depending on which type of estimate that the non-stock
+        ' coded part was added to.
+        If m_str_TypeCode = "KIT" Then
+            'In the SUB_KITS table update corresponded record.
+            l_Result = modDBHelper.UpdateSubKits("CES_UPDATE.UPDATE_SUB_KITS", _
+                                                 l_RetVal, _
+                                                 m_str_AuditReference, _
+                                                 Trim(cboSupplierNumber.Text), _
+                                                 Trim(cboSupplierName.Text), _
+                                                 " ", _
+                                                 Trim(txtQuantity.Text), _
+                                                 Trim(cboPartDescription.Text))
+
+            'Find all Vehicle Estimates where the current OEM Kit is presented.
+            Set RS = New ADODB.Recordset
+            Set RS = modDBHelper.RetrieveBusFromKitsUsed("CES_INQUIRY.RETRIEVE_BUS_FROM_KITS_USED", _
+                                                         m_str_AuditReference)
+            'Insert records for all Vehicle Estimates (where the current OEM Kit is
+            'presented) into the AUDIT_MODIFY_HISTORY table.
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                For l_Count = 0 To RS.RecordCount - 1
+                    If IsNull(RS.Fields.Item("link_code")) = False Then
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Non-Stock Coded Part was updated from the OEM Kit " + m_str_AuditReference, _
+                            RS.Fields.Item("link_code"), _
+                            "BUS", _
+                            "Supplier Number ---> " + Trim(cboSupplierNumber.Text), _
+                            "Supplier Name ---> " + Trim(cboSupplierName.Text), _
+                            "Part Description ---> " + Trim(cboPartDescription.Text), _
+                            "Keyword ---> " + Trim(cboKeyword.Text), _
+                            "Cost Centre ---> " + Trim(cboCostCentre.Text), _
+                            "Quantity ---> " + Trim(txtQuantity.Text), _
+                            "Percent Usage ---> " + Trim(txtPercentUsage.Text), _
+                            "Last Revised ---> " + Trim(txtLastRevised.Text), _
+                            "Part Unit Cost ($/unit) ---> " + Trim(txtPartUnitCost.Text), _
+                            "Core Cost ($/unit) ---> " + Trim(txtCoreCost.Text))
+                    End If
+                    RS.MoveNext
+                Next l_Count
+            End If
+        ElseIf m_str_TypeCode = "RB" Then
+            ' If the estimate is a Rebuilt Part Estimate then cycle
+            ' though all RB, MB and Veh Estimates containing this RBP
+        
+            Set RS = New ADODB.Recordset
+            
+            'In the SC_PARTS_USED table find all Estimates where the current RBE is present.
+            Set RS = modDBHelper.RetrieveESTToPropagateRB("CES_INQUIRY.RETRIEVE_EST_TO_PROPAGATE_RB", _
+                                                          m_str_AuditReference)
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                    For l_Count = 0 To RS.RecordCount - 1
+                        'Add records to the AUDIT_MODIFY_HISTORY table.
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Non-Stock Coded Part was updated from the Rebuilt Part Estimate " + m_str_AuditReference, _
+                            RS.Fields.Item("link_code"), _
+                            RS.Fields.Item("link_type"), _
+                            "Supplier Number ---> " + Trim(cboSupplierNumber.Text), _
+                            "Supplier Name ---> " + Trim(cboSupplierName.Text), _
+                            "Part Description ---> " + Trim(cboPartDescription.Text), _
+                            "Keyword ---> " + Trim(cboKeyword.Text), _
+                            "Cost Centre ---> " + Trim(cboCostCentre.Text), _
+                            "Quantity ---> " + Trim(txtQuantity.Text), _
+                            "Percent Usage ---> " + Trim(txtPercentUsage.Text), _
+                            "Last Revised ---> " + Trim(txtLastRevised.Text), _
+                            "Part Unit Cost ($/unit) ---> " + Trim(txtPartUnitCost.Text), _
+                            "Core Cost ($/unit) ---> " + Trim(txtCoreCost.Text))
+                        RS.MoveNext
+                    Next l_Count
+            End If
+            Set RS = Nothing
+        End If
+        '>>>>>>>>>>>>>>>>>>>>>>>>>>>> AUDIT End >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        
+        Set cboSupplierName.RowSource = Nothing
+        cboSupplierName.Text = ""
+        cboSupplierName.Enabled = False
+        Call SetDefaultCursor
+       
+        Unload Me
+    End If
+    
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdAdd_Click", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub cmdEditDetails_Click()
+    ' Allows the users to edit the details of the non-stock coded
+    ' part before adding it to the part.
+      
+    Dim str_SupplierNumber As String
+    Dim str_SupplierName As String
+    Dim str_PartDescription As String
+    Dim str_PartUnitCost As String
+    Dim str_Keyword As String
+    Dim temp 'temp array to hold values from the split function
+    
+    On Error GoTo Error_Handler
+    
+    'Splits the string into two at the first instance of ":"
+    'the values before and after the ":" are saved into two variables passed in by
+    'reference
+    temp = Split(Trim(cboSupplierName.Text), " Price:")
+    
+    str_SupplierNumber = Trim(cboSupplierNumber.Text)
+    str_SupplierName = temp(0) 'the values before the " Price:"
+    str_PartDescription = Trim(cboPartDescription.Text)
+    str_PartUnitCost = Trim(txtPartUnitCost.Text)
+    str_Keyword = Trim(cboKeyword.Text)
+    
+    Call frmAddNonStockCodedPart.PassParameters(m_var_NSCPRowID, _
+                                                m_l_ID, _
+                                                str_SupplierNumber, _
+                                                str_SupplierName, _
+                                                str_PartDescription, _
+                                                str_PartUnitCost, _
+                                                str_Keyword, _
+                                                True)
+    frmAddNonStockCodedPart.m_str_AuditReference = m_str_AuditReference
+    frmAddNonStockCodedPart.m_str_AuditReferenceType = m_str_TypeCode
+    frmAddNonStockCodedPart.cboSupplierName.Enabled = False
+    frmAddNonStockCodedPart.cboSupplierNumber.Enabled = False
+    frmAddNonStockCodedPart.Show vbModal
+    cmdResolve.Caption = "Resolve"
+    ' Once the non stock coded part is updated refresh the form
+    Call Resolve
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdEditDetails_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub Form_Load()
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+    
+    Me.Height = 4470
+    Me.Width = 7185
+    Call PopulateFields
+    
+    Call SetDefaultCursor
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_Load", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Public Sub PassValues(ByVal str_SupplierNumber As String, _
+                      ByVal str_SupplierName As String, _
+                      ByVal str_CostCentre As String, _
+                      ByVal str_PercentUsage As String, _
+                      ByVal str_Quantity As String, _
+                      ByVal var_RowIDPass As Variant, _
+                      ByVal cur_CoreCost As Currency)
+    
+    Dim RS As ADODB.Recordset
+    
+    On Error GoTo Error_Handler
+    
+    m_var_RowID = var_RowIDPass
+    
+    cboSupplierNumber.Text = str_SupplierNumber
+    cboSupplierName.Text = str_SupplierName
+    cmdResolve.Caption = "Resolve"
+    
+    Call Resolve
+    
+    cboCostCentre.Text = str_CostCentre
+    txtQuantity.Text = Replace(str_Quantity, ",", ".")
+    txtPercentUsage.Text = str_PercentUsage
+    
+    cmdAdd.Caption = "Update"
+    cmdClose.Visible = False
+    cmdResolve.Enabled = False
+    cboSupplierNumber.Enabled = False
+    
+    Set RS = modDBHelper.RetrieveSCPUsedROWID("CES_INQUIRY.retrieve_one_nscp_used", _
+                                             var_RowIDPass)
+    txtCoreCost.Text = Format(RS("CORECOST"), "0.00")
+    Set RS = Nothing
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PassValues", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub PopulateFields()
+    On Error GoTo Error_Handler
+    
+    Set cboSupplierNumber.RowSource = modDBHelper.PopulateNSCComboBoxes( _
+                                                "CES_INQUIRY.POPULATE_NSC_COMBOXES", _
+                                                "1")
+    cboSupplierNumber.ListField = "orig_supplier_num"
+
+    Set cboKeyword.RowSource = modDBHelper.PopulateNSCComboBoxes( _
+                                                "CES_INQUIRY.POPULATE_NSC_COMBOXES", _
+                                                "2")
+    cboKeyword.ListField = "keyword"
+
+    Set cboPartDescription.RowSource = modDBHelper.PopulateNSCComboBoxes( _
+                                                "CES_INQUIRY.POPULATE_NSC_COMBOXES", _
+                                                "3")
+    cboPartDescription.ListField = "detailed_desc"
+
+
+    Set cboCostCentre.RowSource = modDBHelper.PopulateCostCentres( _
+                                                "CES_INQUIRY.RETRIEVE_COST_CENTRES")
+    cboCostCentre.ListField = "cost_centre"
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PopulateFields", g_l_ErrorLineNumber
+End Sub
+
+Private Sub cmdResolve_Click()
+    On Error GoTo Error_Handler
+
+    Call Resolve
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdResolve_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub Resolve()
+    Dim RS As ADODB.Recordset
+    Dim temp
+    
+    On Error GoTo Error_Handler
+
+    Call SetWaitCursor
+    
+    Set RS = New ADODB.Recordset
+    
+    If cmdResolve.Caption = "Resolve" Then
+        'Query database to load vehicle estimate
+        'retrieve part by part number only, save results to Recordset
+        Set RS = modDBHelper.SearchNSCPPartBy2Fields( _
+                                        "CES_INQUIRY.SEARCH_NSCP_PART_BY_2_FIELDS", _
+                                        cboSupplierNumber.Text, _
+                                        cboSupplierName.Text)
+        If RS.RecordCount = 0 Then
+            Set RS = Nothing
+            Call SetDefaultCursor
+            cmdAdd.Enabled = False
+            cmdEditDetails.Enabled = False
+            MsgBox "No information for the Part Number."
+            cmdResolve.Caption = "Find Supplier Name"
+            Exit Sub
+        ElseIf RS.RecordCount > 1 Then
+            Set RS = Nothing
+            Call SetDefaultCursor
+            cmdAdd.Enabled = False
+            cmdEditDetails.Enabled = False
+            m_str_Msg = "There are more than one record for this Non Stock Coded Part. "
+            m_str_Msg = m_str_Msg + "Please edit/remove the duplicate(s) Non Stock "
+            m_str_Msg = m_str_Msg + "Coded part from the system."
+            MsgBox m_str_Msg
+            Exit Sub
+        ElseIf RS.RecordCount = 1 Then
+            cboKeyword.Text = RS.Fields.Item("KEYWORD")
+            cboPartDescription.Text = RS.Fields.Item("DESCRIPTION")
+            txtPartUnitCost.Text = Format(RS.Fields.Item("PRICE"), "0.00")
+            txtLastRevised.Text = RS.Fields.Item("LAST MODIFIED DATE")
+            m_l_ID = RS.Fields.Item("ID")
+            m_var_NSCPRowID = RS.Fields.Item("ROWID")
+            cmdAdd.Enabled = True
+            cmdResolve.Default = False
+            cmdAdd.Default = True
+            cmdEditDetails.Enabled = True
+        End If
+        cmdResolve.Caption = "Find Supplier Name"
+    Else 'If cmdResolve.Caption = "Find Supplier Name"
+        If Trim(cboSupplierNumber.Text) = "" Then
+            Call SetDefaultCursor
+            MsgBox "Please provide Supplier Number."
+            cboSupplierNumber.SetFocus
+            Exit Sub
+        End If
+        
+        'Find Supplier Name by Spplier Number
+        Set RS = modDBHelper.FindSupplierNameByNumber( _
+                                        "CES_INQUIRY.FIND_SUPPLIER_NAME_BY_NUMBER", _
+                                        Trim(cboSupplierNumber.Text))
+        If RS.RecordCount = 0 Then
+            Call SetDefaultCursor
+            MsgBox "Can not find Supplier Name for provided Supplier Number."
+            cboSupplierNumber.SetFocus
+            Set RS = Nothing
+            Exit Sub
+        End If
+        
+        Set cboSupplierName.RowSource = RS
+        cboSupplierName.ListField = "orig_supplier_name"
+        cboSupplierName.Enabled = True
+        cboSupplierName.Text = RS.Fields.Item("orig_supplier_name")
+        cmdResolve.Caption = "Resolve"
+    End If
+        
+    temp = Split(Trim(cboSupplierName.Text), " Price:")
+    cboSupplierName.Text = temp(0)
+    Set RS = Nothing
+    
+    Call SetDefaultCursor
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Resolve", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
+    On Error GoTo Error_Handler
+    
+    Call SetDefaultCursor
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_QueryUnload", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub txtPercentUsage_GotFocus()
+    On Error GoTo Error_Handler
+
+    txtPercentUsage.SelStart = 0
+    txtPercentUsage.SelLength = Len(txtPercentUsage.Text)
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "txtPercentUsage_GotFocus", g_l_ErrorLineNumber
+End Sub
+
+Private Sub txtQuantity_GotFocus()
+    On Error GoTo Error_Handler
+
+    txtQuantity.SelStart = 0
+    txtQuantity.SelLength = Len(txtQuantity.Text)
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "txtQuantity_GotFocus", g_l_ErrorLineNumber
+End Sub
+frmAddLabourTask.frm :
+'=================================================================
+'frmAddLabourTask.frm
+'
+'Adds a non stock coded part to the cost tracking system database.
+'===============================================================
+Option Explicit
+
+Private m_str_Hours As String
+Private m_str_Minutes As String
+Private m_str_Msg As String
+Private Const m_str_const_MsgBoxCaption As String = "Add / Update Labour Tasks"
+
+Public m_str_TypeID As String
+Public m_str_PartID As String
+Public m_str_LinkNumber As String
+Public m_str_AuditReference As String
+
+Private Sub cmdClose_Click()
+    On Error GoTo Error_Handler
+    
+    Unload Me
+    Exit Sub
+    
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdClose_Click", g_l_ErrorLineNumber
+End Sub
+
+'The cmdAddLabourTask_Click button either Adds a new non-stock coded part into
+'the cost estimate system or updates an existing non-stock coded part
+Private Sub cmdAddLabourTask_Click()
+    Dim l_Result As Long
+    Dim l_RetVal As Long
+    Dim l_Count As Long
+    Dim str_FixedMins As String
+    Dim str_FixedHours As String
+    Dim str_TimeInDecimal As String
+    Dim str_AdjTimeInDecimal As String
+    Dim str_LabourType As String
+    Dim RS As ADODB.Recordset
+    Dim str_PercentUsage As String
+    Dim str_TaskDescription As String
+    Dim str_CostCentre As String
+    Dim str_LabourPosition As String
+    
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+    
+    'Make sure that user choused something from the cboTaskDescription combo-box.
+    str_TaskDescription = Trim(cboTaskDescription.Text)
+    If str_TaskDescription = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Please choose Task Description."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        cboTaskDescription.SetFocus
+        Exit Sub
+    End If
+    
+    'Make sure that user choused something from the cboLabourPosition combo-box.
+    str_LabourPosition = Trim(cboLabourPosition.Text)
+    If str_LabourPosition = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Please choose Labour Position."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        cboLabourPosition.SetFocus
+        Exit Sub
+    End If
+    
+    'Make sure that user choused something from the cboCostCentre combo-box.
+    str_CostCentre = Trim(cboCostCentre.Text)
+    If str_CostCentre = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Please choose Cost Centre."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        cboCostCentre.SetFocus
+        Exit Sub
+    End If
+        
+    'Confirm that the percent is entered correctly
+    str_PercentUsage = Trim(txtPercentUsage.Text)
+    If str_PercentUsage = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Please enter Percent Usage."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        txtPercentUsage.SetFocus
+        Exit Sub
+    End If
+    If CheckPercent(str_PercentUsage) = False Then
+        Call SetDefaultCursor
+        m_str_Msg = "Percent Usage is not entered correctly. Percent Usage can be a "
+        m_str_Msg = m_str_Msg + "positive number between 0 and 100 inclusive with "
+        m_str_Msg = m_str_Msg + "possible fraction."
+        MsgBox m_str_Msg, vbExclamation Or vbOKOnly, m_str_const_MsgBoxCaption
+        txtPercentUsage.SetFocus
+        Exit Sub
+    End If
+
+    str_PercentUsage = Replace(str_PercentUsage, ".", ",")
+    
+    'Confirm that the hours are entered correctly
+    str_FixedHours = Trim(txtHoursRequired.Text)
+    If str_FixedHours = "" Then
+        str_FixedHours = "0"
+        txtHoursRequired.Text = "0"
+    End If
+    
+    If Not IsValidLong(str_FixedHours) Or Int(str_FixedHours) < 0 Then
+        Call SetDefaultCursor
+        m_str_Msg = "Hours not entered correctly."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        txtHoursRequired.SetFocus
+        Exit Sub
+    End If
+    str_FixedHours = Round(str_FixedHours, 0)
+    
+    'Confirm that the minutes are entered correctly
+    str_FixedMins = Trim(txtMinutesRequired.Text)
+    If str_FixedMins = "" Then
+        str_FixedMins = "00"
+        txtMinutesRequired.Text = "00"
+    End If
+    If Not IsValidLong(str_FixedHours) Then
+        Call SetDefaultCursor
+        m_str_Msg = "Minutes not entered correctly."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        txtMinutesRequired.SetFocus
+        Exit Sub
+    End If
+    If Int(str_FixedMins) < 0 Or Int(str_FixedMins) > 59 Then
+        Call SetDefaultCursor
+        m_str_Msg = "Minutes must be between 0 and 59."
+        MsgBox m_str_Msg, vbOKOnly Or vbExclamation, m_str_const_MsgBoxCaption
+        txtMinutesRequired.SetFocus
+        Exit Sub
+    End If
+    str_FixedMins = Round(str_FixedMins, 0)
+    If (Len(str_FixedMins) = 1) Then
+        str_FixedMins = 0 & str_FixedMins
+    End If
+    
+    str_TimeInDecimal = str_FixedHours & "." & MinutesToDecimal(str_FixedMins)
+    
+    str_AdjTimeInDecimal = CStr(CDbl(str_TimeInDecimal) / g_dbl_NonProductiveTimeAdj)
+    
+    If cmdAddLabourTask.Caption = "Add Labour Task" Then
+        l_Result = modDBHelper.AddLabourTasks("CES_UPDATE.ADD_LABOUR_TASKS", _
+                                              l_RetVal, _
+                                              str_LabourPosition, _
+                                              m_str_LinkNumber, _
+                                              m_str_TypeID, _
+                                              str_CostCentre, _
+                                              str_TaskDescription, _
+                                              str_LabourType, _
+                                              str_PercentUsage, _
+                                              str_FixedHours & ":" & str_FixedMins, _
+                                              DecimalToMinutes(str_AdjTimeInDecimal), _
+                                              CDbl(str_TimeInDecimal), _
+                                              " ", _
+                                              g_str_UserName)
+        If (l_Result = 0) Then
+            Call SetDefaultCursor
+            m_str_Msg = "Labour Task has been added."
+            MsgBox m_str_Msg, vbInformation Or vbOKOnly, m_str_const_MsgBoxCaption
+        Else
+            Call SetDefaultCursor
+            m_str_Msg = "There was an error adding the Labour Task.  Please Contact "
+            m_str_Msg = m_str_Msg + "Administrator."
+            MsgBox m_str_Msg, vbCritical Or vbOKOnly, m_str_const_MsgBoxCaption
+            Exit Sub
+        End If
+        
+        'Add record to the AUDIT_MODIFY_HISTORY table.
+        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Add Labour Task", _
+                            m_str_AuditReference, _
+                            m_str_TypeID, _
+                            "Task Description ---> " + str_TaskDescription, _
+                            "Labour Position ---> " + str_LabourPosition, _
+                            "Cost Centre ---> " + str_CostCentre, _
+                            "Percent Usage ---> " + str_PercentUsage, _
+                            "Hours Reqired (Hours) ---> " + str_FixedHours, _
+                            "Hours Reqired (Minutes) ---> " + str_FixedMins)
+
+        ' If adding a labour task was performed inside a rebuilt part then cycle
+        ' changes to all estimates containing this rebuilt part
+        If m_str_TypeID = "RB" Then
+            
+            'Now find all estimates where current Rebuilt Part Estimate is present.
+            Set RS = New ADODB.Recordset
+            
+            'In the SC_PARTS_USED table find all Estimates where the current RBE is present.
+            Set RS = modDBHelper.RetrieveESTToPropagateRB("CES_INQUIRY.RETRIEVE_EST_TO_PROPAGATE_RB", _
+                                                          m_str_AuditReference)
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                    For l_Count = 0 To RS.RecordCount - 1
+                        'Add records to the AUDIT_MODIFY_HISTORY table.
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Labour was added from the Rebuilt Part Estimate " + m_str_AuditReference, _
+                            RS.Fields.Item("link_code"), _
+                            RS.Fields.Item("link_type"), _
+                            "Task Description ---> " + str_TaskDescription, _
+                            "Labour Position ---> " + str_LabourPosition, _
+                            "Cost Centre ---> " + str_CostCentre, _
+                            "Percent Usage ---> " + str_PercentUsage, _
+                            "Hours Reqired (Hours) ---> " + str_FixedHours, _
+                            "Hours Reqired (Minutes) ---> " + str_FixedMins)
+                        RS.MoveNext
+                    Next l_Count
+            End If
+            Set RS = Nothing
+        End If
+    Else 'If cmdAddLabourTask.Caption = "Update Labour" Then
+        l_Result = modDBHelper.UpdateLabourTasks("CES_UPDATE.UPDATE_LABOUR_TASKS", _
+                                                 l_RetVal, _
+                                                 str_LabourPosition, _
+                                                 m_str_LinkNumber, _
+                                                 m_str_TypeID, _
+                                                 str_CostCentre, _
+                                                 str_TaskDescription, _
+                                                 str_LabourType, _
+                                                 str_PercentUsage, _
+                                                 str_FixedHours & ":" & str_FixedMins, _
+                                                 DecimalToMinutes(str_AdjTimeInDecimal), _
+                                                 m_str_PartID, _
+                                                 CDbl(str_TimeInDecimal), _
+                                                 g_str_UserName)
+    
+        If (l_Result = 0) Then
+            Call SetDefaultCursor
+            m_str_Msg = "Labour Task has been updated."
+            MsgBox m_str_Msg, vbInformation Or vbOKOnly, m_str_const_MsgBoxCaption
+        Else
+            Call SetDefaultCursor
+            m_str_Msg = "There was an error Updating the Labour Task.  Please Contact "
+            m_str_Msg = m_str_Msg + "Administrator."
+            MsgBox m_str_Msg, vbCritical Or vbOKOnly, m_str_const_MsgBoxCaption
+            Exit Sub
+        End If
+        
+        'Add record to the AUDIT_MODIFY_HISTORY table.
+        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Update Labour Task", _
+                            m_str_AuditReference, _
+                            m_str_TypeID, _
+                            "Task Description ---> " + str_TaskDescription, _
+                            "Labour Position ---> " + str_LabourPosition, _
+                            "Cost Centre ---> " + str_CostCentre, _
+                            "Percent Usage ---> " + str_PercentUsage, _
+                            "Hours Reqired (Hours) ---> " + str_FixedHours, _
+                            "Hours Reqired (Minutes) ---> " + str_FixedMins)
+        
+        ' If updating a labour task was performed inside a rebuilt part then cycle
+        ' changes to all estimates containing this rebuilt part
+        If m_str_TypeID = "RB" Then
+            
+            'Now find all estimates where current Rebuilt Part Estimate is present.
+            Set RS = New ADODB.Recordset
+            
+            'In the SC_PARTS_USED table find all Estimates where the current RBE is present.
+            Set RS = modDBHelper.RetrieveESTToPropagateRB("CES_INQUIRY.RETRIEVE_EST_TO_PROPAGATE_RB", _
+                                                          m_str_AuditReference)
+            If RS.RecordCount > 0 Then
+                RS.MoveFirst
+                    For l_Count = 0 To RS.RecordCount - 1
+                        'Add records to the AUDIT_MODIFY_HISTORY table.
+                        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Indirect change. Labour was updated from the Rebuilt Part Estimate " + m_str_AuditReference, _
+                            RS.Fields.Item("link_code"), _
+                            RS.Fields.Item("link_type"), _
+                            "Task Description ---> " + str_TaskDescription, _
+                            "Labour Position ---> " + str_LabourPosition, _
+                            "Cost Centre ---> " + str_CostCentre, _
+                            "Percent Usage ---> " + str_PercentUsage, _
+                            "Hours Reqired (Hours) ---> " + str_FixedHours, _
+                            "Hours Reqired (Minutes) ---> " + str_FixedMins)
+                        RS.MoveNext
+                    Next l_Count
+            End If
+            Set RS = Nothing
+        End If
+        Unload Me
+    End If 'If cmdAddLabourTask.Caption = "Add Labour Task" Then
+    
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdAddLabourTask_Click", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+    Call SetDefaultCursor
+End Sub
+
+Private Sub Form_Load()
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+    
+    Call PopulateDropdowns
+    If (m_str_PartID <> "") Then
+        cmdAddLabourTask.Caption = "Update Labour"
+        Me.Caption = "Update a Labour Task"
+        fraAddLabourTask.Caption = "Update a Labour Task"
+        'Prepare to retrieve data
+        Call PopulateFields
+    End If
+    
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_Load", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub PopulateDropdowns()
+    Dim RS As ADODB.Recordset
+
+    On Error GoTo Error_Handler
+
+    'Set RS = New ADODB.Recordset
+    'Load the data into the input forms for editing
+    
+    Set RS = modDBHelper.RetrieveTaskDescription("CES_INQUIRY.RETRIEVE_TASK_DESCRIPTION")
+    Set cboTaskDescription.RowSource = RS
+    cboTaskDescription.ListField = "TASK DESCRIPTION"
+    
+    Set RS = modDBHelper.RetrieveLabourPosition("CES_INQUIRY.RETRIEVE_LABOUR_POSITION")
+    Set cboLabourPosition.RowSource = RS
+    cboLabourPosition.ListField = "LABOUR_DEFN"
+    
+    Set RS = modDBHelper.RetrieveCostCentres("CES_INQUIRY.RETRIEVE_COST_CENTRES")
+    Set cboCostCentre.RowSource = RS
+    cboCostCentre.ListField = "COST_CENTRE"
+
+    Set RS = Nothing
+    
+    Exit Sub
+    
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PopulateDropdowns", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub PopulateFields()
+    Dim RS As ADODB.Recordset
+    
+    On Error GoTo Error_Handler
+    
+    m_str_Hours = " "
+    m_str_Minutes = " "
+    'Query database to load vehicle estimate
+    Set RS = New ADODB.Recordset
+    Set RS = modDBHelper.RetrieveMBAllLabour("CES_INQUIRY.RETRIEVE_MB_ALL_LABOUR", m_str_PartID)
+    If RS.RecordCount > 0 Then
+        'RS.Filter = "rowid = '" + m_str_PartID + "'"
+        ParseHours RS.Fields.Item("HRS_REQD"), m_str_Hours, m_str_Minutes
+        
+        'Load values into text boxes
+        txtHoursRequired.Text = m_str_Hours
+        txtMinutesRequired.Text = m_str_Minutes
+        txtPercentUsage.Text = Replace(RS.Fields.Item("USAGE"), ",", ".")
+        cboTaskDescription.Text = RS.Fields.Item("TASK")
+        cboCostCentre.Text = RS.Fields.Item("COSTCENTRE")
+        cboLabourPosition.Text = RS.Fields.Item("LABOUR_DEFN")
+    End If
+       
+    Set RS = Nothing
+    Exit Sub
+    
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PopulateFields", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
+    On Error GoTo Error_Handler
+    
+    Call SetDefaultCursor
+    m_str_TypeID = ""
+    m_str_PartID = ""
+    m_str_LinkNumber = ""
+    Unload Me
+        
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_QueryUnload", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub fraAddLabourTask_DragDrop(Source As Control, X As Single, Y As Single)
+
+End Sub
+
+frmAddLabourGroup.frm :
+'- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+'Description:  This form adds/edits a new employee group.  An employee group is a specific
+'              the labour job with its hours per week and pay.  This form allows the user to add
+'              and edit this information.
+'- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Option Explicit
+
+Private m_str_Msg As String
+
+Private Sub cmdAdd_Click()
+    Dim RS As ADODB.Recordset
+    Dim str_LabourDefinition As String
+    Dim dbl_RatePerHour As Double
+    Dim dbl_HoursPerWeek As Double
+    Dim dbl_OverheadType As Double
+    Dim l_Result As Long
+    Dim l_RetVal As Long
+    Dim l_WageGroup As Long
+    
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+
+    'Check that user typed some data into txtLabourDefinition edit-box.
+    str_LabourDefinition = Trim(txtLabourDefinition.Text)
+    If str_LabourDefinition = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Labour definition can not be empty."
+        MsgBox m_str_Msg, vbOKOnly + vbInformation
+        txtLabourDefinition.SetFocus
+        Exit Sub
+    End If
+
+    'Check that user choused some data from the cboRatePerHour combo-box.
+    If cboRatePerHour.Text = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Please choose Rate Per Hour."
+        MsgBox m_str_Msg, vbOKOnly + vbInformation
+        cboRatePerHour.SetFocus
+        Exit Sub
+    Else
+        dbl_RatePerHour = CDbl(cboRatePerHour.Text)
+    End If
+    
+    'Check that user choused some data from the cboHoursPerWeek combo-box.
+    If cboHoursPerWeek.Text = "" Then
+        Call SetDefaultCursor
+        m_str_Msg = "Please choose Hours Per Week."
+        MsgBox m_str_Msg, vbOKOnly + vbInformation
+        cboHoursPerWeek.SetFocus
+        Exit Sub
+    Else
+        dbl_HoursPerWeek = CDbl(cboHoursPerWeek.Text)
+    End If
+    
+    'Check that data from the txtLabourDefinition edit-box is not duplicated in the
+    'EMPL_CLASS table.
+    Set RS = New ADODB.Recordset
+    Set RS = modDBHelper.SearchEmplClassLabourDefn( _
+                                        "CES_INQUIRY.SEARCH_EMPL_CLASS_LABOUR_DEFN", _
+                                        str_LabourDefinition)
+    If RS.RecordCount > 0 Then
+        Set RS = Nothing
+        Call SetDefaultCursor
+        m_str_Msg = "The same Labour Definition already exists."
+        MsgBox m_str_Msg, vbOKOnly + vbInformation
+        txtLabourDefinition.SetFocus
+        Exit Sub
+    End If
+    
+    'Get value from the EMPLOYEE_SALARIES.WAGE_GROUP.
+    Set RS = modDBHelper.SearchEmployeeSalaries( _
+                                        "CES_INQUIRY.SEARCH_EMPLOYEE_SALARIES", _
+                                        dbl_RatePerHour)
+    If RS.RecordCount = 0 Then
+        Set RS = Nothing
+        Call SetDefaultCursor
+        m_str_Msg = "The Rate Per Hour = '" + CStr(dbl_RatePerHour) + "' data in "
+        m_str_Msg = m_str_Msg + "the EMPLOYEE_SALARIES does not exist. Please contact "
+        m_str_Msg = m_str_Msg + "administrator."
+        MsgBox m_str_Msg, vbOKOnly + vbInformation
+        Exit Sub
+    Else
+        l_WageGroup = CLng(RS.Fields.Item("wage_group"))
+    End If
+    
+    Set RS = Nothing
+    
+    'Insert a new record into the EMPL_CLASS table.
+    l_Result = modDBHelper.AddEmplClass("CES_UPDATE.ADD_EMPL_CLASS", _
+                                        l_RetVal, _
+                                        str_LabourDefinition, _
+                                        l_WageGroup, _
+                                        dbl_HoursPerWeek, _
+                                        dbl_OverheadType)
+    If l_Result > 0 Then
+        Call SetDefaultCursor
+        m_str_Msg = "Employee Group is added."
+        MsgBox m_str_Msg, vbOKOnly + vbInformation
+        
+        'Refresh grdEmployeeGroup grid in the frmEmployeeGroup screen.
+        Call frmEmployeeGroup.PopulateGrid
+        
+        'Add record to the AUDIT_MODIFY_HISTORY table.
+        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                            "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                            l_RetVal, _
+                            "Employee Group was added to the System", _
+                            l_Result, _
+                            "LT", _
+                            "Labour Definition ---> " + Trim(txtLabourDefinition.Text), _
+                            "Rate Per Hour ---> " + Trim(cboRatePerHour.Text), _
+                            "Hours Per Week ---> " + Trim(cboHoursPerWeek.Text), _
+                            "Overhead Type ---> " + Trim(txtOverheadType.Text))
+        Unload Me
+    Else
+        Call SetDefaultCursor
+        'For some reason record was not inserted into the EMPL_CLASS table.
+        m_str_Msg = "Employee Group is not added. Please contact administrator."
+        MsgBox m_str_Msg, vbOKOnly + vbInformation
+    End If
+    
+        Call SetDefaultCursor
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdAdd_Click", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub cmdCancel_Click()
+    On Error GoTo Error_Handler
+
+    Unload Me
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdAdd_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub Form_Load()
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+
+    Call PopulateCombos
+    
+    txtOverheadType.Text = CStr(g_dbl_NonProductiveTimeAdj)
+    
+    Call SetDefaultCursor
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_Load", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub PopulateCombos()
+    Dim RS As ADODB.Recordset
+    Dim l_Count As Long
+    
+    On Error GoTo Error_Handler
+
+    For l_Count = 1 To 168 ' 7 days x 24 hours = 168 hours in one week.
+        cboHoursPerWeek.AddItem CStr(l_Count)
+    Next l_Count
+    cboHoursPerWeek.Text = "40"
+    
+    Set RS = New ADODB.Recordset
+    Set RS = modDBHelper.RetrieveEmployeeSalaries("CES_INQUIRY.RETRIEVE_EMPLOYEE_SALARIES")
+    
+    Set cboRatePerHour.RowSource = RS
+    cboRatePerHour.ListField = "RATE PER HOUR"
+    
+    Set RS = Nothing
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "PopulateCombos", g_l_ErrorLineNumber
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
+    On Error GoTo Error_Handler
+    
+    Call SetDefaultCursor
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_QueryUnload", g_l_ErrorLineNumber
+    Call SetDefaultCursor
+End Sub
+
+Private Sub txtLabourDefinition_KeyUp(KeyCode As Integer, Shift As Integer)
+    Dim str_Data As String
+    Dim l_CursorPosition As Long
+    
+    On Error GoTo Error_Handler
+
+    'Convert data in the txtLabourDefinition edit-box to upper case.
+    l_CursorPosition = txtLabourDefinition.SelStart
+    str_Data = txtLabourDefinition.Text
+    str_Data = UCase(str_Data)
+    txtLabourDefinition.Text = str_Data
+    txtLabourDefinition.SelStart = l_CursorPosition
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "txtLabourDefinition_KeyUp", g_l_ErrorLineNumber
+End Sub
+frmConvertToRebuiltPart.frm :
+Option Explicit
+Private m_str_Msg As String
+Private RS As ADODB.Recordset
+
+Private Sub cmdCancel_Click()
+    On Error GoTo Error_Handler
+
+    Unload Me
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdCancel_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub cmdConvert_Click()
+    Dim l_Result As Long
+    Dim l_RetVal As Long
+    Dim str_MBNumber As String
+    Dim str_MMSStockCode As String
+    Dim str_RBStockCodeFromDB As String
+    Dim str_MMSStockCodeFromDB As String
+    Dim str_DetailedDescription As String
+    Dim str_Keyword As String
+    Dim str_CorePartNumber As String
+    Dim str_RebuiltStockNumber As String
+    Dim str_JobNumber As String
+    Dim str_SOPNumber As String
+    Dim str_LastModifiedBy As String
+    Dim str_BuyCost As String
+    Dim str_ExternalCost As String
+    Dim str_RemanufacturedCost As String
+    Dim str_core_charge As String
+    Dim l_Count As Long
+    
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+    
+    str_RebuiltStockNumber = Trim(txtRebuiltPartNumber.Text)
+    'Make sure that data in the txtRebuiltPartNumber edit-box is not empty.
+    If str_RebuiltStockNumber = "" Then
+        Call SetWaitCursor
+        m_str_Msg = "Rebuilt Part # should not be empty."
+        MsgBox m_str_Msg, vbInformation + vbOKOnly
+        txtRebuiltPartNumber.SetFocus
+        Exit Sub
+    End If
+    
+    'Make sure that data in the txtStockCodedNumber edit-box is not empty.
+    str_MMSStockCode = Trim(txtStockCodedNumber.Text)
+    If str_MMSStockCode = "" Then
+        Call SetWaitCursor
+        m_str_Msg = "Stock Code # should not be empty."
+        MsgBox m_str_Msg, vbInformation + vbOKOnly
+        txtStockCodedNumber.SetFocus
+        Exit Sub
+    End If
+    
+    'Make sure that data in the txtRebuiltPartNumber edit-box is not in the
+    'RB_MASTERLIST.REBUILT_STOCK_NUM field.
+    
+    Set RS = New ADODB.Recordset
+    Set RS = modDBHelper.RetrieveRB("CES_INQUIRY.RETRIEVE_RB")
+    
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 1 To RS.RecordCount
+            str_RBStockCodeFromDB = RS.Fields.Item("REBUILT_STOCK_NUM")
+            If str_RebuiltStockNumber = str_RBStockCodeFromDB Then
+                Call SetWaitCursor
+                Set RS = Nothing
+                m_str_Msg = "Rebuilt Part Number is duplicated. Please provide another one."
+                MsgBox m_str_Msg, vbInformation + vbOKOnly
+                If txtRebuiltPartNumber.Enabled = True Then
+                    txtRebuiltPartNumber.SetFocus
+                End If
+                Exit Sub
+            End If
+            RS.MoveNext
+        Next l_Count
+    End If
+    
+    'NOTE. NEXT INSERTS ARE NOT ATOMIC. ALL OF THEM SHOULD BE UNDER ONE TRANSACTION.
+    '      IF, LET SAY, ONE INSERTION "CES_UPDATE.ADD_NSCP_USED" WILL FAIL, DATA IN THE
+    '      DATABASE WILL NOT BE CONSISTANT.
+    
+    'Get information from the MB_LIST table.
+    str_MBNumber = Trim(txtMakeBuyNumber.Text)
+    Set RS = modDBHelper.RetrieveMBListByMBNumber( _
+                                        "CES_INQUIRY.RETRIEVE_MB_LIST_BY_MB_NUMBER", _
+                                        str_MBNumber)
+    str_DetailedDescription = RS.Fields.Item("DESCRIPTION")
+    str_Keyword = RS.Fields.Item("KEYWORD")
+    str_CorePartNumber = RS.Fields.Item("CORE_CODE")
+    str_JobNumber = RS.Fields.Item("BENCH_NUMBER")
+    str_LastModifiedBy = modMain.g_str_UserName
+    str_SOPNumber = RS.Fields.Item("SOP_Number")
+    str_BuyCost = RS.Fields.Item("Buy_New_cost")
+    str_ExternalCost = RS.Fields.Item("External_Cost")
+    str_RemanufacturedCost = RS.Fields.Item("Reman_Cost")
+    str_JobNumber = " "
+    If IsNull(RS.Fields.Item("JOB_NUMBER")) = False Then
+        str_JobNumber = RS.Fields.Item("JOB_NUMBER")
+    End If
+    
+    str_core_charge = RS.Fields.Item("CORE_CHARGE")
+    
+    'Insert a new record into RB_MASTERLIST table.
+    l_Result = modDBHelper.InsertRBMasterList("CES_UPDATE.INSERT_RB_MASTERLIST", _
+                                              l_RetVal, _
+                                              str_MMSStockCode, _
+                                              str_DetailedDescription, _
+                                              str_Keyword, _
+                                              str_CorePartNumber, _
+                                              str_RebuiltStockNumber, _
+                                              str_JobNumber, _
+                                              str_LastModifiedBy, _
+                                              str_SOPNumber, _
+                                              str_BuyCost, _
+                                              str_RemanufacturedCost, _
+                                              str_ExternalCost, _
+                                              str_core_charge)
+
+    'In the NSC_PARTS_USED table find all records with LINK_CODE = str_MBNumber and
+    'LINK_TYPE = "MB".
+    Set RS = modDBHelper.RetrieveNSCPUsed("CES_INQUIRY.RETRIEVE_NSCP_USED_COPY", _
+                                        str_MBNumber, _
+                                        "MB")
+    
+    'Add new records to the NSC_PARTS_USED table, with all fields = fields from the RS,
+    'except:
+    'ENTERED_BY = current user name
+    'LAST_MODIFIED_BY = current user name (done in CES_UPDATE.ADD_NSCP_USED)
+    'LINK_TYPE = "RB"
+    'LINK_CODE = data from the txtRebuiltPartNumber edit-box
+    'DATE_ENTERED = current date (done in CES_UPDATE.ADD_NSCP_USED)
+    'LAST_MODIFIED_DATE = current date (done in CES_UPDATE.ADD_NSCP_USED)
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 1 To RS.RecordCount
+            l_Result = modDBHelper.AddNSCPUsed("CES_UPDATE.ADD_NSCP_USED", _
+                                               l_RetVal, _
+                                               RS.Fields.Item("SUPPLIER NUMBER"), _
+                                               RS.Fields.Item("SUPPLIER NAME"), _
+                                               RS.Fields.Item("CC"), _
+                                               RS.Fields.Item("QTY"), _
+                                               RS.Fields.Item("%"), _
+                                               modMain.g_str_UserName, _
+                                               str_RebuiltStockNumber, _
+                                               RS.Fields.Item("UNIT COST"), _
+                                               "RB", _
+                                               RS.Fields.Item("CORE COST"), _
+                                               RS.Fields.Item("ID"))
+            RS.MoveNext
+        Next l_Count
+    End If
+    
+    'In the SC_PARTS_USED table find all records with LINK_CODE = str_MBNumber and
+    'LINK_TYPE = "MB" and REBUILT_PART = "Y"
+    Set RS = modDBHelper.RetrieveSCPUsed("CES_INQUIRY.RETRIEVE_SCP_USED_COPY", _
+                                         str_MBNumber, _
+                                         "Y", _
+                                         "MB")
+    
+    'Add new records to the SC_PARTS_USED table, with all fields = fields from the RS,
+    'except:
+    'USER_ENTERED = current user name
+    'LAST_MODIFIED_BY = current user name (done in CES_UPDATE.ADD_SCP_USED)
+    'LINK_TYPE = "RB"
+    'LINK_CODE = data from the txtRebuiltPartNumber edit-box
+    'DATE_ENTERED = current date (done in CES_UPDATE.ADD_SCP_USED)
+    'LAST_MODIFIED_DATE = current date (done in CES_UPDATE.ADD_SCP_USED)
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 1 To RS.RecordCount
+        l_Result = modDBHelper.AddSCPUsed("CES_UPDATE.ADD_SCP_USED", _
+                                          l_RetVal, _
+                                          RS.Fields.Item("STOCK CODE"), _
+                                          RS.Fields.Item("CC"), _
+                                          RS.Fields.Item("QTY"), _
+                                          RS.Fields.Item("%"), _
+                                          modMain.g_str_UserName, _
+                                          RS.Fields.Item("UNIT COST"), _
+                                          RS.Fields.Item("OEM COST"), _
+                                          str_RebuiltStockNumber, _
+                                          RS.Fields.Item("REBUILT PART"), _
+                                          "RB", _
+                                          RS.Fields.Item("CORE COST"), _
+                                          RS.Fields.Item("MMS REBUILT CODE"), _
+                                          RS.Fields.Item("REBUILT PART COST"))
+            RS.MoveNext
+        Next l_Count
+    End If
+    
+    Set RS = modDBHelper.RetrieveSCPUsed("CES_INQUIRY.RETRIEVE_SCP_USED_COPY", _
+                                     str_MBNumber, _
+                                     "N", _
+                                     "MB")
+    
+    'Add new records to the SC_PARTS_USED table, with all fields = fields from the RS,
+    'except:
+    'USER_ENTERED = current user name
+    'LAST_MODIFIED_BY = current user name (done in CES_UPDATE.ADD_SCP_USED)
+    'LINK_TYPE = "RB"
+    'LINK_CODE = data from the txtRebuiltPartNumber edit-box
+    'DATE_ENTERED = current date (done in CES_UPDATE.ADD_SCP_USED)
+    'LAST_MODIFIED_DATE = current date (done in CES_UPDATE.ADD_SCP_USED)
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 1 To RS.RecordCount
+        l_Result = modDBHelper.AddSCPUsed("CES_UPDATE.ADD_SCP_USED", _
+                                          l_RetVal, _
+                                          RS.Fields.Item("STOCK CODE"), _
+                                          RS.Fields.Item("CC"), _
+                                          RS.Fields.Item("QTY"), _
+                                          RS.Fields.Item("%"), _
+                                          modMain.g_str_UserName, _
+                                          RS.Fields.Item("UNIT COST"), _
+                                          RS.Fields.Item("OEM COST"), _
+                                          str_RebuiltStockNumber, _
+                                          RS.Fields.Item("REBUILT PART"), _
+                                          "RB", _
+                                          RS.Fields.Item("CORE COST"), _
+                                               " ", _
+                                               0)
+            RS.MoveNext
+        Next l_Count
+    End If
+    'In the EMPLOYEE_LABOUR table find all records with LINK_NUMBER = str_MBNumber and
+    'TYPEID = "MB"
+    Set RS = modDBHelper.RetrieveEmployeeLabour("CES_INQUIRY.RETRIEVE_EMPLOYEE_LABOUR", _
+                                                str_MBNumber, _
+                                                "MB")
+    'Add new records to the EMPLOYEE_LABOUR table, with all fields = fields from the RS,
+    'except:
+    'TYPEID = "RB"
+    'LINK_NUMBER = data from the txtRebuiltPartNumber edit-box
+    'DATE_ENTERED = current date (done in CES_UPDATE.ADD_LABOUR_TASKS)
+    'DATE_REVISED = current date (done in CES_UPDATE.ADD_LABOUR_TASKS)
+    
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 1 To RS.RecordCount
+        l_Result = modDBHelper.AddLabourTasks("CES_UPDATE.ADD_LABOUR_TASKS", _
+                                              l_RetVal, _
+                                              RS.Fields.Item("LABOUR_DEFN"), _
+                                              str_RebuiltStockNumber, _
+                                              "RB", _
+                                              RS.Fields.Item("COSTCENTRE"), _
+                                              RS.Fields.Item("TASK"), _
+                                              RS.Fields.Item("LABOUR_TYPE"), _
+                                              RS.Fields.Item("USAGE"), _
+                                              RS.Fields.Item("HRS_REQD"), _
+                                              RS.Fields.Item("ADJ_HRS"), _
+                                              Replace(RS.Fields.Item("TIME_ADDITION").Value, ",", "."), _
+                                              RS.Fields.Item("REBUILT_PART_NUM"), _
+                                              g_str_UserName)
+    
+            RS.MoveNext
+        Next l_Count
+    End If
+    
+    'From the MB_LIST_OF_BUSES table get all records with
+    'MB_NUMBER = data from the txtMakeBuyNumber edit-box.
+    Set RS = modDBHelper.RetrieveMBListOfBuses("CES_INQUIRY.MB_LIST_BUSES", _
+                                               str_MBNumber)
+    'Go through all records in the RS, and insert records into the RB_LIST_OF_BUSES table.
+    'Note: instead of field RS.Fields.Item("MB_NUMBER") we will insert data from the
+    'txtRebuiltPartNumber edit-box ( = str_RebuiltStockNumber).
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 0 To RS.RecordCount - 1
+            l_Result = modDBHelper.InsertRBListOFBuses( _
+                                            "CES_UPDATE.INSERT_RB_LIST_OF_BUSES", _
+                                            l_RetVal, _
+                                            str_RebuiltStockNumber, _
+                                            RS.Fields.Item("LIST_ID"))
+            RS.MoveNext
+        Next l_Count
+    End If
+
+    If l_Result = 0 Then
+        
+        'Add record to the AUDIT_MODIFY_HISTORY table.
+        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                                    "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                                    l_RetVal, _
+                                    "Make Vs Buy was Converted to a Rebuilt Part #" & str_RebuiltStockNumber, _
+                                    str_MBNumber, _
+                                    "MB", _
+                                    "Description ---> " + str_DetailedDescription, _
+                                    "Keyword ---> " + str_Keyword)
+
+        
+        m_str_Msg = "Conversion is done."
+        MsgBox m_str_Msg, vbInformation + vbOKOnly
+    Else
+        'Conversion is failed for some reason.
+        m_str_Msg = "Conversion is failed. Please contact Supervisor."
+        MsgBox m_str_Msg, vbInformation + vbOKOnly
+    End If
+    
+    Call SetWaitCursor
+    Set RS = Nothing
+    
+    Unload Me
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdConvert_Click", g_l_ErrorLineNumber
+    Call SetWaitCursor
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_QueryUnload", g_l_ErrorLineNumber
+    Call SetWaitCursor
+End Sub
+
+Private Sub txtRebuiltPartNumber_KeyUp(KeyCode As Integer, Shift As Integer)
+    Dim l_CursorPosition As Long
+    Dim str_Data As String
+    
+    On Error GoTo Error_Handler
+
+    'Convert data in the txtRebuiltPartNumber edit-box to upper case.
+    l_CursorPosition = txtRebuiltPartNumber.SelStart
+    str_Data = txtRebuiltPartNumber.Text
+    str_Data = UCase(str_Data)
+    txtRebuiltPartNumber.Text = str_Data
+    txtRebuiltPartNumber.SelStart = l_CursorPosition
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "txtRebuiltPartNumber_KeyUp", g_l_ErrorLineNumber
+End Sub
+
+Private Sub txtStockCodedNumber_KeyUp(KeyCode As Integer, Shift As Integer)
+    Dim l_CursorPosition As Long
+    Dim str_Data As String
+    
+    On Error GoTo Error_Handler
+
+    'Convert data in the txtStockCodedNumber edit-box to upper case.
+    l_CursorPosition = txtStockCodedNumber.SelStart
+    str_Data = txtStockCodedNumber.Text
+    str_Data = UCase(str_Data)
+    txtStockCodedNumber.Text = str_Data
+    txtStockCodedNumber.SelStart = l_CursorPosition
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "txtStockCodedNumber_KeyUp", g_l_ErrorLineNumber
+End Sub
