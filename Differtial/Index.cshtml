@@ -1,0 +1,199 @@
+@model IEnumerable<BCES.Models.Admin.DifferentialModel>
+
+@{
+    ViewData["Title"] = "Differential";
+}
+<h6>Differential</h6>
+@(
+    Html.Kendo().Grid<BCES.Models.Admin.DifferentialModel>()
+        .Name("DifferentialGrid")
+        .Columns(columns =>
+        {
+            columns.Bound(p => p.Name).Title("Differential")
+                  .Editable("isNameEditable"); // Use a JavaScript function to determine editability
+
+            columns.Command(command =>
+                                  {
+                                      command.Custom("Delete")
+                                           .Click("showDeleteConfirmation")
+                                           .Text(" ")
+                                           .IconClass("k-icon k-i-delete")
+                                           .HtmlAttributes(new { @class = "text-danger", title = "Delete" });
+                                  }).Title("Actions");
+        })
+        .Events(events => events.Edit("onEdit")) //uppercase
+
+         //InCell
+         .ToolBar(toolbar =>
+        {
+            toolbar.Create();
+            toolbar.Save();
+        })
+        .Editable(editable => editable.Mode(GridEditMode.InCell)) // Inline edit mode
+        .Pageable()
+        .Sortable()
+        .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+        .DataSource(dataSource => dataSource
+            .Ajax()
+            .Events(events => events
+                    .Error("onDataSourceError")
+                    .RequestEnd("onRequestEnd")
+                     )
+            .Model(model =>
+            {
+                model.Id(u => u.Name);
+                model.Field(c => c.Name);
+            })
+            .Read(read => read.Url(Url.Action("ReadDifferential", "Differential")).Type(HttpVerbs.Get))
+            .Create(create => create.Url(Url.Action("CreateDifferential", "Differential")).Type(HttpVerbs.Post))
+           .Update(update => update.Url(Url.Action("UpdateDifferential", "Differential")).Type(HttpVerbs.Post))
+           .Destroy(delete => delete.Url(Url.Action("DeleteDifferential", "Differential")).Type(HttpVerbs.Post))
+        )
+        
+
+        )
+)
+<!-- Custom Delete Confirmation Dialog -->
+<div id="deleteConfirmationDialog" style="display: none;">
+    <div class="confirmation-message">
+        <span class="k-icon k-i-warning confirmation-icon"></span>
+        <!-- Edit this span text  -->
+        <span>Are you sure you want to delete this item?</span>
+    </div>
+    <div class="confirmation-buttons">
+        <button type="button" class="k-button cancel-btn">Cancel</button>
+        <button type="button" class="k-button confirm-btn">Delete</button>
+    </div>
+</div>
+<div id="notification"></div>
+@section Scripts {
+    <script>
+        function getAutoCompleteParams() {
+            var input = $("input[data-role='autocomplete']:focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || "" // Handle empty search text
+            };
+        }
+    </script>
+    <script>
+        // Initialize notification FIRST
+        var notification = $("#notification").kendoNotification({
+            position: {
+                pinned: true,
+                top: 50,
+                right: 30
+            },
+            autoHideAfter: 4000,
+            stacking: "down"
+        }).data("kendoNotification");
+
+        // Error handler
+        function onDataSourceError(e) {
+            let errorMessage = "Operation failed. ";
+
+            if (e.errorThrown) {
+                errorMessage += e.errorThrown;
+            } else if (e.xhr && e.xhr.responseText) {
+                errorMessage += e.xhr.responseText;
+            }
+
+            notification.error(errorMessage);
+        }
+
+        // Success handler
+        function onRequestEnd(e) {
+            if (e.type === "create") {
+                notification.success("Record created successfully");
+            } else if (e.type === "update") {
+                notification.success("Record updated successfully");
+            } else if (e.type === "destroy") {
+                notification.success("Record deleted successfully");
+            }
+        }
+    </script>
+    <script>
+
+        // Initialize custom confirmation dialog
+        var deleteDialog = $("#deleteConfirmationDialog").kendoWindow({
+            width: "400px",
+            title: "Confirm Delete",
+            modal: true,
+            visible: false,
+            actions: ["Close"]
+        }).data("kendoWindow");
+
+        function showDeleteConfirmation(e) {
+            e.preventDefault();
+            var grid = $("#DifferentialGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+
+            // Store reference to the dataItem
+            deleteDialog.dataItem = dataItem;
+
+            deleteDialog.center().open();
+        }
+
+        // Handle dialog buttons
+        $(document).on("click", "#deleteConfirmationDialog .confirm-btn", function () {
+            var grid = $("#DifferentialGrid").data("kendoGrid");
+            var dataItem = deleteDialog.dataItem;
+
+            $.ajax({
+                url: '@Url.Action("DeleteDifferential", "Differential")',
+                type: 'POST',
+                data: { Name: dataItem.Name },
+                success: function () {
+                    grid.dataSource.remove(dataItem);
+                    notification.success("Record deleted successfully");
+                    deleteDialog.close();
+                },
+                error: function (xhr) {
+                    notification.error("Delete failed: " + xhr.responseText);
+                    deleteDialog.close();
+                }
+            });
+        });
+
+        $(document).on("click", "#deleteConfirmationDialog .cancel-btn", function () {
+            deleteDialog.close();
+        });
+
+    </script>
+
+    <script>
+        //Uppercase logic
+          function onEdit(e) {
+            // Get the grid instance
+            var grid = e.sender;
+
+            // Find the edited cell/column index
+            var cell = e.container.closest("td");
+            var columnIndex = cell.index();
+
+            // Get the column definition for the edited cell
+            var column = grid.columns[columnIndex];
+
+            // Extract the field name from the column's `field` property
+            var fieldName = column.field;
+
+            console.log('fieldName:', fieldName);
+            // Check if the edited column is "LabourDefn"
+            if (fieldName === "Name") {
+                // Find the input element in the editor container
+                var input = e.container.find("input");
+
+                // Convert input value to uppercase as the user types
+                input.on("input", function() {
+                    this.value = this.value.toUpperCase();
+                });
+            }
+        }
+
+        // Function to determine if the Name column should be editable
+        function isNameEditable(dataItem) {
+            // Allow editing only if the dataItem is new (i.e., in create mode)
+            return dataItem.isNew();
+        }
+    </script>
+}
