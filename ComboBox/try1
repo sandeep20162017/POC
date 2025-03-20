@@ -1,0 +1,119 @@
+has a filtering feature and doesn't allow free text.
+
+So, the steps would be:
+
+1. Replace the ComboBox with a DropDownList in the EditorTemplate.
+
+2. Configure the DropDownList to enable filtering.
+
+3. Adjust the DataSource to handle filtering correctly.
+
+4. Remove any ComboBox-specific settings like MinLength, since DropDownList's filtering works differently.
+
+5. Ensure that the DropDownList is not editable, so users can't type free text.
+
+Additionally, in the JavaScript, the getComboBoxParams function is used to send the column name and search text. Since we're switching to DropDownList, the parameter retrieval might need adjustment, but if the DropDownList is configured correctly, it should handle filtering automatically.
+
+Another consideration: the user might have been using ComboBox for its auto-complete feature, but actually, DropDownList with filtering provides the desired behavior without allowing free text. So by switching to DropDownList and enabling filtering, the user gets the desired functionality.
+
+So, updating the EditorTemplate to use DropDownList instead of ComboBox, setting the filter, and ensuring server-side filtering is correctly implemented would address the issue. Also, removing the AutoBind(false) and MinLength(2) since DropDownList can load all data upfront or handle server filtering as needed.
+
+Wait, but the user might have a large dataset and wants server-side filtering. In that case, the DropDownList can be configured with server filtering, similar to the ComboBox. The main difference is that DropDownList doesn't allow free text.
+
+Therefore, the revised EditorTemplate should use DropDownList, set up server filtering, and disable editing. This way, the user can search by typing, but only existing items can be selected, and no free text is allowed after selection.
+
+(Due to technical issues, the search service is temporarily unavailable.)
+
+To make the Kendo ComboBox behave like a non-editable dropdown (only allowing pre-defined values), use these changes:
+
+1. Update the EditorTemplate to use a DropDownList instead:
+
+html
+Copy
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().DropDownList() <!-- Changed from ComboBox -->
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains) <!-- Enable filtering -->
+    .AutoBind(true) <!-- Load data immediately -->
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "data-role", "dropdownlist" },
+        { "data-column", fieldName }
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+)
+Run HTML
+2. Remove unnecessary ComboBox-specific configuration:
+
+Removed MinLength(2) and Placeholder("Search...")
+
+Changed AutoBind(false) to AutoBind(true)
+
+3. Add JavaScript to enforce selection from dropdown:
+Add this script to prevent manual text input:
+
+javascript
+Copy
+function getComboBoxParams() {
+    var dropdown = $(".k-dropdown[data-column]").filter(function() {
+        return $(this).find(".k-input").is(":focus");
+    });
+    return {
+        columnName: dropdown.attr("data-column"),
+        searchText: dropdown.find(".k-input").val() || ""
+    };
+}
+
+// Block keyboard input in the filter field
+$(document).on("keydown", ".k-dropdown .k-input", function(e) {
+    if (e.keyCode === 13) { // Allow Enter key
+        return true;
+    }
+    e.preventDefault();
+    return false;
+});
+4. Server-side changes:
+Ensure your GetAutoCompleteData action returns empty results when no matching items are found:
+
+csharp
+Copy
+public JsonResult GetAutoCompleteData(string columnName, string searchText)
+{
+    var results = _dataService.GetFilteredData(columnName, searchText);
+    return Json(results); // Return empty array if no matches
+}
+Key changes:
+
+Switched from ComboBox to DropDownList to disable free-text input
+
+Added input blocking JavaScript to prevent manual typing
+
+Removed client-side filtering constraints
+
+Maintained server-side filtering for performance
+
+This will now:
+
+Show all items when clicked
+
+Allow filtering via typing (but not free-text input)
+
+Require selection from the dropdown list
+
+Work with a single click for selection
