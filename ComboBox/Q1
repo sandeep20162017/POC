@@ -1,72 +1,25 @@
 You are ASP.NET v8 and Telerik ASP.NET Core expert.
-I have following two Telerik (Kendoo) ASP.NET core widgets. Both calls the same controller method GetAutoCompleteData.
-GetAutoCompleteData expects columnname and serach text.
-For ComboBoxEditor passed column name and searchtext are null
-For AutocompleteEditor column name and searchtext are  correct values
-Is the role-name correct in ComboBoxEditor? 
-ComboBoxEditor.cshtml :
+I want to implement filterable dropDownEditor.
+DropDownEditor must pass columnname and search text to the controller.
+Dropdown will be used on several pages in several columns which uses Telerik grid.
+Using InCell edit in the grid.
+Pls assist in getting the working code.
+CommonDropDrownEditor :
 @model object
 
 @{
     var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
 }
 
-@(Html.Kendo().ComboBox()
+@(Html.Kendo().DropDownList() 
     .Name(fieldName)
     .DataTextField("Text")
     .DataValueField("Value")
-    .Filter(FilterType.Contains)
-    .Placeholder("Search...")
-    .AutoBind(false) // Only bind data when user types
-    .MinLength(2)    // Trigger server filtering after 1 character
-    @* .HtmlAttributes(new
-    {
-        data_column = fieldName
-    }) *@
-     .HtmlAttributes(new Dictionary<string, object>
-    {
-        { "name", fieldName },
-        { "data-role", "combobox" },
-        { "data-column", fieldName }
-    })
-    @* .Events(e =>
-    {
-        e.Change("validateSelection"); // Validate on selection
-        e.DataBound("clearInvalidInput"); // Optional cleanup
-    }) *@
-    .DataSource(source =>
-    {
-        source.Read(read =>
-        {
-            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
-                .Type(HttpVerbs.Get)
-                .Data("getComboBoxParams");
-        })
-        .ServerFiltering(true);
-    })
-    .Template("#= Text #")
-    
-
-)
-
-AutocompleteEditor.cshtml :
-@model object
-
-@{
-    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
-}
-
-@(Html.Kendo().AutoComplete()
-    .Name(fieldName)
-    .DataTextField("Text") // Changed from "this" to "Text"
-    .Filter("contains")
-    .Placeholder("Type to search...")
-    
-    
+    .Filter(FilterType.Contains) 
+    .AutoBind(true) 
     .HtmlAttributes(new Dictionary<string, object>
     {
-        { "name", fieldName },
-        { "data-role", "autocomplete" },
+        { "data-role", "dropdownlist" },
         { "data-column", fieldName }
     })
     .DataSource(source =>
@@ -75,37 +28,65 @@ AutocompleteEditor.cshtml :
         {
             read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
                 .Type(HttpVerbs.Get)
-                .Data("getAutoCompleteParams");
+                .Data("getCommonDropDownListParams");
         })
         .ServerFiltering(true);
     })
-    
-    .Template("#= Text #") // Explicit template to display data
-    //.Events(e => e.Change("validateAutoCompleteSelection"))
 )
+
+
+Controller :
+ public IActionResult GetAutoCompleteData(string columnName, string searchText)
 Index.cshtml :
-..
-@(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
-    .Name("ScPartsMaterialDetailsRebuiltPartsGrid")
-    .Columns(columns =>
-    {
-        columns.Bound(c => c.MMSStockCode).Title("Stock Code").EditorTemplateName("ComboBoxEditor").Width(70); // Doesn't work, but works for AutoCompleteEditor
-..
-<script>
-function getAutoCompleteParams() {
-    var input = $("input[data-role='autocomplete']:focus");
-    return {
-        columnName: input.attr("name"),
-        searchText: input.val() || "" // Handle empty search text
-    };
-}
-   
-    function getComboBoxParams() {
-        var input = $("input[data-role='combobox']:focus");
-        return {
-            columnName: input.attr("name"),
-            searchText: input.val() || "" // Handle empty search text
-        };
-    }
-</script>
-   
+@(
+Html.Kendo().Grid<BCES.Models.Admin.UserViewModel>()
+                    .Name("userGrid")
+                    .Columns(columns =>
+                    {
+                        columns.Bound(u => u.UserADId).Title("User ID");
+                        columns.Bound(u => u.UserName).Title("User Name");
+                        // columns.Bound(u => u.UserContactNo).Title("Phone Number");
+
+                        columns.Bound(u => u.RoleName)
+                            .Title("Role Name")
+                           // .ClientTemplate("#: RoleName #")
+                            .EditorTemplateName("CommonDropDownEditor");
+...
+.Model(model =>
+{
+    model.Id(u => u.UserID);
+    model.Field(u => u.UserADId).Editable(true);
+    model.Field(u => u.UserName).Editable(true);
+    model.Field(u => u.RoleId).DefaultValue(0); 
+   model.Field(u => u.RoleName);
+                   
+})
+....
+JS :
+ function getCommonDropDownListParams() {
+     var dropdown = $(".k-dropdown[data-column]").filter(function() {
+         return $(this).find(".k-input").is(":focus");
+     });
+     return {
+         columnName: dropdown.attr("data-column"),
+         searchText: dropdown.find(".k-input").val() || ""
+     };
+ }
+ $(document).on("keydown", ".k-dropdown .k-input", function(e) {
+     if (e.keyCode === 13) { // Allow Enter key
+         return true;
+     }
+     e.preventDefault();
+     return false;
+ });
+model :
+public int UserID { get; set; }
+
+public string UserADId { get; set; }
+
+public string UserName { get; set; }
+
+public int  RoleId { get; set; }
+
+public string RoleName { get; set; }
+...
