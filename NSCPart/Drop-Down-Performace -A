@@ -1,0 +1,85 @@
+Server-Side Enhancements
+csharp
+Copy
+[HttpGet]
+public IActionResult GetAutoCompleteData(string columnName, string searchText, int pageSize = 20, int page = 1)
+{
+    var query = _dbContext.YourEntity
+        .AsNoTracking()
+        .Where(e => EF.Functions.Like(e.GetProperty(columnName), $"%{searchText}%")
+        .OrderBy(e => e.GetProperty(columnName))
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize);
+
+    return Json(query.ToList());
+}
+Paging: Return only 20-50 records per request
+
+Indexing: Ensure database columns are properly indexed
+
+EF Core Optimization: Use .AsNoTracking() for read-only queries
+
+2. Client-Side Configuration
+javascript
+Copy
+// Dropdown configuration
+@(Html.Kendo().DropDownList()
+    .Name(fieldName)
+    .Virtual(v => v
+        .ItemHeight(30)
+        .ValueMapper("valueMapper") // For virtual scrolling
+    )
+    .Filter(FilterType.Contains)
+    .MinLength(3) // Wait for 3+ characters
+    .Delay(300) // 300ms debounce
+    .PageSize(20)
+    .DataSource(source => source
+        .Read(read => read
+            .Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+            .Data("getDropDownListParams")
+        )
+        .ServerFiltering(true)
+        .ServerPaging(true)
+    )
+)
+3. Value Mapper for Virtualization (Required for large datasets)
+javascript
+Copy
+var valueMapperCache = {};
+
+function valueMapper(options) {
+    $.ajax({
+        url: "@Url.Action("ValueMapper", "AutoComplete")",
+        data: {
+            columnName: currentColumnName,
+            values: options.value
+        },
+        success: function (data) {
+            options.success(data);
+            valueMapperCache[currentColumnName] = valueMapperCache[currentColumnName] || {};
+            valueMapperCache[currentColumnName][options.value] = data;
+        }
+    });
+}
+4. Optimized JavaScript
+javascript
+Copy
+// Add these to getDropDownListParams
+return {
+    columnName: columnName,
+    searchText: searchText,
+    pageSize: 20, // Match server/page settings
+    page: dropdown.dataSource.page() || 1
+};
+5. Database Indexing Example (SQL Server)
+sql
+Copy
+CREATE NONCLUSTERED INDEX IX_YourColumn_Search 
+ON YourTable (YourColumn) 
+INCLUDE (RelatedField1, RelatedField2);
+Key Performance Strategies:
+Virtual Scrolling
+Only renders visible items (10-20 at a time)
+
+Debounced Filtering
+300ms delay prevents excessive requests during typing
