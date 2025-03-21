@@ -1,0 +1,104 @@
+You are ASP.NET core and Telerik ASp.NET Core expert.
+I am using  Telerik DropDown Editor in the Teleik grid. Grid edit is InCell.
+  I need to pass the colun naame and search (filer string) to the controller function (below).
+  With the following code, when controller action GetAutoCompleteData(string columnName, string searchText) is called, both parameters are null.
+  Pls assist fixing this. Pls double check Telerik ASp.NET core documentaion before reply.
+Dropdown.cshtml :
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().DropDownList() 
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .AutoBind(true) 
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-role", "dropdownlist" },
+        { "data-column", fieldName }
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getDropDownListParams");
+        })
+        .ServerFiltering(true);
+    })
+)
+Javascript :
+    <script>
+    var currentColumnName = "";
+    var currentDropDown = null;
+
+    $(document).ready(function () {
+        setTimeout(function () {
+            var grid = $("#NscPartsUsedGrid").data("kendoGrid");
+
+            if (grid) {
+                console.error('found grid');
+
+                grid.bind("edit", function (e) {
+                    console.error('inside edit');
+
+                    // ✅ Target the DropDownList input correctly
+                    var fieldName = e.container.find(".k-dropdown-wrap input").attr("name");
+                    currentColumnName = fieldName || "";
+                    console.error("Current Column:", currentColumnName);
+
+                    // ✅ Get DropDownList instance from the container
+                    currentDropDown = e.container.find("input[data-role='dropdownlist']").data("kendoDropDownList");
+
+                    if (currentDropDown) {
+                        console.log("DropDownList initialized in cell:", currentDropDown);
+
+                        // ✅ Optionally open dropdown when input is focused
+                       // currentDropDown.input.on("focus", function () {
+                          //  currentDropDown.open();
+                      //  });
+                    } else {
+                        console.warn("DropDownList not found!");
+                    }
+                });
+            } else {
+                console.error('Grid not found');
+            }
+        }, 100);
+    });
+
+    // ✅ Updated function to pass params to the server
+    function getDropDownListParams() {
+        console.log("inside getDropDownListParams", currentColumnName);
+
+        if (currentDropDown) {
+            console.log("inside if dropdown", currentColumnName);
+            var params = {
+                columnName: currentColumnName,
+                searchText: currentDropDown.text() || "" // ✅ Pass the selected value to the server
+            };
+
+            console.log("Sending params:", params);
+            return params;
+        }
+
+        console.warn("No active DropDownList found!");
+        return {};
+    }
+</script>
+
+
+
+Controller:
+[HttpGet]
+public IActionResult GetAutoCompleteData(string columnName, string searchText)
+{
+    // 1. Validate parameters
+    if (string.IsNullOrEmpty(columnName))
+        return BadRequest("Column name is required.");
