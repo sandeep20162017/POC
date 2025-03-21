@@ -1,0 +1,56 @@
+        [HttpGet]
+        public IActionResult GetAutoCompleteData(string columnName, string searchText)
+        {
+            // 1. Validate parameters
+            if (string.IsNullOrEmpty(columnName))
+                return BadRequest("Column name is required.");
+
+            // 2. Column whitelist
+            var columnMappings = new Dictionary<string, (string SqlColumn, string Table)>
+            {
+                //Admin Labour Tasks
+                { "TaskDescription", ("TaskDescription", "[SBCES].[LabourTaskDescriptions]") },
+                //NSC Parts 
+                { "OrigSuppNum", ("OrigSupplierNum", "[SBCES].[NonStockCodedParts]") },
+                { "OrigSupplierName", ("OrigSupplierName", "[SBCES].[NonStockCodedParts]") },
+                { "Description", ("DetailedDesc", "[SBCES].[NonStockCodedParts]") },
+                { "KeyWord", ("KeyWord", "[SBCES].[NonStockCodedParts]") },
+                //RB Parts
+                { "DetailedDesc", ("DetailedDesc", "[SBCES].[RbMasterlist]") },
+                { "LabourDefn", ("LABOURDEFN", "[SBCES].[EMPLCLASS]") },
+                { "CC", ("COSTCENTRE", "[SBCES].[COSTCENTRES]") },
+                { "CostCentre", ("COSTCENTRE", "[SBCES].[COSTCENTRES]") },
+                { "Task", ("TaskDescription", "[SBCES].[LabourTaskDescriptions]") },
+                { "MMSStockCode", ("MMSSTOCKCODE", "[SBCES].[STOCKCODEDPARTS]") },
+                //LabourType
+                 { "WAGEGROUP", ("WAGEGROUP", "[SBCES].[EMPLCLASS]") },
+                //user management
+                {"RoleName", ("RoleName", "[SBCES].Roles") },
+                
+
+                //{ "KeyWord", ("KeyWord", "[SBCES].[RbMasterlist]") }
+            };
+
+            if (!columnMappings.TryGetValue(columnName, out var mapping))
+                return BadRequest("Invalid column name.");
+
+            // 3. Parameterized query
+            using (var connection = _dbConnection)
+            {
+                var sql = $@"
+                            SELECT DISTINCT {mapping.SqlColumn} AS Text
+                            FROM {mapping.Table} 
+                            WHERE {mapping.SqlColumn} LIKE @SearchText + '%'";
+
+                                var results = connection.Query<string>(sql, new { SearchText = searchText ?? "" });
+
+                                // Wrap results in objects with "Text" property
+                                var data = results.Select(x => new { Text = x }).ToList();
+                                return Json(data);
+            }
+
+        }
+
+    }
+
+}
