@@ -1,0 +1,187 @@
+. AutoCompleteController.cs
+csharp
+Copy
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
+using System.Data.SqlClient;
+
+public class AutoCompleteController : Controller
+{
+    private readonly IConfiguration _config;
+    private readonly IMemoryCache _cache;
+    private readonly HashSet<string> _validColumns = new() { "ProductName", "Category", "Supplier" };
+
+    public AutoCompleteController(IConfiguration config, IMemoryCache cache)
+    {
+        _config = config;
+        _cache = cache;
+    }
+
+    // Autocomplete endpoint
+    [HttpGet]
+    public async Task<IActionResult> GetAutoCompleteData(
+        string columnName, 
+        string searchText,
+        int page = 1,
+        int pageSize = 20)
+    {
+        if (!_validColumns.Contains(columnName))
+            return BadRequest("Invalid column");
+
+        var cacheKey = $"{columnName}-{searchText}-{page}";
+        
+        if (!_cache.TryGetValue(cacheKey, out IEnumerable<DropdownItem> data))
+        {
+            using var connection = new SqlConnection(_config.GetConnectionString("Default"));
+            
+            var parameters = new {
+                SearchText = $"%{searchText}%",
+                Offset = (page - 1) * pageSize,
+                PageSize = pageSize
+            };
+
+            data = await connection.QueryAsync<DropdownItem>(
+                $@"SELECT Id AS Value, {columnName} AS Text
+                   FROM Products
+                   WHERE {columnName} LIKE @SearchText
+                   ORDER BY {columnName}
+                   OFFSET @Offset ROWS
+                   FETCH NEXT @PageSize ROWS ONLY",
+                parameters
+            );
+
+            _cache.Set(cacheKey, data, TimeSpan.FromMinutes(15));
+        }
+
+        return Json(data);
+    }
+
+    // ValueMapper endpoint
+    [HttpPost]
+    public async Task<IActionResult> ValueMapper(
+        [FromBody] ValueMapperRequest request)
+    {
+        if (!_validColumns.Contains(request.ColumnName))
+            return BadRequest("Invalid column");
+
+        using var connection = new SqlConnection(_config.GetConnectionString("Default"));
+        
+        var results = await connection.QueryAsync<DropdownItem>(
+            $@"SELECT Id AS Value, {request.ColumnName} AS Text
+               FROM Products
+               WHERE Id IN @Values",
+            new { Values = request.Values.Select(int.Parse) }
+        );
+
+        return Json(results);
+    }
+
+    public class ValueMapperRequest
+    {
+        public string ColumnName { get; set; }
+        public string[] Values { get; set; }
+    }
+
+    public class DropdownItem
+    {
+        public int Value { get; set; }
+        public string Text { get; set; }
+    }
+}
+2. Dropdown Editor Template (Dropdown.cshtml)
+html
+Copy
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().DropDownList()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .MinLength(3)
+    .Delay(300)
+    .HtmlAttributes(new {
+        data_role = "dropdownlist",
+        data_column = fieldName
+    })
+    .Virtual(v => v
+        .ItemHeight(30)
+        .ValueMapper("valueMapper")
+    )
+    .DataSource(source => 
+    {
+        source.Custom()
+            .ServerFiltering(true)
+            .ServerPaging(true)
+            .PageSize(20)
+            .Transport(transport => 
+            {
+                transport.Read(read => 
+                    read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                        .Data("getDropDownListParams"));
+            });
+    })
+)
+Run HTML
+3. JavaScript (In your view)
+javascript
+Copy
+<script>
+    // ValueMapper for virtualization
+    function valueMapper(options) {
+        $.ajax({
+            url: "@Url.Action("ValueMapper", "AutoComplete")",
+            type: "POST",
+            contentType: "application/json",
+            data: JSON.stringify({
+                columnName: getCurrentColumnName(),
+                values: options.value
+            }),
+            success: function(result) {
+                options.success(result);
+            }
+        });
+    }
+
+    // Parameter generator
+    function getDropDownListParams() {
+        const grid = $("#NscPartsUsedGrid").data("kendoGrid");
+        const editCell = grid?.element.find(".k-edit-cell");
+        const dropdown = editCell?.find("[data-role='dropdownlist']").data("kendoDropDownList");
+        
+        if (!dropdown) return {};
+        
+        return {
+            columnName: dropdown.element.attr("data-column"),
+            searchText: dropdown.filterInput.val(),
+            page: dropdown.dataSource.page(),
+            pageSize: dropdown.dataSource.pageSize()
+        };
+    }
+
+    function getCurrentColumnName() {
+        const grid = $("#NscPartsUsedGrid").data("kendoGrid");
+        return grid?.editContainer?.find("[data-column]").attr("data-column") || "";
+    }
+</script>
+4. SQL Index (SQL Server Example)
+sql
+Copy
+CREATE NONCLUSTERED INDEX IX_Products_Search
+ON Products (ProductName)
+INCLUDE (Id)
+WITH (ONLINE = ON, DATA_COMPRESSION = PAGE);
+5. Startup.cs Configuration (Add these)
+csharp
+Copy
+// In ConfigureServices()
+services.AddMemoryCache();
+services.AddDapper(options => {
+    options.ConnectionString = Configuration.GetConnectionString("Default");
+});
+Key Performance Features Added:
