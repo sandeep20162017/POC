@@ -9,25 +9,33 @@ function onComboBoxDataBound(e) {
             .text("No matching data found");
     }
 }
+@model string
 
-
-<script src="~/lib/jquery/dist/jquery.min.js"></script>
-<script src="~/lib/jquery-validation/dist/jquery.validate.min.js"></script>
-<script src="~/lib/jquery-validation-unobtrusive/jquery.validate.unobtrusive.min.js"></script>
-<script src="~/lib/kendo-ui/js/kendo.all.min.js"></script>
-
-https://cdnjs.cloudflare.com/ajax/libs/jquery-validate/1.19.5/jquery.validate.min.js
-https://cdnjs.cloudflare.com/ajax/libs/jquery-validation-unobtrusive/3.2.12/jquery.validate.unobtrusive.min.js
-
-@(Html.Kendo().Grid<YourModel>()
-    .Editable(e => e.Mode(GridEditMode.InCell))
-    .Events(e => e.Edit("onGridEdit")) // 👈 Add this
-)
-
-function onGridEdit(e) {
-    // Force validation initialization
-    var form = e.container.closest("form");
-    form.removeData("validator");
-    form.removeData("unobtrusiveValidation");
-    $.validator.unobtrusive.parse(form);
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+    var hiddenColumnField = ViewData.TemplateInfo.GetFullHtmlFieldName("HiddenColumnName");
 }
+
+@Html.Hidden(hiddenColumnField, "", new { @class = "hidden-column" })
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .Placeholder("Search...")
+    .AutoBind(false)
+    .MinLength(2)
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "data-val", "true" }, // 👈 Critical for validation
+        { "data-val-remote", "Invalid selection" },
+        { "data-val-remote-url", Url.Action("ValidateWidgetData", "AutoComplete") },
+        { "data-val-remote-additionalfields", "*.HiddenColumnName" }, // 👈 Wildcard syntax
+        { "data-val-remote-type", "GET" }
+    })
+    .Events(e => e.DataBound("onComboBoxDataBound"))
+    .DataSource(source => source
+        .Read(read => read.Url(Url.Action("GetAutoCompleteData", "AutoComplete")).Data("getComboBoxParams"))
+    )
+)
