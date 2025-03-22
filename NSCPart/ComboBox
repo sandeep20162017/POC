@@ -2,7 +2,11 @@
 
 @{
     var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+    var hiddenColumnField = ViewData.TemplateInfo.GetFullHtmlFieldName("HiddenColumnName");
 }
+
+@* Hidden field to store column name *@
+@Html.Hidden(hiddenColumnField, "", new { @class = "hidden-column-name" })
 
 @(Html.Kendo().ComboBox()
     .Name(fieldName)
@@ -10,24 +14,19 @@
     .DataValueField("Value")
     .Filter(FilterType.Contains)
     .Placeholder("Search...")
-    .AutoBind(false) // Only bind data when user types
-    
-    .MinLength(2)    // Trigger server filtering after 1 character
-    @* .HtmlAttributes(new
-    {
-        data_column = fieldName
-    }) *@
-     .HtmlAttributes(new Dictionary<string, object>
+    .AutoBind(false)
+    .MinLength(2)
+    .HtmlAttributes(new Dictionary<string, object>
     {
         { "name", fieldName },
-       // { "data-role", "combobox" },
-        { "data-column", fieldName }
+        { "data-column", fieldName },
+        { "data-role", "combobox" }
     })
-    @* .Events(e =>
+    .Events(e => 
     {
-        e.Change("validateSelection"); // Validate on selection
-        e.DataBound("clearInvalidInput"); // Optional clanup
-    }) *@
+        e.DataBound("onComboBoxDataBound"); // For hiding dropdown when empty
+        e.Change("onComboBoxChange");       // For validation cleanup
+    })
     .DataSource(source =>
     {
         source.Read(read =>
@@ -39,7 +38,31 @@
         .ServerFiltering(true);
     })
     .Template("#= Text #")
-    
-
 )
-   
+
+<script>
+    function getComboBoxParams() {
+        return {
+            columnName: $(".hidden-column-name").val(), // Get from hidden field
+            searchText: this.value()
+        };
+    }
+
+    function onComboBoxDataBound(e) {
+        var combobox = e.sender;
+        // Hide dropdown if no results
+        if (combobox.dataSource.view().length === 0) {
+            combobox.close();
+        }
+    }
+
+    function onComboBoxChange(e) {
+        var combobox = e.sender;
+        // Clear error state on valid selection
+        if (combobox.dataItem()) {
+            combobox.element.closest(".k-grid-edit-row")
+                .find("[data-valmsg-for='" + combobox.element.attr("name") + "']")
+                .hide();
+        }
+    }
+</script>
