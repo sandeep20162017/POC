@@ -1,4 +1,4 @@
-Step 1: Configure ComboBox with NoDataTemplate and Events
+Step 1: Configure ComboBox with NoDataTemplate
 razor
 Copy
 @(Html.Kendo().ComboBox()
@@ -7,42 +7,46 @@ Copy
     .DataValueField("Value")
     .Filter(FilterType.Contains)
     .MinLength(2)
-    .NoDataTemplate(@<text>
-        <div id="invalid-selection-message" class="text-danger"> 
-            Invalid Selection! 
-            <script>
-                // Prevent grid save when "No data" is shown
-                var grid = $("#grid").data("kendoGrid");
-                grid._originalSave = grid.saveRow;
-                grid.saveRow = function() {
-                    if ($("#invalid-selection-message").is(":visible")) {
-                        kendo.ui.showNotification("Invalid value: Pake proper selection!", "error");
-                        return; // Block grid save
-                    }
-                    grid._originalSave.apply(this, arguments);
-                };
-            </script>
-        </div>
-    </text>)
+    .NoDataTemplate("<div id='invalid-selection-message' class='text-danger'>Invalid Selection!</div>") // Plain HTML string
     .DataSource(source => 
     {
         source.Read(read => read.Action("GetFilteredData", "YourController"));
     })
     .Events(e => e
-        .Change("clearInvalidMessage") // Clear message on valid selection
+        .DataBound("onComboBoxDataBound") // Detect when data is loaded
+        .Change("onComboBoxChange")       // Clear invalid state on valid selection
     )
 )
-Step 2: Add JavaScript to Clear Message on Valid Selection
+Step 2: Add JavaScript Logic
 javascript
 Copy
-function clearInvalidMessage(e) {
-    // Hide the "No data" message when a valid selection is made
-    $("#invalid-selection-message").hide(); 
-    // Restore grid's save functionality
-    var grid = $("#grid").data("kendoGrid");
-    grid.saveRow = grid._originalSave;
+var isInvalid = false; // Track invalid state
+
+// When ComboBox data is loaded, check if it's empty
+function onComboBoxDataBound(e) {
+    var combobox = e.sender;
+    isInvalid = combobox.dataSource.view().length === 0;
+
+    if (isInvalid) {
+        // Block grid save
+        var grid = $("#grid").data("kendoGrid");
+        grid.bind("saveRow", function (e) {
+            e.preventDefault();
+            kendo.ui.showNotification("Invalid selection: Pake proper value!", "error");
+        });
+    }
 }
-Step 3: Configure Grid to Use InCell Editing
+
+// When a valid selection is made, reset the invalid state
+function onComboBoxChange(e) {
+    isInvalid = false;
+    $("#invalid-selection-message").hide();
+    
+    // Restore grid save
+    var grid = $("#grid").data("kendoGrid");
+    grid.unbind("saveRow");
+}
+Step 3: Configure Grid
 razor
 Copy
 @(Html.Kendo().Grid<YourModel>()
@@ -52,3 +56,4 @@ Copy
         columns.Bound(p => p.YourProperty).EditorTemplateName("CustomComboBoxEditor");
     })
     .Editable(editable => editable.Mode(GridEditMode.InCell))
+)
