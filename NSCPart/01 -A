@@ -1,0 +1,118 @@
+1. Fix the Remote attribute setup
+Change AdditionalFields = nameof(HiddenColumnName) to match how the ComboBox sends data — use an explicit property name:
+
+Model Fix
+csharp
+Copy
+Edit
+[Remote(
+    action: "ValidateWidgetData",
+    controller: "AutoComplete",
+    AdditionalFields = "HiddenColumnName", // Direct match to the form field
+    ErrorMessage = "Invalid selection!"
+)]
+[Required]
+public string KeyWord { get; set; }
+2. Make Sure the Hidden Column Name Is Populated Correctly
+Ensure that the hidden column name value is properly populated before the validation request:
+
+ComboBoxEditor.cshtml Fix
+Update the hidden field binding like this:
+
+cshtml
+Copy
+Edit
+@Html.Hidden(hiddenColumnField, ViewData["HiddenColumnName"] ?? "")
+3. Fix Client-Side Validation Triggering
+You need to manually trigger validation when the ComboBox value changes since InCell mode doesn't automatically trigger it:
+
+Add This Code to onComboBoxChange:
+javascript
+Copy
+Edit
+function onComboBoxChange(e) {
+    var combobox = e.sender;
+    console.log("Clear error state on valid selection");
+    
+    var form = combobox.element.closest("form");
+    
+    if (combobox.dataItem()) {
+        combobox.element.closest(".k-grid-edit-row")
+            .find("[data-valmsg-for='" + combobox.element.attr("name") + "']")
+            .hide();
+    }
+
+    // 🔥 Trigger validation manually
+    form.validate().element(combobox.element);
+}
+4. Ensure Remote Validation Is Triggered Correctly
+The problem might also be with how Remote validation is processed due to the data-val-remote-additionalfields attribute.
+
+Update it to pass the correct form field values:
+
+Updated ComboBox Attributes:
+cs
+Copy
+Edit
+@Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .Placeholder("Search...")
+    .AutoBind(false)
+    .MinLength(2)
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-column", fieldName },
+        { "data-role", "combobox" },
+        { "data-val", "true" },
+        { "data-val-remote", "Invalid selection" },
+        { "data-val-remote-url", Url.Action("ValidateWidgetData", "AutoComplete") },
+        { "data-val-remote-additionalfields", "*.HiddenColumnName" },
+        { "data-val-remote-type", "GET" } // Fix request type
+    })
+    .Events(e =>
+    {
+        e.DataBound("onComboBoxDataBound");
+        e.Change("onComboBoxChange");
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #")
+5. Fix the Controller Action Signature (Just in Case)
+Make sure the action signature matches the expected parameter names:
+
+Controller Action Fix:
+csharp
+Copy
+Edit
+[HttpGet]
+public IActionResult ValidateWidgetData(string KeyWord, string HiddenColumnName)
+{
+    bool isValid = !string.IsNullOrEmpty(KeyWord) && KeyWord.Length > 3; // Example logic
+    return Json(isValid);
+}
+🚀 Summary of Fixes:
+✅ Fixed AdditionalFields binding
+✅ Forced validation on change event
+✅ Fixed data-val-remote-type and data-val-remote-additionalfields
+✅ Correct hidden field binding
+✅ Ensured the controller action parameters match
+
+Give this a try — I’m pretty confident this will get it working! 😎
+
+
+
+
+
+
