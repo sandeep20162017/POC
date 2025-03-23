@@ -1,0 +1,185 @@
+1. Model (NscPartsUsedViewModel.cs)
+csharp
+Copy
+public class NscPartsUsedViewModel
+{
+    [Remote(
+        action: "ValidateWidgetData", 
+        controller: "AutoComplete",
+        AdditionalFields = "ValidationContext",
+        ErrorMessage = "Invalid selection!"
+    )]
+    [Required]
+    public string KeyWord { get; set; }
+
+    [Remote(
+        action: "ValidateWidgetData", 
+        controller: "AutoComplete",
+        AdditionalFields = "ValidationContext",
+        ErrorMessage = "Invalid selection!"
+    )]
+    [Required]
+    public string PartNumber { get; set; }
+
+    // Hidden field for validation context
+    public string ValidationContext { get; set; }
+}
+2. Controller (AutoCompleteController.cs)
+csharp
+Copy
+[Route("Common/[controller]/[action]")]
+public class AutoCompleteController : Controller
+{
+    [HttpGet]
+    public IActionResult ValidateWidgetData(string keyWord, string partNumber, string validationContext)
+    {
+        // Determine which column is being validated
+        var columnName = validationContext;
+        var value = columnName == "KeyWord" ? keyWord : partNumber;
+
+        bool isValid = columnName switch
+        {
+            "KeyWord" => ValidateKeyword(value),
+            "PartNumber" => ValidatePartNumber(value),
+            _ => false
+        };
+
+        return Json(isValid);
+    }
+
+    [HttpGet]
+    public IActionResult GetAutoCompleteData(string columnName, string searchText)
+    {
+        // Your existing suggestion logic
+        return Json(new { Text = searchText, Value = searchText });
+    }
+}
+3. ComboBox Editor Template (ComboBoxEditor.cshtml)
+html
+Copy
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+    var columnName = ViewData.ModelMetadata.PropertyName;
+}
+
+@* Hidden field for validation context *@
+@Html.Hidden("ValidationContext", columnName)
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .HtmlAttributes(new 
+    {
+        data_val = "true",
+        data_val_remote_additionalfields = "*.ValidationContext",
+        data_val_remote = "Invalid selection"
+    })
+    .DataSource(source => source
+        .Read(read => read
+            .Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+            .Data("getComboBoxParams")
+        )
+        .ServerFiltering(true)
+    )
+    .Events(e => 
+    {
+        e.DataBound("onComboBoxDataBound");
+        e.Change("onComboBoxChange");
+    })
+)
+Run HTML
+4. Grid Configuration (Index.cshtml)
+html
+Copy
+@(Html.Kendo().Grid<NscPartsUsedViewModel>()
+    .Name("NscPartsUsedGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(p => p.KeyWord).EditorTemplateName("ComboBoxEditor");
+        columns.Bound(p => p.PartNumber).EditorTemplateName("ComboBoxEditor");
+        columns.Bound(p => p.ValidationContext).Hidden(true);
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model => 
+        {
+            model.Id(p => p.Id);
+            model.Field(p => p.ValidationContext).Editable(false);
+        })
+    )
+    .Events(e => e.Save("onGridSave"))
+Run HTML
+5. JavaScript
+javascript
+Copy
+// Shared params for both endpoints
+function getComboBoxParams() {
+    const input = $(".k-combobox input.k-input:focus");
+    const columnName = input.attr("name").replace("_input", "");
+    return {
+        columnName: columnName,
+        searchText: input.val() || ""
+    };
+}
+
+// Grid save handler
+function onGridSave(e) {
+    const validator = e.container.find("form").data("validator");
+    if (!validator || !validator.validate()) {
+        e.preventDefault();
+        showAlert("Invalid selections found. Please correct before saving.");
+    }
+}
+
+// Alert display
+function showAlert(message) {
+    const alert = `<div class="alert alert-danger">${message}</div>`;
+    $("#alert-container").html(alert).fadeIn().delay(3000).fadeOut();
+}
+
+// Add this container to your layout
+<div id="alert-container" style="display:none; position:fixed; top:20px; right:20px; z-index:10000"></div>
+Key Features:
+Proper Remote Validation
+
+Uses ASP.NET Core's [Remote] attribute correctly
+
+Maintains column context through ValidationContext hidden field
+
+Grid Save Prevention
+
+Intercepts grid save event
+
+Checks validation status before committing changes
+
+Unified Validation Endpoint
+
+Single ValidateWidgetData action handles all columns
+
+Uses validationContext parameter to determine column
+
+Visual Feedback
+
+Bootstrap-style danger alerts
+
+Positioned for visibility without disrupting grid layout
+
+Validation Flow:
+User edits cell → ComboBox triggers remote validation
+
+Server receives both value and validation context (column name)
+
+If invalid:
+
+Shows "Invalid selection" message next to cell
+
+Prevents grid save with top-right alert
+
+If valid:
+
+Allows normal grid operations
