@@ -1,0 +1,134 @@
+You are ASp.NET core v8 and Telerik ASp.NET core expert. Telerik grid uses InCell edit. in the following code, ValidateWidgetData controller actio didn't get called. Pls check Telerik
+documentaio and suggest changaes. No JS erros, all the required JS are included in Layout.
+AutoCompleteController.cs :
+[HttpGet]
+public IActionResult ValidateWidgetData(string columnName, string searchText)
+{
+    return Json(false);
+}
+Index.cshtml :
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+                                .Name("NscPartsUsedGrid")
+                                .Columns(columns =>
+                            {
+                                columns.Bound(p => p.NscPartsUsedId).Title("Part Id").Hidden(true); 
+                               
+                                columns.Bound(p => p.KeyWord).Title("Keyword").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("ComboBoxEditor");
+
+..
+  .Editable(editable => editable.Mode(GridEditMode.InCell).TemplateName("NscPartsAddUpdate"))
+..
+ model.Field(c => c.KeyWord);
+ model.Field(p => p.HiddenColumnName).Editable(false);
+..
+<script>
+    function getComboBoxParams() {
+        var input = $(".k-combobox input.k-input:focus");
+        console.log("columnname :" , input.attr("name"));
+        console.log("searchText :" , input.val());
+
+        return {
+            columnName: input.attr("name")?.replace("_input", ""),
+            searchText: input.val() || ""
+        };
+    }
+    function onComboBoxDataBound(e) {
+        var combobox = e.sender;
+        if (combobox.dataSource.view().length === 0) {
+            combobox.close();
+            // Show validation error
+            combobox.element.closest(".k-grid-edit-row")
+                .find("[data-valmsg-for='" + combobox.element.attr("name") + "']")
+                .show()
+                .text("No matching data found");
+        }
+    }
+
+    function onComboBoxChange(e) {
+        var combobox = e.sender;
+        console.log("Clear error state on valid selection");
+        // Clear error state on valid selection
+        if (combobox.dataItem()) {
+            combobox.element.closest(".k-grid-edit-row")
+                .find("[data-valmsg-for='" + combobox.element.attr("name") + "']")
+                .hide();
+        }
+    }
+    function onGridEdit(e) {
+         console.log("Force validation initialization....");
+    // Force validation initialization
+    var form = e.container.closest("form");
+    form.removeData("validator");
+    form.removeData("unobtrusiveValidation");
+    $.validator.unobtrusive.parse(form);
+}
+</script>
+Model :
+ [Remote(
+    action: "ValidateWidgetData",
+    controller: "AutoComplete",
+    AdditionalFields = nameof(HiddenColumnName),  
+    ErrorMessage = "Invalid selection!"        
+)]
+ [Required]
+ public string KeyWord { get; set; }
+ComboBoxEditor.cshtml :
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+    var hiddenColumnField = ViewData.TemplateInfo.GetFullHtmlFieldName("HiddenColumnName");
+}
+
+@* Hidden field to store column name *@
+@Html.Hidden(hiddenColumnField, "", new { @class = "hidden-column-name" })
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .Placeholder("Search...")
+    .AutoBind(false)
+    .MinLength(2)
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-column", fieldName },
+        { "data-role", "combobox" },
+        { "data-val", "true" }, // Critical for validation
+        { "data-val-remote", "Invalid selection" },
+        { "data-val-remote-url", Url.Action("ValidateWidgetData", "AutoComplete") },
+        { "data-val-remote-additionalfields", "*.HiddenColumnName" }, // Wildcard syntax
+        { "data-val-remote-type", "HttpVerbs.Get" }
+    })
+    .Events(e =>
+    {
+        e.DataBound("onComboBoxDataBound"); // For hiding dropdown when empty
+        e.Change("onComboBoxChange");       // For validation cleanup
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #")
+)
+Generated html , all required JS are included :
+<link href="https://kendo.cdn.telerik.com/2021.2.511/styles/kendo.bootstrap-v4.min.css" rel="stylesheet" type="text/css" crossorigin="anonymous" />
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+    <script src="https://kendo.cdn.telerik.com/2021.2.511/js/jszip.min.js"></script>
+    <script src="https://kendo.cdn.telerik.com/2021.2.511/js/kendo.all.min.js"></script>
+    <script src="https://kendo.cdn.telerik.com/2021.2.511/js/kendo.aspnetmvc.min.js"></script>
+    <!-- Kendo UI CSS -->
+    <link href="https://kendo.cdn.telerik.com/2021.2.511/styles/kendo.common.min.css" rel="stylesheet" crossorigin="anonymous" />
+    <link href="https://kendo.cdn.telerik.com/2021.2.511/styles/kendo.default-v2.min.css" rel="stylesheet" crossorigin="anonymous" />
+    <link href="https://kendo.cdn.telerik.com/2021.2.511/styles/kendo.bootstrap-v4.min.css" rel="stylesheet" crossorigin="anonymous" />
+    <script src="/lib/bootstrap/dist/js/bootstrap.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validate/1.19.5/jquery.validate.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validation-unobtrusive/3.2.12/jquery.validate.unobtrusive.min.js"></script>
