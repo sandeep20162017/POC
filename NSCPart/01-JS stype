@@ -1,0 +1,192 @@
+1. ComboBox Editor Template (ComboBoxEditor.cshtml)
+html
+Copy
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+    var columnName = ViewData.ModelMetadata.PropertyName;
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .AutoBind(false)
+    .MinLength(2)
+    .HtmlAttributes(new {
+        @class = "validatable-combobox",
+        data_val = "true",
+        data_val_required = "This field is required"
+    })
+    .Events(e => {
+        e.DataBound("onComboBoxDataBound");
+        e.Change("onComboBoxChange");
+        e.Open("onComboBoxOpen");
+    })
+    .DataSource(source => source
+        .Read(read => read
+            .Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+            .Data("getComboBoxParams")
+        )
+        .ServerFiltering(true)
+    )
+)
+
+<span class="field-validation-valid text-danger" 
+      data-valmsg-for="@fieldName" 
+      data-valmsg-replace="true"></span>
+Run HTML
+2. JavaScript Validation Logic
+javascript
+Copy
+// Maintain validation state
+let validationState = {};
+
+function onComboBoxDataBound(e) {
+    const combobox = e.sender;
+    const input = combobox.element;
+    const fieldName = input.attr("name");
+    const currentValue = combobox.value();
+    
+    // Check if current value exists in suggestions
+    const match = combobox.dataSource.view().some(item => 
+        item.Value === currentValue || item.Text === currentValue
+    );
+
+    if (!match && currentValue) {
+        showValidationError(input, "Invalid selection");
+        validationState[fieldName] = false;
+    } else {
+        clearValidationError(input);
+        validationState[fieldName] = true;
+    }
+}
+
+function onComboBoxChange(e) {
+    const combobox = e.sender;
+    const input = combobox.element;
+    
+    if (combobox.dataItem()) {
+        clearValidationError(input);
+        validationState[input.attr("name")] = true;
+    }
+}
+
+function onComboBoxOpen(e) {
+    const combobox = e.sender;
+    if (!combobox.value()) return;
+    
+    // Re-validate when dropdown opens
+    combobox.dataSource.read();
+}
+
+function showValidationError(input, message) {
+    const container = input.closest(".k-edit-cell");
+    const errorSpan = container.find("[data-valmsg-for='" + input.attr("name") + "']");
+    
+    errorSpan.html(message)
+            .removeClass("field-validation-valid")
+            .addClass("field-validation-error");
+}
+
+function clearValidationError(input) {
+    const container = input.closest(".k-edit-cell");
+    const errorSpan = container.find("[data-valmsg-for='" + input.attr("name") + "']");
+    
+    errorSpan.empty()
+            .removeClass("field-validation-error")
+            .addClass("field-validation-valid");
+}
+3. Grid Save Prevention
+javascript
+Copy
+function onGridSave(e) {
+    const invalidFields = Object.values(validationState).filter(valid => !valid);
+    
+    if (invalidFields.length > 0) {
+        e.preventDefault();
+        showGridAlert("Invalid selections found. Please correct before saving.");
+    }
+}
+
+function showGridAlert(message) {
+    const alert = `<div class="k-notification-error" style="margin:1em">
+                    <div class="k-notification-wrap">
+                        <span class="k-icon k-i-error"></span>
+                        ${message}
+                    </div>
+                  </div>`;
+    
+    $("#grid").data("kendoGrid").wrapper.prepend(alert);
+}
+4. Controller Endpoint (AutoCompleteController.cs)
+csharp
+Copy
+[HttpGet]
+public IActionResult GetAutoCompleteData(string columnName, string searchText)
+{
+    var validValues = _dbContext.YourTable
+        .Where(x => x.ColumnName == columnName && x.Value.Contains(searchText))
+        .Select(x => new { Text = x.DisplayValue, Value = x.DbValue })
+        .ToList();
+
+    return Json(validValues);
+}
+5. Required Grid Configuration
+csharp
+Copy
+@(Html.Kendo().Grid<YourViewModel>()
+    .Name("grid")
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Events(e => e.Save("onGridSave"))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model => {
+            model.Id(p => p.Id);
+            model.Field(p => p.KeyWord).Editable(true);
+        })
+        .Events(e => e.Error("onGridError"))
+    )
+Key Features:
+Real-Time Validation
+
+Validates during combobox data binding and changes
+
+Shows error messages below the cell like standard validation
+
+Save Prevention
+
+Blocks grid save when invalid selections exist
+
+Shows Kendo-styled error notification
+
+Server-Side Filtering
+
+Ensures only valid database values appear in suggestions
+
+Re-validates when dropdown opens
+
+Visual Feedback
+
+Red text validation messages
+
+Error notification at grid top
+
+Automatic error clearing on valid selection
+
+Validation Flow:
+User types "0578" → Combobox filters
+
+Server returns no matches → "No data found" in dropdown
+
+onComboBoxDataBound detects invalid value → Shows error
+
+User tries to save → Grid blocks action and shows alert
+
+User selects valid item → Error clears automatically
+
+This solution combines Telerik's client-side events with server-side filtering to create a dropdown-like experience while maintaining validation integrity. It works with multiple columns and requires no Remote attribute.
+
+New chat
