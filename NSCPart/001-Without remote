@@ -1,0 +1,131 @@
+. Model (Remove Remote Attribute)
+csharp
+Copy
+public class NscPartsUsedViewModel
+{
+    [Required(ErrorMessage = "Keyword is required")]
+    public string KeyWord { get; set; }
+
+    [Required(ErrorMessage = "Part Number is required")]
+    public string PartNumber { get; set; }
+}
+2. Controller (AutoCompleteController.cs)
+csharp
+Copy
+[Route("Common/[controller]/[action]")]
+public class AutoCompleteController : Controller
+{
+    [HttpGet]
+    public IActionResult ValidateWidgetData(string columnName, string value)
+    {
+        // Column-specific validation logic
+        bool isValid = columnName switch
+        {
+            "KeyWord" => ValidateKeyword(value),
+            "PartNumber" => ValidatePartNumber(value),
+            _ => false
+        };
+        return Json(isValid);
+    }
+
+    [HttpGet]
+    public IActionResult GetAutoCompleteData(string columnName, string searchText)
+    {
+        // Column-specific suggestions
+        var data = _service.GetSuggestions(columnName, searchText);
+        return Json(data);
+    }
+}
+3. ComboBox Editor Template (ComboBoxEditor.cshtml)
+html
+Copy
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+    var columnName = ViewData.ModelMetadata.PropertyName;
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .HtmlAttributes(new {
+        data_val = "true",
+        data_val_required = "This field is required",
+        data_val_remote = "Invalid selection",
+        data_val_remote_url = Url.Action("ValidateWidgetData", "AutoComplete", 
+            new { columnName }), // Dynamic URL
+        data_val_remote_type = "get"
+    })
+    .DataSource(source => source
+        .Read(read => read
+            .Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+            .Data("getComboBoxParams")
+            .Delay(300)
+        )
+        .ServerFiltering(true)
+    )
+    .Events(e => {
+        e.DataBound("onComboBoxDataBound");
+        e.Change("onComboBoxChange");
+    })
+)
+Run HTML
+4. Grid Configuration (Index.cshtml)
+html
+Copy
+@(Html.Kendo().Grid<NscPartsUsedViewModel>()
+    .Name("grid")
+    .Columns(columns => {
+        columns.Bound(p => p.KeyWord)
+            .EditorTemplateName("ComboBoxEditor");
+            
+        columns.Bound(p => p.PartNumber)
+            .EditorTemplateName("ComboBoxEditor");
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model => {
+            model.Id(p => p.Id);
+            model.Field(p => p.KeyWord);
+            model.Field(p => p.PartNumber);
+        })
+    )
+)
+Run HTML
+5. JavaScript
+javascript
+Copy
+// Shared parameter function for both endpoints
+function getComboBoxParams() {
+    const input = $(".k-combobox input.k-input:focus");
+    const columnName = input.attr("name").replace("_input", "");
+    return {
+        columnName: columnName,
+        searchText: input.val() || ""
+    };
+}
+
+// Validation cleanup
+function onComboBoxDataBound(e) {
+    if (e.sender.dataSource.view().length === 0) {
+        e.sender.close();
+        showValidationError(e.sender, "No matching data found");
+    }
+}
+
+function onComboBoxChange(e) {
+    if (e.sender.dataItem()) {
+        clearValidationError(e.sender);
+    }
+}
+
+// Grid edit event
+function onGridEdit(e) {
+    const form = e.container.closest("form");
+    form.removeData("validator").removeData("unobtrusiveValidation");
+    $.validator.unobtrusive.parse(form);
+}
