@@ -1,0 +1,142 @@
+Force Input to Be Inside a <form>
+If the Telerik Grid isn’t inside a proper form, validation won’t work.
+
+👉 Wrap the grid in a form manually in Index.cshtml:
+
+cshtml
+Copy
+Edit
+@using (Html.BeginForm())
+{
+    @(Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+        .Name("NscPartsUsedGrid")
+        .Columns(columns =>
+        {
+            columns.Bound(p => p.NscPartsUsedId).Title("Part Id").Hidden(true);
+            columns.Bound(p => p.KeyWord).Title("Keyword")
+                .HtmlAttributes(new { @name = "KeyWord" }); // Ensure name is correct
+        })
+        .Editable(editable => editable.Mode(GridEditMode.InCell))
+        .DataSource(dataSource => dataSource
+            .Ajax()
+            .Model(model =>
+            {
+                model.Id(p => p.NscPartsUsedId);
+                model.Field(p => p.KeyWord).Editable(true);
+            })
+        )
+    )
+}
+✅ This makes sure the input is part of a valid form element — critical for [Remote] validation.
+
+2. Double-Check That the Input Field is Generated Properly
+Now that it's inside a form, the generated input should have the correct data-val attributes.
+
+👉 Open DevTools → Elements tab → Inspect the generated input:
+
+Expected:
+
+html
+Copy
+Edit
+<input type="text"
+       name="KeyWord"
+       data-val="true"
+       data-val-remote="Invalid selection!"
+       data-val-remote-url="/AutoComplete/ValidateWidgetData"
+       data-val-remote-additionalfields="*.HiddenColumnName" />
+✅ If it’s not showing up, the problem is still with model binding.
+✅ If the attributes appear — we’re on the right track!
+
+3. Manually Trigger MVC Validation (Force it!)
+If the form is correct and the input is valid, manually trigger MVC validation to force it to fire:
+
+👉 Add this to onGridEdit:
+
+javascript
+Copy
+Edit
+function onGridEdit(e) {
+    console.log("Reinitializing validation...");
+
+    var form = e.container.closest("form");
+    
+    // Force reinitialization of validator
+    form.removeData("validator");
+    form.removeData("unobtrusiveValidation");
+    $.validator.unobtrusive.parse(form);
+}
+👉 Add this to onComboBoxChange to trigger validation manually:
+
+javascript
+Copy
+Edit
+function onComboBoxChange(e) {
+    console.log("Manual validation triggered");
+
+    var combobox = e.sender;
+    var form = combobox.element.closest("form");
+
+    // Manually trigger validation
+    form.validate().element(combobox.element);
+}
+4. Test the Endpoint Directly
+Sometimes the request might not be firing because the routing is misconfigured.
+
+👉 Open the browser and test directly:
+
+text
+Copy
+Edit
+https://localhost:5001/AutoComplete/ValidateWidgetData?KeyWord=test&HiddenColumnName=test
+✅ If the route returns a JSON response, the controller is working.
+✅ If it returns a 404 — the route might be misconfigured (check casing and routing config).
+
+5. Confirm the Controller Signature Matches the Model
+The Remote call must match the controller signature exactly in terms of parameter names and casing.
+
+👉 Double-check that the controller looks like this:
+
+csharp
+Copy
+Edit
+[HttpGet]
+public IActionResult ValidateWidgetData(string KeyWord, string HiddenColumnName)
+{
+    Console.WriteLine($"Validation called: {KeyWord}, {HiddenColumnName}");
+
+    bool isValid = !string.IsNullOrEmpty(KeyWord) && KeyWord.Length > 3;
+    return Json(isValid);
+}
+6. Double-Check MVC Routing
+Make sure routing is properly configured for attribute-based routes. If the action isn’t being reached:
+
+👉 Confirm Program.cs or Startup.cs has correct routing:
+
+csharp
+Copy
+Edit
+app.UseRouting();
+
+app.UseEndpoints(endpoints =>
+{
+    endpoints.MapControllerRoute(
+        name: "default",
+        pattern: "{controller=Home}/{action=Index}/{id?}");
+});
+✅ This makes sure that attribute-based routes are processed correctly.
+
+7. If All Else Fails — Debug at the Network Layer
+👉 If the remote call still isn’t happening:
+
+Open Chrome DevTools → Network tab
+
+Filter by XHR or Fetch
+
+Type a value → Look for a GET request to ValidateWidgetData
+
+If nothing appears:
+
+The data-val attributes are missing (model binding issue).
+
+The request is being blocked (possibly CORS or route issue).
