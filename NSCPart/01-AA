@@ -1,0 +1,86 @@
+1. Force jQuery Validation to Re-Initialize on Grid Edit
+InCell mode often doesn’t automatically wire up validation because Telerik doesn’t treat it as a form submission.
+
+You can manually reinitialize validation when the grid starts editing.
+
+👉 Update the onGridEdit event:
+javascript
+Copy
+Edit
+function onGridEdit(e) {
+    console.log("Force validation initialization...");
+    
+    var form = e.container.closest("form");
+
+    // Remove any existing validator instance to avoid conflicts
+    form.removeData("validator");
+    form.removeData("unobtrusiveValidation");
+
+    // Reinitialize validation
+    $.validator.unobtrusive.parse(form);
+}
+✅ This will ensure that the [Remote] validator is correctly initialized when the cell switches to edit mode.
+
+2. Make Sure the Input Field Is Properly Named
+The Remote attribute binds to the input field’s name attribute.
+
+If the generated name attribute for the KeyWord column doesn’t match the property name, validation won’t fire.
+
+👉 Check the HTML Source:
+After rendering, inspect the generated HTML using browser DevTools (F12) — confirm that the name attribute matches the property name (KeyWord).
+
+Example HTML:
+
+html
+Copy
+Edit
+<input name="KeyWord" type="text" data-val="true" data-val-required="This field is required." data-val-remote-url="/AutoComplete/ValidateWidgetData" />
+✅ If the name is mismatched or missing, update the column binding like this:
+
+csharp
+Copy
+Edit
+columns.Bound(p => p.KeyWord)
+       .Title("Keyword")
+       .EditorTemplateName("ComboBoxEditor") // Optional if you want a custom editor
+       .HtmlAttributes(new { @name = "KeyWord" }); // Ensure name attribute is correctly set
+3. Double-Check the Controller Route
+The [Remote] validator sends the request using the default routing convention:
+/ControllerName/ActionName?param1=value1&param2=value2
+
+If the route isn’t resolving correctly, the request might fail silently.
+
+👉 Confirm Controller Route:
+csharp
+Copy
+Edit
+[HttpGet]
+public IActionResult ValidateWidgetData(string KeyWord, string HiddenColumnName)
+{
+    Console.WriteLine($"Validation called: {KeyWord}, {HiddenColumnName}");
+
+    bool isValid = !string.IsNullOrEmpty(KeyWord) && KeyWord.Length > 3;
+    return Json(isValid);
+}
+✅ Add logging to confirm if the method is getting hit at all.
+
+4. Ensure Unobtrusive Validation Scripts Are Loaded
+If the Remote attribute is not working at all, it could be due to missing jQuery validation scripts.
+
+👉 Ensure these are loaded:
+html
+Copy
+Edit
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validate/1.19.5/jquery.validate.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validation-unobtrusive/3.2.12/jquery.validate.unobtrusive.min.js"></script>
+✅ Even though you said they’re included, sometimes ordering issues can cause them to fail silently.
+
+5. Manually Trigger Remote Validation (Optional)
+If all else fails, you can manually trigger validation using jQuery:
+
+👉 Add Manual Trigger (for debugging):
+javascript
+Copy
+Edit
+$("form").validate().element("#KeyWord");
