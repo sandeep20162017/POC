@@ -1,0 +1,113 @@
+@model IEnumerable<BCES.Models.Admin.SettingModel>
+
+@{
+    ViewData["Title"] = "Settings";
+}
+
+<style>
+    /* logic for required col changes - CSS for required columns */
+    .required-header::after {
+        content: " *";
+        color: #e32;
+        font-weight: bold;
+    }
+    .required-cell {
+        background-color: rgba(255, 0, 0, 0.05);
+    }
+    .k-edit-cell.required-cell input {
+        border-left: 3px solid #e32;
+        padding-left: 5px;
+    }
+</style>
+
+<h6>Settings</h6>
+
+@(
+Html.Kendo().Grid<BCES.Models.Admin.SettingModel>()
+    .Name("SettingGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(p => p.CesSettingId).Title("Setting ID").Visible(false);
+        columns.Bound(p => p.Parameter).Title("Parameter");
+        
+        /* logic for required col changes - Added required indicators */
+        columns.Bound(p => p.Value)
+            .Title("Value")
+            .HeaderHtmlAttributes(new { @class = "required-header" })
+            .HtmlAttributes(new { @class = "required-cell" });
+    })
+    .ToolBar(toolbar =>
+    {
+        toolbar.Save();
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Events(events => events
+            .Error("onDataSourceError")
+            .RequestEnd("onRequestEnd")
+        )
+        .Model(model =>
+        {
+            model.Id(u => u.CesSettingId);
+            model.Field(c => c.Parameter).Editable(false);
+            model.Field(c => c.Value).Editable(true);
+        })
+        .Read(read => read.Url(Url.Action("GetSetting", "Setting")).Type(HttpVerbs.Get))
+        .Update(update => update.Url(Url.Action("UpdateSetting", "Setting")).Type(HttpVerbs.Post))
+    )
+)
+
+<div id="notification"></div>
+
+@section Scripts {
+    <script>
+        function getAutoCompleteParams() {
+            var input = $("input[data-role='autocomplete']:focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || ""
+            };
+        }
+    </script>
+
+    <script>
+        // Initialize notification FIRST
+        var notification = $("#notification").kendoNotification({
+            position: {
+                pinned: true,
+                top: 50,
+                right: 30
+            },
+            autoHideAfter: 4000,
+            stacking: "down"
+        }).data("kendoNotification");
+
+        // Error handler
+        function onDataSourceError(e) {
+            let errorMessage = "Operation failed: ";
+
+            if (e.errorThrown) {
+                errorMessage += e.errorThrown;
+            } else if (e.xhr && e.xhr.responseText) {
+                errorMessage += e.xhr.responseText;
+            }
+
+            notification.error(errorMessage);
+        }
+
+        // Success handler
+        function onRequestEnd(e) {
+            if (e.type === "create") {
+                notification.success("Record created successfully");
+            } else if (e.type === "update") {
+                notification.success("Record updated successfully");
+            } else if (e.type === "destroy") {
+                notification.success("Record deleted successfully");
+            }
+        }
+    </script>
+}
