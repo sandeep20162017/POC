@@ -1,0 +1,161 @@
+I have BaseController. All the other controllers are inhertied from BaseController.
+Can I implement loggong in the BaseController?
+BaseController.cs :
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.EntityFrameworkCore;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
+using DataSourceRequest = Kendo.Mvc.UI.DataSourceRequest;
+using BCES.Data;
+using BCES.Controllers.Utilities;
+using Telerik.SvgIcons;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using NuGet.Protocol;
+using System.Linq.Expressions;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authentication.Negotiate;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Identity;
+using System.Security.Principal;
+
+
+namespace BCES.Controllers.Base
+{
+    public class BaseController : Controller
+    {
+       
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly UserManager<IdentityUser> _userManager;
+
+        public BaseController(DapperContext dapper, IHttpContextAccessor httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+            _httpContextAccessor = httpContextAccessor;
+            
+        }
+
+        
+        public override async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+        {
+            try
+            {
+                string userADId = _httpContextAccessor.HttpContext.User.Identity.Name;
+                string[] temp = userADId.Split('\\');
+                userADId = temp[1];
+               // var userADId__ = _httpContextAccessor.HttpContext.User.FindFirst(ClaimTypes.NameIdentifier).Value;
+                var userADId_ = Environment.UserName; // Get the username from the environment
+                var userDomainName = Environment.UserDomainName;
+                
+                var userName =
+                        _dbConnection.QueryFirstOrDefault<string>(@"SELECT u.UserName FROM SBCES.Users u WHERE u.UserADId = '" + userADId + "'");
+
+                if (string.IsNullOrEmpty(userName))
+                {
+                    context.Result= View("~/Views/Shared/Unauthorized.cshtml");
+                    return;
+                }
+                var roleId =
+                         _dbConnection.QueryFirstOrDefault<int>(@"SELECT r.RoleId FROM SBCES.Users u JOIN SBCES.Roles r ON u.RoleId = r.RoleId WHERE u.UserADId = '" + userADId + "'");
+
+                var roleName =
+                    _dbConnection.QueryFirstOrDefault<string>(@"SELECT r.RoleName FROM SBCES.Users u JOIN SBCES.Roles r ON u.RoleId = r.RoleId WHERE u.UserADId = '" + userADId + "'");
+                //sites
+                var siteQuery = @"SELECT                
+                              STRING_AGG(s.SiteName, ',') AS SiteName
+                              FROM SBCES.[Users] u          
+                              LEFT JOIN SBCES.UserSites us ON u.UserId = us.userId
+                              LEFT JOIN SBCES.Sites s ON us.SiteId = s.SiteId";
+                var siteSubQuery = @"  GROUP BY u.UserADId, u.UserId, U.UserName";
+                var siteNames = _dbConnection.QueryFirstOrDefault<string>(siteQuery + " WHERE u.UserADId = '" + userADId + "'" + siteSubQuery);
+
+
+                //// Access the session variable
+                HttpContext.Session.SetString("UserADId", userADId);
+                HttpContext.Session.SetString("UserName", userName);
+                HttpContext.Session.SetInt32("roleId", roleId);
+                HttpContext.Session.SetString("roleName", roleName);
+                HttpContext.Session.SetString("siteNames", siteNames);
+
+                ViewBag.RoleId = roleId;
+                ViewBag.UserName = userName;
+                ViewBag.RoleName = roleName;
+                ViewBag.SiteNames = siteNames;
+               
+                await next();
+               
+
+            }
+            catch (Exception ex)
+            {
+                
+            }
+         
+        }
+
+    }
+   
+}
+Example of one controller inherited from BaseController :
+using BCES.Data;
+using Microsoft.AspNetCore.Mvc;
+using System.Data;
+using BCES.Controllers.Base;
+using BCES.Models.Parts;
+
+using BCES.Models.Admin;
+using System.Data.Common;
+using Dapper;
+
+namespace BCES.Controllers.Parts
+{
+    public class BusesController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public BusesController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        public async Task<IEnumerable<BusesModel>> GetBusDetails(string rebuiltStockNum)
+        {
+            var query = @"
+            SELECT rlb.[RebuiltStockNum],
+                   lb.[ListId],
+                   lb.[Description]
+            FROM [SBCES].[RbListOfBuses] rlb
+            INNER JOIN [SBCES].[ListOfBuses] lb ON rlb.[ListId] = lb.[ListId]
+            WHERE rlb.[RebuiltStockNum] = @RebuiltStockNum"
+            ;
+
+            return await _dbConnection.QueryAsync<BusesModel>(query, new { RebuiltStockNum = rebuiltStockNum });
+        }
+    }
+
+
+    
+}
+
+
+
