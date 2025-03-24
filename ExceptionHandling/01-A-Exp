@@ -1,0 +1,112 @@
+BaseController.cs (Clean Version)
+Here's the clean BaseController:
+
+csharp
+Copy
+Edit
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.Logging;
+using Dapper;
+using System;
+using System.Data;
+using System.Threading.Tasks;
+
+namespace BCES.Controllers.Base
+{
+    public class BaseController : Controller
+    {
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly ILogger<BaseController> _logger;
+
+        protected string UserName { get; private set; }
+        protected int RoleId { get; private set; }
+        protected string RoleName { get; private set; }
+        protected string SiteNames { get; private set; }
+
+        public BaseController(
+            DapperContext dapper,
+            IHttpContextAccessor httpContextAccessor,
+            ILogger<BaseController> logger)
+        {
+            _dbConnection = dapper.CreateConnection();
+            _httpContextAccessor = httpContextAccessor;
+            _logger = logger;
+        }
+
+        public override async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+        {
+            try
+            {
+                // ✅ Load context data (UserName, RoleId, etc.)
+                string userADId = _httpContextAccessor.HttpContext.User.Identity?.Name;
+                if (!string.IsNullOrEmpty(userADId))
+                {
+                    string[] temp = userADId.Split('\\');
+                    userADId = temp.Length > 1 ? temp[1] : userADId;
+
+                    UserName = _dbConnection.QueryFirstOrDefault<string>(
+                        @"SELECT u.UserName FROM SBCES.Users u WHERE u.UserADId = @UserADId",
+                        new { UserADId = userADId }
+                    );
+
+                    RoleId = _dbConnection.QueryFirstOrDefault<int>(
+                        @"SELECT r.RoleId FROM SBCES.Users u 
+                          JOIN SBCES.Roles r ON u.RoleId = r.RoleId 
+                          WHERE u.UserADId = @UserADId",
+                        new { UserADId = userADId }
+                    );
+
+                    RoleName = _dbConnection.QueryFirstOrDefault<string>(
+                        @"SELECT r.RoleName FROM SBCES.Users u 
+                          JOIN SBCES.Roles r ON u.RoleId = r.RoleId 
+                          WHERE u.UserADId = @UserADId",
+                        new { UserADId = userADId }
+                    );
+
+                    SiteNames = _dbConnection.QueryFirstOrDefault<string>(
+                        @"SELECT STRING_AGG(s.SiteName, ',') 
+                          FROM SBCES.Users u
+                          LEFT JOIN SBCES.UserSites us ON u.UserId = us.userId
+                          LEFT JOIN SBCES.Sites s ON us.SiteId = s.SiteId
+                          WHERE u.UserADId = @UserADId
+                          GROUP BY u.UserADId, u.UserId, u.UserName",
+                        new { UserADId = userADId }
+                    );
+
+                    ViewBag.UserName = UserName;
+                    ViewBag.RoleId = RoleId;
+                    ViewBag.RoleName = RoleName;
+                    ViewBag.SiteNames = SiteNames;
+                }
+
+                await next(); // ✅ Execute action
+            }
+            catch (Exception ex)
+            {
+                // ✅ Call LoggerService directly without injecting it into BaseController
+                var loggerService = HttpContext.RequestServices.GetService<LoggerService>();
+                if (loggerService != null)
+                {
+                    await loggerService.LogErrorAsync(ex, UserName, "Error in BaseController", redirectToErrorPage: true);
+                }
+            }
+        }
+    }
+}
+✅ 4. Create Error Action and Page
+You only need to define the Error action once in HomeController:
+
+HomeController.cs
+csharp
+Copy
+Edit
+public class HomeController : Controller
+{
+    [Route("Home/Error")]
+    public IActionResult Error()
+    {
+        return View("Error");
+    }
+}
