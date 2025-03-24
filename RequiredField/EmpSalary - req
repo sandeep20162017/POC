@@ -1,0 +1,192 @@
+@model IEnumerable<BCES.Models.Admin.EmpSalaryModel>
+
+@{
+    ViewData["Title"] = "Employee Salary";
+}
+
+<style>
+    /* logic for required col changes - CSS for required columns */
+    .required-header::after {
+        content: " *";
+        color: #e32;
+        font-weight: bold;
+    }
+    .required-cell {
+        background-color: rgba(255, 0, 0, 0.05);
+    }
+    .k-edit-cell.required-cell input,
+    .k-edit-cell.required-cell .k-numeric-wrap {
+        border-left: 3px solid #e32;
+        padding-left: 5px;
+    }
+</style>
+
+<h4>Employee Salary</h4>
+
+@(
+Html.Kendo().Grid<BCES.Models.Admin.EmpSalaryModel>()
+    .Name("EmployeeSalaryGrid")
+    .Columns(columns =>
+    {
+        /* logic for required col changes - Added required indicators */
+        columns.Bound(p => p.WageGroup)
+            .Title("Wage Group")
+            .HeaderHtmlAttributes(new { @class = "required-header" })
+            .HtmlAttributes(new { @class = "required-cell" })
+            .Editable("isNameEditable");
+
+        /* logic for required col changes - Added required indicators */
+        columns.Bound(p => p.RatePerHour)
+            .Title("Rate Per Hour")
+            .HeaderHtmlAttributes(new { @class = "required-header" })
+            .HtmlAttributes(new { @class = "required-cell" })
+            .Filterable(ftb => ftb.Cell(cell => cell.Operator("gte")))
+            .Format("{0:C2}")
+            .EditorTemplateName("Currency");
+
+        columns.Command(command =>
+        {
+            command.Custom("Delete")
+                .Click("showDeleteConfirmation")
+                .Text(" ")
+                .IconClass("k-icon k-i-delete")
+                .HtmlAttributes(new { @class = "text-danger", title = "Delete" });
+        }).Title("Actions");
+    })
+    .ToolBar(toolbar =>
+    {
+        toolbar.Create();
+        toolbar.Save();
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Events(events => events
+            .Error("onDataSourceError")
+            .RequestEnd("onRequestEnd")
+        )
+        .Model(model =>
+        {
+            model.Id(u => u.WageGroup);
+            model.Field(c => c.WageGroup).Editable(true);
+            model.Field(c => c.RatePerHour).Editable(true);
+            model.Field(c => c.DateEntered);
+        })
+        .Read(read => read.Url(Url.Action("GetEmpSalary", "EmpSalary")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("CreateEmpSalary", "EmpSalary")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateEmpSalary", "EmpSalary")).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteEmpSalary", "EmpSalary")).Type(HttpVerbs.Post))
+    )
+)
+
+<!-- Custom Delete Confirmation Dialog -->
+<div id="deleteConfirmationDialog" style="display: none;">
+    <div class="confirmation-message">
+        <span class="k-icon k-i-warning confirmation-icon"></span>
+        <span>Are you sure you want to delete this item?</span>
+    </div>
+    <div class="confirmation-buttons">
+        <button type="button" class="k-button cancel-btn">Cancel</button>
+        <button type="button" class="k-button confirm-btn">Delete</button>
+    </div>
+</div>
+<div id="notification"></div>
+
+@section Scripts {
+    <script>
+        function getAutoCompleteParams() {
+            var input = $("input[data-role='autocomplete']:focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || ""
+            };
+        }
+    </script>
+
+    <script>
+        // Initialize notification FIRST
+        var notification = $("#notification").kendoNotification({
+            position: {
+                pinned: true,
+                top: 50,
+                right: 30
+            },
+            autoHideAfter: 4000,
+            stacking: "down"
+        }).data("kendoNotification");
+
+        // Error handler
+        function onDataSourceError(e) {
+            let errorMessage = "Operation failed. ";
+
+            if (e.errorThrown) {
+                errorMessage += e.errorThrown;
+            } else if (e.xhr && e.xhr.responseText) {
+                errorMessage += e.xhr.responseText;
+            }
+
+            notification.error(errorMessage);
+        }
+
+        // Success handler
+        function onRequestEnd(e) {
+            if (e.type === "create") {
+                notification.success("Record created successfully");
+            } else if (e.type === "update") {
+                notification.success("Record updated successfully");
+            } else if (e.type === "destroy") {
+                notification.success("Record deleted successfully");
+            }
+        }
+    </script>
+
+    <script>
+        // Initialize custom confirmation dialog
+        var deleteDialog = $("#deleteConfirmationDialog").kendoWindow({
+            width: "400px",
+            title: "Confirm Delete",
+            modal: true,
+            visible: false,
+            actions: ["Close"]
+        }).data("kendoWindow");
+
+        function showDeleteConfirmation(e) {
+            e.preventDefault();
+            var grid = $("#EmployeeSalaryGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            deleteDialog.dataItem = dataItem;
+            deleteDialog.center().open();
+        }
+
+        $(document).on("click", "#deleteConfirmationDialog .confirm-btn", function () {
+            var grid = $("#EmployeeSalaryGrid").data("kendoGrid");
+            var dataItem = deleteDialog.dataItem;
+
+            $.ajax({
+                url: '@Url.Action("DeleteEmpSalary", "EmpSalary")',
+                type: 'POST',
+                data: { WageGroup: dataItem.WageGroup },
+                success: function () {
+                    grid.dataSource.remove(dataItem);
+                    notification.success("Record deleted successfully");
+                    deleteDialog.close();
+                },
+                error: function (xhr) {
+                    notification.error("Delete failed: " + xhr.responseText);
+                    deleteDialog.close();
+                }
+            });
+        });
+
+        $(document).on("click", "#deleteConfirmationDialog .cancel-btn", function () {
+            deleteDialog.close();
+        });
+
+        function isNameEditable(dataItem) {
+            return dataItem.isNew();
+        }
+    </script>
+}
