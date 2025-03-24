@@ -1,0 +1,80 @@
+1. Update AdminController (Controllers/AdminController.cs)
+csharp
+Copy
+using Microsoft.AspNetCore.Mvc;
+using Models.Admin;
+using Dapper;
+using System.Data;
+
+public class AdminController : BaseController
+{
+    // ... existing Editor and SaveContent actions ...
+
+    public IActionResult Index()
+    {
+        try
+        {
+            // Get the latest content from database
+            var content = _dbConnection.QueryFirstOrDefault<string>(
+                "SELECT TOP 1 Content FROM SBCES.AdminHtmlContent ORDER BY Id DESC");
+            
+            var model = new EditorModel 
+            {
+                Content = content ?? "<p>No content found</p>"
+            };
+
+            return View(model);
+        }
+        catch (Exception ex)
+        {
+            return HandleError(ex);
+        }
+    }
+}
+2. Create Index View (Views/Admin/Index.cshtml)
+html
+Copy
+@model Models.Admin.EditorModel
+
+@{
+    ViewData["Title"] = "Admin Content Display";
+}
+
+<div class="container mt-4">
+    <h2>Stored Content</h2>
+    
+    <div class="card">
+        <div class="card-body">
+            <!-- Render the HTML content safely -->
+            @Html.Raw(Model.Content)
+        </div>
+    </div>
+
+    <div class="mt-3">
+        <a asp-action="Editor" class="btn btn-primary">Edit Content</a>
+    </div>
+</div>
+Run HTML
+3. Security Recommendation (Optional)
+If you need to sanitize the output, modify the Index action:
+
+csharp
+Copy
+public IActionResult Index()
+{
+    try
+    {
+        var rawContent = _dbConnection.QueryFirstOrDefault<string>(
+            "SELECT TOP 1 Content FROM SBCES.AdminHtmlContent ORDER BY Id DESC");
+        
+        // Sanitize the HTML before displaying
+        var sanitizer = new Ganss.Xss.HtmlSanitizer();
+        var cleanHtml = sanitizer.Sanitize(rawContent ?? "<p>No content found</p>");
+        
+        return View(new EditorModel { Content = cleanHtml });
+    }
+    catch (Exception ex)
+    {
+        return HandleError(ex);
+    }
+}
