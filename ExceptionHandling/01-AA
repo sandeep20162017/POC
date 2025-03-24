@@ -1,0 +1,147 @@
+Folder Structure
+Copy
+Controllers/
+├── BaseController.cs
+├── HomeController.cs
+Views/
+└── Home/
+    └── Error.cshtml
+1. BaseController.cs
+csharp
+Copy
+using Microsoft.AspNetCore.Mvc;
+using Dapper;
+using System.Data;
+
+public class BaseController : Controller
+{
+    protected readonly IDbConnection _dbConnection;
+    
+    // If using DbContext
+    protected readonly YourDbContext _dbContext;
+
+    public BaseController(IDbConnection dbConnection, YourDbContext dbContext = null)
+    {
+        _dbConnection = dbConnection;
+        _dbContext = dbContext;
+    }
+
+    protected IActionResult HandleError(Exception ex)
+    {
+        try
+        {
+            var userName = ViewData["UserName"]?.ToString() ?? "Anonymous";
+            
+            _dbConnection.Execute(
+                @"INSERT INTO ErrorLog 
+                (UserName, ExceptionMessage, StackTrace)
+                VALUES
+                (@UserName, @ExceptionMessage, @StackTrace)",
+                new {
+                    UserName = userName,
+                    ExceptionMessage = ex.Message,
+                    StackTrace = ex.ToString()
+                });
+        }
+        catch 
+        {
+            // Fallback error handling
+        }
+
+        return RedirectToAction("Error");
+    }
+
+    public IActionResult Error()
+    {
+        return View("~/Views/Home/Error.cshtml");
+    }
+}
+2. HomeController.cs
+csharp
+Copy
+public class HomeController : BaseController
+{
+    public HomeController(IDbConnection dbConnection, YourDbContext dbContext)
+        : base(dbConnection, dbContext)
+    {
+    }
+
+    public IActionResult Index()
+    {
+        try
+        {
+            // Your Dapper code using _dbConnection
+            ViewData["UserName"] = "CurrentUser";  // Set your username
+            return View();
+        }
+        catch (Exception ex)
+        {
+            return HandleError(ex);
+        }
+    }
+}
+3. Error.cshtml (Views/Home/Error.cshtml)
+html
+Copy
+@{
+    ViewData["Title"] = "Error";
+}
+
+<h1>Error Occurred</h1>
+<p>We've logged the error and are working on a fix.</p>
+Run HTML
+4. Program.cs Configuration
+csharp
+Copy
+var builder = WebApplication.CreateBuilder(args);
+
+// Add database services
+builder.Services.AddScoped<IDbConnection>(_ => 
+    new SqlConnection(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// If using DbContext
+builder.Services.AddDbContext<YourDbContext>();
+
+builder.Services.AddControllersWithViews();
+
+var app = builder.Build();
+
+app.UseExceptionHandler("/Home/Error");
+// Other middleware...
+
+app.MapControllerRoute(
+    name: "default",
+    pattern: "{controller=Home}/{action=Index}/{id?}");
+
+app.Run();
+Usage in Any Controller
+csharp
+Copy
+public class SomeController : BaseController
+{
+    public SomeController(IDbConnection dbConnection, YourDbContext dbContext)
+        : base(dbConnection, dbContext)
+    {
+    }
+
+    public IActionResult MyAction()
+    {
+        try
+        {
+            // Your Dapper code using _dbConnection
+            ViewData["UserName"] = "User123";  // Set before potential errors
+            return View();
+        }
+        catch (Exception ex)
+        {
+            return HandleError(ex);
+        }
+    }
+}
+Key Features:
+TABLE [dbo].[ErrorLog] (
+    [Id] INT IDENTITY(1,1) PRIMARY KEY,
+    [UserName] NVARCHAR(100) NULL, 
+    [LogDate] DATETIME NOT NULL DEFAULT GETDATE(),
+    [ExceptionMessage] NVARCHAR(MAX) NOT NULL,
+    [StackTrace] NVARCHAR(MAX) NULL,
