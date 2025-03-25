@@ -1,0 +1,67 @@
+[AllowAnonymous]
+private async Task<IEnumerable<LabourDetailsRebuiltPartsViewModel>> GetLabourHourSummaryInRbPartsData(
+    string rebuiltPartNum,
+    string gridType)
+{
+    try
+    {
+        var query = @"
+            SELECT 
+                [Id],
+                [LabourDefn],
+                [DateEntered],
+                [LinkNumber],
+                [TypeId],
+                [CostCentre],
+                [Task],
+                [LabourType],
+                [Usage],
+                [HrsReqd],
+                [AdjHrs],
+                CAST([DateRevised] AS DATETIME) AS DateRevised,
+                [TimeAddition],
+                [RebuiltPartNum],
+                [LastModifiedBy]
+            FROM 
+                [CES].[SBCES].[EmployeeLabour]
+            WHERE 
+                LinkNumber = @RebuiltPartNum AND TypeId = 'RB'";
+
+        var parameters = new
+        {
+            RebuiltPartNum = rebuiltPartNum.Trim()
+        };
+
+        var result = await _dbConnection.QueryAsync<LabourDetailsRebuiltPartsViewModel>(
+            query, 
+            parameters
+        );
+
+        //  Split HrsReqd into LabourHrs and LabourMins
+        foreach (var item in result)
+        {
+            if (!string.IsNullOrEmpty(item.HrsReqd))
+            {
+                var parts = item.HrsReqd.Split(':');
+
+                // If left or right part is missing, set to 0
+                item.LabourHrs = parts.Length > 0 && int.TryParse(parts[0], out int hrs) ? hrs : 0;
+                item.LabourMins = parts.Length > 1 && int.TryParse(parts[1], out int mins) ? mins : 0;
+            }
+            else
+            {
+                // If HrsReqd is null or empty, default to 0
+                item.LabourHrs = 0;
+                item.LabourMins = 0;
+            }
+        }
+
+        Console.WriteLine($"Query returned {result.Count()} rows");
+        return result;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error in GetLabourHourSummaryInRbPartsData: {ex.Message}");
+        throw;
+    }
+}
