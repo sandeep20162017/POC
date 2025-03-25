@@ -1,0 +1,144 @@
+Controller
+csharp
+Copy
+Edit
+[HttpGet]
+[AllowAnonymous]
+public async Task<JsonResult> GetLabourHourSummaryInRbParts(
+    [DataSourceRequest] DataSourceRequest request,
+    [FromQuery] string rebuiltPartNum,
+    [FromQuery] string gridType)
+{
+    if (string.IsNullOrEmpty(rebuiltPartNum))
+    {
+        return BadRequest("rebuiltPartNum is required.");
+    }
+
+    var model = await GetLabourHourSummaryInRbPartsData(rebuiltPartNum, gridType);
+    if (model == null)
+    {
+        return Json(new { success = false, message = "No data found." });
+    }
+
+    return Json(model.ToDataSourceResult(request));
+}
+Data Retrieval
+✅ Fixes: ✔️ Added parameterization.
+✔️ Fixed DateOnly type issue by casting it to DateTime.
+✔️ Fixed type mismatches.
+✔️ Added exception logging to avoid silent failures.
+
+csharp
+Copy
+Edit
+[AllowAnonymous]
+private async Task<IEnumerable<LabourDetailsRebuiltPartsViewModel>> GetLabourHourSummaryInRbPartsData(
+    string rebuiltPartNum, 
+    string gridType)
+{
+    try
+    {
+        var query = @"
+            SELECT 
+                [Id],
+                [LabourDefn],
+                [DateEntered],
+                [LinkNumber],
+                [TypeId],
+                [CostCentre],
+                [Task],
+                [LabourType],
+                [Usage],
+                [HrsReqd],
+                [AdjHrs],
+                CAST([DateRevised] AS DATETIME) AS DateRevised, -- Fix DateOnly issue
+                [TimeAddition],
+                [RebuiltPartNum],
+                [LastModifiedBy]
+            FROM 
+                [CES].[SBCES].[EmployeeLabour]
+            WHERE 
+                LinkNumber = @RebuiltPartNum AND TypeId = 'RB'";
+
+        var parameters = new
+        {
+            RebuiltPartNum = rebuiltPartNum.Trim() // Trim whitespace if necessary
+        };
+
+        var result = await _dbConnection.QueryAsync<LabourDetailsRebuiltPartsViewModel>(
+            query, 
+            parameters
+        );
+
+        // Debug logging (optional)
+        Console.WriteLine($"Query returned {result.Count()} rows");
+
+        return result;
+    }
+    catch (Exception ex)
+    {
+        // Proper error logging
+        Console.WriteLine($"Error in GetLabourHourSummaryInRbPartsData: {ex.Message}");
+        throw;
+    }
+}
+✅ Model Fixes
+Change DateOnly to DateTime?
+
+Make sure all property names match column names from the query.
+
+Model Fix:
+csharp
+Copy
+Edit
+public class LabourDetailsRebuiltPartsViewModel
+{
+    [Key]
+    [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+    public int Id { get; set; }
+
+    [StringLength(50)]
+    public string? LabourDefn { get; set; }
+
+    public DateTime? DateEntered { get; set; }
+
+    [StringLength(25)]
+    public string? LinkNumber { get; set; }
+
+    [StringLength(5)]
+    public string? TypeId { get; set; }
+
+    [StringLength(5)]
+    public string? CostCentre { get; set; }
+
+    [StringLength(50)]
+    public string? Task { get; set; }
+
+    public int? LabourType { get; set; }
+
+    [StringLength(25)]
+    public string? Usage { get; set; }
+
+    public decimal? RatePerHour { get; set; }
+
+    public int LabourHrs { get; set; }
+    public int LabourMins { get; set; }
+
+    [StringLength(25)]
+    public string? HrsReqd { get; set; }
+
+    [StringLength(25)]
+    public string? AdjHrs { get; set; }
+
+    // Change DateOnly to DateTime
+    public DateTime? DateRevised { get; set; }
+
+    [Column(TypeName = "numeric(18,2)")]
+    public decimal? TimeAddition { get; set; }
+
+    [StringLength(30)]
+    public string? RebuiltPartNum { get; set; }
+
+    [StringLength(25)]
+    public string? LastModifiedBy { get; set; }
+}
