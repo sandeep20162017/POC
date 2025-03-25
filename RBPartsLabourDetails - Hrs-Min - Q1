@@ -1,5 +1,5 @@
 You are ASP.NET Core 8.0 and Telerik ASp.NET Core expert. Application uses Telerik Grid, InCell Edit.
-Pls assist me for the below Controller logic  implementation.
+Pls assist me in rewrting Add, Update, Get controller logic below
 Add exception handling.
 
 Model 
@@ -20,5 +20,193 @@ Controller Read :
 Select HrsReqd from EmployeeLabour (SQL query), which returns string example 18:20 (Hrs:Mins)
 Update model properties to set Hrs and Mins from HrsReqd (string seperated by :) and pass it to view (convert to int)
 
-Controller Add :
-Insert into EmployeeLabour set HrsReqd = = LabourHrs+":"+LabourMins (Do proper conversion)
+Controller Update :
+[AcceptVerbs("Post")]
+public ActionResult UpdateLabourDetail([DataSourceRequest] DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<LabourDetailsRebuiltPartsViewModel> labourDetails)
+{
+    if (labourDetails != null && ModelState.IsValid)
+    {
+        foreach (var labour in labourDetails)
+        {
+            UpdateLabourDetailData(labour);
+        }
+    }
+
+    return Json(labourDetails.ToDataSourceResult(request, ModelState));
+}
+
+
+[AllowAnonymous]
+public IActionResult UpdateLabourDetailData(LabourDetailsRebuiltPartsViewModel model)
+
+{
+    if (ModelState.IsValid)
+    {
+        try
+        {
+            string query = @"
+                            UPDATE SBCES.EMPLOYEELABOUR 
+                            SET 
+                                LABOURDEFN = @LabourDefn,
+                                COSTCENTRE = @CostCentre,
+                                TASK = @Task,
+                                USAGE = @Usage,
+                                HRSREQD = @HrsReqd,
+                                REBUILTPARTNUM = @LinkNumber 
+                            WHERE Id = @Id";
+
+            var parameters = new
+            {
+                model.LabourDefn,
+                model.CostCentre,
+                model.Task,
+                model.Usage,
+                model.HrsReqd,
+                model.LinkNumber, // From query parameter
+                model.Id
+            };
+
+            _dbConnection.Execute(query, parameters);
+        }
+        catch (Exception ex)
+        {
+            ModelState.AddModelError("", "Error: " + ex.Message);
+        }
+    }
+
+    return Json(ModelState);
+}
+Controller Create :
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> CreateLabourDetail(
+                                [DataSourceRequest] DataSourceRequest request,
+                                [Bind(Prefix = "models")] IEnumerable<LabourDetailsRebuiltPartsViewModel> models,
+                                [FromQuery] string rebuiltPartNum,
+                                [FromQuery] string gridType)
+{
+    if (!ModelState.IsValid)
+    {
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+
+    // Create and manage connection locally
+    using (_dbConnection)
+    {
+        _dbConnection.Open(); // Async open
+
+        using (var transaction = _dbConnection.BeginTransaction())
+        {
+            try
+            {
+                foreach (var model in models)
+                {
+                    const string query = @"
+                    INSERT INTO SBCES.EMPLOYEELABOUR (
+                        LABOURDEFN, DATEENTERED, LINKNUMBER, TYPEID, 
+                        COSTCENTRE, TASK, LABOURTYPE, USAGE, HRSREQD, 
+                        ADJHRS, DATEREVISED, TIMEADDITION, REBUILTPARTNUM, LASTMODIFIEDBY
+                    ) VALUES (
+                        @LabourDefn, @DateEntered, @LinkNumber, @TypeId,
+                        @CostCentre, @Task, @LabourType, @Usage, @HrsReqd,
+                        @AdjHrs, @DateRevised, @TimeAddition, @RebuiltPartNum, @LastModifiedBy
+                    )";
+
+                    var parameters = new
+                    {
+                        model.LabourDefn,
+                        DateEntered = DateTime.Now,
+                        LinkNumber = rebuiltPartNum,
+                        TypeId = "RB", // PartType
+                        model.CostCentre,
+                        model.Task,
+                        model.LabourType,
+                        model.Usage,
+                        model.HrsReqd,
+                        model.AdjHrs,
+                        DateRevised = DateTime.Now,
+                        model.TimeAddition,
+                        RebuiltPartNum = rebuiltPartNum,
+                        LastModifiedBy = ViewBag.UserName // Ensure ViewBag.UserName exists
+                    };
+
+                    // Async execute with transaction
+                    await _dbConnection.ExecuteAsync(query, parameters, transaction: transaction);
+                }
+
+                transaction.Commit(); // Async commit
+                return Json(models.ToDataSourceResult(request));
+            }
+            catch (Exception ex)
+            {
+                transaction.Rollback();
+                // Log the error (e.g., using ILogger)
+                // _logger.LogError(ex, "Error inserting labour details");
+
+                ModelState.AddModelError("", "An error occurred while saving data.");
+                return Json(models.ToDataSourceResult(request, ModelState));
+            }
+        } // Transaction disposed here
+    } // Connection closed/disposed here automatically
+}
+Controller Get
+[HttpGet]
+[AllowAnonymous]
+public async Task<JsonResult> GetLabourDetails([DataSourceRequest] DataSourceRequest request, [FromQuery] string rebuiltPartNum, [FromQuery] string gridType)
+{
+    // Fetch data for the grid
+
+    if (string.IsNullOrEmpty(rebuiltPartNum))
+    {
+        return null; // BadRequest("rebuiltPartNum is required.");
+    }
+
+    // Fetch data for the grid using the rebuiltPartNum
+    var model = await GetLabourDetailsData(rebuiltPartNum, gridType);
+    return Json(model.ToDataSourceResult(request));
+
+}
+
+[AllowAnonymous]
+public async Task<IEnumerable<LabourDetailsRebuiltPartsViewModel>> GetLabourDetailsData(string partNum, string gridType)
+{
+    //TODO use GridType
+    try
+    {
+        // _rebuiltPartNum = RebuiltPartNum;
+        var query = @"
+                     DECLARE @RebuiltPartNumber VARCHAR(30) = '" + partNum + "'" +
+                     @"
+                   
+
+                    -- Section 1: Labour Details
+                    PRINT 'Fetching Labour Details...'; 
+                    SELECT 
+                        EL.Id,
+                        EL.LinkNumber,
+                        EL.LabourDefn,
+                        EL.CostCentre,
+                        EL.Task ,
+                        REPLACE(EL.Usage, ',', '.') AS [Usage],
+                        EL.HrsReqd,
+                        ES.RatePerHour,
+                        EL.TimeAddition
+                    FROM 
+                        SBCES.EmployeeLabour EL
+                        JOIN SBCES.EmplClass EC ON EL.LabourDefn = UPPER(EC.LabourDefn)
+                        JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
+                    WHERE 
+                        EL.LinkNumber = @RebuiltPartNumber
+                       
+
+                    PRINT 'Labour Details fetched successfully.';
+                         ";
+
+        return await _dbConnection.QueryAsync<LabourDetailsRebuiltPartsViewModel>(query);
+
+    }
+    catch (Exception ex)
+    {
+        return null;
+    }
+}
