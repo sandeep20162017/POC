@@ -1,0 +1,99 @@
+Rewrite above controller logic to implement following business rules (calculations). Use proper casting.
+Updated model is included below. Use exception handling. Appreciate your help.
+Give me the full changed files. Assume I don't hav access to your prvious suggetions.
+
+1. DecimalHours = LabourHrs + (LabourMins / 60)
+2. EffectiveHours = DecimalHrs × Usage (this is string value in the model need to cast it and divide the value by 100)
+3. NonProductiveAdjustment = Get it from the SQL statement : SELECT  [Value]  FROM [CES].[SBCES].[CesSettings]  where [Parameter] = 'NON_PRODUCTIVE_ADJUSTMENT' //This returns varchar need to properly cast it.
+4. AdjHrs= EffectiveHours / NonProductiveAdjustment 
+5. //Use following BR to re-calculate LabourHrs from EffectiveHours
+Example model.EffectiveHours: 24.5333 hours
+Convert to Hours and Minutes:
+Hours: 24
+Minutes: 0.5333 × 60 = 32 minutes
+LabourHrs = 24:32 (Hours:Minutes) This is varchar. Values are Grs semicolumn Mins
+
+6. Calculate LabourRate 
+Get WageGroup using SQL : SELECT    [WageGroup]   FROM [CES].[SBCES].[EmplClass]
+  where [LabourDefn] like model.LabourType (this is varchar pls use like '% %') 
+Get LabourRate using SQL : SELECT       [RatePerHour]
+  FROM [CES].[SBCES].[EmployeeSalaries]
+  where WageGroup = WageGroup
+LabourCost = AdjHrs (make sure to cast, if null 0) × LabourRate (use proper casting - this is neumeric (18,2))
+7. Calculate LabourOverheadTotal
+Get OverheadPercentage using SQL call :
+SELECT 
+      [Value]
+  FROM [CES].[SBCES].[CesSettings]
+  where parameter = 'OVERHEAD'
+Value is Varchar. You will need to cast this before calculations. If Null 0.
+
+LabourOverheadTotal =  LabourCost × OverheadPercentage
+
+Model :
+using System.ComponentModel.DataAnnotations.Schema;
+using System.ComponentModel.DataAnnotations;
+
+namespace BCES.Models.Parts
+{
+    public class LabourDetailsRebuiltPartsViewModel
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public int Id { get; set; }
+
+        [StringLength(50)]
+        public string? LabourDefn { get; set; }
+
+        public DateTime? DateEntered { get; set; }
+
+        [StringLength(25)]
+        public string? LinkNumber { get; set; }
+
+        [StringLength(5)]
+        public string? TypeId { get; set; }
+
+        [StringLength(5)]
+        public string? CostCentre { get; set; }
+
+        [StringLength(50)]
+        public string? Task { get; set; }
+
+        public int? LabourType { get; set; }
+
+        [StringLength(25)]
+        public string? Usage { get; set; }
+
+        /// <summary> additinal columns for calcuations
+        public decimal? DecimalHrs { get; set; }
+        public decimal? EffectiveHours { get; set; }
+        public string? AdjHrs { get; set; } //make sure to cast this when used
+        public decimal LabourCost { get; set; }
+        public decimal LabourOverheadTotal { get; set; }
+        /// </summary>
+
+        public decimal? AdjustedHours { get; set; }
+       
+
+        public int LabourHrs { get; set; }
+        public int LabourMins { get; set; }
+
+        [StringLength(25)]
+        public string? HrsReqd { get; set; }
+
+        
+        // Change DateOnly to DateTime
+        public DateTime? DateRevised { get; set; }
+
+        [Column(TypeName = "numeric(18,2)")]
+        public decimal? TimeAddition { get; set; }
+
+        [StringLength(30)]
+        public string RebuiltPartNum { get; set; }
+
+        [StringLength(25)]
+        public string? LastModifiedBy { get; set; }
+    }
+
+
+}
