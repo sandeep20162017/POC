@@ -1,0 +1,191 @@
+using Microsoft.AspNetCore.Mvc;
+using Dapper;
+using System.Data;
+using BCES.Models.Parts;
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using System.Linq;
+
+namespace BCES.Controllers
+{
+    public class LabourDetailsController : Controller
+    {
+        private readonly IDbConnection _dbConnection;
+
+        public LabourDetailsController(IDbConnection dbConnection)
+        {
+            _dbConnection = dbConnection;
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<JsonResult> GetLabourHourSummaryInRbParts(
+            [DataSourceRequest] DataSourceRequest request, 
+            [FromQuery] string rebuiltPartNum, 
+            [FromQuery] string gridType)
+        {
+            if (string.IsNullOrEmpty(rebuiltPartNum))
+            {
+                return Json(new { success = false, message = "RebuiltPartNum is required." });
+            }
+
+            try
+            {
+                var model = await GetLabourHourSummaryInRbPartsData(rebuiltPartNum, gridType);
+
+                if (model == null || !model.Any())
+                {
+                    return Json(new { success = false, message = "No data found." });
+                }
+
+                return Json(model.ToDataSourceResult(request));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in GetLabourHourSummaryInRbParts: {ex.Message}");
+                return StatusCode(500, "An error occurred while fetching data.");
+            }
+        }
+
+        [AllowAnonymous]
+        private async Task<IEnumerable<LabourDetailsRebuiltPartsViewModel>> GetLabourHourSummaryInRbPartsData(
+            string rebuiltPartNum, 
+            string gridType)
+        {
+            try
+            {
+                var query = @"
+                    SELECT 
+                        [Id],
+                        [LabourDefn],
+                        [DateEntered],
+                        [LinkNumber],
+                        [TypeId],
+                        [CostCentre],
+                        [Task],
+                        [LabourType],
+                        [Usage],
+                        [HrsReqd],
+                        [AdjHrs],
+                        CAST([DateRevised] AS DATETIME) AS DateRevised,
+                        [TimeAddition],
+                        [RebuiltPartNum],
+                        [LastModifiedBy]
+                    FROM 
+                        [CES].[SBCES].[EmployeeLabour]
+                    WHERE 
+                        LinkNumber = @RebuiltPartNum AND TypeId = 'RB'";
+
+                var parameters = new { RebuiltPartNum = rebuiltPartNum.Trim() };
+
+                var result = await _dbConnection.QueryAsync<LabourDetailsRebuiltPartsViewModel>(query, parameters);
+
+                foreach (var item in result)
+                {
+                    // 1. Split HrsReqd into LabourHrs and LabourMins
+                    if (!string.IsNullOrEmpty(item.HrsReqd))
+                    {
+                        var parts = item.HrsReqd.Split(':');
+                        item.LabourHrs = parts.Length > 0 && int.TryParse(parts[0], out int hrs) ? hrs : 0;
+                        item.LabourMins = parts.Length > 1 && int.TryParse(parts[1], out int mins) ? mins : 0;
+                    }
+                    else
+                    {
+                        item.LabourHrs = 0;
+                        item.LabourMins = 0;
+                    }
+
+                    // 2. DecimalHours = LabourHrs + (LabourMins / 60)
+                    item.DecimalHrs = item.LabourHrs + (item.LabourMins / 60m);
+
+                    // 3. EffectiveHours = DecimalHrs × (Usage/100)
+                    if (decimal.TryParse(item.Usage, out decimal usage))
+                    {
+                        item.EffectiveHours = item.DecimalHrs * (usage / 100m);
+                    }
+
+                    // 4. NonProductiveAdjustment = Get from DB and cast it
+                    var nonProductiveAdjustment = await GetNonProductiveAdjustment();
+                    if (nonProductiveAdjustment > 0)
+                    {
+                        item.AdjustedHours = item.EffectiveHours / nonProductiveAdjustment;
+                        item.AdjHrs = $"{(int)item.AdjustedHours}:{(int)((item.AdjustedHours % 1) * 60):D2}";
+                    }
+
+                    // 5. LabourRate and LabourCost Calculation
+                    var labourRate = await GetLabourRate(item.LabourDefn);
+                    item.LabourCost = (item.AdjustedHours ?? 0) * labourRate;
+
+                    // 6. LabourOverheadTotal Calculation
+                    var overheadPercentage = await GetOverheadPercentage();
+                    item.LabourOverheadTotal = item.LabourCost * (overheadPercentage / 100m);
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in GetLabourHourSummaryInRbPartsData: {ex.Message}");
+                throw;
+            }
+        }
+
+        private async Task<decimal> GetNonProductiveAdjustment()
+        {
+            try
+            {
+                var query = @"SELECT [Value] FROM [CES].[SBCES].[CesSettings] WHERE [Parameter] = 'NON_PRODUCTIVE_ADJUSTMENT'";
+                var value = await _dbConnection.ExecuteScalarAsync<string>(query);
+                return decimal.TryParse(value, out var result) ? result : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private async Task<decimal> GetLabourRate(string labourDefn)
+        {
+            try
+            {
+                var wageGroupQuery = @"
+                    SELECT [WageGroup] 
+                    FROM [CES].[SBCES].[EmplClass] 
+                    WHERE [LabourDefn] LIKE '%' + @LabourDefn + '%'";
+
+                var wageGroup = await _dbConnection.ExecuteScalarAsync<string>(wageGroupQuery, new { LabourDefn = labourDefn });
+
+                if (!string.IsNullOrEmpty(wageGroup))
+                {
+                    var rateQuery = @"
+                        SELECT [RatePerHour] 
+                        FROM [CES].[SBCES].[EmployeeSalaries] 
+                        WHERE [WageGroup] = @WageGroup";
+
+                    var rate = await _dbConnection.ExecuteScalarAsync<decimal?>(rateQuery, new { WageGroup = wageGroup });
+                    return rate ?? 0;
+                }
+
+                return 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private async Task<decimal> GetOverheadPercentage()
+        {
+            try
+            {
+                var query = @"SELECT [Value] FROM [CES].[SBCES].[CesSettings] WHERE [Parameter] = 'OVERHEAD'";
+                var value = await _dbConnection.ExecuteScalarAsync<string>(query);
+                return decimal.TryParse(value, out var result) ? result : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+    }
+}
