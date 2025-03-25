@@ -1,0 +1,47 @@
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> DeleteLabourDetails(
+    [DataSourceRequest] DataSourceRequest request,
+    [Bind(Prefix = "models")] IEnumerable<LabourDetailsRebuiltPartsViewModel> models)
+{
+    if (models == null || !models.Any())
+    {
+        ModelState.AddModelError("", "No records provided for deletion.");
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+
+    using (var transaction = _dbConnection.BeginTransaction())
+    {
+        try
+        {
+            foreach (var model in models)
+            {
+                string query = @"
+                    DELETE FROM SBCES.EmployeeLabour 
+                    WHERE Id = @Id";
+
+                var parameters = new { model.Id };
+
+                int affectedRows = await _dbConnection.ExecuteAsync(query, parameters, transaction);
+
+                if (affectedRows == 0)
+                {
+                    ModelState.AddModelError("", $"Record with ID {model.Id} not found.");
+                }
+            }
+
+            transaction.Commit();
+            return Json(models.ToDataSourceResult(request));
+        }
+        catch (Exception ex)
+        {
+            transaction.Rollback();
+
+            // Log the error (you can use ILogger if available)
+            Console.WriteLine($"Error in DeleteLabourDetails: {ex.Message}");
+
+            ModelState.AddModelError("", "An error occurred while deleting data.");
+            return Json(models.ToDataSourceResult(request, ModelState));
+        }
+    }
+}
