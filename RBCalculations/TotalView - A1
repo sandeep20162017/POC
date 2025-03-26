@@ -1,0 +1,121 @@
+🔎 1. Kendo Grid Expecting JSON Format
+Dapper will return an IEnumerable<TotalCostInRbModel>, but Kendo expects a properly formatted JSON object. To fix this, return the data as a JsonResult from the controller.
+
+✅ Fix: Wrap the Result in a JsonResult
+Update the GetTotalCostInRbPartsData method like this:
+
+csharp
+Copy
+Edit
+[HttpGet]
+public async Task<IActionResult> GetTotalCostInRbPartsData(string rebuiltPartNum)
+{
+    try
+    {
+        var labourDetails = await GetLabourCostDetails(rebuiltPartNum);
+
+        if (labourDetails.Any())
+        {
+            var totalCostModel = new TotalCostInRbModel
+            {
+                LabourDetailsRebuiltParts = labourDetails,
+                LabourCost = Math.Round(labourDetails.Sum(x => x.LabourCost), 2),
+                LabourOverhead = Math.Round(labourDetails.Sum(x => x.LabourOverheadTotal), 2),
+                LabourTotal = Math.Round(labourDetails.Sum(x => x.LabourCost + x.LabourOverheadTotal), 2)
+            };
+
+            return Json(new[] { totalCostModel });
+        }
+
+        return Json(new List<TotalCostInRbModel>());
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error fetching total cost data: {ex.Message}");
+        return Json(new List<TotalCostInRbModel>());
+    }
+}
+Returning a JsonResult ensures that Kendo can properly read and bind the data.
+
+The new[] { totalCostModel } wraps the result in an array, which is required for Kendo to recognize it as a data source.
+
+🔎 2. Kendo Grid Model Definition Issue
+You commented out the model.Id() and model.Field() definitions.
+👉 Kendo requires a primary key to work correctly, even if it’s not shown in the grid.
+
+✅ Fix: Uncomment the Model Definition
+Restore the model.Id() and model.Field() definitions:
+
+csharp
+Copy
+Edit
+.DataSource(dataSource => dataSource
+    .Ajax()
+    .Model(model =>
+    {
+        model.Id(c => c.Id); // Even if not displayed, it helps Kendo track the rows
+        model.Field(c => c.LabourCost);
+        model.Field(c => c.LabourOverhead);
+        model.Field(c => c.LabourTotal);
+    })
+    .Read(read => read.Url(Url.Action("GetTotalCostInRbPartsData", "TotalCostInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum).Type(HttpVerbs.Get))
+)
+🔎 3. Check the rebuiltPartNum Parameter
+If ViewBag.PartNum is null or empty, the grid won’t load any data.
+
+✅ Fix: Confirm ViewBag.PartNum is Assigned
+Add a debug statement to confirm ViewBag.PartNum is populated:
+
+csharp
+Copy
+Edit
+Console.WriteLine($"Rebuilt Part Number: {ViewBag.PartNum}");
+🔎 4. Column Duplication
+You have two identical LabourTotal columns — remove the duplicate:
+
+✅ Fix: Remove Duplicate Column
+Remove the extra LabourTotal:
+
+csharp
+Copy
+Edit
+columns.Bound(c => c.LabourCost).Title("Labour Cost").Format("{0:C2}");
+columns.Bound(c => c.LabourOverhead).Title("Labour Overhead").Format("{0:C2}");
+columns.Bound(c => c.LabourTotal).Title("Labour Total").Format("{0:C2}");
+✅ Final Cleaned-Up View
+Here’s the final cleaned-up and corrected view:
+
+html
+Copy
+Edit
+@model IEnumerable<BCES.Models.Parts.TotalCostInRbModel>
+
+@{
+    ViewData["Title"] = "Total Cost Summary";
+}
+
+<h6>Total Cost Summary</h6>
+
+@(
+Html.Kendo().Grid<BCES.Models.Parts.TotalCostInRbModel>()
+    .Name("TotalCostInRbModelGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.LabourCost).Title("Labour Cost").Format("{0:C2}");
+        columns.Bound(c => c.LabourOverhead).Title("Labour Overhead").Format("{0:C2}");
+        columns.Bound(c => c.LabourTotal).Title("Labour Total").Format("{0:C2}");
+    })
+    .Pageable()
+    .Sortable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.Id);
+            model.Field(c => c.LabourCost);
+            model.Field(c => c.LabourOverhead);
+            model.Field(c => c.LabourTotal);
+        })
+        .Read(read => read.Url(Url.Action("GetTotalCostInRbPartsData", "TotalCostInRbParts") + "?rebuiltPartNum=" + ViewBag.PartNum).Type(HttpVerbs.Get))
+    )
+)
