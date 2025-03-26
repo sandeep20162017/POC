@@ -1,0 +1,125 @@
+For your questions 1 and 2, get the details from the additional information below. TotalCostEstimateModel is purely calculated model.
+private async Task<IEnumerable<LabourDetailsRebuiltPartsViewModel>> GetLabourDetailsData(string partNum, string gridType)
+{
+    try
+    {
+        var query = @"
+    SELECT 
+        EL.Id,
+        EL.LinkNumber,
+        EL.LabourDefn,
+        EL.CostCentre,
+        EL.Task,
+        REPLACE(EL.Usage, ',', '.') AS [Usage],
+        EL.HrsReqd,
+        ES.RatePerHour,
+        EL.TimeAddition
+    FROM 
+        SBCES.EmployeeLabour EL
+        JOIN SBCES.EmplClass EC ON EL.LabourDefn = UPPER(EC.LabourDefn)
+        JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
+    WHERE 
+        EL.LinkNumber = @RebuiltPartNumber";
+Schema :
+CREATE TABLE [SBCES].[EmployeeLabour](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[LabourDefn] [varchar](50) NULL,
+	[DateEntered] [datetime] NULL,
+	[LinkNumber] [varchar](25) NULL,
+	[TypeId] [varchar](5) NULL,
+	[CostCentre] [varchar](5) NULL,
+	[Task] [varchar](50) NULL,
+	[LabourType] [int] NULL,
+	[Usage] [varchar](25) NULL,
+	[HrsReqd] [varchar](25) NULL,
+	[AdjHrs] [varchar](25) NULL,
+	[DateRevised] [date] NULL,
+	[TimeAddition] [numeric](18, 2) NULL,
+	[RebuiltPartNum] [varchar](30) NULL,
+	[LastModifiedBy] [varchar](25) NULL,
+ CONSTRAINT [PK_EmployeeLabour] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+CREATE TABLE [SBCES].[EmplClass](
+	[LabourType] [int] NOT NULL,
+	[LabourDefn] [varchar](50) NULL,
+	[WageGroup] [int] NULL,
+	[HrsPerWeek] [numeric](18, 4) NULL,
+	[DateEntered] [datetime] NULL,
+	[OverheadType] [numeric](5, 2) NOT NULL,
+ CONSTRAINT [PK_LabourType] PRIMARY KEY CLUSTERED 
+(
+	[LabourType] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[EmplClass]  WITH CHECK ADD  CONSTRAINT [FK_WageGroup] FOREIGN KEY([WageGroup])
+REFERENCES [SBCES].[EmployeeSalaries] ([WageGroup])
+GO
+
+ALTER TABLE [SBCES].[EmplClass] CHECK CONSTRAINT [FK_WageGroup]
+GO
+REATE TABLE [SBCES].[EmployeeSalaries](
+	[WageGroup] [int] NOT NULL,
+	[RatePerHour] [numeric](18, 2) NULL,
+	[DateEntered] [datetime] NULL,
+ CONSTRAINT [PK_WageGroup] PRIMARY KEY CLUSTERED 
+(
+	[WageGroup] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+    public async Task<IActionResult> CreateLabourDetail(
+[DataSourceRequest] DataSourceRequest request,
+[Bind(Prefix = "models")] IEnumerable<LabourDetailsRebuiltPartsViewModel> models,
+[FromQuery] string rebuiltPartNum)
+    {
+        if (!ModelState.IsValid)
+            return Json(models.ToDataSourceResult(request, ModelState));
+
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    foreach (var model in models)
+                    {
+                        model.HrsReqd = $"{model.LabourHrs}:{model.LabourMins:D2}";
+
+                        string query = @"
+                    INSERT INTO SBCES.EMPLOYEELABOUR (
+                        LABOURDEFN, DATEENTERED, LINKNUMBER, TYPEID, 
+                        COSTCENTRE, TASK, LABOURTYPE, USAGE, HRSREQD, 
+                        ADJHRS, DATEREVISED, TIMEADDITION, REBUILTPARTNUM, LASTMODIFIEDBY
+                    ) VALUES (
+                        @LabourDefn, @DateEntered, @LinkNumber, @TypeId,
+                        @CostCentre, @Task, @LabourType, @Usage, @HrsReqd,
+                        @AdjHrs, @DateRevised, @TimeAddition, @RebuiltPartNum, @LastModifiedBy
+                    )";
+
+                        var parameters = new
+                        {
+                            model.LabourDefn,
+                            DateEntered = DateTime.Now,
+                            LinkNumber = rebuiltPartNum,
+                            TypeId = "RB",
+                            model.CostCentre,
+                            model.Task,
+                            model.LabourType,
+                            model.Usage,
+                            model.HrsReqd,
+                            model.AdjHrs,
+                            DateRevised = DateTime.Now,
+                            model.TimeAddition,
+                            RebuiltPartNum = rebuiltPartNum,
+                            LastModifiedBy = ViewBag.UserName
+                        };
+
+                        await _dbConnection.ExecuteAsync(query, parameters, transaction);
+                    }
+
+                    transaction.Commit();
+
+                    return Json(models.ToDataSourceResult(request));
+                }
