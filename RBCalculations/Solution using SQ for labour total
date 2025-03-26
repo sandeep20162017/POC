@@ -1,0 +1,186 @@
+✅ 1. Create the ViewModel
+Since the query returns clean aggregate totals, we only need to store the final calculated values.
+
+Models/Parts/TotalCostSummaryViewModel.cs
+csharp
+Copy
+Edit
+using System.ComponentModel.DataAnnotations;
+
+namespace BCES.Models.Parts
+{
+    public class TotalCostSummaryViewModel
+    {
+        [Key]
+        public string RebuiltPartNum { get; set; }
+
+        public decimal TotalLabourCost { get; set; }
+        public decimal TotalLabourOverCost { get; set; }
+        public decimal TotalLabourTotal { get; set; }
+    }
+}
+Why This Works:
+✅ RebuiltPartNum is the key for grouping.
+✅ All fields are decimal for clean numeric handling.
+✅ Model is flat — perfect for Kendo grid binding.
+
+✅ 2. Update the Controller
+Now update the controller to run the query using Dapper and pass the result as JSON.
+
+Controllers/TotalCostInRbPartsController.cs
+csharp
+Copy
+Edit
+using Microsoft.AspNetCore.Mvc;
+using BCES.Models.Parts;
+using Dapper;
+using System.Data;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
+public class TotalCostInRbPartsController : Controller
+{
+    private readonly IDbConnection _dbConnection;
+
+    public TotalCostInRbPartsController(IDbConnection dbConnection)
+    {
+        _dbConnection = dbConnection;
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> GetTotalCostInRbPartsData(string rebuiltPartNum)
+    {
+        try
+        {
+            const string query = @"
+                BEGIN TRY
+                    -- Create a temp table for calculations
+                    CREATE TABLE #TempLabourDetails
+                    (
+                        Id INT,
+                        RebuiltPartNum VARCHAR(30),
+                        DecimalHrs DECIMAL(18, 2),
+                        EffectiveHours DECIMAL(18, 2),
+                        AdjHrs VARCHAR(10),
+                        LabourRate DECIMAL(18, 2),
+                        LabourCost DECIMAL(18, 2),
+                        LabourOverheadTotal DECIMAL(18, 2)
+                    );
+
+                    -- Insert calculated values into temp table
+                    INSERT INTO #TempLabourDetails
+                    SELECT 
+                        EL.Id,
+                        EL.RebuiltPartNum,
+
+                        -- DecimalHours = LabourHrs + (LabourMins / 60)
+                        CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                        (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                        AS DecimalHrs,
+
+                        -- EffectiveHours = DecimalHrs × (Usage / 100)
+                        CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                        (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                        * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) AS EffectiveHours,
+
+                        -- AdjHrs = EffectiveHours / NonProductiveAdjustment
+                        CAST(
+                            (
+                                CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                                * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
+                            ) / 
+                            CAST(
+                                (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                                 FROM [CES].[SBCES].[CesSettings]
+                                 WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2)
+                            ) AS VARCHAR(10)
+                        ) AS AdjHrs,
+
+                        -- Get LabourRate using WageGroup lookup
+                        (SELECT TOP 1 ES.RatePerHour 
+                         FROM [CES].[SBCES].[EmployeeSalaries] ES
+                         WHERE ES.WageGroup = 
+                            (SELECT TOP 1 EC.WageGroup
+                             FROM [CES].[SBCES].[EmplClass] EC
+                             WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                        ) AS LabourRate,
+
+                        -- LabourCost = AdjHrs × LabourRate
+                        ISNULL(
+                            CAST(
+                                (
+                                    CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                    (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                                    * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) 
+                                    / CAST(
+                                        (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                                         FROM [CES].[SBCES].[CesSettings]
+                                         WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2)
+                                    )
+                                ) * 
+                                ISNULL(
+                                    (SELECT TOP 1 ES.RatePerHour 
+                                     FROM [CES].[SBCES].[EmployeeSalaries] ES
+                                     WHERE ES.WageGroup = 
+                                        (SELECT TOP 1 EC.WageGroup
+                                         FROM [CES].[SBCES].[EmplClass] EC
+                                         WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                                    ), 0
+                                ) AS DECIMAL(18,2)
+                            ), 
+                            0
+                        ) AS LabourCost,
+
+                        -- LabourOverheadTotal = LabourCost × OverheadPercentage
+                        ISNULL(
+                            (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                             FROM [CES].[SBCES].[CesSettings]
+                             WHERE Parameter = 'OVERHEAD'
+                            ), 0) * LabourCost AS LabourOverheadTotal
+                    FROM 
+                        SBCES.EmployeeLabour EL
+                    WHERE 
+                        EL.RebuiltPartNum = @RebuiltPartNum;
+
+                    -- Return final totals
+                    SELECT 
+                        RebuiltPartNum,
+                        SUM(LabourCost) AS TotalLabourCost,
+                        SUM(LabourOverheadTotal) AS TotalLabourOverCost,
+                        SUM(LabourCost + LabourOverheadTotal) AS TotalLabourTotal
+                    FROM 
+                        #TempLabourDetails
+                    GROUP BY 
+                        RebuiltPartNum;
+
+                    -- Cleanup
+                    DROP TABLE #TempLabourDetails;
+                END TRY
+                BEGIN CATCH
+                    PRINT 'Error in column: ' + ERROR_MESSAGE(); 
+                END CATCH;
+            ";
+
+            var result = await _dbConnection.QueryAsync<TotalCostSummaryViewModel>(
+                query,
+                new { RebuiltPartNum = rebuiltPartNum }
+            );
+
+            return Json(result);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+            return Json(new List<TotalCostSummaryViewModel>());
+        }
+    }
+}
+✅ 3. Json Passing to View
+The Json(result) returns clean JSON to the view, which Kendo can directly consume.
+
+🚀 Summary of Fixes:
+✔️ Created a clean TotalCostSummaryViewModel
+✔️ Fixed controller logic to execute SQL and pass JSON
+✔️ Handled exception logging and cleanup
+✔️ Data is flat and clean for Kendo grid binding
