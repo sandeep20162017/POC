@@ -1,0 +1,124 @@
+BEGIN TRY
+    -- Create a temp table for calculations
+    CREATE TABLE #TempLabourDetails
+    (
+        Id INT,
+        RebuiltPartNum VARCHAR(30),
+        DecimalHrs DECIMAL(18, 2),
+        EffectiveHours DECIMAL(18, 2),
+        AdjHrs VARCHAR(10),
+        LabourRate DECIMAL(18, 2),
+        LabourCost DECIMAL(18, 2),
+        LabourOverheadTotal DECIMAL(18, 2)
+    );
+
+    -- Insert calculated values into temp table
+    INSERT INTO #TempLabourDetails
+    SELECT 
+        EL.Id,
+        EL.RebuiltPartNum,
+
+        -- Split HrsReqd (handle NULL cases with ISNULL)
+        CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+        (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+        AS DecimalHrs,
+
+        -- EffectiveHours = DecimalHrs × (Usage / 100)
+        CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+        (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+        * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) AS EffectiveHours,
+
+        -- AdjHrs = EffectiveHours / NonProductiveAdjustment
+        CAST(
+            (
+                CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
+            ) / 
+            CAST(
+                (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                 FROM [CES].[SBCES].[CesSettings]
+                 WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2)
+            ) AS VARCHAR(10)
+        ) AS AdjHrs,
+
+        -- Get LabourRate using WageGroup lookup
+        (SELECT TOP 1 ES.RatePerHour 
+         FROM [CES].[SBCES].[EmployeeSalaries] ES
+         WHERE ES.WageGroup = 
+            (SELECT TOP 1 EC.WageGroup
+             FROM [CES].[SBCES].[EmplClass] EC
+             WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+        ) AS LabourRate,
+
+        -- LabourCost = AdjHrs × LabourRate
+        ISNULL(
+            CAST(
+                (
+                    CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                    (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                    * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) 
+                    / CAST(
+                        (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                         FROM [CES].[SBCES].[CesSettings]
+                         WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2)
+                    )
+                ) * 
+                ISNULL(
+                    (SELECT TOP 1 ES.RatePerHour 
+                     FROM [CES].[SBCES].[EmployeeSalaries] ES
+                     WHERE ES.WageGroup = 
+                        (SELECT TOP 1 EC.WageGroup
+                         FROM [CES].[SBCES].[EmplClass] EC
+                         WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                    ), 0
+                ) AS DECIMAL(18,2)
+            ), 
+            0
+        ) AS LabourCost,
+
+        -- LabourOverheadTotal = LabourCost × OverheadPercentage
+        ISNULL(
+            CAST(
+                (
+                    CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                    (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                    * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) 
+                    / CAST(
+                        (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                         FROM [CES].[SBCES].[CesSettings]
+                         WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2)
+                    )
+                ) *
+                ISNULL(
+                    (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                     FROM [CES].[SBCES].[CesSettings]
+                     WHERE Parameter = 'OVERHEAD'
+                    ), 0
+                ) AS DECIMAL(18,2)
+            ), 
+            0
+        ) AS LabourOverheadTotal
+
+    FROM 
+        SBCES.EmployeeLabour EL
+    WHERE 
+        EL.RebuiltPartNum = @RebuiltPartNum;
+
+    -- Return the calculated values
+    SELECT 
+        RebuiltPartNum,
+        SUM(LabourCost) AS TotalLabourCost,
+        SUM(LabourOverheadTotal) AS TotalLabourOverCost,
+        SUM(LabourCost + LabourOverheadTotal) AS TotalLabourTotal
+    FROM 
+        #TempLabourDetails
+    GROUP BY 
+        RebuiltPartNum;
+
+    -- Cleanup temp table
+    DROP TABLE #TempLabourDetails;
+END TRY
+BEGIN CATCH
+    PRINT 'Error in column: ' + ERROR_MESSAGE(); -- Logs the column where casting fails
+END CATCH;
