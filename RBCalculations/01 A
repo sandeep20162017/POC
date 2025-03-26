@@ -1,0 +1,41 @@
+WITH SplitData AS (
+    SELECT
+        CostCentre,
+        -- Extract hours (left of colon) with error handling
+        ISNULL(TRY_CAST(
+            CASE 
+                WHEN CHARINDEX(':', HrsReqd) > 0 
+                THEN SUBSTRING(HrsReqd, 1, CHARINDEX(':', HrsReqd) - 1)
+                ELSE '0' 
+            END 
+        AS INT), 0) AS hours,
+        -- Extract minutes (right of colon) with error handling
+        ISNULL(TRY_CAST(
+            CASE 
+                WHEN CHARINDEX(':', HrsReqd) > 0 
+                THEN SUBSTRING(HrsReqd, CHARINDEX(':', HrsReqd) + 1, LEN(HrsReqd))
+                ELSE '0' 
+            END 
+        AS INT), 0) AS minutes
+    FROM 
+        SBCES.EmployeeLabour
+    WHERE
+        LinkNumber = @RebuiltPartNumber
+        AND TypeId = 'RB'  -- Verify column name (schema has TypeId, not LinkId)
+),
+AggregatedData AS (
+    SELECT
+        CostCentre,
+        SUM((hours * 60) + minutes) AS total_minutes
+    FROM 
+        SplitData
+    GROUP BY 
+        CostCentre
+)
+SELECT
+    CostCentre,
+    -- Handle hours > 99 by removing VARCHAR(2) truncation
+    CAST(total_minutes / 60 AS VARCHAR(10)) + ':' + 
+    RIGHT('0' + CAST(total_minutes % 60 AS VARCHAR(2)), 2) AS TotalTime
+FROM 
+    AggregatedData;
