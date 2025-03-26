@@ -1,0 +1,31 @@
+SELECT
+    CostCentre,
+    -- Convert total minutes back to hh:mm format with leading zeros
+    RIGHT('0' + CAST(SUM(total_minutes) / 60 AS VARCHAR(2)), 2) + ':' + 
+    RIGHT('0' + CAST(SUM(total_minutes) % 60 AS VARCHAR(2)), 2) AS TotalTime
+FROM 
+    SBCES.EmployeeLabour
+CROSS APPLY (
+    SELECT 
+        -- Extract hours (left of colon) or 0 if invalid
+        ISNULL(TRY_CAST(SUBSTRING(
+            HrsReqd, 
+            1, 
+            NULLIF(CHARINDEX(':', HrsReqd), 0) - 1  -- Split at colon
+        ) AS INT), 0) AS hours,
+        -- Extract minutes (right of colon) or 0 if invalid
+        ISNULL(TRY_CAST(SUBSTRING(
+            HrsReqd, 
+            NULLIF(CHARINDEX(':', HrsReqd), 0) + 1,  -- Start after colon
+            LEN(HrsReqd)
+        ) AS INT), 0) AS minutes
+) AS split
+CROSS APPLY (
+    -- Convert hours to minutes and sum with minutes
+    SELECT (split.hours * 60) + split.minutes AS total_minutes
+) AS calc
+WHERE
+    LinkNumber = @RebuiltPartNumber
+    AND TypeId = 'RB'  -- Assuming TypeId is correct (no LinkId in schema)
+GROUP BY 
+    CostCentre;
