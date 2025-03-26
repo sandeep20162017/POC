@@ -1,0 +1,126 @@
+✅ Updated TotalCostInRbModel.cs
+csharp
+Copy
+Edit
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+
+namespace BCES.Models.Parts
+{
+    public class TotalCostInRbModel
+    {
+        [Key]
+        public int Id { get; set; }
+
+        // Make it IEnumerable to allow multiple labour details per part
+        public IEnumerable<LabourDetailsRebuiltPartsViewModel> LabourDetailsRebuiltParts { get; set; }
+
+        public decimal LabourCost { get; set; }
+        public decimal LabourOverhead { get; set; }
+        public decimal LabourTotal { get; set; }
+    }
+}
+2. Implement GetLabourCostDetails(PartNum)
+Fetch labour details using PartNum.
+
+Calculate totals:
+
+Total Labour Costs
+
+Total Labour Overhead
+
+Labour Total = Labour Costs + Labour Overhead
+
+Round to 2 decimal places.
+
+Add exception handling for robustness.
+
+✅ Updated TotalCostsInRBPartsController.cs
+csharp
+Copy
+Edit
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
+using BCES.Models.Parts;
+using Microsoft.EntityFrameworkCore;
+
+public class TotalCostsInRBPartsController : Controller
+{
+    private readonly ApplicationDbContext _context;
+
+    public TotalCostsInRBPartsController(ApplicationDbContext context)
+    {
+        _context = context;
+    }
+
+    private async Task<IEnumerable<TotalCostInRbModel>> GetTotalCostInRbPartsData(string partNum)
+    {
+        try
+        {
+            var labourDetails = await GetLabourCostDetails(partNum);
+
+            var totalCostModels = labourDetails.Select(ld => new TotalCostInRbModel
+            {
+                LabourDetailsRebuiltParts = labourDetails,
+                LabourCost = Math.Round(labourDetails.Sum(x => x.LabourCost), 2),
+                LabourOverhead = Math.Round(labourDetails.Sum(x => x.LabourOverheadTotal), 2),
+                LabourTotal = Math.Round(labourDetails.Sum(x => x.LabourCost + x.LabourOverheadTotal), 2)
+            }).ToList();
+
+            return totalCostModels;
+        }
+        catch (Exception ex)
+        {
+            // Log the exception (use ILogger or similar)
+            Console.WriteLine($"Error fetching data: {ex.Message}");
+            return new List<TotalCostInRbModel>();
+        }
+    }
+
+    private async Task<IEnumerable<LabourDetailsRebuiltPartsViewModel>> GetLabourCostDetails(string partNum)
+    {
+        try
+        {
+            var labourDetails = await _context.LabourDetailsRebuiltPartsViewModel
+                .Where(ld => ld.RebuiltPartNum == partNum)
+                .ToListAsync();
+
+            return labourDetails ?? new List<LabourDetailsRebuiltPartsViewModel>();
+        }
+        catch (Exception ex)
+        {
+            // Log the exception
+            Console.WriteLine($"Error fetching labour details: {ex.Message}");
+            return new List<LabourDetailsRebuiltPartsViewModel>();
+        }
+    }
+}
+3. Update TotalCostView.cshtml
+Bind the calculated fields in the grid:
+
+LabourCost
+
+LabourOverhead
+
+LabourTotal
+
+✅ Updated TotalCostView.cshtml
+html
+Copy
+Edit
+@(Html.Kendo().Grid<BCES.Models.Parts.TotalCostInRbModel>()
+    .Name("TotalCostInRbModelGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.LabourCost).Title("Labour Cost").Format("{0:C2}");
+        columns.Bound(c => c.LabourOverhead).Title("Labour Overhead").Format("{0:C2}");
+        columns.Bound(c => c.LabourTotal).Title("Labour Total").Format("{0:C2}");
+    })
+    .Pageable()
+    .Sortable()
+    .Filterable()
+    .Groupable()
+)
