@@ -1,0 +1,107 @@
+and variables would be declared with @.
+
+Putting it all together, each query needs to have underscores in table and column names removed, functions like NVL replaced with ISNULL, old-style joins converted to explicit JOINs, and any Oracle-specific syntax adjusted to T-SQL.
+
+Here's the migrated MS SQL code with key changes explained:
+
+Get CoreCost
+
+sql
+Copy
+SELECT
+    UPPER(RebuiltStockNum) AS RebuiltStockNum,
+    MMSStockCode,
+    Keyword,
+    DetailedDesc,
+    ISNULL(SopNumber, ' ') AS SopNumber,
+    ISNULL(JobNumber, ' ') AS JobNumber,
+    CorePartNum,
+    CoreCharge,
+    EstimatedCost,
+    DateModified,
+    Active,
+    RowID
+FROM RBMasterList;
+Get Materials Cost
+2.1 RBParts Total:
+
+sql
+Copy
+SELECT SUM(TotalCost) AS RBPartsTotal
+FROM (
+    SELECT
+        UPPER(pu.MMSRebuiltCode) AS RebuiltNumber,
+        ISNULL(a.RBUnitCost, 0) AS UnitCost,
+        UPPER(pu.CostCentre) AS CC,
+        UPPER(pu.QtyReqd) AS Qty,
+        REPLACE(pu.PercentUsage, ',', '.') AS PercentUsage,
+        pu.CoreCost,
+        ISNULL(a.RBCost, 0) AS TotalCost
+    FROM SCPartsUsed pu
+    LEFT JOIN RBMasterList rb ON rb.RebuiltStockNum = pu.MMSRebuiltCode
+    LEFT JOIN (
+        SELECT 
+            ROUND(SUM(TotalCost), 2) AS RBCost,
+            ROUND(SUM(TotalUnitCost), 2) AS RBUnitCost,
+            RBReference
+        FROM TEMPMaterialsList
+        GROUP BY RBReference
+    ) a ON a.RBReference = pu.MMSRebuiltCode
+    WHERE
+        pu.LinkCode = @vi_idnum
+        AND pu.RebuiltPart = 'Y'
+        AND pu.LinkType = @vi_link_type
+) sub;
+2.2 SCP Part Total:
+
+sql
+Copy
+SELECT SUM(TotalCost) AS SCPartsTotal
+FROM (
+    SELECT
+        REPLACE(FINALCOST(pu.PercentUsage, pu.QtyReqd, pu.MMSCost, 0), ',', '.') AS TotalCost
+    FROM SCPartsUsed pu
+    LEFT JOIN StockCodedParts scp ON scp.MMSStockCode = pu.MMSStockCode
+    WHERE
+        pu.LinkCode = @vi_link_code
+        AND pu.RebuiltPart = @vi_rebuilt_part_choice
+        AND pu.LinkType = @vi_link_type
+) sub;
+2.3 NSP Used Total:
+
+sql
+Copy
+SELECT SUM(TotalCost) AS NSPartsTotal
+FROM (
+    SELECT
+        REPLACE(FINALCOST(nu.PercentUsage, nu.QtyReqd, nsc.OEMPartCost, 0), ',', '.') AS TotalCost
+    FROM NSCPartsUsed nu
+    LEFT JOIN NonStockCodedParts nsc ON nsc.ID = nu.ID
+    WHERE
+        nu.LinkCode = @vi_idnum
+        AND nu.LinkType = @vi_link_type
+) sub;
+Material Cost Calculation
+
+sql
+Copy
+DECLARE @MaterialCost DECIMAL(18,2) = 
+    (SELECT RBPartsTotal FROM #RbParts) +
+    (SELECT SCPartsTotal FROM #ScParts) +
+    (SELECT NSPartsTotal FROM #NsParts) -
+    (SELECT SUM(CoreCost) FROM SCPartsUsed WHERE LinkCode = @vi_idnum);
+Get Tax
+
+sql
+Copy
+SELECT 
+    CESettingsID,
+    Value 
+FROM CESettings 
+WHERE Parameter = 'TAX_RATE';
+Tax and Total Calculation
+
+sql
+Copy
+DECLARE @Tax DECIMAL(18,2) = @MaterialCost * (SELECT Value FROM CESettings WHERE Parameter = 'TAX_RATE');
+DECLARE @TotalWithTax DECIMAL(18,2) = (@LabourTotal + @MaterialCost - @CoreCostTotal) + @Tax;
