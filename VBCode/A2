@@ -1,0 +1,125 @@
+DECLARE @RebuiltPartNum VARCHAR(25) = '035434';
+
+BEGIN TRY
+    -- =============== First Query: Labour Calculation ===============
+    PRINT 'Starting Labour Calculation...';
+
+    -- Intermediate Results for Debugging
+    PRINT 'RebuiltPartNum: ' + @RebuiltPartNum;
+
+    -- Calculate LabourCost and Overhead
+    SELECT 
+        EL.LinkNumber AS RebuiltPartNum,
+        
+        -- Labour Cost Calculation
+        SUM(
+            CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+            (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+            * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
+            * CAST(ISNULL(EL.LabourCost, 0) AS DECIMAL(18,2))
+        ) AS LabourCostTotal,
+
+        -- Labour Overhead Calculation
+        SUM(
+            CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+            (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+            * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
+            * CAST(ISNULL(EL.LabourCost, 0) AS DECIMAL(18,2))
+            * ISNULL(
+                (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                 FROM [CES].[SBCES].[CesSettings] 
+                 WHERE Parameter = 'OVERHEAD'),
+                0
+            )
+        ) AS LabourOverheadTotal
+        
+    INTO #LabourTotal
+    FROM 
+        SBCES.EmployeeLabour EL
+    WHERE 
+        EL.TypeId = 'RB' 
+        AND EL.LinkNumber = @RebuiltPartNum
+    GROUP BY 
+        EL.LinkNumber;
+
+    -- Debug: Print Intermediate Results
+    PRINT 'Labour Calculation Done';
+
+    -- =============== Second Query: Material Cost Calculation ===============
+    PRINT 'Starting Material Cost Calculation...';
+
+    -- Declare Variables for Intermediate Results
+    DECLARE @CoreCostTotal DECIMAL(18,2) = 0;
+    DECLARE @RBPartsTotal DECIMAL(18,2) = 0;
+    DECLARE @SCPartsTotal DECIMAL(18,2) = 0;
+    DECLARE @NSPartsTotal DECIMAL(18,2) = 0;
+
+    -- Core Cost Total Calculation
+    SELECT @CoreCostTotal = SUM(CAST(CoreCost AS DECIMAL(18,2)))
+    FROM SBCES.SCPartsUsed
+    WHERE LinkCode = @RebuiltPartNum;
+
+    PRINT 'CoreCostTotal: ' + CAST(@CoreCostTotal AS VARCHAR);
+
+    -- Rebuilt Parts Total Calculation
+    SELECT @RBPartsTotal = SUM(CAST(RebPartCost AS DECIMAL(18,2)))
+    FROM SBCES.SCPartsUsed
+    WHERE LinkCode = @RebuiltPartNum 
+      AND RebuiltPart = 'Y' 
+      AND LinkType = 'RB';
+
+    PRINT 'RBPartsTotal: ' + CAST(@RBPartsTotal AS VARCHAR);
+
+    -- Stock-Coded Parts Total Calculation
+    SELECT @SCPartsTotal = SUM(
+        SBCES.FINALCOST(
+            CAST(REPLACE(pu.PercentUsage, ',', '.') AS DECIMAL(18,2)),
+            CAST(pu.QtyReqd AS DECIMAL(18,2)),
+            CAST(pu.MMSCost AS DECIMAL(18,2)),
+            0
+        )
+    )
+    FROM SBCES.SCPartsUsed pu
+    WHERE pu.LinkCode = @RebuiltPartNum 
+      AND pu.LinkType = 'RB';
+
+    PRINT 'SCPartsTotal: ' + CAST(@SCPartsTotal AS VARCHAR);
+
+    -- Non-Stock-Coded Parts Total Calculation
+    SELECT @NSPartsTotal = SUM(
+        SBCES.FINALCOST(
+            CAST(REPLACE(nu.PercentUsage, ',', '.') AS DECIMAL(18,2)),
+            CAST(nu.QtyReqd AS DECIMAL(18,2)),
+            CAST(ISNULL(nsc.OEMPartCost, 0) AS DECIMAL(18,2)),
+            0
+        )
+    )
+    FROM SBCES.NSCPartsUsed nu
+    LEFT JOIN SBCES.NonStockCodedParts nsc ON nsc.ID = nu.ID
+    WHERE nu.LinkCode = @RebuiltPartNum 
+      AND nu.LinkType = 'RB';
+
+    PRINT 'NSPartsTotal: ' + CAST(@NSPartsTotal AS VARCHAR);
+
+    -- Total Material Cost Calculation
+    DECLARE @TotalMaterialCost DECIMAL(18,2) = 
+        @RBPartsTotal + @SCPartsTotal + @NSPartsTotal - @CoreCostTotal;
+
+    PRINT 'TotalMaterialCost: ' + CAST(@TotalMaterialCost AS VARCHAR);
+
+    -- =============== Final Calculation: Rebuilt Part Total ===============
+    SELECT 
+        L.LabourCostTotal + @TotalMaterialCost - @CoreCostTotal AS TotalRebuiltPart
+    FROM 
+        #LabourTotal L;
+
+    -- Cleanup
+    DROP TABLE #LabourTotal;
+
+    PRINT 'Calculation Completed Successfully';
+
+END TRY
+BEGIN CATCH
+    -- Handle Errors
+    PRINT 'Error Occurred: ' + ERROR_MESSAGE();
+END CATCH;
