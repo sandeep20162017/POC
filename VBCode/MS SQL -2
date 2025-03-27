@@ -3,7 +3,104 @@ CREATE TABLE #LabourTotal (LabourTotal DECIMAL(18,2));
 CREATE TABLE #CoreCostTotal (CoreCostTotal DECIMAL(18,2));
 CREATE TABLE #RBPartsTotal (RBPartsTotal DECIMAL(18,2));
 CREATE TABLE #SCPartsTotal (SCPartsTotal DECIMAL(18,2));
+CREATE TABLE #NSPartsTotal (NSPartsTotal DECIMAL(18,2));-- Create temp tables for intermediate results
+CREATE TABLE #LabourTotal (LabourTotal DECIMAL(18,2));
+CREATE TABLE #CoreCostTotal (CoreCostTotal DECIMAL(18,2));
+CREATE TABLE #RBPartsTotal (RBPartsTotal DECIMAL(18,2));
+CREATE TABLE #SCPartsTotal (SCPartsTotal DECIMAL(18,2));
 CREATE TABLE #NSPartsTotal (NSPartsTotal DECIMAL(18,2));
+
+-- Populate Labour Total (assuming this comes from another source)
+INSERT INTO #LabourTotal VALUES (@LabourTotal);
+
+-- Calculate Core Cost Total with schema
+INSERT INTO #CoreCostTotal
+SELECT SUM(ISNULL(CoreCost, 0))
+FROM SBCES.SCPartsUsed 
+WHERE LinkCode = @vi_idnum;
+
+-- Calculate Rebuilt Parts Total with proper casting
+INSERT INTO #RBPartsTotal
+SELECT ISNULL(SUM(TotalCost), 0)
+FROM (
+    SELECT ISNULL(a.RBCost, 0) AS TotalCost
+    FROM SBCES.SCPartsUsed pu
+    LEFT JOIN (
+        SELECT 
+            RBReference,
+            ROUND(SUM(CAST(ISNULL(TotalCost, '0') AS DECIMAL(18,2))), 2) AS RBCost
+        FROM SBCES.TempMaterialsList
+        GROUP BY RBReference
+    ) a ON a.RBReference = pu.MMSRebuiltCode
+    WHERE pu.LinkCode = @vi_idnum
+    AND pu.RebuiltPart = 'Y'
+    AND pu.LinkType = @vi_link_type
+) sub;
+
+-- Calculate Stock-Coded Parts Total with schema
+INSERT INTO #SCPartsTotal
+SELECT ISNULL(SUM(TotalCost), 0)
+FROM (
+    SELECT SBCES.FINALCOST(
+        CAST(REPLACE(pu.PercentUsage, ',', '.') AS DECIMAL(18,2)),
+        CAST(pu.QtyReqd AS DECIMAL(18,2)),
+        CAST(pu.MMSCost AS DECIMAL(18,2)),
+        0
+    ) AS TotalCost
+    FROM SBCES.SCPartsUsed pu
+    WHERE pu.LinkCode = @vi_link_code
+    AND pu.RebuiltPart = @vi_rebuilt_part_choice
+    AND pu.LinkType = @vi_link_type
+) sub;
+
+-- Calculate Non-Stock-Coded Parts Total with schema
+INSERT INTO #NSPartsTotal
+SELECT ISNULL(SUM(TotalCost), 0)
+FROM (
+    SELECT SBCES.FINALCOST(
+        CAST(REPLACE(nu.PercentUsage, ',', '.') AS DECIMAL(18,2)),
+        CAST(nu.QtyReqd AS DECIMAL(18,2)),
+        CAST(ISNULL(nsc.OEMPartCost, 0) AS DECIMAL(18,2)),
+        0
+    ) AS TotalCost
+    FROM SBCES.NSCPartsUsed nu
+    LEFT JOIN SBCES.NonStockCodedParts nsc ON nsc.ID = nu.ID
+    WHERE nu.LinkCode = @vi_idnum
+    AND nu.LinkType = @vi_link_type
+) sub;
+
+-- Material Cost Calculation
+SELECT 
+    (R.RBPartsTotal + S.SCPartsTotal + N.NSPartsTotal - C.CoreCostTotal) AS MaterialCost,
+    STR((R.RBPartsTotal + S.SCPartsTotal + N.NSPartsTotal - C.CoreCostTotal), 18, 2) AS MaterialCostExcel
+FROM #RBPartsTotal R, #SCPartsTotal S, #NSPartsTotal N, #CoreCostTotal C;
+
+-- Tax Calculations
+DECLARE @TaxRate DECIMAL(18,4) = (
+    SELECT CAST(Value AS DECIMAL(18,4)) 
+    FROM SBCES.CESettings 
+    WHERE Parameter = 'TAX_RATE'
+);
+
+SELECT 
+    MaterialCost * @TaxRate AS TaxTotal,
+    STR(MaterialCost * @TaxRate, 18, 2) AS TaxTotalExcel
+FROM (
+    SELECT R.RBPartsTotal + S.SCPartsTotal + N.NSPartsTotal - C.CoreCostTotal AS MaterialCost
+    FROM #RBPartsTotal R, #SCPartsTotal S, #NSPartsTotal N, #CoreCostTotal C
+) mc;
+
+-- Total with Tax Calculation
+SELECT 
+    (L.LabourTotal + mc.MaterialCost - C.CoreCostTotal) + (mc.MaterialCost * @TaxRate) AS TotalWithTax,
+    STR((L.LabourTotal + mc.MaterialCost - C.CoreCostTotal) + (mc.MaterialCost * @TaxRate), 18, 2) AS TotalWithTaxExcel
+FROM #LabourTotal L,
+(SELECT R.RBPartsTotal + S.SCPartsTotal + N.NSPartsTotal - C.CoreCostTotal AS MaterialCost
+ FROM #RBPartsTotal R, #SCPartsTotal S, #NSPartsTotal N, #CoreCostTotal C) mc,
+#CoreCostTotal C;
+
+-- Cleanup
+DROP TABLE #LabourTotal, #CoreCostTotal, #RBPartsTotal, #SCPartsTotal, #NSPartsTotal;
 
 -- Populate Labour Total (assuming this comes from another source)
 INSERT INTO #LabourTotal VALUES (@LabourTotal);  -- Pass your labour total value here
