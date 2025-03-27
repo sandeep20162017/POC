@@ -1,0 +1,117 @@
+1. Get CoreCost 
+SELECT
+            UPPER(rebuilt_stock_num) AS "rebuilt_stock_num",
+            mms_stock_code,
+            keyword,
+            detailed_desc,
+            NVL(sop_number,' ') AS "sop_number",
+            NVL(job_number,' ') AS "job_number",
+            core_part_num,
+            core_charge,
+            estimated_cost,
+            date_modified,
+            active,
+            ROWID
+        FROM
+            RB_MASTERLIST;
+2. Get Materials Cost
+ 2.1 RBParts total :
+   Sum of TOTAL COST from
+     SELECT
+
+
+            UPPER(SC_PARTS_USED.mms_rebuilt_code) AS "REBUILT NUMBER",
+            nvl(A.RB_UNIT_COST,0) AS "UNIT COST",
+            UPPER(SC_PARTS_USED.cost_centre) AS "CC",
+            UPPER(SC_PARTS_USED.qty_reqd) AS "QTY",
+            REPLACE(SC_PARTS_USED.percent_usage,',','.') AS "%",
+            SC_PARTS_USED.corecost AS "CORE COST",
+            nvl(A.RB_COST,0) AS "TOTAL COST",
+            UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+            UPPER(RB_MASTERLIST.keyword) AS "KEYWORD",
+            SC_PARTS_USED.rowid
+        FROM
+            SC_PARTS_USED,
+            RB_MASTERLIST,
+            (SELECT
+            round(sum(total_cost),2) as RB_COST, round(sum(total_unit_cost),2) as RB_UNIT_COST , rb_reference
+        FROM
+            TEMP_materials_list
+        group by
+            rb_reference) A
+        WHERE
+            SC_PARTS_USED.link_code = vi_idnum AND
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = vi_link_type AND
+            RB_MASTERLIST.rebuilt_stock_num(+)= SC_PARTS_USED.mms_rebuilt_code AND
+            rb_reference (+)= SC_PARTS_USED.mms_rebuilt_code
+        ORDER BY
+            SC_PARTS_USED.mms_rebuilt_code;
+END RETRIEVE_RBP_USED;
+2.2 SCP Part Total:
+ Sum of TOTAL COST from
+ SELECT
+            UPPER(SC_PARTS_USED.mms_stock_code) AS "STOCK CODE",
+            NVL(SC_PARTS_USED.mms_cost,0) AS "UNIT COST",
+            UPPER(SC_PARTS_USED.qty_reqd) AS "QTY",
+            REPLACE(SC_PARTS_USED.percent_usage,',','.') AS "%",
+            replace(FINAL_COST(SC_PARTS_USED.percent_usage, SC_PARTS_USED.qty_reqd,SC_PARTS_USED.corecost,0),',','.') AS "CORE COST",
+            REPLACE(FINAL_COST(SC_PARTS_USED.percent_usage, SC_PARTS_USED.qty_reqd, SC_PARTS_USED.mms_cost, 0),',','.') AS "TOTAL COST",
+            UPPER(SC_PARTS_USED.cost_centre) AS "CC",
+            NVL(UPPER(STOCK_CODED_PARTS.detailed_desc),'') AS "DESCRIPTION",
+            NVL(UPPER(STOCK_CODED_PARTS.part_type),'') AS "KEYWORD",
+            SC_PARTS_USED.oem_cost AS "OEM COST",
+            SC_PARTS_USED.mms_rebuilt_code AS "MMS REBUILT CODE",
+            SC_PARTS_USED.reb_part_cost AS "REBUILT PART COST",
+            UPPER(SC_PARTS_USED.rebuilt_part) AS "REBUILT PART",
+            SC_PARTS_USED.rowid
+        FROM
+            SC_PARTS_USED,
+            STOCK_CODED_PARTS
+        WHERE
+            SC_PARTS_USED.link_code = vi_link_code AND
+            SC_PARTS_USED.rebuilt_part = vi_rebuilt_part_choice AND
+            SC_PARTS_USED.link_type = vi_link_type AND
+            STOCK_CODED_PARTS.mms_stock_code (+)= SC_PARTS_USED.mms_stock_code
+        ORDER BY
+            SC_PARTS_USED.mms_stock_code;
+2.3 NSP Used Total : 
+ Sum of TOTAL COST from
+SELECT
+            UPPER(NON_STOCK_CODED_PARTS.orig_supplier_num) AS "SUPPLIER NUMBER",
+            UPPER(NON_STOCK_CODED_PARTS.orig_supplier_name) AS "SUPPLIER NAME",
+
+            NON_STOCK_CODED_PARTS.oem_part_cost AS "UNIT COST",
+            UPPER(NSC_PARTS_USED.qty_reqd) AS "QTY",
+            REPLACE(NSC_PARTS_USED.percent_usage,',','.') AS "%",
+            REPLACE(FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd,NSC_PARTS_USED.corecost,0),',','.') AS "CORE COST",
+            REPLACE(FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0),',','.') AS "TOTAL COST",
+            UPPER(NSC_PARTS_USED.cost_centre) AS "CC",
+            NVL(UPPER(NON_STOCK_CODED_PARTS.detailed_desc),'') AS "DESCRIPTION",
+            NVL(UPPER(NON_STOCK_CODED_PARTS.keyword), '' ) AS "KEYWORD",
+            UPPER(NSC_PARTS_USED.id) AS "ID",
+            UPPER(NSC_PARTS_USED.last_modified_date) AS "LAST MODIFIED DATE",
+            NSC_PARTS_USED.ROWID
+        FROM
+            NSC_PARTS_USED NSC_PARTS_USED,
+            NON_STOCK_CODED_PARTS NON_STOCK_CODED_PARTS
+        WHERE
+            NSC_PARTS_USED.link_code = vi_idnum AND
+            NSC_PARTS_USED.link_type = vi_link_type AND
+            NON_STOCK_CODED_PARTS.id (+)= NSC_PARTS_USED.id
+        ORDER BY
+            NON_STOCK_CODED_PARTS.orig_supplier_num;
+3.0 Material Cost = (Rebuilt Parts Total + Stock-Coded Parts Total + Non-Stock-Coded Parts Total) - Core Cost Total  
+4.0 Get Tax
+SELECT
+            ces_settings_id,
+            value
+        FROM
+            CES_SETTINGS
+        WHERE
+            parameter = 'TAX_RATE'
+________________________________________
+5.0 
+Tax = Material Cost × Tax Rate (from CES_Settings)  
+
+Total with Tax = (Labour Total + Material Cost - Core Cost) + Tax 
