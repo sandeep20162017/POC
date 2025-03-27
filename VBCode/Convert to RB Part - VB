@@ -1,0 +1,367 @@
+Option Explicit
+Private m_str_Msg As String
+Private RS As ADODB.Recordset
+
+Private Sub cmdCancel_Click()
+    On Error GoTo Error_Handler
+
+    Unload Me
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdCancel_Click", g_l_ErrorLineNumber
+End Sub
+
+Private Sub cmdConvert_Click()
+    Dim l_Result As Long
+    Dim l_RetVal As Long
+    Dim str_MBNumber As String
+    Dim str_MMSStockCode As String
+    Dim str_RBStockCodeFromDB As String
+    Dim str_MMSStockCodeFromDB As String
+    Dim str_DetailedDescription As String
+    Dim str_Keyword As String
+    Dim str_CorePartNumber As String
+    Dim str_RebuiltStockNumber As String
+    Dim str_JobNumber As String
+    Dim str_SOPNumber As String
+    Dim str_LastModifiedBy As String
+    Dim str_BuyCost As String
+    Dim str_ExternalCost As String
+    Dim str_RemanufacturedCost As String
+    Dim str_core_charge As String
+    Dim l_Count As Long
+    
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+    
+    str_RebuiltStockNumber = Trim(txtRebuiltPartNumber.Text)
+    'Make sure that data in the txtRebuiltPartNumber edit-box is not empty.
+    If str_RebuiltStockNumber = "" Then
+        Call SetWaitCursor
+        m_str_Msg = "Rebuilt Part # should not be empty."
+        MsgBox m_str_Msg, vbInformation + vbOKOnly
+        txtRebuiltPartNumber.SetFocus
+        Exit Sub
+    End If
+    
+    'Make sure that data in the txtStockCodedNumber edit-box is not empty.
+    str_MMSStockCode = Trim(txtStockCodedNumber.Text)
+    If str_MMSStockCode = "" Then
+        Call SetWaitCursor
+        m_str_Msg = "Stock Code # should not be empty."
+        MsgBox m_str_Msg, vbInformation + vbOKOnly
+        txtStockCodedNumber.SetFocus
+        Exit Sub
+    End If
+    
+    'Make sure that data in the txtRebuiltPartNumber edit-box is not in the
+    'RB_MASTERLIST.REBUILT_STOCK_NUM field.
+    
+    Set RS = New ADODB.Recordset
+    Set RS = modDBHelper.RetrieveRB("CES_INQUIRY.RETRIEVE_RB")
+    
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 1 To RS.RecordCount
+            str_RBStockCodeFromDB = RS.Fields.Item("REBUILT_STOCK_NUM")
+            If str_RebuiltStockNumber = str_RBStockCodeFromDB Then
+                Call SetWaitCursor
+                Set RS = Nothing
+                m_str_Msg = "Rebuilt Part Number is duplicated. Please provide another one."
+                MsgBox m_str_Msg, vbInformation + vbOKOnly
+                If txtRebuiltPartNumber.Enabled = True Then
+                    txtRebuiltPartNumber.SetFocus
+                End If
+                Exit Sub
+            End If
+            RS.MoveNext
+        Next l_Count
+    End If
+    
+    'NOTE. NEXT INSERTS ARE NOT ATOMIC. ALL OF THEM SHOULD BE UNDER ONE TRANSACTION.
+    '      IF, LET SAY, ONE INSERTION "CES_UPDATE.ADD_NSCP_USED" WILL FAIL, DATA IN THE
+    '      DATABASE WILL NOT BE CONSISTANT.
+    
+    'Get information from the MB_LIST table.
+    str_MBNumber = Trim(txtMakeBuyNumber.Text)
+    Set RS = modDBHelper.RetrieveMBListByMBNumber( _
+                                        "CES_INQUIRY.RETRIEVE_MB_LIST_BY_MB_NUMBER", _
+                                        str_MBNumber)
+    str_DetailedDescription = RS.Fields.Item("DESCRIPTION")
+    str_Keyword = RS.Fields.Item("KEYWORD")
+    str_CorePartNumber = RS.Fields.Item("CORE_CODE")
+    str_JobNumber = RS.Fields.Item("BENCH_NUMBER")
+    str_LastModifiedBy = modMain.g_str_UserName
+    str_SOPNumber = RS.Fields.Item("SOP_Number")
+    str_BuyCost = RS.Fields.Item("Buy_New_cost")
+    str_ExternalCost = RS.Fields.Item("External_Cost")
+    str_RemanufacturedCost = RS.Fields.Item("Reman_Cost")
+    str_JobNumber = " "
+    If IsNull(RS.Fields.Item("JOB_NUMBER")) = False Then
+        str_JobNumber = RS.Fields.Item("JOB_NUMBER")
+    End If
+    
+    str_core_charge = RS.Fields.Item("CORE_CHARGE")
+    
+    'Insert a new record into RB_MASTERLIST table.
+    l_Result = modDBHelper.InsertRBMasterList("CES_UPDATE.INSERT_RB_MASTERLIST", _
+                                              l_RetVal, _
+                                              str_MMSStockCode, _
+                                              str_DetailedDescription, _
+                                              str_Keyword, _
+                                              str_CorePartNumber, _
+                                              str_RebuiltStockNumber, _
+                                              str_JobNumber, _
+                                              str_LastModifiedBy, _
+                                              str_SOPNumber, _
+                                              str_BuyCost, _
+                                              str_RemanufacturedCost, _
+                                              str_ExternalCost, _
+                                              str_core_charge)
+
+    'In the NSC_PARTS_USED table find all records with LINK_CODE = str_MBNumber and
+    'LINK_TYPE = "MB".
+    Set RS = modDBHelper.RetrieveNSCPUsed("CES_INQUIRY.RETRIEVE_NSCP_USED_COPY", _
+                                        str_MBNumber, _
+                                        "MB")
+    
+    'Add new records to the NSC_PARTS_USED table, with all fields = fields from the RS,
+    'except:
+    'ENTERED_BY = current user name
+    'LAST_MODIFIED_BY = current user name (done in CES_UPDATE.ADD_NSCP_USED)
+    'LINK_TYPE = "RB"
+    'LINK_CODE = data from the txtRebuiltPartNumber edit-box
+    'DATE_ENTERED = current date (done in CES_UPDATE.ADD_NSCP_USED)
+    'LAST_MODIFIED_DATE = current date (done in CES_UPDATE.ADD_NSCP_USED)
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 1 To RS.RecordCount
+            l_Result = modDBHelper.AddNSCPUsed("CES_UPDATE.ADD_NSCP_USED", _
+                                               l_RetVal, _
+                                               RS.Fields.Item("SUPPLIER NUMBER"), _
+                                               RS.Fields.Item("SUPPLIER NAME"), _
+                                               RS.Fields.Item("CC"), _
+                                               RS.Fields.Item("QTY"), _
+                                               RS.Fields.Item("%"), _
+                                               modMain.g_str_UserName, _
+                                               str_RebuiltStockNumber, _
+                                               RS.Fields.Item("UNIT COST"), _
+                                               "RB", _
+                                               RS.Fields.Item("CORE COST"), _
+                                               RS.Fields.Item("ID"))
+            RS.MoveNext
+        Next l_Count
+    End If
+    
+    'In the SC_PARTS_USED table find all records with LINK_CODE = str_MBNumber and
+    'LINK_TYPE = "MB" and REBUILT_PART = "Y"
+    Set RS = modDBHelper.RetrieveSCPUsed("CES_INQUIRY.RETRIEVE_SCP_USED_COPY", _
+                                         str_MBNumber, _
+                                         "Y", _
+                                         "MB")
+    
+    'Add new records to the SC_PARTS_USED table, with all fields = fields from the RS,
+    'except:
+    'USER_ENTERED = current user name
+    'LAST_MODIFIED_BY = current user name (done in CES_UPDATE.ADD_SCP_USED)
+    'LINK_TYPE = "RB"
+    'LINK_CODE = data from the txtRebuiltPartNumber edit-box
+    'DATE_ENTERED = current date (done in CES_UPDATE.ADD_SCP_USED)
+    'LAST_MODIFIED_DATE = current date (done in CES_UPDATE.ADD_SCP_USED)
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 1 To RS.RecordCount
+        l_Result = modDBHelper.AddSCPUsed("CES_UPDATE.ADD_SCP_USED", _
+                                          l_RetVal, _
+                                          RS.Fields.Item("STOCK CODE"), _
+                                          RS.Fields.Item("CC"), _
+                                          RS.Fields.Item("QTY"), _
+                                          RS.Fields.Item("%"), _
+                                          modMain.g_str_UserName, _
+                                          RS.Fields.Item("UNIT COST"), _
+                                          RS.Fields.Item("OEM COST"), _
+                                          str_RebuiltStockNumber, _
+                                          RS.Fields.Item("REBUILT PART"), _
+                                          "RB", _
+                                          RS.Fields.Item("CORE COST"), _
+                                          RS.Fields.Item("MMS REBUILT CODE"), _
+                                          RS.Fields.Item("REBUILT PART COST"))
+            RS.MoveNext
+        Next l_Count
+    End If
+    
+    Set RS = modDBHelper.RetrieveSCPUsed("CES_INQUIRY.RETRIEVE_SCP_USED_COPY", _
+                                     str_MBNumber, _
+                                     "N", _
+                                     "MB")
+    
+    'Add new records to the SC_PARTS_USED table, with all fields = fields from the RS,
+    'except:
+    'USER_ENTERED = current user name
+    'LAST_MODIFIED_BY = current user name (done in CES_UPDATE.ADD_SCP_USED)
+    'LINK_TYPE = "RB"
+    'LINK_CODE = data from the txtRebuiltPartNumber edit-box
+    'DATE_ENTERED = current date (done in CES_UPDATE.ADD_SCP_USED)
+    'LAST_MODIFIED_DATE = current date (done in CES_UPDATE.ADD_SCP_USED)
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 1 To RS.RecordCount
+        l_Result = modDBHelper.AddSCPUsed("CES_UPDATE.ADD_SCP_USED", _
+                                          l_RetVal, _
+                                          RS.Fields.Item("STOCK CODE"), _
+                                          RS.Fields.Item("CC"), _
+                                          RS.Fields.Item("QTY"), _
+                                          RS.Fields.Item("%"), _
+                                          modMain.g_str_UserName, _
+                                          RS.Fields.Item("UNIT COST"), _
+                                          RS.Fields.Item("OEM COST"), _
+                                          str_RebuiltStockNumber, _
+                                          RS.Fields.Item("REBUILT PART"), _
+                                          "RB", _
+                                          RS.Fields.Item("CORE COST"), _
+                                               " ", _
+                                               0)
+            RS.MoveNext
+        Next l_Count
+    End If
+    'In the EMPLOYEE_LABOUR table find all records with LINK_NUMBER = str_MBNumber and
+    'TYPEID = "MB"
+    Set RS = modDBHelper.RetrieveEmployeeLabour("CES_INQUIRY.RETRIEVE_EMPLOYEE_LABOUR", _
+                                                str_MBNumber, _
+                                                "MB")
+    'Add new records to the EMPLOYEE_LABOUR table, with all fields = fields from the RS,
+    'except:
+    'TYPEID = "RB"
+    'LINK_NUMBER = data from the txtRebuiltPartNumber edit-box
+    'DATE_ENTERED = current date (done in CES_UPDATE.ADD_LABOUR_TASKS)
+    'DATE_REVISED = current date (done in CES_UPDATE.ADD_LABOUR_TASKS)
+    
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 1 To RS.RecordCount
+        l_Result = modDBHelper.AddLabourTasks("CES_UPDATE.ADD_LABOUR_TASKS", _
+                                              l_RetVal, _
+                                              RS.Fields.Item("LABOUR_DEFN"), _
+                                              str_RebuiltStockNumber, _
+                                              "RB", _
+                                              RS.Fields.Item("COSTCENTRE"), _
+                                              RS.Fields.Item("TASK"), _
+                                              RS.Fields.Item("LABOUR_TYPE"), _
+                                              RS.Fields.Item("USAGE"), _
+                                              RS.Fields.Item("HRS_REQD"), _
+                                              RS.Fields.Item("ADJ_HRS"), _
+                                              Replace(RS.Fields.Item("TIME_ADDITION").Value, ",", "."), _
+                                              RS.Fields.Item("REBUILT_PART_NUM"), _
+                                              g_str_UserName)
+    
+            RS.MoveNext
+        Next l_Count
+    End If
+    
+    'From the MB_LIST_OF_BUSES table get all records with
+    'MB_NUMBER = data from the txtMakeBuyNumber edit-box.
+    Set RS = modDBHelper.RetrieveMBListOfBuses("CES_INQUIRY.MB_LIST_BUSES", _
+                                               str_MBNumber)
+    'Go through all records in the RS, and insert records into the RB_LIST_OF_BUSES table.
+    'Note: instead of field RS.Fields.Item("MB_NUMBER") we will insert data from the
+    'txtRebuiltPartNumber edit-box ( = str_RebuiltStockNumber).
+    If RS.RecordCount > 0 Then
+        RS.MoveFirst
+        For l_Count = 0 To RS.RecordCount - 1
+            l_Result = modDBHelper.InsertRBListOFBuses( _
+                                            "CES_UPDATE.INSERT_RB_LIST_OF_BUSES", _
+                                            l_RetVal, _
+                                            str_RebuiltStockNumber, _
+                                            RS.Fields.Item("LIST_ID"))
+            RS.MoveNext
+        Next l_Count
+    End If
+
+    If l_Result = 0 Then
+        
+        'Add record to the AUDIT_MODIFY_HISTORY table.
+        l_Result = modDBHelper.InsertIntoAuditModifyHistory( _
+                                    "CES_UPDATE.AUDIT_INSERT_MODIFY_HISTORY", _
+                                    l_RetVal, _
+                                    "Make Vs Buy was Converted to a Rebuilt Part #" & str_RebuiltStockNumber, _
+                                    str_MBNumber, _
+                                    "MB", _
+                                    "Description ---> " + str_DetailedDescription, _
+                                    "Keyword ---> " + str_Keyword)
+
+        
+        m_str_Msg = "Conversion is done."
+        MsgBox m_str_Msg, vbInformation + vbOKOnly
+    Else
+        'Conversion is failed for some reason.
+        m_str_Msg = "Conversion is failed. Please contact Supervisor."
+        MsgBox m_str_Msg, vbInformation + vbOKOnly
+    End If
+    
+    Call SetWaitCursor
+    Set RS = Nothing
+    
+    Unload Me
+    
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "cmdConvert_Click", g_l_ErrorLineNumber
+    Call SetWaitCursor
+    If Not RS Is Nothing Then
+        Set RS = Nothing
+    End If
+End Sub
+
+Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
+    On Error GoTo Error_Handler
+    
+    Call SetWaitCursor
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "Form_QueryUnload", g_l_ErrorLineNumber
+    Call SetWaitCursor
+End Sub
+
+Private Sub txtRebuiltPartNumber_KeyUp(KeyCode As Integer, Shift As Integer)
+    Dim l_CursorPosition As Long
+    Dim str_Data As String
+    
+    On Error GoTo Error_Handler
+
+    'Convert data in the txtRebuiltPartNumber edit-box to upper case.
+    l_CursorPosition = txtRebuiltPartNumber.SelStart
+    str_Data = txtRebuiltPartNumber.Text
+    str_Data = UCase(str_Data)
+    txtRebuiltPartNumber.Text = str_Data
+    txtRebuiltPartNumber.SelStart = l_CursorPosition
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "txtRebuiltPartNumber_KeyUp", g_l_ErrorLineNumber
+End Sub
+
+Private Sub txtStockCodedNumber_KeyUp(KeyCode As Integer, Shift As Integer)
+    Dim l_CursorPosition As Long
+    Dim str_Data As String
+    
+    On Error GoTo Error_Handler
+
+    'Convert data in the txtStockCodedNumber edit-box to upper case.
+    l_CursorPosition = txtStockCodedNumber.SelStart
+    str_Data = txtStockCodedNumber.Text
+    str_Data = UCase(str_Data)
+    txtStockCodedNumber.Text = str_Data
+    txtStockCodedNumber.SelStart = l_CursorPosition
+
+    Exit Sub
+Error_Handler:
+    g_l_ErrorLineNumber = Erl()
+    modDBHelper.LogErrorToDB Me.Name, "txtStockCodedNumber_KeyUp", g_l_ErrorLineNumber
+End Sub
