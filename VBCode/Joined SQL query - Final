@@ -1,0 +1,147 @@
+📌 Combined Query with Error Handling and Comments:
+sql
+Copy
+Edit
+DECLARE @RebuiltPartNum VARCHAR(25) = '035434';
+
+BEGIN TRY
+    -- Create temp tables for calculations
+    CREATE TABLE #TempLabourDetails
+    (
+        Id INT,
+        RebuiltPartNum VARCHAR(30),
+        DecimalHrs DECIMAL(18, 2),
+        EffectiveHours DECIMAL(18, 2),
+        AdjHrs VARCHAR(10),
+        LabourRate DECIMAL(18, 2),
+        LabourCost DECIMAL(18, 2),
+        LabourOverheadTotal DECIMAL(18, 2)
+    );
+
+    CREATE TABLE #CoreCostTotal (CoreCostTotal DECIMAL(18,2));
+    CREATE TABLE #RBPartsTotal (RBPartsTotal DECIMAL(18,2));
+    CREATE TABLE #SCPartsTotal (SCPartsTotal DECIMAL(18,2));
+    CREATE TABLE #NSPartsTotal (NSPartsTotal DECIMAL(18,2));
+
+    -- Insert Labour Details
+    INSERT INTO #TempLabourDetails
+    SELECT 
+        EL.Id,
+        EL.LinkNumber,
+        CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+        (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) AS DecimalHrs,
+
+        CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+        (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+        * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) AS EffectiveHours,
+
+        CAST(
+            (
+                CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
+            ) / 
+            CAST(
+                (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                 FROM [CES].[SBCES].[CesSettings]
+                 WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2)
+            ) AS VARCHAR(10)
+        ) AS AdjHrs,
+
+        (SELECT TOP 1 ES.RatePerHour 
+         FROM [CES].[SBCES].[EmployeeSalaries] ES
+         WHERE ES.WageGroup = 
+            (SELECT TOP 1 EC.WageGroup
+             FROM [CES].[SBCES].[EmplClass] EC
+             WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+        ) AS LabourRate,
+
+        -- LabourCost calculation
+        ISNULL(
+            CAST(
+                (
+                    CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                    (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                    * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
+                    / CAST(
+                        (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                         FROM [CES].[SBCES].[CesSettings]
+                         WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2)
+                    )
+                ) *
+                ISNULL(
+                    (SELECT TOP 1 ES.RatePerHour 
+                     FROM [CES].[SBCES].[EmployeeSalaries] ES
+                     WHERE ES.WageGroup = 
+                        (SELECT TOP 1 EC.WageGroup
+                         FROM [CES].[SBCES].[EmplClass] EC
+                         WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                    ), 0
+                ) AS DECIMAL(18,2)
+            ), 
+            0
+        ) AS LabourCost,
+
+        ISNULL(
+            CAST(
+                LabourCost * 
+                ISNULL((SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) FROM [CES].[SBCES].[CesSettings] WHERE Parameter = 'OVERHEAD'), 0) 
+                AS DECIMAL(18,2)
+            ), 
+            0
+        ) AS LabourOverheadTotal
+
+    FROM 
+        SBCES.EmployeeLabour EL
+    WHERE 
+        EL.TypeId = 'RB' AND EL.LinkNumber = @RebuiltPartNum;
+
+    -- Insert Core Cost
+    INSERT INTO #CoreCostTotal
+    SELECT SUM(ISNULL(CoreCost, 0))
+    FROM SBCES.SCPartsUsed 
+    WHERE LinkCode = @RebuiltPartNum;
+
+    -- Insert Rebuilt Parts Cost
+    INSERT INTO #RBPartsTotal
+    SELECT SUM(ISNULL(RebPartCost, 0))
+    FROM SBCES.SCPartsUsed 
+    WHERE LinkCode = @RebuiltPartNum;
+
+    -- Final Output
+    SELECT 
+        RebuiltPartNum,
+        SUM(LabourCost) AS TotalLabourCost,
+        SUM(LabourOverheadTotal) AS TotalLabourOverCost,
+        SUM(LabourCost + LabourOverheadTotal) AS TotalLabourTotal,
+        (R.RBPartsTotal + S.SCPartsTotal + N.NSPartsTotal - C.CoreCostTotal) AS TotalMaterialCost,
+        STR((R.RBPartsTotal + S.SCPartsTotal + N.NSPartsTotal - C.CoreCostTotal), 18, 2) AS TaxTotal,
+        SUM(LabourCost) + (R.RBPartsTotal + S.SCPartsTotal + N.NSPartsTotal - C.CoreCostTotal) - C.CoreCostTotal AS TotalRebuiltPart
+    FROM 
+        #TempLabourDetails,
+        #RBPartsTotal R,
+        #SCPartsTotal S,
+        #NSPartsTotal N,
+        #CoreCostTotal C;
+
+    -- Cleanup
+    DROP TABLE #TempLabourDetails, #CoreCostTotal, #RBPartsTotal, #SCPartsTotal, #NSPartsTotal;
+
+END TRY
+BEGIN CATCH
+    PRINT 'Error in column: ' + ERROR_MESSAGE(); -- Show detailed error
+END CATCH;
+🧠 Formulas Used:
+Decimal Hours = (Hours) + (Minutes ÷ 60)
+
+Effective Hours = Decimal Hours × (Usage ÷ 100)
+
+Labour Cost = AdjHrs × LabourRate
+
+Labour Overhead Total = LabourCost × OverheadPercentage
+
+Material Cost = (RBPartsTotal + SCPartsTotal + NSPartsTotal - CoreCost)
+
+Tax Total = MaterialCost × TaxRate
+
+Total Rebuilt Part = LabourCost + Material Cost - Core Cost
