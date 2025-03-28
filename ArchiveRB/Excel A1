@@ -1,0 +1,83 @@
+function onExcelExport(e) {
+    console.log("onExcelExport called");
+
+    var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+    var dataSource = grid.dataSource;
+
+    // 👉 Make sure all data is fetched before exporting
+    e.preventDefault(); // Prevent automatic export
+
+    dataSource.fetch().then(function() {
+        var data = dataSource.data(); // ✅ Get all loaded data
+        var sheet = e.workbook.sheets[0];
+
+        var allowedFields = [
+            "RebuiltStockNum", "MmsStockCode", "KeyWord", 
+            "DetailedDesc", "JobNumber", "BuyNewCost", "RemanCost"
+        ];
+
+        // ✅ Remove unwanted columns
+        sheet.columns = sheet.columns.filter(function(column, index) {
+            var field = grid.columns[index] ? grid.columns[index].field : null;
+            return allowedFields.includes(field);
+        });
+
+        // ✅ Add calculated column for "Cost Savings Per Unit"
+        sheet.columns.push({ width: 150 });
+        sheet.rows[0].cells.push({
+            value: "Cost Savings Per Unit",
+            background: "#f3f3f3",
+            color: "#000000",
+            bold: true
+        });
+
+        // ✅ Inject calculated values
+        sheet.rows.forEach(function(row, rowIndex) {
+            if (rowIndex > 0) {
+                var item = data[rowIndex - 1];
+                if (item) {
+                    var buyNewCost = item.BuyNewCost || 0;
+                    var remanCost = item.RemanCost || 0;
+
+                    row.cells.push({
+                        value: calculateCostSaving(buyNewCost, remanCost),
+                        background: "#f9f9f9",
+                        color: "#333"
+                    });
+                }
+            }
+        });
+
+        // ✅ Add calculated column for "Percentage Savings Per Unit"
+        sheet.columns.push({ width: 150 });
+        sheet.rows[0].cells.push({
+            value: "Percentage Savings Per Unit",
+            background: "#f3f3f3",
+            color: "#000000",
+            bold: true
+        });
+
+        // ✅ Inject percentage savings
+        sheet.rows.forEach(function(row, rowIndex) {
+            if (rowIndex > 0) {
+                var item = data[rowIndex - 1];
+                if (item) {
+                    var buyNewCost = item.BuyNewCost || 0;
+                    var remanCost = item.RemanCost || 0;
+
+                    row.cells.push({
+                        value: calculatePercentageSaving(buyNewCost, remanCost),
+                        background: "#f9f9f9",
+                        color: "#333"
+                    });
+                }
+            }
+        });
+
+        // ✅ Trigger the export manually after processing
+        kendo.saveAs({
+            dataURI: new kendo.ooxml.Workbook(e.workbook).toDataURL(),
+            fileName: "RebuiltPart.xlsx"
+        });
+    });
+}
