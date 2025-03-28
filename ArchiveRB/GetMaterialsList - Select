@@ -2,35 +2,40 @@ DECLARE @viIDnum VARCHAR(4000) = 'test123';
 DECLARE @viType VARCHAR(4000) = 'BUS';
 DECLARE @VFinalPrice DECIMAL(20,2);
 
--- Diagnostic: Show raw inputs
-SELECT 
-    @viIDnum AS InputID,
-    @viType AS InputType;
-
 WITH MaterialCost AS (
     SELECT
         ISNULL(C.Name,'NONE') AS AssemblyArea,
         ISNULL(A.CostCentre, '0') AS CostCentre,
-        A.PercentUsage,
-        A.QtyReqd,
-        A.MmsCost,
-        A.CoreCost,
-        [SBCES].[FinalCost](A.PercentUsage, A.QtyReqd, A.MmsCost, 0) AS RawFinalCost,
         SUM(A.Cost) AS TotalCost,
         SUM(A.TaxCost) AS TaxableCost
     FROM (
         SELECT 
             CostCentre,
-            PercentUsage,
-            QtyReqd,
-            MmsCost,
-            CoreCost,
             CONVERT(DECIMAL(10,2),
-                [SBCES].[FinalCost](PercentUsage, QtyReqd, MmsCost, 0) 
-                - [SBCES].[FinalCost](PercentUsage, QtyReqd, CoreCost, 0)
+                CONVERT(DECIMAL(10,2), 
+                    [SBCES].[FinalCost](
+                        CONVERT(DECIMAL(10,2), REPLACE(PercentUsage, ',', '.')),
+                        CONVERT(DECIMAL(10,2), REPLACE(QtyReqd, ',', '.')),
+                        CONVERT(DECIMAL(10,2), REPLACE(MmsCost, ',', '.')),
+                        0
+                    )
+                ) -
+                CONVERT(DECIMAL(10,2), 
+                    [SBCES].[FinalCost](
+                        CONVERT(DECIMAL(10,2), REPLACE(PercentUsage, ',', '.')),
+                        CONVERT(DECIMAL(10,2), REPLACE(QtyReqd, ',', '.')),
+                        CONVERT(DECIMAL(10,2), REPLACE(CoreCost, ',', '.')),
+                        0
+                    )
+                )
             ) AS Cost,
-            CONVERT(DECIMAL(10,2),
-                [SBCES].[FinalCost](PercentUsage, QtyReqd, MmsCost, 0)
+            CONVERT(DECIMAL(10,2), 
+                [SBCES].[FinalCost](
+                    CONVERT(DECIMAL(10,2), REPLACE(PercentUsage, ',', '.')),
+                    CONVERT(DECIMAL(10,2), REPLACE(QtyReqd, ',', '.')),
+                    CONVERT(DECIMAL(10,2), REPLACE(MmsCost, ',', '.')),
+                    0
+                )
             ) AS TaxCost
         FROM 
             SBCES.ScPartsUsed
@@ -41,16 +46,31 @@ WITH MaterialCost AS (
         UNION ALL
         SELECT 
             NSU.CostCentre,
-            NSU.PercentUsage,
-            NSU.QtyReqd,
-            NSCP.OemPartCost,
-            NSU.CoreCost,
             CONVERT(DECIMAL(10,2),
-                [SBCES].[FinalCost](NSU.PercentUsage, NSU.QtyReqd, NSCP.OemPartCost, 0) 
-                - [SBCES].[FinalCost](NSU.PercentUsage, NSU.QtyReqd, NSU.CoreCost, 0)
+                CONVERT(DECIMAL(10,2), 
+                    [SBCES].[FinalCost](
+                        CONVERT(DECIMAL(10,2), REPLACE(NSU.PercentUsage, ',', '.')),
+                        CONVERT(DECIMAL(10,2), REPLACE(NSU.QtyReqd, ',', '.')),
+                        CONVERT(DECIMAL(10,2), REPLACE(NSCP.OemPartCost, ',', '.')),
+                        0
+                    )
+                ) -
+                CONVERT(DECIMAL(10,2), 
+                    [SBCES].[FinalCost](
+                        CONVERT(DECIMAL(10,2), REPLACE(NSU.PercentUsage, ',', '.')),
+                        CONVERT(DECIMAL(10,2), REPLACE(NSU.QtyReqd, ',', '.')),
+                        CONVERT(DECIMAL(10,2), REPLACE(NSU.CoreCost, ',', '.')),
+                        0
+                    )
+                )
             ) AS Cost,
-            CONVERT(DECIMAL(10,2),
-                [SBCES].[FinalCost](NSU.PercentUsage, NSU.QtyReqd, NSCP.OemPartCost, 0)
+            CONVERT(DECIMAL(10,2), 
+                [SBCES].[FinalCost](
+                    CONVERT(DECIMAL(10,2), REPLACE(NSU.PercentUsage, ',', '.')),
+                    CONVERT(DECIMAL(10,2), REPLACE(NSU.QtyReqd, ',', '.')),
+                    CONVERT(DECIMAL(10,2), REPLACE(NSCP.OemPartCost, ',', '.')),
+                    0
+                )
             ) AS TaxCost
         FROM 
             SBCES.NscPartsUsed NSU
@@ -62,38 +82,18 @@ WITH MaterialCost AS (
     ) A
     JOIN SBCES.CostCentres C 
         ON C.CostCentre = A.CostCentre
-    GROUP BY A.CostCentre, C.Name, A.PercentUsage, A.QtyReqd, A.MmsCost, A.CoreCost
-)
-
--- Diagnostic: Show FinalCost inputs/outputs
-SELECT 
-    'MaterialCost' AS Source,
-    PercentUsage,
-    QtyReqd,
-    MmsCost,
-    CoreCost,
-    RawFinalCost,
-    TotalCost,
-    TaxableCost
-FROM MaterialCost;
-
-WITH KitCost AS (
+    GROUP BY A.CostCentre, C.Name
+),
+KitCost AS (
     SELECT 
         CASE 
             WHEN UPPER(@viType) = 'BUS' 
-            THEN ISNULL(TotalKitCost, 0)
+            THEN CONVERT(DECIMAL(10,2), ISNULL(TotalKitCost, 0))
             ELSE 0 
         END AS KitTotal
     FROM SBCES.OemKitsTotal2 
-    WHERE Link = @viIDnum)
+    WHERE Link = @viIDnum
 )
-
--- Diagnostic: Show kit cost
-SELECT 
-    'KitCost' AS Source,
-    KitTotal
-FROM KitCost;
-
 SELECT 
     @VFinalPrice = ROUND(
         ISNULL(SUM(MaterialCost.TotalCost), 0) 
@@ -102,8 +102,4 @@ SELECT
     )
 FROM MaterialCost, KitCost;
 
--- Final diagnostic output
-SELECT 
-    @VFinalPrice AS FinalMaterialPrice,
-    [SBCES].[FinalCost](100, 1, 100, 0) AS TestFinalCost1,  -- Should return 100
-    [SBCES].[FinalCost](50, 2, 200, 0) AS TestFinalCost2;   -- Should return 200
+SELECT @VFinalPrice AS FinalMaterialPrice;
