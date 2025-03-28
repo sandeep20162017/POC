@@ -1,0 +1,473 @@
+You are MS SQL expert.
+Pls assist me to rewrite follwing main query.
+1. Get follwing parameters 
+@ViUsername --Declare as Variable defauly 'System'
+@ViLabourCost,
+    @ViLabourOverheadAmount,
+    @ViLabourTotal,
+    @ViMaterialsTotal,
+    @ViTotalRebuiltPartCost,
+    @ViTaxTotal,
+    @ViTotalCostTax
+Q2 : Is @vPrice used in any inserts or calculatiopn?
+
+Using  query 2 below
+
+main query :
+
+-- 1. Insert new record into the ArchRbMasterlist table
+INSERT INTO SBCES.ArchRbMasterlist (
+    MmsStockCode,
+    ItemRefNumber,
+    DetailedDesc,
+    Keyword,
+    CorePartNum,
+    RebuiltStockNum,
+    CoreCharge,
+    JobNumber,
+    EstimatedCost,
+    SopNumber,
+    DateArchived,
+    ArchivedBy,
+    ArchRbMasterlistId,
+    LabourCost,
+    LabourOverheadAmount,
+    LabourTotal,
+    MaterialsTotal,
+    TotalRebuiltPartCost,
+    TaxTotal,
+    TotalCostTax
+)
+SELECT
+    MmsStockCode,
+    ItemRefNumber,
+    DetailedDesc,
+    Keyword,
+    CorePartNum,
+    RebuiltStockNum,
+    CoreCharge,
+    JobNumber,
+    EstimatedCost,
+    SopNumber,
+    GETDATE(), -- SYSDATE replaced with GETDATE()
+    @ViUsername,
+    NEXT VALUE FOR SBCES.ArchRbMasterlistSeq, -- Sequence handling
+    @ViLabourCost,
+    @ViLabourOverheadAmount,
+    @ViLabourTotal,
+    @ViMaterialsTotal,
+    @ViTotalRebuiltPartCost,
+    @ViTaxTotal,
+    @ViTotalCostTax
+FROM
+    SBCES.RbMasterlist
+WHERE
+    UPPER(RebuiltStockNum) = UPPER(@ViRebuiltStockNum);
+
+-- Capture the latest ArchRbMasterlistId
+DECLARE @ArchId INT;
+SELECT @ArchId = MAX(ArchRbMasterlistId) FROM SBCES.ArchRbMasterlist;
+
+-- 2. Insert record(s) into ArchRbEmployeeLabour
+INSERT INTO SBCES.ArchRbEmployeeLabour (
+    LabourDefn,
+    DateEntered,
+    LinkNumber,
+    TypeId,
+    CostCentre,
+    Task,
+    LabourType,
+    [Usage], -- Usage is a reserved keyword, escaped with brackets
+    HrsReqd,
+    AdjHrs,
+    TimeAddition,
+    ArchRbMasterlistId
+)
+SELECT
+    LabourDefn,
+    DateEntered,
+    LinkNumber,
+    TypeId,
+    CostCentre,
+    Task,
+    LabourType,
+    [Usage],
+    HrsReqd,
+    AdjHrs,
+    TimeAddition,
+    @ArchId -- Replaced CURRVAL with captured variable
+FROM
+    SBCES.EmployeeLabour
+WHERE
+    LinkNumber = @ViLinkNumber
+    AND TypeId = @ViTypeId;
+
+-- Calculate V_PRICE using SQL Server function
+DECLARE @VPrice DECIMAL(18,2);
+SET @VPrice = SBCES.GetMaterialCost(@ViLinkNumber, @ViTypeId);
+
+-- 3. Insert into ArchRbScPartsUsed (Rebuilt parts)
+INSERT INTO SBCES.ArchRbScPartsUsed (
+    MmsStockCode,
+    DateEntered,
+    RebPartCost,
+    UserEntered,
+    MmsCost,
+    OemCost,
+    MmsRebuiltCode,
+    CostCentre,
+    QtyReqd,
+    PercentUsage,
+    LinkCode,
+    RebuiltPart,
+    LinkType,
+    CoreCost,
+    ArchRbMasterlistId,
+    TotalCost,
+    ScKeyword,
+    ScDescription
+)
+SELECT
+    UPPER(SU.MmsStockCode),
+    SU.DateEntered,
+    ISNULL(A.RbUnitCost, 0),
+    UPPER(SU.UserEntered),
+    ISNULL(SU.MmsCost, 0),
+    ISNULL(SU.OemCost, 0),
+    UPPER(SU.MmsRebuiltCode),
+    UPPER(SU.CostCentre),
+    UPPER(SU.QtyReqd),
+    REPLACE(SU.PercentUsage, ',', '.'),
+    @ViLinkNumber,
+    'Y',
+    'RB',
+    SU.CoreCost,
+    @ArchId,
+    ISNULL(A.RbCost, 0),
+    UPPER(RM.Keyword),
+    UPPER(RM.DetailedDesc)
+FROM
+    SBCES.ScPartsUsed SU
+    LEFT JOIN SBCES.RbMasterlist RM ON RM.RebuiltStockNum = SU.MmsRebuiltCode
+    LEFT JOIN (
+        SELECT
+            RbReference,
+            ROUND(SUM(TotalCost), 2) AS RbCost,
+            ROUND(SUM(TotalUnitCost), 2) AS RbUnitCost
+        FROM
+            SBCES.TempMaterialsList
+        GROUP BY
+            RbReference
+    ) A ON A.RbReference = SU.MmsRebuiltCode
+WHERE
+    SU.LinkCode = @ViLinkNumber
+    AND SU.RebuiltPart = 'Y'
+    AND SU.LinkType = @ViTypeId;
+
+-- 3b. Insert into ArchRbScPartsUsed (Non-rebuilt parts)
+INSERT INTO SBCES.ArchRbScPartsUsed (
+    MmsStockCode,
+    DateEntered,
+    RebPartCost,
+    UserEntered,
+    MmsCost,
+    OemCost,
+    MmsRebuiltCode,
+    CostCentre,
+    QtyReqd,
+    PercentUsage,
+    LinkCode,
+    RebuiltPart,
+    LinkType,
+    CoreCost,
+    ArchRbMasterlistId,
+    TotalCost,
+    ScKeyword,
+    ScDescription
+)
+SELECT
+    A.MmsStockCode,
+    A.DateEntered,
+    A.RebPartCost,
+    A.UserEntered,
+    A.MmsCost,
+    A.OemCost,
+    A.MmsRebuiltCode,
+    A.CostCentre,
+    A.QtyReqd,
+    A.PercentUsage,
+    @ViLinkNumber,
+    'N',
+    @ViTypeId,
+    SBCES.FinalCost(A.PercentUsage, A.QtyReqd, A.CoreCost, 0),
+    @ArchId,
+    A.MmsCost * CAST(A.QtyReqd AS DECIMAL) * (CONVERT(DECIMAL, REPLACE(ISNULL(A.PercentUsage, '0'), ',', '.')) / 100),
+    ISNULL(B.PartType, ''),
+    ISNULL(B.DetailedDesc, '')
+FROM
+    SBCES.ScPartsUsed A
+    LEFT JOIN SBCES.StockCodedParts B ON B.MmsStockCode = A.MmsStockCode
+WHERE
+    A.LinkCode = @ViLinkNumber
+    AND A.LinkType = @ViTypeId
+    AND A.RebuiltPart = 'N';
+
+-- 4. Insert into ArchRbNscPartsUsed
+INSERT INTO SBCES.ArchRbNscPartsUsed (
+    OrigSuppNum,
+    OrigSupplierName,
+    CostCentre,
+    QtyReqd,
+    PercentUsage,
+    DateEntered,
+    EnteredBy,
+    LinkCode,
+    Cost,
+    LinkType,
+    CoreCost,
+    ArchRbMasterlistId,
+    TotalCost
+)
+SELECT
+    OrigSuppNum,
+    OrigSupplierName,
+    CostCentre,
+    QtyReqd,
+    PercentUsage,
+    DateEntered,
+    EnteredBy,
+    LinkCode,
+    Cost,
+    LinkType,
+    SBCES.FinalCost(PercentUsage, QtyReqd, CoreCost, 0),
+    @ArchId,
+    Cost * CAST(QtyReqd AS DECIMAL) * (CONVERT(DECIMAL, REPLACE(ISNULL(PercentUsage, '0'), ',', '.')) / 100)
+FROM
+    SBCES.NscPartsUsed
+WHERE
+    LinkCode = @ViLinkNumber
+    AND LinkType = @ViTypeId;
+
+-- Calculate labour cost
+SET @VPrice = SBCES.GetLabourCost(@ViLinkNumber, @ViTypeId);
+
+-- 5. Insert into ArchRbLabourCcTotal
+INSERT INTO SBCES.ArchRbLabourCcTotal (
+    CostCentre,
+    TotalHours,
+    ArchRbMasterlistId
+)
+SELECT
+    CC AS CostCentre,
+    SUM(ExtendedTime) AS TotalHours,
+    @ArchId
+FROM
+    SBCES.TempLabourList
+GROUP BY
+    CC;
+
+-- 6. Insert into ArchRbMaterialsCcTotal
+INSERT INTO SBCES.ArchRbMaterialsCcTotal (
+    CostCentre,
+    TotalCost,
+    ArchRbMasterlistId
+)
+SELECT
+    CostCentre,
+    SUM(TotalCost),
+    @ArchId
+FROM
+    SBCES.TempMaterialsList
+GROUP BY
+    CostCentre;
+
+-- Insert into ArchRbListBuses
+INSERT INTO SBCES.ArchRbListBuses (
+    BusDescription,
+    ArchRbMasterlistId
+)
+SELECT
+    LB.Description,
+    @ArchId
+FROM
+    SBCES.RbListOfBuses RB
+    INNER JOIN SBCES.ListOfBuses LB ON RB.ListId = LB.ListId
+WHERE
+    RB.RebuiltStockNum = @ViLinkNumber;
+
+Query 2 :
+ -- DECLARE @RebuiltPartNum VARCHAR(25) = '035434';
+
+  BEGIN TRY
+      -- ==============================
+      -- STEP 1: Calculate Labour Costs
+      -- ==============================
+
+      -- Create temp table for labour details
+      CREATE TABLE #TempLabourDetails
+      (
+          Id INT,
+          RebuiltPartNum VARCHAR(30),
+          DecimalHrs DECIMAL(18, 2),
+          EffectiveHours DECIMAL(18, 2),
+          AdjHrs VARCHAR(10),
+          LabourRate DECIMAL(18, 2),
+          LabourCost DECIMAL(18, 2),
+          LabourOverheadTotal DECIMAL(18, 2)
+      );
+
+      -- Insert labour calculation values into temp table
+      INSERT INTO #TempLabourDetails
+      SELECT 
+          EL.Id,
+          EL.LinkNumber,
+
+          -- DecimalHrs calculation: HrsReqd (HH:MM) converted to decimal format
+          CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+          (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+          AS DecimalHrs,
+
+          -- EffectiveHours = DecimalHrs × (Usage / 100)
+          CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+          (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+          * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) AS EffectiveHours,
+
+          -- AdjHrs = EffectiveHours / NonProductiveAdjustment
+          CAST(
+              (
+                  CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                  (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                  * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
+              ) / 
+              CAST(
+                  (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                   FROM [CES].[SBCES].[CesSettings]
+                   WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'
+                  ) AS DECIMAL(18,2)
+              ) AS VARCHAR(10)
+          ) AS AdjHrs,
+
+          -- LabourRate lookup based on WageGroup
+          (SELECT TOP 1 ES.RatePerHour 
+           FROM [CES].[SBCES].[EmployeeSalaries] ES
+           WHERE ES.WageGroup = 
+              (SELECT TOP 1 EC.WageGroup
+               FROM [CES].[SBCES].[EmplClass] EC
+               WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+          ) AS LabourRate,
+
+          -- LabourCost = AdjHrs × LabourRate
+          ISNULL(
+              CAST(
+                  (
+                      CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                      (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                      * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) 
+                      / CAST(
+                          (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                           FROM [CES].[SBCES].[CesSettings]
+                           WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'
+                          ) AS DECIMAL(18,2)
+                      )
+                  ) * 
+                  ISNULL(
+                      (SELECT TOP 1 ES.RatePerHour 
+                       FROM [CES].[SBCES].[EmployeeSalaries] ES
+                       WHERE ES.WageGroup = 
+                          (SELECT TOP 1 EC.WageGroup
+                           FROM [CES].[SBCES].[EmplClass] EC
+                           WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                      ), 0
+                  ) AS DECIMAL(18,2)
+              ), 
+              0
+          ) AS LabourCost,
+
+          -- LabourOverheadTotal = LabourCost × OverheadPercentage
+          ISNULL(
+              CAST(
+                  (
+                      CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                      (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                      * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) 
+                      / CAST(
+                          (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                           FROM [CES].[SBCES].[CesSettings]
+                           WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'
+                          ) AS DECIMAL(18,2)
+                      )
+                  ) *
+                  ISNULL(
+                      (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                       FROM [CES].[SBCES].[CesSettings]
+                       WHERE Parameter = 'OVERHEAD'
+                      ), 0
+                  ) AS DECIMAL(18,2)
+              ), 
+              0
+          ) AS LabourOverheadTotal
+
+      FROM 
+          SBCES.EmployeeLabour EL
+      WHERE 
+          EL.TypeId = 'RB' 
+          AND EL.LinkNumber = @RebuiltPartNum;
+
+      -- ============================
+      -- STEP 2: Calculate Costs
+      -- ============================
+
+      DECLARE @TotalLabourCost DECIMAL(18,2) = (
+          SELECT SUM(LabourCost) 
+          FROM #TempLabourDetails
+      );
+
+      DECLARE @TotalLabourOverHeadCost DECIMAL(18,2) = (
+          SELECT SUM(LabourOverheadTotal) 
+          FROM #TempLabourDetails
+      );
+
+      DECLARE @CoreCost DECIMAL(18,2) = (
+          SELECT SUM(CoreCost) 
+          FROM SBCES.SCPartsUsed 
+          WHERE LinkCode = @RebuiltPartNum
+      );
+
+      DECLARE @TotalMaterialCost DECIMAL(18,2) = (
+          SELECT ISNULL(SUM(RebPartCost + MMSCost - CoreCost), 0) 
+          FROM SBCES.SCPartsUsed 
+          WHERE LinkCode = @RebuiltPartNum
+      );
+
+      DECLARE @TaxRate DECIMAL(18,4) = (
+          SELECT CAST(Value AS DECIMAL(18,4)) 
+          FROM SBCES.CesSettings 
+          WHERE Parameter = 'TAX_RATE'
+      );
+
+      DECLARE @TaxTotal DECIMAL(18,2) = @TotalMaterialCost * @TaxRate;
+
+      DECLARE @TotalRebuiltPart DECIMAL(18,2) = @TotalLabourCost + @TotalMaterialCost;
+
+      DECLARE @TotalRebuiltPartCostWithTax DECIMAL(18,2) = @TotalRebuiltPart + @TaxTotal;
+
+      -- ============================
+      -- STEP 3: Return Results
+      -- ============================
+
+      SELECT 
+          @RebuiltPartNum AS RebuiltPartNum,
+          @TotalLabourCost AS TotalLabourCost,
+          @TotalLabourOverHeadCost AS TotalLabourOverHeadCost,
+          @CoreCost AS CoreCost,
+          @TotalMaterialCost AS TotalMaterialCost,
+          @TaxTotal AS TaxTotal,
+          @TotalRebuiltPartCostWithTax AS TotalRebuiltPartCostWithTax;
+
+      -- Cleanup
+      DROP TABLE #TempLabourDetails;
+
+  END TRY
+  BEGIN CATCH
+      PRINT 'Error in column: ' + ERROR_MESSAGE();
+  END CATCH;
