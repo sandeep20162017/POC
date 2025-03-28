@@ -1,0 +1,164 @@
+Migrate following from Oracle to MS SQL.
+Use pascal case for MS SQL (remove underscrores from all.
+Replace CES to SBCEs.
+example : V_FINAL_PRICE to VFINALPRICE
+get_material_cost to GetMmaterialCost
+vi_type varchar to vitypevarchar
+Do for all.
+
+USE [CES]
+GO
+
+/****** Object:  StoredProcedure [CES].[get_material_cost]    Script Date: 3/28/2025 12:28:53 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+
+CREATE Procedure [CES].[get_material_cost]
+(@vi_IDnum varchar(4000), @vi_type varchar(4000), @V_FINAL_PRICE DECIMAL(20,2) OUTPUT)
+AS
+ BEGIN
+ DECLARE  @SqlStatment AS NVARCHAR(1000)
+ Declare @Adjustment decimal (20,10);
+DECLARE @V_LINK_CODE VARCHAR(30);
+DECLARE @V_PRICE decimal (20,10);
+DECLARE @V_RET_VAL VARCHAR(25);
+DECLARE @V_KIT_TOTAL DECIMAL(20,10);
+DECLARE @C_RB_LIST_To_Prop_vi_IDnum varchar;
+DECLARE @cur_MaterialRec_ASSEMBLYAREA varchar(50);
+declare @cur_MaterialRec_CC varchar(50);
+declare @cur_MaterialRec_TOTALCOST varchar(50);
+declare @cur_MaterialRec_TAXABLECOST varchar(50) ;
+DECLARE C_RB_LIST_To_Prop CURSOR LOCAL 
+FOR
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS [link_code],
+                SC_PARTS_USED.qty_reqd AS [QTY],
+                SC_PARTS_USED.percent_usage AS [%],
+                SC_PARTS_USED.mms_rebuilt_code AS [Rebuilt Code]
+        FROM
+            CES.SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = UPPER(@vi_type) AND
+            upper(SC_PARTS_USED.link_code) = upper(@vi_IDnum);
+
+DECLARE @cur_RBRec_RebuiltCode varchar(50);
+declare @cur_RBRec_QTY varchar(50);
+declare @cur_RBRec_Usage varchar(50);
+DECLARE @cur_RBRec_LinkCode varchar(50);
+
+DECLARE @cur_Material_vi_IDnum varchar;
+
+DECLARE cur_Material CURSOR LOCAL FOR
+
+       SELECT
+            isnull(C.name,'NONE') AS [ASSEMBLY AREA],
+            isnull(A.cost_centre, '0') AS [CC],
+           isnull(SUM(A.cost), '0') AS [TOTAL COST],
+          isnull(SUM(A.taxcost), '0')AS [TAXABLE COST]
+
+
+        FROM
+            (SELECT
+                cost_centre,
+                 (Convert(Decimal(10,2),[CES].[final_cost](percent_usage, qty_reqd, mms_cost, 0))	- Convert(Decimal(10,2),CES.FINAL_COST(percent_usage, qty_reqd, corecost, 0))) AS cost,
+                 Convert(Decimal(10,2),[CES].[final_cost](percent_usage, qty_reqd, mms_cost, 0)) AS taxcost
+             FROM
+                [CES].SC_PARTS_USED
+             WHERE
+                link_code = upper(@vi_IDnum) AND
+                rebuilt_part = 'N' AND
+                link_type =upper(@vi_type)
+             UNION ALL
+                    SELECT
+                        NSC_PARTS_USED.cost_centre,
+                       (Convert(Decimal(10,2),[CES].[final_cost](NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0)) -  Convert(Decimal(10,2),CES.FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NSC_PARTS_USED.corecost, 0))) as cost,
+                      CONVERT(Decimal(10,2),[CES].[final_cost](NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0)) AS taxcost
+                    FROM
+                        [CES].NSC_PARTS_USED NSC_PARTS_USED RIGHT OUTER JOIN CES.NON_STOCK_CODED_PARTS ON NON_STOCK_CODED_PARTS.ID= NSC_PARTS_USED.ID
+                    WHERE
+                        NSC_PARTS_USED.link_code = upper(@vi_IDnum) AND
+                        NSC_PARTS_USED.link_type = UPPER(@vi_type)
+) A,
+            CES.COST_CENTRES C
+        WHERE
+            C.cost_centre = A.cost_centre
+        GROUP BY
+            A.cost_centre,
+            C.NAME;
+
+
+
+ 	SET @SqlStatment = 'TRUNCATE TABLE CES.TEMP_MATERIALS_LIST'
+
+			EXECUTE sp_executesql  @SqlStatment ;
+--commit;
+--set @cur_Material_vi_IDnum = upper;
+		
+open cur_Material;
+FETCH NEXT FROM cur_Material
+    INTO @cur_MaterialRec_ASSEMBLYAREA, @cur_MaterialRec_CC, @cur_MaterialRec_TOTALCOST, @cur_MaterialRec_TAXABLECOST
+WHILE @@FETCH_STATUS = 0
+    BEGIN 
+
+	IF @@FETCH_STATUS <> 0 BREAK;
+	
+    print @cur_MaterialRec_TOTALCOST
+    insert into CES.TEMP_MATERIALS_LIST values  (@cur_MaterialRec_ASSEMBLYAREA,@cur_MaterialRec_CC ,@cur_MaterialRec_TOTALCOST,@cur_MaterialRec_TAXABLECOST,@vi_IDnum,@cur_MaterialRec_TOTALCOST);
+	FETCH NEXT FROM cur_Material
+    INTO @cur_MaterialRec_ASSEMBLYAREA, @cur_MaterialRec_CC, @cur_MaterialRec_TOTALCOST, @cur_MaterialRec_TAXABLECOST;
+END;
+CLOSE cur_Material;
+DEALLOCATE cur_Material;
+
+
+SELECT @V_PRICE = count(*) FROM CES.SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = UPPER(@vi_type) AND
+            upper(SC_PARTS_USED.link_code) = upper(@vi_IDnum);
+
+
+-- built part (rb_num) in this procedure resides
+-- lt parts update the prices of those rebuilt parts as well.
+if @V_PRICE > 0 begin
+
+
+open C_RB_LIST_To_Prop;
+WHILE 1=1 BEGIN
+ FETCH C_RB_LIST_To_Prop
+    INTO @cur_RBRec_LinkCode,@cur_RBRec_QTY, @cur_RBRec_Usage,@cur_RBRec_RebuiltCode ;
+    IF @@FETCH_STATUS <> 0 BREAK;
+	SET @Adjustment =@cur_RBRec_QTY * cast(replace(ISNULL(@cur_RBRec_USAGE,'0'),',','.') as decimal(10,2))/100.00;
+    EXEC CES.WRITE_MATERIALS @cur_RBRec_RebuiltCode,@Adjustment, @cur_RBRec_RebuiltCode ,1;
+
+   
+END;
+CLOSE C_RB_LIST_To_Prop;
+DEALLOCATE C_RB_LIST_To_Prop;
+end;
+
+
+SELECT @V_KIT_TOTAL = count(*) FROM CES.OEM_KITS_TOTAL2 WHERE OEM_KITS_TOTAL2.LINK = @vi_IDnum;
+
+if upper(@vi_type) = 'BUS' and @V_KIT_TOTAL > 0 begin
+    SELECT @V_KIT_TOTAL = TOTAL_KIT_COST FROM OEM_KITS_TOTAL2 WHERE OEM_KITS_TOTAL2.LINK = @vi_IDnum;
+    insert into CES.TEMP_MATERIALS_LIST values ('KITS','05H7',@V_KIT_TOTAL,@V_KIT_TOTAL,@vi_IDnum,@V_KIT_TOTAL);
+end 
+
+
+
+SELECT @V_FINAL_PRICE = round(sum(ISNULL(CONVERT(Decimal(10,2),total_cost),0)),2) --as RB_COST
+        FROM
+            CES.TEMP_MATERIALS_LIST;
+RETURN @V_FINAL_PRICE ;
+
+
+END;
+ 
+GO
+
+
