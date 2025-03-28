@@ -1,0 +1,168 @@
+When I change  .AllPages(false); to  .AllPages(true); below for Excel, gtting folowing exception
+.Excel(excel =>
+{
+    excel.FileName("RebuiltPart.xlsx")
+    .Filterable(false)
+    .AllPages(true);
+
+})
+...
+.Events(events => events.ExcelExport("onExcelExport"))
+JS :
+<script>
+    function onExcelExport(e) {
+        console.log("onExcelExport called");
+        var sheet = e.workbook.sheets[0];
+
+        var allowedFields = ["RebuiltStockNum", "MmsStockCode", "KeyWord", "DetailedDesc", "JobNumber", "BuyNewCost", "RemanCost", "Cost Savings Per Unit", "Percentage Savings Per Unit"]; 
+
+        // Filter out columns not in the allowed list
+        sheet.columns = sheet.columns.filter(function(column, index) {
+            var field = e.sender.columns[index] ? e.sender.columns[index].field : null;
+            return allowedFields.includes(field);
+        });
+
+        var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+        var data = grid.dataSource.data();
+
+        //  Add a new column for the calculated value
+        sheet.columns.push({ width: 150 });
+
+        //  Add a header for the calculated column
+        sheet.rows[0].cells.push({
+            value: "Cost Savings Per Unit", //Custom header
+            background: "#f3f3f3", // Optional formatting
+            color: "#000000",
+            bold: true
+        });
+
+        // Inject calculated values into the Excel file
+        //BuyNewCost, RemanCost            
+           sheet.rows.forEach(function(row, rowIndex) {
+               row.cells = row.cells.filter(function(cell, index) {
+                    var field = e.sender.columns[index] ? e.sender.columns[index].field : null;
+                    return allowedFields.includes(field);
+                });
+
+            if (rowIndex > 0) { // Skip header row
+                //skip undefined rows 
+                if (typeof data == 'undefined') {
+                    console.log('data is undefined');
+                    BuyNewCost = 0;
+                }
+                // if (typeof data[rowIndex - 1].RemanCost == 'undefined') {
+                //     console.log('RemanCost is undefined');
+                //     RemanCost = 0;
+                // }
+
+                var buyNewCost = data[rowIndex - 1].BuyNewCost;
+                var remanCost = data[rowIndex - 1].RemanCost;
+
+                    if (buyNewCost != null && remanCost != null) {
+                        console.log("buyNewCost not null - normal");
+                    row.cells.push({
+                            value: calculateCostSaving(buyNewCost, remanCost),
+                        background: "#f9f9f9",
+                        color: "#333"
+                    });
+                }
+            }
+        });
+
+        //percentage
+            //  Add a new column for the calculated value
+            sheet.columns.push({ width: 150 });
+
+            //  Add a header for the calculated column
+            sheet.rows[0].cells.push({
+                value: "Percentage Savings Per Unit", //Custom header
+                background: "#f3f3f3", // Optional formatting
+                color: "#000000",
+                bold: true
+            });
+
+            // Inject calculated values into the Excel file
+            //BuyNewCost, RemanCost            
+               sheet.rows.forEach(function(row, rowIndex) {
+                   row.cells = row.cells.filter(function(cell, index) {
+                        var field = e.sender.columns[index] ? e.sender.columns[index].field : null;
+                        return allowedFields.includes(field);
+                    });
+
+                    if (rowIndex > 0) { // Skip header row
+                          //skip undefined rows 
+                        if (typeof data == 'undefined') {
+                            console.log('data is undefined');
+                            BuyNewCost = 0;
+                        }
+                        // if (typeof RemanCost == 'undefined') {
+                        //     console.log('RemanCost is undefined');
+                        //     RemanCost = 0;
+                        // }
+                    var buyNewCost = data[rowIndex - 1].BuyNewCost;
+                    var remanCost = data[rowIndex - 1].RemanCost;
+
+                        if (buyNewCost != null && remanCost != null) {
+                            console.log("buyNewCost not null - percentage");
+                        row.cells.push({
+                                value: calculatePercentageSaving(buyNewCost, remanCost),
+                            background: "#f9f9f9",
+                            color: "#333"
+                        });
+                    }
+                }
+            });
+    }
+
+function formatNegative(value) {
+    try {
+        if (typeof value !== 'number') {
+            value = 0;
+        }
+        // Format to 2 decimal places and wrap negatives in parentheses
+        return value < 0 ? `(${Math.abs(value).toFixed(2)})` : value.toFixed(2);
+    } catch (e) {
+        showError("Error formatting number: " + e.message);
+        return '0.00';
+    }
+}
+
+function calculateCostSaving(BuyNewCost, RemanCost) {
+    
+            console.log('inside calculateCostSaving ');
+    
+    try {
+        console.log('BuyNewCost :', BuyNewCost);
+            console.log('RemanCost :', RemanCost);
+        var buyNew = parseCurrency(BuyNewCost);
+        var reman = parseCurrency(RemanCost);
+        var costSaving = buyNew - reman;
+        console.log("returning costSaving:", costSaving);
+        console.log("returning formatNegative :", formatNegative(costSaving));
+        return formatNegative(costSaving);
+    } catch (e) {
+        console.log("Error calculating cost saving: " + e.message);
+        return '0.00';
+    }
+}
+
+function calculatePercentageSaving(BuyNewCost, RemanCost) {
+    if (typeof BuyNewCost == 'undefined' )
+    {
+            console.log('calculatePercentageSaving BuyNewCost is undefined ');
+    }
+    try {
+        var buyNew = parseCurrency(BuyNewCost);
+        var reman = parseCurrency(RemanCost);
+        var costSaving = buyNew - reman;
+
+        if (buyNew === 0) return '0.00%'; // Avoid division by zero
+
+        var percentage = (costSaving / buyNew) * 100;
+        return formatNegative(percentage) + '%';
+    } catch (e) {
+        console.log("Error calculating percentage saving: " + e.message);
+        return '0.00%';
+    }
+}
+</script>
