@@ -1,0 +1,130 @@
+function onExcelExport(e) {
+    console.log("onExcelExport called");
+
+    var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+    var dataSource = grid.dataSource;
+
+    // 👉 Prevent automatic export until all data is ready
+    e.preventDefault();
+
+    dataSource.read().then(function () {
+        var data = dataSource.data(); // ✅ Now holds ALL records across all pages
+        var sheet = e.workbook.sheets[0];
+
+        // ✅ Allowed fields for the final report
+        var allowedFields = [
+            "RebuiltStockNum", "MmsStockCode", "KeyWord",
+            "DetailedDesc", "JobNumber", "BuyNewCost", "RemanCost"
+        ];
+
+        // ✅ Filter out unwanted columns
+        sheet.columns = sheet.columns.filter(function (column, index) {
+            var field = grid.columns[index] ? grid.columns[index].field : null;
+            return allowedFields.includes(field);
+        });
+
+        // ✅ Create header row
+        sheet.rows[0].cells = sheet.rows[0].cells.filter(function (cell, index) {
+            var field = grid.columns[index] ? grid.columns[index].field : null;
+            return allowedFields.includes(field);
+        });
+
+        // ✅ Add calculated column headers
+        sheet.columns.push({ width: 150 });
+        sheet.rows[0].cells.push({
+            value: "Cost Savings Per Unit",
+            background: "#f3f3f3",
+            color: "#000000",
+            bold: true
+        });
+
+        sheet.columns.push({ width: 150 });
+        sheet.rows[0].cells.push({
+            value: "Percentage Savings Per Unit",
+            background: "#f3f3f3",
+            color: "#000000",
+            bold: true
+        });
+
+        // ✅ Ensure rows exist for ALL data rows
+        while (sheet.rows.length <= data.length) {
+            sheet.rows.push({ cells: [] });
+        }
+
+        // ✅ Inject calculated values for ALL records
+        data.forEach(function (item, index) {
+            var row = sheet.rows[index + 1]; // Create if missing
+
+            // Ensure other allowed fields are populated
+            row.cells = row.cells.filter(function (cell, index) {
+                var field = grid.columns[index] ? grid.columns[index].field : null;
+                return allowedFields.includes(field);
+            });
+
+            var buyNewCost = item.BuyNewCost || 0;
+            var remanCost = item.RemanCost || 0;
+
+            // ✅ Inject calculated values
+            row.cells.push({
+                value: calculateCostSaving(buyNewCost, remanCost),
+                background: "#f9f9f9",
+                color: "#333"
+            });
+
+            row.cells.push({
+                value: calculatePercentageSaving(buyNewCost, remanCost),
+                background: "#f9f9f9",
+                color: "#333"
+            });
+        });
+
+        // ✅ Trigger export after processing
+        kendo.saveAs({
+            dataURI: new kendo.ooxml.Workbook(e.workbook).toDataURL(),
+            fileName: "RebuiltPart.xlsx"
+        });
+    });
+}
+
+// ✅ Utility functions remain unchanged
+function calculateCostSaving(buyNewCost, remanCost) {
+    try {
+        var buyNew = parseCurrency(buyNewCost);
+        var reman = parseCurrency(remanCost);
+        var costSaving = buyNew - reman;
+        return formatNegative(costSaving);
+    } catch (e) {
+        console.error("Error calculating cost saving:", e);
+        return '0.00';
+    }
+}
+
+function calculatePercentageSaving(buyNewCost, remanCost) {
+    try {
+        var buyNew = parseCurrency(buyNewCost);
+        var reman = parseCurrency(remanCost);
+        if (buyNew === 0) return '0.00%';
+        var percentage = ((buyNew - reman) / buyNew) * 100;
+        return formatNegative(percentage) + '%';
+    } catch (e) {
+        console.error("Error calculating percentage saving:", e);
+        return '0.00%';
+    }
+}
+
+function formatNegative(value) {
+    try {
+        if (typeof value !== 'number') {
+            value = 0;
+        }
+        return value < 0 ? `(${Math.abs(value).toFixed(2)})` : value.toFixed(2);
+    } catch (e) {
+        console.error("Error formatting number:", e);
+        return '0.00';
+    }
+}
+
+function parseCurrency(value) {
+    if (!value) return 0;
+    return parseFloat(value.toString().replace(/[^0-9.-]+/g, "")) || 0;
+}
