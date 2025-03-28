@@ -1,0 +1,270 @@
+--M-- 1. Create temp tables
+--EXEC CreateTempTables.sql
+
+-- 2. Create stored procedure
+EXEC CalculateTotalLabourAndMaterialsPartsInRB.sql
+
+-- 3. Execute main script
+------EXEC MainMigrationScript.sql
+
+-- File: MainMigrationScript.sql
+USE [SBCES]
+GO
+
+DECLARE @ViRebuiltStockNum VARCHAR(25) = 'TEST123',
+        @ViLinkNumber VARCHAR(25) = 'LINK456',
+        @ViTypeId VARCHAR(25) = 'RB',
+        @ViUsername VARCHAR(50) = 'TestUser',
+        @ArchId INT;
+
+-- Output Parameters
+DECLARE @ViLabourCost DECIMAL(18,2),
+        @ViLabourOverhead DECIMAL(18,2),
+        @ViMaterialsTotal DECIMAL(18,2),
+        @ViTaxTotal DECIMAL(18,2),
+        @ViTotalCostTax DECIMAL(18,2);
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    -- Step 1: Calculate Costs
+    EXEC SBCES.CalculateTotalLabourAndMaterialsPartsInRB
+        @RebuiltPartNum = @ViLinkNumber,
+        @TotalLabourCost = @ViLabourCost OUTPUT,
+        @TotalLabourOverHeadCost = @ViLabourOverhead OUTPUT,
+        @TotalMaterialCost = @ViMaterialsTotal OUTPUT,
+        @TaxTotal = @ViTaxTotal OUTPUT,
+        @TotalRebuiltPartCostWithTax = @ViTotalCostTax OUTPUT;
+
+    -- Step 2: Insert into Masterlist
+    INSERT INTO #ArchRbMasterlist (
+        MmsStockCode, ItemRefNumber, DetailedDesc, Keyword,
+        CorePartNum, RebuiltStockNum, CoreCharge, JobNumber,
+        EstimatedCost, SopNumber, DateArchived, ArchivedBy,
+        LabourCost, LabourOverheadAmount, LabourTotal,
+        MaterialsTotal, TotalRebuiltPartCost, TaxTotal, TotalCostTax
+    )
+    SELECT
+        RM.MmsStockCode,
+        RM.ItemRefNumber,
+        RM.DetailedDesc,
+        RM.Keyword,
+        RM.CorePartNum,
+        RM.RebuiltStockNum,
+        RM.CoreCharge,
+        RM.JobNumber,
+        RM.EstimatedCost,
+        RM.SopNumber,
+        GETDATE(),
+        @ViUsername,
+        @ViLabourCost,
+        @ViLabourOverhead,
+        @ViLabourCost + @ViLabourOverhead,
+        @ViMaterialsTotal,
+        @ViLabourCost + @ViMaterialsTotal,
+        @ViTaxTotal,
+        @ViTotalCostTax
+    FROM SBCES.RbMasterlist RM
+    WHERE RM.RebuiltStockNum = @ViRebuiltStockNum;
+
+    SET @ArchId = SCOPE_IDENTITY();
+    SELECT * FROM #ArchRbMasterlist;
+
+    -- Step 3: Employee Labour
+    INSERT INTO #ArchRbEmployeeLabour (
+        LabourDefn, DateEntered, LinkNumber, TypeId,
+        CostCentre, Task, LabourType, [Usage],
+        HrsReqd, AdjHrs, TimeAddition, ArchRbMasterlistId
+    )
+    SELECT
+        EL.LabourDefn,
+        EL.DateEntered,
+        EL.LinkNumber,
+        EL.TypeId,
+        EL.CostCentre,
+        EL.Task,
+        EL.LabourType,
+        TRY_CAST(EL.[Usage] AS DECIMAL(5,2)),
+        EL.HrsReqd,
+        EL.AdjHrs,
+        EL.TimeAddition,
+        @ArchId
+    FROM SBCES.EmployeeLabour EL
+    WHERE EL.LinkNumber = @ViLinkNumber
+        AND EL.TypeId = @ViTypeId;
+
+    SELECT * FROM #ArchRbEmployeeLabour;
+
+    -- Step 4: SC Parts Used (Rebuilt)
+    INSERT INTO #ArchRbScPartsUsed (
+        MmsStockCode, DateEntered, RebPartCost, UserEntered,
+        MmsCost, OemCost, MmsRebuiltCode, CostCentre,
+        QtyReqd, PercentUsage, LinkCode, RebuiltPart,
+        LinkType, CoreCost, ArchRbMasterlistId, TotalCost,
+        ScKeyword, ScDescription
+    )
+    SELECT
+        UPPER(SU.MmsStockCode),
+        SU.DateEntered,
+        ISNULL(A.RbUnitCost, 0),
+        UPPER(SU.UserEntered),
+        ISNULL(SU.MmsCost, 0),
+        ISNULL(SU.OemCost, 0),
+        UPPER(SU.MmsRebuiltCode),
+        UPPER(SU.CostCentre),
+        TRY_CAST(SU.QtyReqd AS DECIMAL(18,2)),
+        TRY_CAST(REPLACE(SU.PercentUsage, ',', '.') AS DECIMAL(5,2)),
+        @ViLinkNumber,
+        'Y',
+        'RB',
+        SU.CoreCost,
+        @ArchId,
+        ISNULL(A.RbCost, 0),
+        UPPER(RM.Keyword),
+        UPPER(RM.DetailedDesc)
+    FROM SBCES.ScPartsUsed SU
+    LEFT JOIN SBCES.RbMasterlist RM 
+        ON RM.RebuiltStockNum = SU.MmsRebuiltCode
+    LEFT JOIN (
+        SELECT 
+            RbReference,
+            ROUND(SUM(TotalCost), 2) AS RbCost,
+            ROUND(SUM(TotalUnitCost), 2) AS RbUnitCost
+        FROM SBCES.TempMaterialsList
+        GROUP BY RbReference
+    ) A ON A.RbReference = SU.MmsRebuiltCode
+    WHERE SU.LinkCode = @ViLinkNumber
+        AND SU.RebuiltPart = 'Y'
+        AND SU.LinkType = @ViTypeId;
+
+    SELECT * FROM #ArchRbScPartsUsed WHERE RebuiltPart = 'Y';
+
+    -- Step 5: SC Parts Used (Non-Rebuilt)
+    INSERT INTO #ArchRbScPartsUsed (
+        MmsStockCode, DateEntered, RebPartCost, UserEntered,
+        MmsCost, OemCost, MmsRebuiltCode, CostCentre,
+        QtyReqd, PercentUsage, LinkCode, RebuiltPart,
+        LinkType, CoreCost, ArchRbMasterlistId, TotalCost,
+        ScKeyword, ScDescription
+    )
+    SELECT
+        A.MmsStockCode,
+        A.DateEntered,
+        A.RebPartCost,
+        A.UserEntered,
+        A.MmsCost,
+        A.OemCost,
+        A.MmsRebuiltCode,
+        A.CostCentre,
+        TRY_CAST(A.QtyReqd AS DECIMAL(18,2)),
+        TRY_CAST(REPLACE(A.PercentUsage, ',', '.') AS DECIMAL(5,2)),
+        @ViLinkNumber,
+        'N',
+        @ViTypeId,
+        SBCES.FinalCost(
+            TRY_CAST(REPLACE(A.PercentUsage, ',', '.') AS DECIMAL(5,2)),
+            TRY_CAST(A.QtyReqd AS DECIMAL(18,2)),
+            A.CoreCost, 
+            0
+        ),
+        @ArchId,
+        A.MmsCost * TRY_CAST(A.QtyReqd AS DECIMAL(18,2)) 
+            * (TRY_CAST(REPLACE(ISNULL(A.PercentUsage, '0'), ',', '.') AS DECIMAL(5,2))/100),
+        ISNULL(B.PartType, ''),
+        ISNULL(B.DetailedDesc, '')
+    FROM SBCES.ScPartsUsed A
+    LEFT JOIN SBCES.StockCodedParts B 
+        ON B.MmsStockCode = A.MmsStockCode
+    WHERE A.LinkCode = @ViLinkNumber
+        AND A.LinkType = @ViTypeId
+        AND A.RebuiltPart = 'N';
+
+    SELECT * FROM #ArchRbScPartsUsed WHERE RebuiltPart = 'N';
+
+    -- Step 6: NSC Parts Used
+    INSERT INTO #ArchRbNscPartsUsed (
+        OrigSuppNum, OrigSupplierName, CostCentre,
+        QtyReqd, PercentUsage, DateEntered, EnteredBy,
+        LinkCode, Cost, LinkType, CoreCost,
+        ArchRbMasterlistId, TotalCost
+    )
+    SELECT
+        NP.OrigSuppNum,
+        NP.OrigSupplierName,
+        NP.CostCentre,
+        TRY_CAST(NP.QtyReqd AS DECIMAL(18,2)),
+        TRY_CAST(REPLACE(NP.PercentUsage, ',', '.') AS DECIMAL(5,2)),
+        NP.DateEntered,
+        NP.EnteredBy,
+        NP.LinkCode,
+        NP.Cost,
+        NP.LinkType,
+        SBCES.FinalCost(
+            TRY_CAST(REPLACE(NP.PercentUsage, ',', '.') AS DECIMAL(5,2)),
+            TRY_CAST(NP.QtyReqd AS DECIMAL(18,2)),
+            NP.CoreCost, 
+            0
+        ),
+        @ArchId,
+        NP.Cost * TRY_CAST(NP.QtyReqd AS DECIMAL(18,2)) 
+            * (TRY_CAST(REPLACE(ISNULL(NP.PercentUsage, '0'), ',', '.') AS DECIMAL(5,2))/100)
+    FROM SBCES.NscPartsUsed NP
+    WHERE NP.LinkCode = @ViLinkNumber
+        AND NP.LinkType = @ViTypeId;
+
+    SELECT * FROM #ArchRbNscPartsUsed;
+
+    -- Step 7: Labour CC Total
+    INSERT INTO #ArchRbLabourCcTotal (
+        CostCentre, TotalHours, ArchRbMasterlistId
+    )
+    SELECT
+        CC,
+        SUM(TRY_CAST(ExtendedTime AS DECIMAL(18,2))),
+        @ArchId
+    FROM SBCES.TempLabourList
+    GROUP BY CC;
+
+    SELECT * FROM #ArchRbLabourCcTotal;
+
+    -- Step 8: Materials CC Total
+    INSERT INTO #ArchRbMaterialsCcTotal (
+        CostCentre, TotalCost, ArchRbMasterlistId
+    )
+    SELECT
+        CostCentre,
+        SUM(TRY_CAST(TotalCost AS DECIMAL(18,2))),
+        @ArchId
+    FROM SBCES.TempMaterialsList
+    GROUP BY CostCentre;
+
+    SELECT * FROM #ArchRbMaterialsCcTotal;
+
+    -- Step 9: List Buses
+    INSERT INTO #ArchRbListBuses (
+        BusDescription, ArchRbMasterlistId
+    )
+    SELECT
+        LB.Description,
+        @ArchId
+    FROM SBCES.RbListOfBuses RB
+    INNER JOIN SBCES.ListOfBuses LB
+        ON RB.ListId = LB.ListId
+    WHERE RB.RebuiltStockNum = @ViLinkNumber;
+
+    SELECT * FROM #ArchRbListBuses;
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    ROLLBACK TRANSACTION;
+    SELECT 
+        ERROR_NUMBER() AS ErrorNumber,
+        ERROR_MESSAGE() AS ErrorMessage;
+END CATCH
+
+-- Cleanup
+DROP TABLE IF EXISTS #ArchRbMasterlist, #ArchRbEmployeeLabour,
+                  #ArchRbScPartsUsed, #ArchRbNscPartsUsed,
+                  #ArchRbLabourCcTotal, #ArchRbMaterialsCcTotal,
+                  #ArchRbListBuses;
