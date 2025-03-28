@@ -11,9 +11,15 @@ WITH MaterialCost AS (
     FROM (
         SELECT 
             CostCentre,
-            CONVERT(DECIMAL(10,2),[SBCES].[FinalCost](PercentUsage, QtyReqd, MmsCost, 0) 
-              - CONVERT(DECIMAL(10,2),[SBCES].[FinalCost](PercentUsage, QtyReqd, CoreCost, 0) AS Cost,
-            CONVERT(DECIMAL(10,2),[SBCES].[FinalCost](PercentUsage, QtyReqd, MmsCost, 0) AS TaxCost
+            CONVERT(DECIMAL(10,2),
+                [SBCES].[FinalCost](PercentUsage, QtyReqd, MmsCost, 0) 
+                - CONVERT(DECIMAL(10,2),
+                    [SBCES].[FinalCost](PercentUsage, QtyReqd, CoreCost, 0)
+                )
+            ) AS Cost,
+            CONVERT(DECIMAL(10,2),
+                [SBCES].[FinalCost](PercentUsage, QtyReqd, MmsCost, 0)
+            ) AS TaxCost
         FROM 
             SBCES.ScPartsUsed
         WHERE 
@@ -23,31 +29,26 @@ WITH MaterialCost AS (
         UNION ALL
         SELECT 
             NSU.CostCentre,
-            CONVERT(DECIMAL(10,2),[SBCES].[FinalCost](NSU.PercentUsage, NSU.QtyReqd, NSCP.OemPartCost, 0) 
-              - CONVERT(DECIMAL(10,2),[SBCES].[FinalCost](NSU.PercentUsage, NSU.QtyReqd, NSU.CoreCost, 0) AS Cost,
-            CONVERT(DECIMAL(10,2),[SBCES].[FinalCost](NSU.PercentUsage, NSU.QtyReqd, NSCP.OemPartCost, 0) AS TaxCost
+            CONVERT(DECIMAL(10,2),
+                [SBCES].[FinalCost](NSU.PercentUsage, NSU.QtyReqd, NSCP.OemPartCost, 0) 
+                - CONVERT(DECIMAL(10,2),
+                    [SBCES].[FinalCost](NSU.PercentUsage, NSU.QtyReqd, NSU.CoreCost, 0)
+                )
+            ) AS Cost,
+            CONVERT(DECIMAL(10,2),
+                [SBCES].[FinalCost](NSU.PercentUsage, NSU.QtyReqd, NSCP.OemPartCost, 0)
+            ) AS TaxCost
         FROM 
             SBCES.NscPartsUsed NSU
-        RIGHT JOIN SBCES.NonStockCodedParts NSCP ON NSCP.Id = NSU.Id
+        RIGHT JOIN SBCES.NonStockCodedParts NSCP 
+            ON NSCP.Id = NSU.Id
         WHERE 
             NSU.LinkCode = UPPER(@viIDnum)
             AND NSU.LinkType = UPPER(@viType)
     ) A
-    JOIN SBCES.CostCentres C ON C.CostCentre = A.CostCentre
+    JOIN SBCES.CostCentres C 
+        ON C.CostCentre = A.CostCentre
     GROUP BY A.CostCentre, C.Name
-),
-RebuiltParts AS (
-    SELECT DISTINCT 
-        UPPER(SU.LinkCode) AS LinkCode,
-        SU.QtyReqd AS Qty,
-        SU.PercentUsage AS UsagePercent,
-        SU.MmsRebuiltCode AS RebuiltCode
-    FROM 
-        SBCES.ScPartsUsed SU
-    WHERE 
-        RebuiltPart = 'Y'
-        AND LinkType = UPPER(@viType)
-        AND UPPER(LinkCode) = UPPER(@viIDnum)
 ),
 KitCost AS (
     SELECT 
@@ -61,11 +62,10 @@ KitCost AS (
 )
 SELECT 
     @VFinalPrice = ROUND(
-        ISNULL(SUM(MaterialCost.TotalCost), 0) + 
-        ISNULL(MAX(KitCost.KitTotal), 0),
+        ISNULL(SUM(MaterialCost.TotalCost), 0) 
+        + ISNULL(MAX(KitCost.KitTotal), 0),
         2
     )
-FROM MaterialCost
-CROSS JOIN KitCost;
+FROM MaterialCost, KitCost;
 
 SELECT @VFinalPrice AS FinalMaterialPrice;
