@@ -1,0 +1,423 @@
+-- Declare parameters
+DECLARE @ViUsername NVARCHAR(50) = 'System',
+        @ViLabourCost DECIMAL(18, 2),
+        @ViLabourOverheadAmount DECIMAL(18, 2),
+        @ViLabourTotal DECIMAL(18, 2),
+        @ViMaterialsTotal DECIMAL(18, 2),
+        @ViTotalRebuiltPartCost DECIMAL(18, 2),
+        @ViTaxTotal DECIMAL(18, 2),
+        @ViTotalCostTax DECIMAL(18, 2),
+        @ViRebuiltStockNum VARCHAR(25), -- Assuming this variable is needed
+        @ViLinkNumber VARCHAR(25),        -- Assuming this variable is needed
+        @ViTypeId VARCHAR(25);            -- Assuming this variable is needed
+
+-- 1. Create temporary table for ArchRbMasterlist
+CREATE TABLE #TempArchRbMasterlist (
+    MmsStockCode NVARCHAR(50),
+    ItemRefNumber NVARCHAR(50),
+    DetailedDesc NVARCHAR(500),
+    Keyword NVARCHAR(50),
+    CorePartNum NVARCHAR(50),
+    RebuiltStockNum NVARCHAR(50),
+    CoreCharge DECIMAL(18, 2),
+    JobNumber NVARCHAR(50),
+    EstimatedCost DECIMAL(18, 2),
+    SopNumber NVARCHAR(50),
+    DateArchived DATETIME,
+    ArchivedBy NVARCHAR(50),
+    ArchRbMasterlistId INT,
+    LabourCost DECIMAL(18, 2),
+    LabourOverheadAmount DECIMAL(18, 2),
+    LabourTotal DECIMAL(18, 2),
+    MaterialsTotal DECIMAL(18, 2),
+    TotalRebuiltPartCost DECIMAL(18, 2),
+    TaxTotal DECIMAL(18, 2),
+    TotalCostTax DECIMAL(18, 2)
+);
+
+-- Insert new record into ##TempArchRbMasterlist table
+INSERT INTO #TempArchRbMasterlist (
+    MmsStockCode,
+    ItemRefNumber,
+    DetailedDesc,
+    Keyword,
+    CorePartNum,
+    RebuiltStockNum,
+    CoreCharge,
+    JobNumber,
+    EstimatedCost,
+    SopNumber,
+    DateArchived,
+    ArchivedBy,
+    ArchRbMasterlistId,
+    LabourCost,
+    LabourOverheadAmount,
+    LabourTotal,
+    MaterialsTotal,
+    TotalRebuiltPartCost,
+    TaxTotal,
+    TotalCostTax
+)
+SELECT
+    MmsStockCode,
+    ItemRefNumber,
+    DetailedDesc,
+    Keyword,
+    CorePartNum,
+    RebuiltStockNum,
+    CoreCharge,
+    JobNumber,
+    EstimatedCost,
+    SopNumber,
+    GETDATE(), -- Use GETDATE() for current date
+    @ViUsername,
+    NEXT VALUE FOR SBCES.ArchRbMasterlistSeq, -- Sequence handling
+    @ViLabourCost,
+    @ViLabourOverheadAmount,
+    @ViLabourTotal,
+    @ViMaterialsTotal,
+    @ViTotalRebuiltPartCost,
+    @ViTaxTotal,
+    @ViTotalCostTax
+FROM
+    SBCES.RbMasterlist
+WHERE
+    UPPER(RebuiltStockNum) = UPPER(@ViRebuiltStockNum);
+
+-- Capture the latest ArchRbMasterlistId from the temporary table
+DECLARE @ArchId INT;
+SELECT @ArchId = MAX(ArchRbMasterlistId) FROM #TempArchRbMasterlist;
+
+-- 2. Create temporary table for ArchRbEmployeeLabour
+CREATE TABLE #TempArchRbEmployeeLabour (
+    LabourDefn NVARCHAR(50),
+    DateEntered DATETIME,
+    LinkNumber NVARCHAR(50),
+    TypeId NVARCHAR(50),
+    CostCentre NVARCHAR(50),
+    Task NVARCHAR(200),
+    LabourType NVARCHAR(50),
+    [Usage] DECIMAL(18, 2), -- Usage as a decimal
+    HrsReqd NVARCHAR(10),
+    AdjHrs NVARCHAR(10),
+    TimeAddition NVARCHAR(10),
+    ArchRbMasterlistId INT
+);
+
+-- Insert records into #TempArchRbEmployeeLabour
+INSERT INTO #TempArchRbEmployeeLabour (
+    LabourDefn,
+    DateEntered,
+    LinkNumber,
+    TypeId,
+    CostCentre,
+    Task,
+    LabourType,
+    [Usage],
+    HrsReqd,
+    AdjHrs,
+    TimeAddition,
+    ArchRbMasterlistId
+)
+SELECT
+    LabourDefn,
+    DateEntered,
+    LinkNumber,
+    TypeId,
+    CostCentre,
+    Task,
+    LabourType,
+    [Usage],
+    HrsReqd,
+    AdjHrs,
+    TimeAddition,
+    @ArchId -- Replaced CURRVAL with captured variable
+FROM
+    SBCES.EmployeeLabour
+WHERE
+    LinkNumber = @ViLinkNumber
+    AND TypeId = @ViTypeId;
+
+-- Calculate @VPrice using SQL Server function
+DECLARE @VPrice DECIMAL(18, 2);
+SET @VPrice = SBCES.GetMaterialCost(@ViLinkNumber, @ViTypeId);
+
+-- 3. Create temporary table for ArchRbScPartsUsed (Rebuilt parts)
+CREATE TABLE #TempArchRbScPartsUsed (
+    MmsStockCode NVARCHAR(50),
+    DateEntered DATETIME,
+    RebPartCost DECIMAL(18, 2),
+    UserEntered NVARCHAR(50),
+    MmsCost DECIMAL(18, 2),
+    OemCost DECIMAL(18, 2),
+    MmsRebuiltCode NVARCHAR(50),
+    CostCentre NVARCHAR(50),
+    QtyReqd DECIMAL(18, 2),
+    PercentUsage DECIMAL(18, 2),
+    LinkCode NVARCHAR(50),
+    RebuiltPart CHAR(1),
+    LinkType NVARCHAR(50),
+    CoreCost DECIMAL(18, 2),
+    ArchRbMasterlistId INT,
+    TotalCost DECIMAL(18, 2),
+    ScKeyword NVARCHAR(50),
+    ScDescription NVARCHAR(500)
+);
+
+-- Insert into #TempArchRbScPartsUsed (Rebuilt parts)
+INSERT INTO #TempArchRbScPartsUsed (
+    MmsStockCode,
+    DateEntered,
+    RebPartCost,
+    UserEntered,
+    MmsCost,
+    OemCost,
+    MmsRebuiltCode,
+    CostCentre,
+    QtyReqd,
+    PercentUsage,
+    LinkCode,
+    RebuiltPart,
+    LinkType,
+    CoreCost,
+    ArchRbMasterlistId,
+    TotalCost,
+    ScKeyword,
+    ScDescription
+)
+SELECT
+    UPPER(SU.MmsStockCode),
+    SU.DateEntered,
+    ISNULL(A.RbUnitCost, 0),
+    UPPER(SU.UserEntered),
+    ISNULL(SU.MmsCost, 0),
+    ISNULL(SU.OemCost, 0),
+    UPPER(SU.MmsRebuiltCode),
+    UPPER(SU.CostCentre),
+    UPPER(SU.QtyReqd),
+    REPLACE(SU.PercentUsage, ',', '.'),
+    @ViLinkNumber,
+    'Y',
+    'RB',
+    SU.CoreCost,
+    @ArchId,
+    ISNULL(A.RbCost, 0),
+    UPPER(RM.Keyword),
+    UPPER(RM.DetailedDesc)
+FROM
+    SBCES.ScPartsUsed SU
+LEFT JOIN SBCES.RbMasterlist RM ON RM.RebuiltStockNum = SU.MmsRebuiltCode
+LEFT JOIN (
+    SELECT
+        RbReference,
+        ROUND(SUM(TotalCost), 2) AS RbCost,
+        ROUND(SUM(TotalUnitCost), 2) AS RbUnitCost
+    FROM
+        SBCES.TempMaterialsList
+    GROUP BY
+        RbReference
+) A ON A.RbReference = SU.MmsRebuiltCode
+WHERE
+    SU.LinkCode = @ViLinkNumber
+    AND SU.RebuiltPart = 'Y'
+    AND SU.LinkType = @ViTypeId;
+
+-- 3b. Create temporary table for ArchRbScPartsUsed (Non-rebuilt parts)
+CREATE TABLE #TempArchRbScPartsUsedNonRebuilt (
+    MmsStockCode NVARCHAR(50),
+    DateEntered DATETIME,
+    RebPartCost DECIMAL(18, 2),
+    UserEntered NVARCHAR(50),
+    MmsCost DECIMAL(18, 2),
+    OemCost DECIMAL(18, 2),
+    MmsRebuiltCode NVARCHAR(50),
+    CostCentre NVARCHAR(50),
+    QtyReqd DECIMAL(18, 2),
+    PercentUsage DECIMAL(18, 2),
+    LinkCode NVARCHAR(50),
+    RebuiltPart CHAR(1),
+    LinkType NVARCHAR(50),
+    CoreCost DECIMAL(18, 2),
+    ArchRbMasterlistId INT,
+    TotalCost DECIMAL(18, 2),
+    ScKeyword NVARCHAR(50),
+    ScDescription NVARCHAR(500)
+);
+
+-- Insert into #TempArchRbScPartsUsed (Non-rebuilt parts)
+INSERT INTO #TempArchRbScPartsUsedNonRebuilt (
+    MmsStockCode,
+    DateEntered,
+    RebPartCost,
+    UserEntered,
+    MmsCost,
+    OemCost,
+    MmsRebuiltCode,
+    CostCentre,
+    QtyReqd,
+    PercentUsage,
+    LinkCode,
+    RebuiltPart,
+    LinkType,
+    CoreCost,
+    ArchRbMasterlistId,
+    TotalCost,
+    ScKeyword,
+    ScDescription
+)
+SELECT
+    A.MmsStockCode,
+    A.DateEntered,
+    A.RebPartCost,
+    A.UserEntered,
+    A.MmsCost,
+    A.OemCost,
+    A.MmsRebuiltCode,
+    A.CostCentre,
+    A.QtyReqd,
+    A.PercentUsage,
+    @ViLinkNumber,
+    'N',
+    @ViTypeId,
+    SBCES.FinalCost(A.PercentUsage, A.QtyReqd, A.CoreCost, 0),
+    @ArchId,
+    A.MmsCost * CAST(A.QtyReqd AS DECIMAL) * (CONVERT(DECIMAL, REPLACE(ISNULL(A.PercentUsage, '0'), ',', '.')) / 100),
+    ISNULL(B.PartType, ''),
+    ISNULL(B.DetailedDesc, '')
+FROM
+    SBCES.ScPartsUsed A
+LEFT JOIN SBCES.StockCodedParts B ON B.MmsStockCode = A.MmsStockCode
+WHERE
+    A.LinkCode = @ViLinkNumber
+    AND A.LinkType = @ViTypeId
+    AND A.RebuiltPart = 'N';
+
+-- 4. Create temporary table for ArchRbNscPartsUsed
+CREATE TABLE #TempArchRbNscPartsUsed (
+    OrigSuppNum NVARCHAR(50),
+    OrigSupplierName NVARCHAR(50),
+    CostCentre NVARCHAR(50),
+    QtyReqd DECIMAL(18, 2),
+    PercentUsage DECIMAL(18, 2),
+    DateEntered DATETIME,
+    EnteredBy NVARCHAR(50),
+    LinkCode NVARCHAR(50),
+    Cost DECIMAL(18, 2),
+    LinkType NVARCHAR(50),
+    CoreCost DECIMAL(18, 2),
+    ArchRbMasterlistId INT,
+    TotalCost DECIMAL(18, 2)
+);
+
+-- Insert into #TempArchRbNscPartsUsed
+INSERT INTO #TempArchRbNscPartsUsed (
+    OrigSuppNum,
+    OrigSupplierName,
+    CostCentre,
+    QtyReqd,
+    PercentUsage,
+    DateEntered,
+    EnteredBy,
+    LinkCode,
+    Cost,
+    LinkType,
+    CoreCost,
+    ArchRbMasterlistId,
+    TotalCost
+)
+SELECT
+    OrigSuppNum,
+    OrigSupplierName,
+    CostCentre,
+    QtyReqd,
+    PercentUsage,
+    DateEntered,
+    EnteredBy,
+    LinkCode,
+    Cost,
+    LinkType,
+    SBCES.FinalCost(PercentUsage, QtyReqd, CoreCost, 0),
+    @ArchId,
+    Cost * CAST(QtyReqd AS DECIMAL) * (CONVERT(DECIMAL, REPLACE(ISNULL(PercentUsage, '0'), ',', '.')) / 100)
+FROM
+    SBCES.NscPartsUsed
+WHERE
+    LinkCode = @ViLinkNumber
+    AND LinkType = @ViTypeId;
+
+-- Calculate labour cost using @VPrice
+SET @VPrice = SBCES.GetLabourCost(@ViLinkNumber, @ViTypeId);
+
+-- 5. Create temporary table for ArchRbLabourCcTotal
+CREATE TABLE #TempArchRbLabourCcTotal (
+    CostCentre NVARCHAR(50),
+    TotalHours DECIMAL(18, 2),
+    ArchRbMasterlistId INT
+);
+
+-- Insert into #TempArchRbLabourCcTotal
+INSERT INTO #TempArchRbLabourCcTotal (
+    CostCentre,
+    TotalHours,
+    ArchRbMasterlistId
+)
+SELECT
+    CC AS CostCentre,
+    SUM(ExtendedTime) AS TotalHours,
+    @ArchId
+FROM
+    SBCES.TempLabourList
+GROUP BY
+    CC;
+
+-- 6. Create temporary table for ArchRbMaterialsCcTotal
+CREATE TABLE #TempArchRbMaterialsCcTotal (
+    CostCentre NVARCHAR(50),
+    TotalCost DECIMAL(18, 2),
+    ArchRbMasterlistId INT
+);
+
+-- Insert into #TempArchRbMaterialsCcTotal
+INSERT INTO #TempArchRbMaterialsCcTotal (
+    CostCentre,
+    TotalCost,
+    ArchRbMasterlistId
+)
+SELECT
+    CostCentre,
+    SUM(TotalCost),
+    @ArchId
+FROM
+    SBCES.TempMaterialsList
+GROUP BY
+    CostCentre;
+
+-- 7. Create temporary table for ArchRbListBuses
+CREATE TABLE #TempArchRbListBuses (
+    BusDescription NVARCHAR(255),
+    ArchRbMasterlistId INT
+);
+
+-- Insert into #TempArchRbListBuses
+INSERT INTO #TempArchRbListBuses (
+    BusDescription,
+    ArchRbMasterlistId
+)
+SELECT
+    LB.Description,
+    @ArchId
+FROM
+    SBCES.RbListOfBuses RB
+INNER JOIN SBCES.ListOfBuses LB ON RB.ListId = LB.ListId
+WHERE
+    RB.RebuiltStockNum = @ViLinkNumber;
+
+-- Final cleanup: Drop temporary tables if desired
+-- DROP TABLE #TempArchRbMasterlist;
+-- DROP TABLE #TempArchRbEmployeeLabour;
+-- DROP TABLE #TempArchRbScPartsUsed;
+-- DROP TABLE #TempArchRbScPartsUsedNonRebuilt;
+-- DROP TABLE #TempArchRbNscPartsUsed;
+-- DROP TABLE #TempArchRbLabourCcTotal;
+-- DROP TABLE #TempArchRbMaterialsCcTotal;
+-- DROP TABLE #TempArchRbListBuses;
