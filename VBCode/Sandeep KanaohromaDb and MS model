@@ -1,0 +1,161 @@
+File 1: generate_vectordb.py
+python
+Copy
+# generate_vectordb.py
+from langchain_community.document_loaders import DirectoryLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
+import os
+
+# Configuration
+VB6_CODE_PATH = "your_vb6_files"  # Update with your VB6 directory
+EMBEDDINGS_MODEL = "sentence-transformers/all-mpnet-base-v2"
+CHROMA_DB_DIR = "./vb6_chroma_db"
+
+class VB6Loader(DirectoryLoader):
+    def __init__(self, path):
+        super().__init__(
+            path,
+            glob="**/*.bas",
+            suffixes=[".bas", ".frm", ".cls"],
+            show_progress=True
+        )
+
+def process_files():
+    # Load and split VB6 files
+    loader = VB6Loader(VB6_CODE_PATH)
+    documents = loader.load()
+    
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        separators=["\n\n", "\n", "End Sub", "End Function"]
+    )
+    
+    splits = text_splitter.split_documents(documents)
+    
+    # Create embeddings
+    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDINGS_MODEL)
+    
+    # Create and persist ChromaDB
+    vectordb = Chroma.from_documents(
+        documents=splits,
+        embedding=embeddings,
+        persist_directory=CHROMA_DB_DIR
+    )
+    vectordb.persist()
+    print(f"VectorDB created at {CHROMA_DB_DIR}")
+
+if __name__ == "__main__":
+    process_files()
+File 2: query_vectordb.py
+python
+Copy
+# query_vectordb.py
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from langchain_community.llms import HuggingFacePipeline
+
+# Configuration
+CHROMA_DB_DIR = "./vb6_chroma_db"
+EMBEDDINGS_MODEL = "sentence-transformers/all-mpnet-base-v2"
+CODEGPT_MODEL = "microsoft/CodeGPT-small-py"
+
+def initialize_codegpt():
+    tokenizer = AutoTokenizer.from_pretrained(CODEGPT_MODEL)
+    model = AutoModelForCausalLM.from_pretrained(CODEGPT_MODEL)
+    
+    pipe = pipeline(
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        max_new_tokens=256,
+        temperature=0.3
+    )
+    
+    return HuggingFacePipeline(pipeline=pipe)
+
+def query_vb6(question):
+    # Load existing ChromaDB
+    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDINGS_MODEL)
+    vectordb = Chroma(persist_directory=CHROMA_DB_DIR, 
+                     embedding_function=embeddings)
+    
+    # Create prompt template
+    prompt_template = """[VB6 Expert] Use this code context:
+    {context}
+    Question: {question}
+    Answer:"""
+    
+    PROMPT = PromptTemplate(
+        template=prompt_template,
+        input_variables=["context", "question"]
+    )
+    
+    # Create QA chain
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=initialize_codegpt(),
+        chain_type="stuff",
+        retriever=vectordb.as_retriever(),
+        chain_type_kwargs={"prompt": PROMPT}
+    )
+    
+    return qa_chain({"query": question})["result"]
+
+if __name__ == "__main__":
+    while True:
+        question = input("\nAsk about your VB6 code (type 'exit' to quit): ")
+        if question.lower() == 'exit':
+            break
+        print("\nProcessing...")
+        response = query_vb6(question)
+        print(f"\nAnswer: {response}")
+Setup Instructions
+Install Requirements:
+
+bash
+Copy
+pip install langchain langchain_community chromadb sentence-transformers transformers torch
+Download Models:
+
+bash
+Copy
+# CodeGPT-small-py (272MB)
+python -c "from transformers import AutoModel; AutoModel.from_pretrained('microsoft/CodeGPT-small-py')"
+
+# Embeddings model (420MB)
+python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-mpnet-base-v2')"
+Directory Structure:
+
+Copy
+your_project/
+├── your_vb6_files/          # Your VB6 files (.bas, .frm, .cls)
+├── generate_vectordb.py     # First run this
+├── query_vectordb.py        # Then run this
+└── vb6_chroma_db/           # Auto-created by generate_vectordb.py
+Usage:
+
+bash
+Copy
+# Step 1: Generate VectorDB
+python generate_vectordb.py
+
+# Step 2: Query the codebase
+python query_vectordb.py
+
+# Example questions:
+# - "Where is the database connection handled?"
+# - "Show me all functions related to user authentication"
+# - "Explain the main form initialization process"
+Key Features
+Local Execution - No API keys required
+
+VB6-Specific - Custom document loader and text splitting
+
+CodeGPT Integration - Specialized for code understanding
+
+Persistent Storage - ChromaDB only needs rebuilding when code changes
