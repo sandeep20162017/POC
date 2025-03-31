@@ -1,0 +1,106 @@
+USE [CES]
+GO
+
+/****** Object:  StoredProcedure [SBCES].[CalculateTotalLabourAndMaterialsPartsInRB]    Script Date: 3/31/2025 4:43:26 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE PROCEDURE [SBCES].[CalculateTotalLabourAndMaterialsPartsInRB]  
+    @RebuiltPartNum VARCHAR(25),  
+    @TotalLabourCost DECIMAL(18,2) OUTPUT,  
+    @TotalLabourOverHeadCost DECIMAL(18,2) OUTPUT,  
+    @TotalMaterialCost DECIMAL(18,2) OUTPUT,  
+    @TaxTotal DECIMAL(18,2) OUTPUT,  
+    @TotalRebuiltPartCostWithTax DECIMAL(18,2) OUTPUT  
+AS  
+BEGIN  
+    -- Temporary table for Labour details  
+    CREATE TABLE #TempLabourDetails (  
+        Id INT,  
+        DecimalHrs DECIMAL(18,2),  
+        EffectiveHours DECIMAL(18,2),  
+        LabourRate DECIMAL(18,2),  
+        LabourCost DECIMAL(18,2),  
+        LabourOverheadTotal DECIMAL(18,2)  
+    );  
+
+    -- Labour Calculations  
+    INSERT INTO #TempLabourDetails  
+    SELECT  
+        EL.Id,  
+        TRY_CAST(LEFT(EL.HrsReqd, 2) AS DECIMAL(5,2))   
+            + TRY_CAST(SUBSTRING(EL.HrsReqd, 4, 2) AS DECIMAL(5,2))/60 AS DecimalHrs,  
+        (TRY_CAST(LEFT(EL.HrsReqd, 2) AS DECIMAL(5,2))   
+            + TRY_CAST(SUBSTRING(EL.HrsReqd, 4, 2) AS DECIMAL(5,2))/60)  
+            * (TRY_CAST(EL.[Usage] AS DECIMAL(5,2))/100) AS EffectiveHours,  
+        ISNULL((  
+            SELECT TOP 1 RatePerHour  
+            FROM SBCES.EmployeeSalaries ES  
+            INNER JOIN SBCES.EmplClass EC   
+                ON EC.WageGroup = ES.WageGroup  
+            WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%'  
+        ), 0) AS LabourRate,  
+        (TRY_CAST(LEFT(EL.HrsReqd, 2) AS DECIMAL(5,2))   
+            + TRY_CAST(SUBSTRING(EL.HrsReqd, 4, 2) AS DECIMAL(5,2))/60)  
+            * (TRY_CAST(EL.[Usage] AS DECIMAL(5,2))/100)  
+            * ISNULL((  
+                SELECT TOP 1 RatePerHour  
+                FROM SBCES.EmployeeSalaries ES  
+                INNER JOIN SBCES.EmplClass EC   
+                    ON EC.WageGroup = ES.WageGroup  
+                WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%'  
+            ), 0) AS LabourCost,  
+        ((TRY_CAST(LEFT(EL.HrsReqd, 2) AS DECIMAL(5,2))   
+            + TRY_CAST(SUBSTRING(EL.HrsReqd, 4, 2) AS DECIMAL(5,2))/60)  
+            * (TRY_CAST(EL.[Usage] AS DECIMAL(5,2))/100)  
+            * ISNULL((  
+                SELECT TOP 1 RatePerHour  
+                FROM SBCES.EmployeeSalaries ES  
+                INNER JOIN SBCES.EmplClass EC   
+                    ON EC.WageGroup = ES.WageGroup  
+                WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%'  
+            ), 0)  
+        ) * ISNULL((  
+            SELECT TRY_CAST(Value AS DECIMAL(5,2))  
+            FROM SBCES.CesSettings  
+            WHERE Parameter = 'OVERHEAD'  
+        ), 0) AS LabourOverheadTotal  
+    FROM SBCES.EmployeeLabour EL  
+    WHERE EL.LinkNumber = @RebuiltPartNum;  
+
+    -- Sum Labour Costs  
+    SELECT  
+        @TotalLabourCost = SUM(LabourCost),  
+        @TotalLabourOverHeadCost = SUM(LabourOverheadTotal)  
+    FROM #TempLabourDetails;  
+
+    -- Material Calculations  
+    SELECT @TotalMaterialCost = ISNULL(SUM(  
+        TRY_CAST(RebPartCost AS DECIMAL(18,2)) +  
+        TRY_CAST(MmsCost AS DECIMAL(18,2)) -  
+        TRY_CAST(CoreCost AS DECIMAL(18,2))  
+    ), 0)  
+    FROM SBCES.SCPartsUsed  
+    WHERE LinkCode = @RebuiltPartNum;  
+
+    -- Tax Calculation  
+    DECLARE @TaxRate DECIMAL(18,4) = (  
+        SELECT TRY_CAST(Value AS DECIMAL(18,4))  
+        FROM SBCES.CesSettings  
+        WHERE Parameter = 'TAX_RATE'  
+    );  
+
+    SET @TaxTotal = @TotalMaterialCost * ISNULL(@TaxRate, 0);  
+    SET @TotalRebuiltPartCostWithTax =   
+        (@TotalLabourCost + @TotalMaterialCost) + @TaxTotal;  
+
+    -- Clean up temporary table  
+    DROP TABLE IF EXISTS #TempLabourDetails;  
+END;  
+GO
+
+
