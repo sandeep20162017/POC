@@ -1,0 +1,182 @@
+You are ASP.NET core v8 and Telerik ASP.NET core expert.
+In the following code when I replace ComboBox with CommonDropDown columnname and search text is null. Looks like data is not correcly passed from
+below CommonDropDown to controller action.
+I see in Telerikcombo box code is using .Data("getComboBoxParams").
+In DropDon code coe is using function .Data("getDropDownListParams")
+Need yur help to complete function getDropDownListParams() { ...}
+JS :
+ <script>
+    function getComboBoxParams() {
+     var input = $(".k-combobox input.k-input:focus");
+     return {
+         columnName: input.attr("name")?.replace("_input", ""),
+         searchText: input.val() || ""
+     };
+ }
+  </script>
+
+shared View :
+@model IEnumerable<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel>
+
+@{
+    ViewData["Title"] = "Labour Details";
+}
+
+<h6>Labour Details</h6>
+
+@(Html.Kendo().Grid<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel>()
+    //.Name((string)ViewBag.PartNum)
+    .Name($"LabourDetailsGrid_{ViewBag.PartNum}")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.Id).Title("Id").Hidden(true);
+        columns.Bound(c => c.LabourDefn).Title("Labour Type").EditorTemplateName("CommonDropDownEditor").Width(10); //when replaced by ComboBox values are passed correcly.
+        columns.Bound(c => c.CostCentre).Title("Cost Centre").EditorTemplateName("CommonDropDownEditor").Width(10);
+        columns.Bound(c => c.Task).Title("Labour Task").EditorTemplateName("CommonDropDownEditor").Width(10);
+        columns.Bound(c => c.Usage).Title("Percent Usage").Width(10);
+      //  columns.Bound(c => c.TimeAddition).Title("Time").Format("{0:N2}");
+       // columns.Bound(c => c.RatePerHour).Title("Rate Per Hour").Format("{0:N2}");
+        //columns.Bound(c => c.HrsReqd).Title("Hrs Reqd").Format("{0:N2}");
+        columns.Bound(c => c.LabourHrs).Title("Labour Hrs").Width(10);
+        columns.Bound(c => c.LabourMins).Title("Labour Mins").Width(10);
+
+       // columns.Bound(c => c.DateRevised).Title("Date Revised");
+       // columns.Command(command => command.Edit()).Title("Actions");
+    })
+    .ToolBar(toolbar =>
+    {
+        if (@ViewBag.RoleId == 1)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    .Resizable(r => r.Columns(true))
+    .Scrollable(s => s.Height("auto"))
+  
+    .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(true)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.Id); 
+            model.Field(c => c.LabourType);
+        })
+        .Events(events =>
+        {
+            events.RequestEnd("onRequestEnd"); 
+            events.Error("onDataSourceError");
+        })
+
+        .Read(read => read.Url(Url.Action("GetLabourDetails", "LabourDetails") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("CreateLabourDetail", "LabourDetails") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        
+            .Update(update => update.Url(Url.Action("UpdateLabourDetail", "LabourDetails") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType)
+            .Type(HttpVerbs.Post))
+            
+            
+        .Destroy(delete => delete.Url(Url.Action("DeleteLabourDetail", "LabourDetails") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+)
+@section Scripts {
+    
+}
+CommonDrpDown.cshtml :
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().DropDownList() 
+    @* .Name(fieldName) *@
+    .Name($"dropdown_{ViewBag.PartNum}")
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .AutoWidth(true)
+   @*  .Virtual(v=>v
+             .ItemHeight(30)
+             .ValueMapper("valueMapper")
+             ) *@
+    .Filter(FilterType.Contains)
+    //.AutoBind(true) 
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-role", "dropdownlist" },
+        { "data-column", fieldName }
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getDropDownListParams");
+        })
+        .ServerFiltering(true);
+        
+    })
+    .Events(e =>
+                {
+                    e.Change("onDropDownChange");
+                })
+)
+controller :
+ [HttpGet]
+ public IActionResult GetAutoCompleteData(string columnName, string searchText) //colname is passed correcly when combobox is used. columnname is null when drop down is used
+ {
+     // 1. Validate parameters
+,,
+}
+combobox.cshtml :
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .Placeholder("Search...")
+    .AutoBind(false) // Only bind data when user types
+    
+    .MinLength(2)    // Trigger server filtering after 1 character
+    @* .HtmlAttributes(new
+    {
+        data_column = fieldName
+    }) *@
+     .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+       // { "data-role", "combobox" },
+        { "data-column", fieldName }
+    })
+    @* .Events(e =>
+    {
+        e.Change("validateSelection"); // Validate on selection
+        e.DataBound("clearInvalidInput"); // Optional clanup
+    }) *@
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #")
+    
+
+)
+   
