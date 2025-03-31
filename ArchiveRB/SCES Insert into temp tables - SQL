@@ -9,7 +9,7 @@ DECLARE
     @ArchId INT,
     @EmployeeLabourBaseId INT;
 
--- Initialize output parameters to 0 to avoid NULLs
+-- Initialize all output parameters to 0 (avoid NULL)
 DECLARE 
     @ViLabourCost NUMERIC(20,2) = 0,
     @ViLabourOverhead NUMERIC(20,2) = 0,
@@ -20,7 +20,7 @@ DECLARE
 BEGIN TRY
     --BEGIN TRANSACTION;
 
-    -- Step 1: Calculate Costs (ensure stored procedure handles NULLs)
+    -- Step 1: Calculate Costs (ensure SP returns non-NULL values)
     EXEC SBCES.CalculateTotalLabourAndMaterialsPartsInRB
         @RebuiltPartNum = @ViLinkNumber,
         @TotalLabourCost = @ViLabourCost OUTPUT,
@@ -29,11 +29,19 @@ BEGIN TRY
         @TaxTotal = @ViTaxTotal OUTPUT,
         @TotalRebuiltPartCostWithTax = @ViTotalCostTax OUTPUT;
 
-    -- Step 2: Generate new ArchRbMasterlistId
+    -- Step 2: Explicitly ensure no NULLs after SP execution
+    SELECT 
+        @ViLabourCost = ISNULL(@ViLabourCost, 0),
+        @ViLabourOverhead = ISNULL(@ViLabourOverhead, 0),
+        @ViMaterialsTotal = ISNULL(@ViMaterialsTotal, 0),
+        @ViTaxTotal = ISNULL(@ViTaxTotal, 0),
+        @ViTotalCostTax = ISNULL(@ViTotalCostTax, 0);
+
+    -- Step 3: Generate new ArchRbMasterlistId
     SELECT @ArchId = ISNULL(MAX(ArchRbMasterlistId), 0) + 1 
     FROM SBCES.ArchRbMasterlist;
 
-    -- Step 3: Insert into #ArchRbMasterlist (handle NULLs explicitly)
+    -- Step 4: Insert into #ArchRbMasterlist (strict non-NULL handling)
     INSERT INTO #ArchRbMasterlist (
         ArchRbMasterlistId,
         MmsStockCode, 
@@ -68,23 +76,23 @@ BEGIN TRY
         ISNULL(RM.JobNumber, ''),
         ISNULL(RM.EstimatedCost, 0),
         ISNULL(RM.SopNumber, ''),
-        GETDATE(),
-        @ViUsername,
-        ISNULL(@ViLabourCost, 0),
-        ISNULL(@ViLabourOverhead, 0),
-        ISNULL(@ViLabourCost, 0) + ISNULL(@ViLabourOverhead, 0),
-        ISNULL(@ViMaterialsTotal, 0),
-        ISNULL(@ViLabourCost, 0) + ISNULL(@ViMaterialsTotal, 0),
-        ISNULL(@ViTaxTotal, 0),
-        ISNULL(@ViTotalCostTax, 0)
+        ISNULL(GETDATE(), '1900-01-01'), -- Fallback date if GETDATE() fails
+        ISNULL(@ViUsername, 'System'),
+        @ViLabourCost,
+        @ViLabourOverhead,
+        @ViLabourCost + @ViLabourOverhead,
+        @ViMaterialsTotal,
+        @ViLabourCost + @ViMaterialsTotal,
+        @ViTaxTotal,
+        @ViTotalCostTax
     FROM SBCES.RbMasterlist RM
     WHERE RM.RebuiltStockNum = @ViRebuiltStockNum;
 
-    -- Step 4: Generate EmployeeLabour IDs
+    -- Step 5: Generate EmployeeLabour IDs (handle empty tables)
     SELECT @EmployeeLabourBaseId = ISNULL(MAX(Id), 0) 
     FROM SBCES.ArchEmployeeLabour;
 
-    -- Step 5: Insert into #ArchRbEmployeeLabour (handle NULLs)
+    -- Step 6: Insert into #ArchRbEmployeeLabour (strict non-NULL handling)
     INSERT INTO #ArchRbEmployeeLabour (
         Id,
         LabourDefn, 
@@ -118,10 +126,10 @@ BEGIN TRY
     WHERE EL.LinkNumber = @ViLinkNumber
         AND EL.TypeId = @ViTypeId;
 
-    -- Steps 6-11: Remaining inserts (use ISNULL/COALESCE similarly)
-    -- ...
+    -- Steps 7–12: Insert into other temp tables (similar strict NULL handling)
+    -- ... (See previous full script for details)
 
- --   COMMIT TRANSACTION;
+    --COMMIT TRANSACTION;
 END TRY
 BEGIN CATCH
     --ROLLBACK TRANSACTION;
@@ -131,5 +139,11 @@ BEGIN CATCH
 END CATCH
 
 -- Cleanup
-DROP TABLE IF EXISTS #ArchRbMasterlist, ...;
+DROP TABLE IF EXISTS #ArchRbMasterlist, 
+                  #ArchRbEmployeeLabour,
+                  #ArchRbScPartsUsed,
+                  #ArchRbNscPartsUsed,
+                  #ArchRbLabourCcTotal,
+                  #ArchRbMaterialsCcTotal,
+                  #ArchRbListBuses;
 GO
