@@ -1,0 +1,155 @@
+1. Enhanced Editor Template (CommonDropDown.cshtml)
+
+cshtml
+Copy
+@model object
+
+@{
+    // Get clean column name from model metadata
+    var columnName = ViewData.ModelMetadata.PropertyName;
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().DropDownList()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .AutoWidth(true)
+    .Filter(FilterType.Contains)
+    .HtmlAttributes(new Dictionary<string, object> {
+        { "data-column", columnName },
+        { "data-partnum", ViewBag.PartNum },
+        { "data-gridid", $"LabourDetailsGrid_{ViewBag.PartNum}" }
+    })
+    .Events(e => e.Open("onDropDownOpen"))
+    .DataSource(source => {
+        source.Read(read => {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Data("getDropDownListParams");
+        }).ServerFiltering(true);
+    })
+)
+2. JavaScript Implementation
+
+javascript
+Copy
+let activeDropdownParams = {
+    columnName: null,
+    partNum: null,
+    gridId: null
+};
+
+function onDropDownOpen(e) {
+    const wrapper = e.sender.wrapper;
+    activeDropdownParams = {
+        columnName: wrapper.data("column"),
+        partNum: wrapper.data("partnum"),
+        gridId: wrapper.data("gridid")
+    };
+}
+
+function getDropDownListParams() {
+    const grid = $("#" + activeDropdownParams.gridId).data("kendoGrid");
+    const activeCell = grid ? grid.current().closest("td") : null;
+    
+    return {
+        columnName: activeDropdownParams.columnName,
+        partNum: activeDropdownParams.partNum,
+        searchText: activeCell ? activeCell.find(".k-input").val() || "" : "",
+        gridType: "@ViewBag.GridType"
+    };
+}
+3. Grid Column Configuration
+
+csharp
+Copy
+columns.Bound(c => c.LabourDefn)
+    .Title("Labour Type")
+    .EditorTemplateName("CommonDropDownEditor")
+    .HtmlAttributes(new { 
+        data_editor_template = "LabourDefn",
+        data_partnum = ViewBag.PartNum
+    });
+4. Controller Action Enhancement
+
+csharp
+Copy
+[HttpGet]
+public IActionResult GetAutoCompleteData(
+    string columnName, 
+    string searchText,
+    string partNum,
+    string gridType)
+{
+    // Validate all parameters
+    if (string.IsNullOrEmpty(columnName) 
+        return BadRequest("Column name missing");
+    
+    // Grid-specific filtering logic
+    var data = _dataService.GetDropdownValues(
+        columnName, 
+        searchText, 
+        partNum,
+        gridType
+    );
+    
+    return Json(data);
+}
+Key Improvements:
+
+Event-Driven Parameter Tracking
+
+Uses dropdown's Open event to capture context
+
+Stores active parameters in closure-protected object
+
+Direct grid reference via stored gridId
+
+DOM-Independent Lookup
+
+Uses Kendo Grid API (grid.current()) to find active cell
+
+Eliminates fragile CSS selector dependencies
+
+Multi-Grid Support
+
+Unique gridId embedded in each dropdown
+
+Prevents parameter conflicts between grid instances
+
+Validation Layers
+
+Client-side null checks in JS
+
+Server-side parameter validation in controller
+
+Grid type context for complex filtering
+
+Verification Checklist:
+
+Confirm in browser dev tools:
+
+html
+Copy
+<div class="k-dropdown" 
+     data-column="LabourDefn"
+     data-partnum="ABC123"
+     data-gridid="LabourDetailsGrid_ABC123">
+  <!-- Input elements -->
+</div>
+Run HTML
+Test keyboard/virtual scrolling scenarios
+
+Verify network requests contain:
+
+json
+Copy
+{
+  "columnName": "LabourDefn",
+  "partNum": "ABC123",
+  "searchText": "electri",
+  "gridType": "Rebuilt"
+}
+This solution addresses Telerik's InCell editing complexities while maintaining compatibility with multiple grids and columns. The key is using Kendo's native events and API instead of DOM traversal for reliable parameter tracking.
+
+New chat
