@@ -1,0 +1,65 @@
+Step 1: Modify CommonDropDownEditor.cshtml
+Update this part inside CommonDropDownEditor.cshtml:
+
+csharp
+Copy
+Edit
+@model object
+
+@{
+    // Ensure we get only the column name (not "LabourDefn.LabourDefn")
+    var columnName = ViewData.ModelMetadata.PropertyName;
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+
+    // Extract only the last part (actual column name)
+    var cleanColumnName = fieldName.Split('.').Last();
+}
+
+@(Html.Kendo().DropDownList()
+    .Name(fieldName) // Keep field name as is for Kendo binding
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .AutoWidth(true)
+    .Filter(FilterType.Contains)
+    .HtmlAttributes(new Dictionary<string, object> {
+        { "data-column", cleanColumnName }, // Use cleaned column name
+        { "data-partnum", ViewBag.PartNum },
+        { "data-gridid", $"LabourDetailsGrid_{ViewBag.PartNum}" }
+    })
+    .Events(e => e.Open("onDropDownOpen"))
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Data("getDropDownListParams");
+        }).ServerFiltering(true);
+    })
+)
+Step 2: Adjust getDropDownListParams()
+Modify this line inside your JavaScript function:
+
+js
+Copy
+Edit
+function getDropDownListParams() {
+    var $cell = $("td.k-edit-cell"); // Find the currently edited cell
+    var $dropdown = $cell.find("input[name]"); // Target the DropDownList's hidden input field
+
+    if ($dropdown.length === 0) {
+        console.warn("No input field found in the edited cell.");
+        return {};
+    }
+
+    var dropdownWidget = $dropdown.data("kendoDropDownList");
+
+    if (!dropdownWidget) {
+        console.warn("DropDownList widget is not initialized yet.");
+        return {};
+    }
+
+    return {
+        columnName: $dropdown.attr("data-column"), // Use `data-column` (which is now correct)
+        searchText: dropdownWidget.text() || "" 
+    };
+}
