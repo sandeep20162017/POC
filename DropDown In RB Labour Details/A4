@@ -1,0 +1,63 @@
+Here's the comprehensive solution for handling multiple dropdowns in a shared ASP.NET Core Telerik Grid view with InCell editing, ensuring proper parameter passing to the controller:
+
+1. Core Configuration in CommonDropDown.cshtml
+cshtml
+Copy
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().DropDownList()
+    .Name(fieldName)  // Critical for grid binding:cite[6]
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .AutoWidth(true)
+    .Filter(FilterType.Contains)
+    .HtmlAttributes(new Dictionary<string, object> {
+        { "data-column", fieldName },  // Essential for param retrieval
+        { "data-partnum", ViewBag.PartNum }
+    })
+    .DataSource(source => {
+        source.Read(read => {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Data("getDropDownListParams");
+        }).ServerFiltering(true);
+    })
+)
+2. JavaScript Parameter Retrieval
+javascript
+Copy
+function getDropDownListParams() {
+    const activeCell = $(".k-edit-cell:visible");
+    const dropdownWrapper = activeCell.find(".k-dropdown");
+    
+    return {
+        columnName: dropdownWrapper.data("column"),  // From data attribute:cite[6]
+        partNum: dropdownWrapper.data("partnum"),
+        searchText: dropdownWrapper.find(".k-input").val() || ""
+    };
+}
+3. Grid Column Configuration
+csharp
+Copy
+columns.Bound(c => c.LabourDefn)
+    .EditorTemplateName("CommonDropDownEditor")
+    .HtmlAttributes(new { 
+        data_field = "LabourDefn",
+        data_partnum = ViewBag.PartNum 
+    });
+4. Controller Action Adjustment
+csharp
+Copy
+[HttpGet]
+public IActionResult GetAutoCompleteData(
+    string columnName, 
+    string searchText,
+    string partNum)
+{
+    // Use partNum for grid-specific filtering
+    var data = _service.GetDropdownData(columnName, searchText, partNum);
+    return Json(data);
+}
