@@ -1,0 +1,142 @@
+ tabstrip.Add().Text("Rebuilt Parts")
+     .Selected(true)
+     .Content(@<text>
+         @try
+         {
+             @(Html.Kendo().Grid<RebuiltPartsViewModel>()
+                 .Name("RebuiltPartsGrid")
+                 .Columns(columns =>
+                 {
+                     columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Stock Code")
+                         .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+                         .EditorTemplateName("ComboBoxEditor")
+                         .Width(130).Hidden(false).Lockable(false);
+
+                     columns.Bound(c => c.MmsStockCode).Title("MMS Stock Code")
+                         .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+                         .EditorTemplateName("ComboBoxEditor")
+                         .Width(130);
+
+                     columns.Bound(c => c.KeyWord).Title("Keyword")
+                         .ClientTemplate("#: truncateText(data.KeyWord) #")
+                         .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+                         .EditorTemplateName("ComboBoxEditor")
+                         .Width(120).Hidden(false).MinScreenWidth(768);
+
+                     columns.Bound(c => c.DetailedDesc).Title("Description")
+                         .ClientTemplate("#: truncateText(data.DetailedDesc) #")
+                         .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+                         .EditorTemplateName("ComboBoxEditor")
+                         .Width(250).Hidden(false).MinScreenWidth(768);
+
+                     
+
+                     columns.Bound(c => c.JobNumber).Title("Job Number")
+                         .ClientTemplate("#: truncateText(data.JobNumber) #")
+                         .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+                         .Width(100).Hidden(false).MinScreenWidth(768);
+
+                     columns.Bound(c => c.CorePartNum).Title("Core Code")
+                         .ClientTemplate("#: truncateText(data.CorePartNum) #")
+                         .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+                         .Width(100).Hidden(false).MinScreenWidth(768);
+
+                     columns.Bound(c => c.CoreCharge).Title("Core Cost")
+                         .ClientTemplate("#: truncateText(data.CoreCharge) #")
+                         .Filterable(ftb => ftb.Cell(cell => cell.Operator("gte")))
+                         .Format("{0:C}").EditorTemplateName("Currency")
+                         .Width(80).Hidden(false).MinScreenWidth(768);
+
+                     columns.Bound(c => c.BuyNewCost).Title("Buy New Cost")                                
+                         .Filterable(ftb => ftb.Cell(cell => cell.Operator("gte")))
+                         .Format("{0:C}").EditorTemplateName("Currency")
+                         .Width(80).Hidden(false).MinScreenWidth(768);
+
+                     columns.Bound(c => c.RemanCost).Title("Remanufactured Cost")
+                         .Filterable(ftb => ftb.Cell(cell => cell.Operator("gte")))
+                         .EditorTemplateName("Currency")
+                         .ClientTemplate("#:kendo.toString(RemanCost, 'c2')#")
+                         .Width(80);
+
+                     columns.Bound(p => p.CostSavingPerUnitDummy)
+                         .Title("Cost Saving Per Unit")
+                         .ClientTemplate("#= calculateCostSaving(BuyNewCost, RemanCost) #")
+                         .Width(70);
+
+                     columns.Bound(p => p.PercentageSavingPerUnitDummy)
+                         .Title("Percentage Saving Per Unit")
+                         .ClientTemplate("#= calculatePercentageSaving(data) #")
+                         .Width(50);
+
+                     columns.Bound(u => u.BusId).Title("Vehicle Series") 
+                         // .ClientTemplate("# if (typeof Buses != 'undefined'  && Buses && Buses.length > 0) { # #= Buses.map(bus => bus.BusName).join(', ') # # } else { # Select Vehicle # } #")
+                         .ClientTemplate("# if (typeof Buses != 'undefined' && Buses && Buses.length) { # #= Buses.map(bus => truncateWords(bus.BusName, 10)).join(', ') # # } else { # Select Vehicle # } #")
+                         .EditorTemplateName("VehicleSeriesEditor")
+                         .Width(130);
+
+                     columns.Command(command =>
+                     {
+                        // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+                         command.Custom("Archive").Text(" ").IconClass("k-icon k-i-folder").Click("onArchiveClick").HtmlAttributes(new { title = "Archive" }); // Archive button with tooltip
+                         command.Custom("Save to Excel").Text(" ").IconClass("k-icon k-i-file-excel").Click("onSaveToExcelClick").HtmlAttributes(new { title = "Save to Excel" }); // Save to Excel button with tooltip
+                         command.Custom("Email Estimate").Text(" ").IconClass("k-icon k-i-email").Click("onEmailEstimateClick").HtmlAttributes(new { title = "Email Estimate" }); // Email Estimate button with tooltip
+                     }).Title("Actions").Width(220).HtmlAttributes(new { @class = "action-buttons" }); // Set a fixed width for the Actions column
+                 })
+                 
+                 .ToolBar(toolbar => {
+                     toolbar.Create().Text("Add").IconClass("k-icon k-i-plus").HtmlAttributes(new { 
+                         title = "Add new record",
+                         @class = "k-primary" 
+                     });
+                     toolbar.Save().SaveText("Save").CancelText("Cancel")
+                         .HtmlAttributes(new { 
+                             title_save = "Save all changes",
+                             title_cancel = "Discard changes"
+                         });
+                     toolbar.Excel().Text("Variance Report");
+                 })
+                 .Excel(excel =>
+                 {
+                     excel.FileName("VarianceReport.xlsx")
+                     .Filterable(true)
+                     .AllPages(true);
+
+                 })
+                 .Editable(editable => editable.Mode(GridEditMode.InCell))
+                 .Events(events => events.ExcelExport("onExcelExport"))
+                 .Pageable()
+                 .Sortable()
+                 .ClientDetailTemplateId("template")
+                 .Resizable(r => r.Columns(true))
+                 .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+                 .ColumnMenu(menu => menu.Enabled(true))
+                 .Scrollable(s => s.Height("auto"))
+                 .DataSource(dataSource => dataSource
+                     .Ajax()
+                     .Model(model =>
+                     {
+                         model.Id(c => c.RbMasterlistId);
+                         model.Field(c => c.RebuiltStockNum).Editable(true);
+                         model.Field(c => c.MmsStockCode).Editable(true);
+                         model.Field(u => u.BusIds).DefaultValue(new List<int>());
+                         model.Field(u => u.BusNames).DefaultValue(new List<string>());
+                         model.Field(f => f.CostSavingPerUnitDummy).Editable(false);
+                         model.Field(f => f.PercentageSavingPerUnitDummy).Editable(false);
+                     })
+                     .Events(events =>
+                     {
+                         events.RequestEnd("onRequestEnd"); 
+                         events.Error("onDataSourceError");
+                          
+                     })
+                     .Read(read => read.Url(Url.Action("GetRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Get))
+                     .Create(create => create.Url(Url.Action("AddRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+                     .Update(update => update.Url(Url.Action("UpdateRebuiltPartsView", "RebuiltParts")).Type(HttpVerbs.Post))
+                 )
+             )
+         }
+         catch (Exception ex)
+         {
+             <div class="alert alert-danger">Error loading rebuilt parts: @ex.Message</div>
+         }
+     </text>);
