@@ -1,0 +1,148 @@
+PROCEDURE RETRIEVE_RBP_USED
+    (vi_idnum IN SC_PARTS_USED.LINK_CODE%TYPE,
+     vi_link_type IN SC_PARTS_USED.LINK_TYPE%TYPE,
+     vo_Cursor OUT query_cur) IS
+V_PRICE number (20,10);
+BEGIN
+
+V_PRICE := get_material_cost(vi_idnum,vi_link_type);
+    OPEN vo_cursor FOR
+
+        SELECT
+
+
+            UPPER(SC_PARTS_USED.mms_rebuilt_code) AS "REBUILT NUMBER",
+            nvl(A.RB_UNIT_COST,0) AS "UNIT COST",
+            UPPER(SC_PARTS_USED.cost_centre) AS "CC",
+            UPPER(SC_PARTS_USED.qty_reqd) AS "QTY",
+            REPLACE(SC_PARTS_USED.percent_usage,',','.') AS "%",
+            SC_PARTS_USED.corecost AS "CORE COST",
+            nvl(A.RB_COST,0) AS "TOTAL COST",
+            UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION",
+            UPPER(RB_MASTERLIST.keyword) AS "KEYWORD",
+            SC_PARTS_USED.rowid
+        FROM
+            SC_PARTS_USED,
+            RB_MASTERLIST,
+            (SELECT
+            round(sum(total_cost),2) as RB_COST, round(sum(total_unit_cost),2) as RB_UNIT_COST , rb_reference
+        FROM
+            TEMP_materials_list
+        group by
+            rb_reference) A
+        WHERE
+            SC_PARTS_USED.link_code = vi_idnum AND
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = vi_link_type AND
+            RB_MASTERLIST.rebuilt_stock_num(+)= SC_PARTS_USED.mms_rebuilt_code AND
+            rb_reference (+)= SC_PARTS_USED.mms_rebuilt_code
+        ORDER BY
+            SC_PARTS_USED.mms_rebuilt_code;
+END RETRIEVE_RBP_USED;
+--------------------------
+PROCEDURE RETRIEVE_RB
+    (vo_Cursor IN OUT query_cur) IS
+BEGIN
+    OPEN vo_cursor FOR
+        SELECT
+            UPPER(rebuilt_stock_num) AS "rebuilt_stock_num",
+            mms_stock_code,
+            keyword,
+            detailed_desc,
+            NVL(sop_number,' ') AS "sop_number",
+            NVL(job_number,' ') AS "job_number",
+            core_part_num,
+            core_charge,
+            estimated_cost,
+            date_modified,
+            active,
+            ROWID
+        FROM
+            RB_MASTERLIST;
+END RETRIEVE_RB;
+-------------------------
+PROCEDURE RETRIEVE_EST_TO_PROPAGATE_RB
+    (vi_idnum IN SC_PARTS_USED.mms_rebuilt_code%TYPE,
+     vo_Cursor OUT query_cur) IS
+BEGIN
+    OPEN vo_Cursor FOR
+        SELECT
+            UPPER(SC_PARTS_USED.link_code) AS "link_code",
+            UPPER(SC_PARTS_USED.link_type) AS "link_type"
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.mms_rebuilt_code = vi_idnum;
+END RETRIEVE_EST_TO_PROPAGATE_RB;
+----------------
+BEGIN
+    INSERT INTO SC_PARTS_USED
+        (
+         mms_stock_code,
+         cost_centre,
+         percent_usage,
+         user_entered,
+         date_entered,
+         last_modified_by,
+         last_modified_date,
+         link_code,
+         qty_reqd,
+         reb_part_cost,
+         mms_rebuilt_code,
+         rebuilt_part,
+         link_type,
+         corecost,
+         mms_cost,
+         oem_cost
+        )
+    VALUES
+        (
+         UPPER(vi_mms_stock_code),
+         NVL(UPPER(vi_cost_centre), ' '),
+         NVL(vi_percent_usage, '0'),
+         UPPER(vi_user_entered),
+         SYSDATE,
+         UPPER(vi_user_entered),
+         SYSDATE,
+         vi_makebuy_code,
+         vi_qty_reqd,
+         vi_estimated_cost,
+         vi_mms_rebuilt_code,
+         'Y',
+         vi_link_type,
+         NVL(vi_core_cost, 0),
+         0,
+         0
+        );
+      --ces_inquiry.retrieve_mb_labour(vi_makebuy_code,vi_link_type);
+    COMMIT;
+    vo_ret_val:=0;
+    RETURN 0;
+---------------------
+FUNCTION UPDATE_RBP_USED
+    (vi_cost_centre IN SC_PARTS_USED.cost_centre%TYPE,
+     vi_qty_reqd IN SC_PARTS_USED.qty_reqd%TYPE,
+     vi_percent_usage IN SC_PARTS_USED.percent_usage%TYPE,
+	 vi_user_entered IN SC_PARTS_USED.user_entered%TYPE,
+     vi_makebuy_code IN SC_PARTS_USED.link_code%TYPE,
+     vi_estimated_cost IN SC_PARTS_USED.reb_part_cost%TYPE,
+     vi_rebuilt_num IN SC_PARTS_USED.mms_rebuilt_code%TYPE,
+     vi_id IN ROWID,
+     vi_core_cost IN SC_PARTS_USED.corecost %TYPE,
+     vo_ret_val OUT NUMBER) RETURN NUMBER IS
+BEGIN
+    UPDATE
+        SC_PARTS_USED
+    SET
+        mms_rebuilt_code = UPPER(vi_rebuilt_num),
+        qty_reqd = NVL(vi_qty_reqd,'0'),
+        percent_usage = NVL(vi_percent_usage,'0'),
+        cost_centre = NVL(vi_cost_centre, ' '),
+        last_modified_by = UPPER(vi_user_entered),
+        last_modified_date = SYSDATE,
+        reb_part_cost = vi_estimated_cost,
+        corecost = NVL(vi_core_cost, 0)
+    WHERE
+        ROWID = vi_id;
+-------------------
