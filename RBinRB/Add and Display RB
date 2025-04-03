@@ -1,0 +1,110 @@
+Step-by-Step Logic for Adding Rebuilt Parts 1111 (Parent) and 2222 (Child)
+1. Creating Parent RebuiltPart 1111
+Form: frmAddRebuiltPart
+Stored Procedure: ADD_RB_ESTIMATE
+Parameters Passed:
+
+sql
+Copy
+vi_rebuilt_stock_num = '1111', 
+vi_keyword = '[Keyword]', 
+vi_detailed_desc = '[Description]', 
+vi_mms_stock_code = '[MMS Stock Code]', 
+vi_job_number = '[Job Number]', 
+vi_core_charge = 0.00, 
+vi_active = 'Y'
+SQL Execution:
+
+sql
+Copy
+INSERT INTO RB_MASTERLIST (
+    rebuilt_stock_num, keyword, detailed_desc, mms_stock_code, 
+    job_number, core_charge, active, ...
+)
+VALUES (
+    '1111', '[Keyword]', '[Description]', '[MMS Stock Code]', 
+    '[Job Number]', 0.00, 'Y', ...
+);
+Table Affected:
+
+RB_MASTERLIST: Stores metadata for RB Part 1111 (stock code, description, etc.).
+
+2. Adding Child RebuiltPart 2222 to Parent 1111
+Form: frmAddRBPToEstimate
+Stored Procedure: ADD_RBP_USED
+Parameters Passed:
+
+sql
+Copy
+vi_mms_rebuilt_code = '2222', 
+vi_link_code = '1111',       // Parent’s RebuiltNumber
+vi_link_type = 'RB',         // Parent is an RB Part
+vi_qty_reqd = [Quantity], 
+vi_percent_usage = [% Usage], 
+vi_user_entered = '[Username]', 
+vi_estimated_cost = [Unit Cost]
+SQL Execution:
+
+sql
+Copy
+INSERT INTO SC_PARTS_USED (
+    mms_rebuilt_code, link_code, link_type, qty_reqd, 
+    percent_usage, user_entered, rebuilt_part, ...
+)
+VALUES (
+    '2222', '1111', 'RB', [Quantity], [% Usage], 
+    '[Username]', 'Y', ...
+);
+Tables Affected:
+
+SC_PARTS_USED: Links child RB Part 2222 to parent 1111 via link_code = '1111'.
+
+3. Displaying RB Parts in the Main Grid
+Stored Procedure: RETRIEVE_RBP_USED
+Parameters Passed:
+
+sql
+Copy
+vi_idnum = '1111',    // Parent’s RebuiltNumber
+vi_link_type = 'RB'   // Parent is an RB Part
+SQL Execution:
+
+sql
+Copy
+SELECT 
+    SC_PARTS_USED.mms_rebuilt_code AS "REBUILT NUMBER",
+    RB_MASTERLIST.detailed_desc AS "DESCRIPTION",
+    SC_PARTS_USED.qty_reqd AS "QTY",
+    ...
+FROM 
+    SC_PARTS_USED
+    LEFT JOIN RB_MASTERLIST 
+        ON SC_PARTS_USED.mms_rebuilt_code = RB_MASTERLIST.rebuilt_stock_num
+WHERE 
+    SC_PARTS_USED.link_code = '1111' 
+    AND SC_PARTS_USED.link_type = 'RB';
+Result:
+
+Displays child RB Part 2222 in the grid under parent 1111.
+
+4. Propagating Changes to Dependent Estimates
+Stored Procedure: RETRIEVE_EST_TO_PROPAGATE_RB
+Parameters Passed:
+
+sql
+Copy
+vi_idnum = '2222'  // Child RB Part
+SQL Execution:
+
+sql
+Copy
+SELECT 
+    link_code, link_type 
+FROM 
+    SC_PARTS_USED 
+WHERE 
+    mms_rebuilt_code = '2222' 
+    AND rebuilt_part = 'Y';
+Purpose:
+
+Finds all estimates (e.g., MB/BUS/RB) that include RB Part 2222 for cascading updates.
