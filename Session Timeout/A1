@@ -1,0 +1,184 @@
+1. First, update your ConfigureServices with cookie authentication settings:
+csharp
+Copy
+// Update your authentication configuration
+services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
+    .AddNegotiate()
+    .AddCookie(options =>  // Add cookie authentication as fallback
+    {
+        options.ExpireTimeSpan = TimeSpan.FromMinutes(30);
+        options.SlidingExpiration = true;
+        options.LoginPath = "/Home/Index";
+        options.AccessDeniedPath = "/Home/Unauthorized";
+    });
+2. Add session validation middleware in the Configure method:
+csharp
+Copy
+public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+{
+    // ... existing code ...
+    
+    app.UseSession();
+    app.UseHttpsRedirection();
+    app.UseStaticFiles();
+    
+    // Add session validation middleware
+    app.Use(async (context, next) =>
+    {
+        if (context.User.Identity.IsAuthenticated)
+        {
+            var lastActivity = context.Session.GetString("LastActivity");
+            if (lastActivity != null && 
+                (DateTime.UtcNow - DateTime.Parse(lastActivity)) > TimeSpan.FromMinutes(30))
+            {
+                context.Response.Redirect("/Account/Logout?timeout=true");
+                return;
+            }
+            context.Session.SetString("LastActivity", DateTime.UtcNow.ToString());
+        }
+        await next();
+    });
+    
+    // ... rest of existing configuration ...
+}
+3. Add JavaScript to _Layout.cshtml (just before </body>):
+html
+Copy
+<script>
+    // Session timeout handling
+    let idleTime = 0;
+    let warningShown = false;
+    const timeoutMinutes = 30;
+    const warningMinutes = 2;
+
+    function resetTimer() {
+        idleTime = 0;
+        warningShown = false;
+    }
+
+    function showTimeoutWarning() {
+        if (!warningShown) {
+            warningShown = true;
+            if (confirm('Your session will expire in 2 minutes. Click OK to stay logged in.')) {
+                // Ping server to reset session
+                fetch('/Account/KeepAlive')
+                    .then(() => resetTimer())
+                    .catch(() => window.location.reload());
+            } else {
+                window.location.href = '/Account/Logout';
+            }
+        }
+    }
+
+    // Update idle time every minute
+    setInterval(() => {
+        idleTime++;
+        if (idleTime >= timeoutMinutes - warningMinutes) showTimeoutWarning();
+        if (idleTime >= timeoutMinutes) window.location.href = '/Account/Logout?timeout=true';
+    }, 60000); // 1 minute interval
+
+    // Reset timer on user activity
+    ['mousemove', 'keydown', 'click'].forEach(event => 
+        document.addEventListener(event, resetTimer)
+    );
+
+    // Handle Telerik Grid interactions
+    document.addEventListener('kendoReady', function() {
+        const grids = document.querySelectorAll('.k-grid');
+        grids.forEach(grid => {
+            grid.addEventListener('click', resetTimer);
+            grid.addEventListener('keydown', resetTimer);
+        });
+    });
+</script>
+Run HTML
+4. Add these endpoints to your AccountController:
+csharp
+Copy
+[AllowAnonymous]
+public IActionResult Logout(bool timeout = false)
+{
+    HttpContext.SignOutAsync();
+    HttpContext.Session.Clear();
+    return RedirectToAction("Index", "Home");
+}
+
+[HttpPost]
+[Authorize]
+public IActionResult KeepAlive()
+{
+    HttpContext.Session.SetString("LastActivity", DateTime.UtcNow.ToString());
+    return Ok();
+}
+Key points about this implementation:
+Server-Side Validation:
+
+Middleware checks session activity on every request
+
+Updates LastActivity timestamp
+
+Automatically redirects after 30 minutes
+
+Client-Side Handling:
+
+Simple confirm() dialog instead of custom modal
+
+Handles Telerik Grid interactions through event listeners
+
+Uses native fetch API for keep-alive
+
+No external dependencies
+
+Telerik Integration:
+
+Listens for grid clicks and keyboard events
+
+Uses kendoReady event to ensure grid availability
+
+Works with both static and dynamic grids
+
+Security Considerations:
+
+Maintains server-side validation even if JavaScript is disabled
+
+Uses sliding expiration for cookies
+
+Clears session on logout
+
+For your 20-user intranet application, this provides:
+
+Simple implementation (no additional packages)
+
+Minimal code changes
+
+AD integration maintenance
+
+Telerik Grid compatibility
+
+Progressive degradation if JavaScript is disabled
+
+The confirm() dialog is intentionally simple - you could replace it with a Kendo UI dialog if preferred:
+
+javascript
+Copy
+function showTimeoutWarning() {
+    if (!warningShown) {
+        warningShown = true;
+        kendo.confirm("Your session will expire in 2 minutes. Continue working?")
+            .then(function() {
+                fetch('/Account/KeepAlive')
+                    .then(() => resetTimer())
+                    .catch(() => window.location.reload());
+            })
+            .catch(function() {
+                window.location.href = '/Account/Logout';
+            });
+    }
+}
+To use the Kendo dialog version:
+
+Add @using Kendo.Mvc.UI to your _Layout.cshtml
+
+Ensure Kendo JavaScript files are properly referenced
+
+This solution balances simplicity with security while maintaining compatibility with your existing AD authentication and Telerik components.
