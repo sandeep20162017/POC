@@ -1,0 +1,160 @@
+Startup :
+
+using BCES.Data;
+using Newtonsoft.Json.Serialization;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc.Authorization;
+
+using BCES.Controllers.Parts;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.Negotiate;
+
+namespace BCES
+{
+    public class Startup
+    {
+        public Startup(IConfiguration configuration)
+        {
+            Configuration = configuration;
+        }
+
+        public IConfiguration Configuration { get; }
+
+        // This method gets called by the runtime. Use this method to add services to the container.
+        public void ConfigureServices(IServiceCollection services)
+        {
+            // Add CORS support
+            services.AddCors(options =>
+            {
+                options.AddPolicy("AllowAll", policy =>
+                {
+                    policy.AllowAnyOrigin()
+                          .AllowAnyMethod()
+                          .AllowAnyHeader();
+                });
+            });
+
+            services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
+            .AddNegotiate();
+            //// Configure authentication
+            ////services.AddAuthentication(IISDefaults.AuthenticationScheme) //Authentication 
+            //services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+            //.AddCookie(options =>
+            //{
+            //    options.LoginPath = new PathString("/Home/Index"); // Redirect to Home/Index for authentication
+            //    options.AccessDeniedPath = new PathString("/Home/Unauthorized"); // Redirect to Home/Unauthorized for access denied
+            //});
+
+            //services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
+            //.AddNegotiate();
+
+            // Configure authorization
+            services.AddAuthorization(options =>
+            {
+                options.AddPolicy("ADRoleOnly", SiteAccessPolicy(Configuration["SecuritySettings:ADGroup"].Split(";")));
+            });
+
+            // Add MVC with global authorization filter
+            services.AddControllersWithViews(config =>
+            {
+                var policy = new AuthorizationPolicyBuilder()
+                    .RequireAuthenticatedUser()
+                    .Build();
+                config.Filters.Add(new AuthorizeFilter(policy));
+            })
+            .AddRazorOptions(options =>
+            {
+                options.ViewLocationFormats.Add("Views/Admin/{0}.cshtml");
+            })
+            .AddNewtonsoftJson(options => options.SerializerSettings.ContractResolver = new DefaultContractResolver());
+
+            // Register application services
+            services.AddScoped<ContextApplicationDB>();
+            services.AddSingleton<DapperContext>();
+            services.AddLogging();
+            services.AddScoped<DapperContext>();
+
+            // Add Kendo UI services
+            services.AddKendo();
+
+            // Add Razor Pages
+            services.AddRazorPages().AddNewtonsoftJson();
+
+            // Add session support
+            services.AddSession(options =>
+            {
+                options.IdleTimeout = TimeSpan.FromMinutes(30); // Set session timeout
+                options.Cookie.HttpOnly = true; // Ensure the cookie is accessible only through HTTP
+                options.Cookie.IsEssential = true; // Make the session cookie essential
+                options.Cookie.SameSite = SameSiteMode.Lax;
+            });
+
+            // Add IHttpContextAccessor
+            //services.AddHttpContextAccessor();
+            services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+
+            // Register transient controllers
+            services.AddTransient<ExportController>();
+            services.AddTransient<RebuiltPartsController>();
+            services.AddTransient<BusesController>();
+            services.AddTransient<LabourDetailsController>();
+
+            // Add distributed memory cache
+            services.AddDistributedMemoryCache();
+        }
+
+        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+            }
+            else
+            {
+                app.UseExceptionHandler("Error");
+                app.UseHsts();
+            }
+
+            // Enable session
+            app.UseSession();
+
+            // Redirect HTTP to HTTPS
+            app.UseHttpsRedirection();
+
+            // Serve static files
+            app.UseStaticFiles();
+
+            // Enable routing
+            app.UseRouting();
+
+            // Enable authentication and authorization
+            app.UseAuthentication();
+            app.UseAuthorization();
+
+            // Apply CORS policy
+            app.UseCors("AllowAll");
+
+            // Configure endpoints
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllers();
+
+                // Default route
+                endpoints.MapControllerRoute(
+                    name: "default",
+                    pattern: "{controller=Home}/{action=Index}/{id?}");
+            });
+        }
+
+        // Helper method to create an authorization policy
+        public static AuthorizationPolicy SiteAccessPolicy(string[] roles)
+        {
+            var policy = new AuthorizationPolicyBuilder()
+                .RequireRole(roles)
+                .RequireAuthenticatedUser()
+                .Build();
+            return policy;
+        }
+    }
+}
