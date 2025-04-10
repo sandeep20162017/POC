@@ -1,0 +1,63 @@
+1. Update AccountController.cs:
+csharp
+Copy
+[HttpPost]
+[ValidateAntiForgeryToken] // Remove this if you're not using anti-forgery tokens
+[Authorize] // Keep this if endpoint requires authentication
+public IActionResult KeepAlive()
+{
+    try 
+    {
+        // Reset both session and authentication cookie
+        HttpContext.Session.SetString("LastActivity", DateTime.UtcNow.ToString());
+        
+        // If using cookie authentication
+        var authProps = new AuthenticationProperties {
+            ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+            IsPersistent = true
+        };
+        
+        HttpContext.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            HttpContext.User,
+            authProps
+        ).Wait();
+
+        return Json(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, new { error = ex.Message });
+    }
+}
+2. Update JavaScript in _Layout.cshtml:
+javascript
+Copy
+function resetSession() {
+    warningActive = false;
+    clearTimeout(idleTimer);
+    clearInterval(countdownTimer);
+    
+    // Add proper POST headers
+    fetch('/Account/KeepAlive', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        if (!response.ok) throw new Error('Keep-alive failed');
+        startSessionTimer();
+    })
+    .catch(() => window.location.reload());
+}
+3. Add anti-forgery token to your layout (if needed):
+html
+Copy
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    var token = Antiforgery.GetAndStoreTokens(Context).RequestToken;
+}
+<input type="hidden" id="__RequestVerificationToken" name="__RequestVerificationToken" value="@token">
