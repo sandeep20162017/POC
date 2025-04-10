@@ -1,0 +1,140 @@
+1. First, add this to your _Layout.cshtml (before closing </body>):
+html
+Copy
+<div id="timeoutDialog" style="display: none;">
+    <div style="padding: 20px;">
+        <h4>Session Expiration Warning</h4>
+        <p>Your session will expire in <span id="countdown">2:00</span>.</p>
+        <p>Any unsaved changes will be lost.</p>
+        <button class="k-button" id="continueSession">Continue Working</button>
+    </div>
+</div>
+
+<script>
+let idleTimer;
+let countdownTimer;
+const timeoutMinutes = 30;
+const warningMinutes = 2;
+let warningActive = false;
+
+function startSessionTimer() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(showTimeoutWarning, (timeoutMinutes - warningMinutes) * 60 * 1000);
+}
+
+function showTimeoutWarning() {
+    warningActive = true;
+    const dialog = $("#timeoutDialog").data("kendoDialog") || 
+        $("#timeoutDialog").kendoDialog({
+            width: "400px",
+            title: "Session Expiration",
+            closable: false,
+            modal: true,
+            actions: []
+        }).data("kendoDialog");
+
+    let seconds = warningMinutes * 60;
+    
+    function updateCountdown() {
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+        $("#countdown").text(`${minutes}:${remainingSeconds.toString().padStart(2, '0')}`);
+        
+        if (seconds <= 0) {
+            clearInterval(countdownTimer);
+            dialog.close();
+            window.location.href = '/Home/SessionExpired';
+        }
+        seconds--;
+    }
+
+    countdownTimer = setInterval(updateCountdown, 1000);
+    updateCountdown();
+    dialog.open();
+
+    // Handle continue button
+    $("#continueSession").off("click").on("click", function() {
+        resetSession();
+        dialog.close();
+    });
+
+    // Reset on any user activity
+    $(document).one("mousemove keydown click", function() {
+        resetSession();
+        dialog.close();
+    });
+}
+
+function resetSession() {
+    warningActive = false;
+    clearTimeout(idleTimer);
+    clearInterval(countdownTimer);
+    fetch('/Account/KeepAlive').then(() => startSessionTimer());
+}
+
+// Initial setup
+$(document).ready(function() {
+    startSessionTimer();
+    
+    // Reset timer on Telerik Grid interactions
+    $(document).on("click", ".k-grid", resetSession);
+    $(document).on("keydown", ".k-grid", resetSession);
+});
+</script>
+Run HTML
+2. Add these controller actions:
+csharp
+Copy
+// In HomeController
+public IActionResult SessionExpired()
+{
+    HttpContext.SignOutAsync();
+    HttpContext.Session.Clear();
+    return View();
+}
+
+// In AccountController
+[HttpPost]
+[Authorize]
+public IActionResult KeepAlive()
+{
+    HttpContext.Session.SetString("LastActivity", DateTime.UtcNow.ToString());
+    return Json(new { success = true });
+}
+3. Create a new SessionExpired View (Views/Home/SessionExpired.cshtml):
+html
+Copy
+@{
+    ViewData["Title"] = "Session Expired";
+    Layout = "_Layout"; // Use your existing layout
+}
+
+<div class="k-content">
+    <div class="k-card">
+        <div class="k-card-body">
+            <h2 class="k-card-title">Session Expired</h2>
+            <div class="k-card-subtitle">
+                <p>Your session has expired due to inactivity.</p>
+                <p>Please <a href="/Home/Index">click here</a> to log in again.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .k-content {
+        padding: 20px;
+        max-width: 600px;
+        margin: 50px auto;
+    }
+</style>
+Run HTML
+4. Update your logout action:
+csharp
+Copy
+public IActionResult Logout()
+{
+    HttpContext.SignOutAsync();
+    HttpContext.Session.Clear();
+    return RedirectToAction("Index", "Home");
+}
