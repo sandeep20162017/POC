@@ -1,0 +1,105 @@
+1. Update _Layout.cshtml (Stylesheet Order)
+Change this section:
+
+html
+Copy
+<link href="https://kendo.cdn.telerik.com/2021.2.511/styles/kendo.common.min.css" rel="stylesheet" crossorigin="anonymous" />
+<link href="https://kendo.cdn.telerik.com/2021.2.511/styles/kendo.default-v2.min.css" rel="stylesheet" crossorigin="anonymous" />
+<link href="https://kendo.cdn.telerik.com/2021.2.511/styles/kendo.bootstrap-v4.min.css" rel="stylesheet" crossorigin="anonymous" />
+<link rel="stylesheet" href="~/css/header-footer.css" />
+<link rel="stylesheet" href="~/css/telerik-min.css" />
+Run HTML
+To:
+
+html
+Copy
+<link href="https://kendo.cdn.telerik.com/2021.2.511/styles/kendo.common.min.css" rel="stylesheet" crossorigin="anonymous" />
+<link href="https://kendo.cdn.telerik.com/2021.2.511/styles/kendo.default-v2.min.css" rel="stylesheet" crossorigin="anonymous" />
+<link href="https://kendo.cdn.telerik.com/2021.2.511/styles/kendo.bootstrap-v4.min.css" rel="stylesheet" crossorigin="anonymous" />
+<!-- Load your custom styles AFTER Kendo styles -->
+<link rel="stylesheet" href="~/css/header-footer.css" />
+<link rel="stylesheet" href="~/css/telerik-min.css" />
+<link rel="stylesheet" href="~/css/site.min.css" />
+Run HTML
+2. Enhanced CSS (Add to site.min.css)
+Replace the unsaved styles section with:
+
+css
+Copy
+/* Unsaved Changes Styles - High Specificity */
+.k-grid[role="grid"] > .k-grid-content table > tbody > tr.unsaved-row {
+    background-color: #fff9e6 !important;
+    box-shadow: inset 3px 0 0 #ffd700 !important;
+}
+
+.k-grid[role="grid"] > .k-grid-content table > tbody > tr.unsaved-row > td {
+    position: relative;
+    background-color: inherit !important;
+}
+
+.k-grid[role="grid"] > .k-grid-content table > tbody > tr.unsaved-row > td.unsaved-cell {
+    background-color: #fff3cd !important;
+    box-shadow: inset 0 0 0 1px rgba(255, 193, 7, 0.3) !important;
+}
+
+.k-grid[role="grid"] > .k-grid-content table > tbody > tr.unsaved-row .unsaved-badge {
+    position: absolute !important;
+    right: 2px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    background: #dc3545 !important;
+    color: white !important;
+    font-size: 0.65em !important;
+    padding: 1px 4px !important;
+    border-radius: 2px !important;
+    z-index: 1000 !important;
+    line-height: 1.2;
+}
+3. JavaScript Modification
+Update your onLabourGridDataBound function:
+
+javascript
+Copy
+function onLabourGridDataBound(e) {
+    const grid = e.sender;
+    const ds = grid.dataSource;
+    unsavedChangesExist = false;
+
+    // Clear previous styling
+    grid.tbody.find("tr").removeClass("unsaved-row");
+    grid.tbody.find(".unsaved-badge").remove();
+
+    // Apply new styling
+    ds.view().forEach(item => {
+        const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+        
+        if (item.dirty || item.isNew()) {
+            // Add classes using Kendo's row template
+            row.addClass("unsaved-row")
+               .find("td").each((index, cell) => {
+                   const $cell = $(cell);
+                   $cell.addClass($cell.attr("data-field") + "-cell");
+               });
+            
+            // Add badge to first visible cell
+            const firstCell = row.find("td:visible:first");
+            if (firstCell.length && !firstCell.find(".unsaved-badge").length) {
+                firstCell.append(`<span class="unsaved-badge">UNSAVED</span>`);
+            }
+            
+            unsavedChangesExist = true;
+        }
+    });
+
+    // Force style recalculation
+    grid.thead.hide().show();
+
+    // Update tab indicator
+    const tabStrip = $("#rebuildPartsTabStrip").data("kendoTabStrip");
+    if (tabStrip?.items().length) {
+        $(tabStrip.items()[0].element)
+            .find(".k-link")
+            .toggleClass("has-unsaved", unsavedChangesExist);
+    }
+}
+Key Changes and Why They Work:
