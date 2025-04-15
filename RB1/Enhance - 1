@@ -1,0 +1,153 @@
+1. Add CSS Styling
+Add this to your site-wide CSS or inline styles:
+
+css
+Copy
+/* Style for rows with unsaved changes */
+.unsaved-row {
+    background-color: #fff9e6 !important; /* Light yellow background */
+    box-shadow: inset 0 0 0 2px #ffd700; /* Gold border indicator */
+}
+
+/* Style for modified cells */
+.unsaved-cell {
+    background-color: #fff3cd !important; /* Darker yellow for cells */
+    font-weight: bold;
+}
+
+/* Notification badge */
+.unsaved-badge {
+    position: absolute;
+    right: 10px;
+    top: 5px;
+    background: #ff4444;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.8em;
+}
+2. Enhanced Grid Configuration
+Modify your grid configuration to include these events:
+
+javascript
+Copy
+@(Html.Kendo().Grid<LabourDetailsRebuiltPartsViewModel>()
+    .Name($"LabourDetailsGrid_{ViewBag.PartNum}")
+    .Events(events => events
+        .DataBound("onLabourGridDataBound")
+        .SaveChanges("onLabourGridSave")
+    )
+    // Rest of your existing configuration...
+)
+3. JavaScript Implementation
+Add these script handlers:
+
+javascript
+Copy
+// Track unsaved changes state
+let unsavedChangesExist = false;
+
+function onLabourGridDataBound(e) {
+    const grid = e.sender;
+    const ds = grid.dataSource;
+    
+    // Clear previous styling
+    grid.tbody.find("tr").removeClass("unsaved-row");
+    grid.tbody.find("td").removeClass("unsaved-cell");
+
+    // Apply new styling
+    ds.data().forEach((item, index) => {
+        const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+        
+        if (item.dirty || item.isNew()) {
+            // Highlight entire row
+            row.addClass("unsaved-row");
+            
+            // Highlight individual modified cells
+            Object.keys(item.modified || {}).forEach(field => {
+                const cell = row.find(`td[data-field='${field}']`);
+                cell.addClass("unsaved-cell");
+            });
+            
+            // Add "Unsaved" badge
+            if (!row.find(".unsaved-badge").length) {
+                row.prepend(`<span class="unsaved-badge">UNSAVED</span>`);
+            }
+            
+            unsavedChangesExist = true;
+        }
+    });
+
+    // Update tab indicator
+    const tabStrip = $("#rebuildPartsTabStrip").data("kendoTabStrip");
+    const tab = tabStrip.items().eq(0); // Labour Details tab
+    tab.find(".k-link").toggleClass("has-unsaved", unsavedChangesExist);
+}
+
+function onLabourGridSave(e) {
+    const notification = $("#notification").data("kendoNotification");
+    
+    // Show save confirmation
+    notification.success("Changes saved successfully");
+    
+    // Force full refresh to clear styling
+    e.sender.dataSource.read().then(() => {
+        unsavedChangesExist = false;
+    });
+}
+
+// Add tab styling
+$(document).ready(function() {
+    const tabStrip = $("#rebuildPartsTabStrip").data("kendoTabStrip");
+    
+    tabStrip.wrapper.find(".k-tabstrip-items").append(`
+        <style>
+            .k-tabstrip-items .has-unsaved {
+                position: relative;
+                color: #d9534f !important;
+            }
+            .has-unsaved::after {
+                content: "•";
+                color: #d9534f;
+                position: absolute;
+                right: 8px;
+                top: 6px;
+                font-size: 1.5em;
+            }
+        </style>
+    `);
+});
+4. Enhanced User Feedback Features
+This implementation provides:
+
+Row Highlighting: Yellow background with gold border for entire rows with changes
+
+Cell Highlighting: Darker yellow for individual modified cells
+
+"Unsaved" Badge: Red badge with white text on each modified row
+
+Tab Indicator: Red dot indicator on the Labour Details tab header
+
+Save Confirmation: Notification when changes are successfully saved
+
+Key Advantages:
+Visual Clarity: Clear hierarchy of visual indicators (row → cell → badge)
+
+Performance: Efficient DOM manipulation using Kendo's uid system
+
+Persistence: Maintains visual state through grid paging/sorting
+
+Context Awareness: Tab-level indication of unsaved work
+
+Optional Enhancement: Auto-Save Timer
+Add this to automatically check for changes every 30 seconds:
+
+javascript
+Copy
+setInterval(() => {
+    const grid = $("#LabourDetailsGrid_@ViewBag.PartNum").data("kendoGrid");
+    if (grid.dataSource.hasChanges()) {
+        grid.saveChanges();
+    }
+}, 30000); // 30 seconds
+Would you like me to add any specific modifications to this implementation?
