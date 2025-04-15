@@ -1,0 +1,106 @@
+1. Updated CSS (Critical Fixes)
+css
+Copy
+/* Fix for grid row layout */
+.k-grid-content tr.unsaved-row {
+    display: table-row !important; /* Maintain table structure */
+    background-color: #fff9e6;
+    border-left: 3px solid #ffd700;
+}
+
+/* Cell styling that works with Kendo's DOM structure */
+.k-grid-content td.unsaved-cell {
+    position: relative;
+    background-color: #fff3cd;
+    z-index: 1;
+}
+
+/* Badge positioning fix */
+.unsaved-badge {
+    position: absolute;
+    right: 4px;
+    top: 2px;
+    z-index: 2;
+    background: #ff4444;
+    color: white;
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 0.7em;
+    pointer-events: none; /* Prevent interaction */
+}
+
+/* Maintain header alignment */
+.k-grid-header th {
+    padding-right: 20px !important; /* Compensate for badge width */
+}
+2. Modified JavaScript (DOM Handling Fix)
+javascript
+Copy
+function onLabourGridDataBound(e) {
+    const grid = e.sender;
+    const ds = grid.dataSource;
+    unsavedChangesExist = false;
+
+    // Clear previous styling using Kendo's row template
+    grid.tbody.find(".k-master-row").each((index, row) => {
+        const $row = $(row);
+        $row.removeClass("unsaved-row")
+             .find(".unsaved-badge").remove();
+    });
+
+    // Apply new styling
+    ds.view().forEach(item => {
+        const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+        
+        if (item.dirty || item.isNew()) {
+            // Add row class using Kendo's row template
+            row.addClass("unsaved-row k-master-row");
+            
+            // Add badge to first cell
+            const firstCell = row.find("td:first");
+            if (!firstCell.find(".unsaved-badge").length) {
+                firstCell.append(`<span class="unsaved-badge">UNSAVED</span>`);
+            }
+
+            // Highlight modified cells
+            Object.keys(item.modified || {}).forEach(field => {
+                const cell = row.find(`td[data-field='${field}']`);
+                cell.addClass("unsaved-cell");
+            });
+            
+            unsavedChangesExist = true;
+        }
+    });
+
+    // Update tab indicator
+    const tabStrip = $("#rebuildPartsTabStrip").data("kendoTabStrip");
+    if (tabStrip) {
+        const tabs = tabStrip.items();
+        if (tabs.length > 0) {
+            $(tabs[0].element)
+                .find(".k-link")
+                .toggleClass("has-unsaved", unsavedChangesExist);
+        }
+    }
+}
+3. Grid Configuration Update
+csharp
+Copy
+@(Html.Kendo().Grid<LabourDetailsRebuiltPartsViewModel>()
+    .Name($"LabourDetailsGrid_{ViewBag.PartNum}")
+    .Events(e => e
+        .DataBound("onLabourGridDataBound")
+        .Edit("onGridEdit") // Add edit handler
+    )
+    // Rest of your configuration
+)
+Add this edit handler:
+
+javascript
+Copy
+function onGridEdit(e) {
+    // Re-apply styles after edit
+    const grid = e.sender;
+    grid.one("dataBound", () => grid.refresh());
+}
+Key Changes and Why They Work:
