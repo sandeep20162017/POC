@@ -1,0 +1,117 @@
+Let's implement a robust solution that works regardless of status availability. Here's the correct approach using Kendo's official data item state tracking:
+
+javascript
+Copy
+function onNscGridDataBound(e) {
+    const grid = e.sender;
+    const ds = grid.dataSource;
+    
+    // Clear previous styling
+    grid.tbody.find(".unsaved-row, .unsaved-cell, .unsaved-badge").remove();
+
+    // Track changes using proper Kendo state management
+    ds.data().forEach(dataItem => {
+        const row = grid.tbody.find(`tr[data-uid='${dataItem.uid}']`);
+        const state = ds.getByUid(dataItem.uid);
+
+        // Official Kendo state detection
+        if (typeof state._state !== "undefined") { // Kendo's internal state tracking
+            const isNew = state._state === "added";
+            const isModified = state._state === "dirty";
+            
+            if (isNew) {
+                row.addClass("unsaved-row")
+                   .find("td:first")
+                   .append('<span class="unsaved-badge">NEW</span>');
+            }
+            else if (isModified) {
+                Object.keys(state._modified || {}).forEach(field => {
+                    row.find(`td[data-field='${field}']`)
+                       .addClass("unsaved-cell")
+                       .append('<span class="unsaved-badge">CHANGED</span>');
+                });
+            }
+        }
+        else { // Fallback for older Kendo versions
+            const isNew = dataItem.id === undefined || dataItem.id === null;
+            const isModified = ds.hasChanges(dataItem);
+            
+            if (isNew) {
+                row.addClass("unsaved-row")
+                   .find("td:first")
+                   .append('<span class="unsaved-badge">NEW</span>');
+            }
+            else if (isModified) {
+                Object.keys(ds.get(dataItem).modified || {}).forEach(field => {
+                    row.find(`td[data-field='${field}']`)
+                       .addClass("unsaved-cell")
+                       .append('<span class="unsaved-badge">CHANGED</span>');
+                });
+            }
+        }
+    });
+}
+Critical Grid Configuration:
+
+csharp
+Copy
+@(Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+    .Name("NscPartsUsedGrid")
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(true) // Required for proper state tracking
+        .Model(model => {
+            model.Id(p => p.Id); // Must match your primary key
+            model.Field(p => p.Id).Editable(false); // ID should not be editable
+        })
+        .Read(read => read.Action("ReadAction", "Controller"))
+        .Update(update => update.Action("UpdateAction", "Controller"))
+        .Create(create => create.Action("CreateAction", "Controller"))
+    )
+    .Events(events => events
+        .DataBound("onNscGridDataBound")
+    )
+)
+Key Requirements:
+
+Your model must have a primary key field configured with .Id()
+
+Server responses must return existing records with their IDs
+
+New items must not have an ID until saved
+
+Batch mode must be enabled for proper state tracking
+
+Debugging Steps:
+
+Check your server response for existing records:
+
+javascript
+Copy
+console.log("Server response:", ds.data().map(item => ({
+    uid: item.uid,
+    id: item.id,
+    exists: item.id !== undefined
+})));
+Verify model configuration:
+
+javascript
+Copy
+console.log("Grid model ID field:", grid.options.dataSource.schema.model.id);
+Check Kendo version compatibility:
+
+javascript
+Copy
+console.log("Kendo UI version:", kendo.version);
+Common Fixes:
+
+If using Entity Framework, ensure your model has [Key] attribute on the ID field
+
+For JSON responses, ensure IDs are numeric (not strings) if using default configuration
+
+If using GUIDs, configure the model explicitly:
+
+csharp
+Copy
+model.Id(p => p.Id).Editable(false).DefaultValue(Guid.Empty);
+This solution works with:
