@@ -1,0 +1,119 @@
+Here's the corrected approach for Telerik ASP.NET Core Grid (note that Hideable and PageSize(0) aren't supported in this version):
+
+1. Default Page Size (Show All Records)
+csharp
+Copy
+.Pageable(p => p
+    .PageSizes(new int[] { 0, 10, 20, 50 }) // Show "All" option
+    .PageSize(1000) // Default to showing all records
+)
+2. Column Visibility Management
+csharp
+Copy
+.Columns(columns =>
+{
+    // Always visible columns (configure as non-hidable)
+    columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Stock Code").Hidden(false);
+    columns.Bound(c => c.KeyWord).Title("Keyword").Hidden(false);
+    columns.Bound(c => c.CoreCharge).Title("Core Cost").Hidden(false);
+    columns.Bound(c => c.BuyNewCost).Title("Buy New Cost").Hidden(false);
+    columns.Bound(c => c.RemanCost).Title("Reman Cost").Hidden(false);
+    columns.Bound(u => u.BusId).Title("Vehicle Series").Hidden(false);
+
+    // Other columns (hidden by default)
+    columns.Bound(c => c.MmsStockCode).Title("MMS Stock Code").Hidden(true);
+    columns.Bound(c => c.Description).Title("Description").Hidden(true);
+    // Add remaining columns with .Hidden(true)
+})
+.ColumnMenu(menu => menu.Enabled(true))
+3. Column Reordering
+csharp
+Copy
+.Reorderable(reorder => reorder.Columns(true))
+4. JavaScript to Prevent Hiding Required Columns
+Add this script to disable hiding for specific columns:
+
+javascript
+Copy
+<script>
+    $(document).ready(function () {
+        var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+        
+        grid.bind("columnMenuInit", function (e) {
+            if (e.field === "RebuiltStockNum" || 
+                e.field === "KeyWord" ||
+                e.field === "CoreCharge" ||
+                e.field === "BuyNewCost" ||
+                e.field === "RemanCost" ||
+                e.field === "BusId") {
+                var menu = e.container.find(".k-menu").data("kendoMenu");
+                menu.remove(":contains('Hide Column')");
+            }
+        });
+    });
+</script>
+5. Server-Side Handling (Controller)
+Handle the "Show All" (0) option in your controller:
+
+csharp
+Copy
+public ActionResult Read([DataSourceRequest] DataSourceRequest request)
+{
+    // Handle "Show All" selection
+    if (request.PageSize == 0)
+    {
+        request.PageSize = int.MaxValue;
+    }
+    
+    // Your data retrieval logic
+    var result = GetData().ToDataSourceResult(request);
+    return Json(result);
+}
+Key Notes:
+Page Size "0" is handled by:
+
+Showing "0" in the dropdown as "All"
+
+Setting a large default page size (1000)
+
+Modifying the page size in the controller when 0 is detected
+
+Column Management:
+
+Required columns are initialized with .Hidden(false)
+
+Other columns start with .Hidden(true)
+
+JavaScript removes the "Hide Column" option for specific columns
+
+Column reordering works out-of-the-box with .Reorderable()
+
+This works with Telerik UI for ASP.NET Core v2022.3.1109 or later
+
+Final Grid Configuration:
+csharp
+Copy
+@(Html.Kendo().Grid<RebuiltPartsViewModel>()
+    .Name("RebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Stock Code").Hidden(false);
+        columns.Bound(c => c.KeyWord).Title("Keyword").Hidden(false);
+        columns.Bound(c => c.CoreCharge).Title("Core Cost").Hidden(false);
+        columns.Bound(c => c.BuyNewCost).Title("Buy New Cost").Hidden(false);
+        columns.Bound(c => c.RemanCost).Title("Reman Cost").Hidden(false);
+        columns.Bound(u => u.BusId).Title("Vehicle Series").Hidden(false);
+
+        // Other columns (hidden by default)
+        columns.Bound(c => c.MmsStockCode).Title("MMS Stock Code").Hidden(true);
+        columns.Bound(c => c.Description).Title("Description").Hidden(true);
+        // Add remaining columns...
+    })
+    .Pageable(p => p
+        .PageSizes(new int[] { 0, 10, 20, 50 })
+        .PageSize(1000)
+    )
+    .Reorderable(reorder => reorder.Columns(true))
+    .ColumnMenu(menu => menu.Enabled(true))
+    // Rest of your configuration
+)
