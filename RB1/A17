@@ -1,0 +1,60 @@
+// Track unsaved changes state
+let unsavedChangesExist = false;
+
+function onNscGridDataBound(e) {
+    const grid = e.sender;
+    const ds = grid.dataSource;
+    
+    // Clear previous styling efficiently
+    grid.tbody.find(".unsaved-row, .unsaved-cell").removeClass("unsaved-row unsaved-cell");
+    grid.tbody.find(".unsaved-badge").remove();
+
+    // Track changes without full refresh
+    unsavedChangesExist = ds.hasChanges();
+
+    // Get current view once
+    const currentView = ds.view();
+    
+    // Batch DOM updates
+    const fragment = document.createDocumentFragment();
+    
+    currentView.forEach(item => {
+        const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+        const rowNode = row[0];
+        
+        if (item.isNew()) {
+            // New row highlighting
+            row.addClass("unsaved-row");
+            const firstCell = row.find("td:first")[0];
+            const badge = createBadge("NEW");
+            fragment.appendChild(badge);
+            firstCell.appendChild(badge);
+        }
+        else if (item.dirty) {
+            // Modified cells highlighting
+            Object.keys(item.modified || {}).forEach(field => {
+                const cell = row.find(`td[data-field='${field}']`)[0];
+                if (cell) {
+                    cell.classList.add("unsaved-cell");
+                    const badge = createBadge("CHANGED");
+                    fragment.appendChild(badge);
+                    cell.appendChild(badge);
+                }
+            });
+        }
+    });
+
+    // Apply all badges at once
+    grid.tbody[0].appendChild(fragment);
+    
+    // Lightweight visual refresh
+    grid.thead.hide().show();
+}
+
+// Helper function to create badges
+function createBadge(text) {
+    const badge = document.createElement("span");
+    badge.className = "unsaved-badge";
+    badge.textContent = text;
+    return badge;
+}
