@@ -1,13 +1,85 @@
-With above:
-runtime exception:
-kendo.all.js:5104 Uncaught TypeError: Cannot read properties of undefined (reading 'field')
-    at kendo.all.js:5104:29
-    at i (jquery-3.7.1.min.js:2:71227)
-    at Pt (jquery-3.7.1.min.js:2:71118)
-    at Function.<anonymous> (jquery-3.7.1.min.js:2:71034)
-    at Function.each (jquery-3.7.1.min.js:2:3129)
-    at Pt (jquery-3.7.1.min.js:2:70992)
-    at Pt (jquery-3.7.1.min.js:2:71141)
-    at Function.param (jquery-3.7.1.min.js:2:71440)
-    at Function.ajax (jquery-3.7.1.min.js:2:74840)
-    at HTMLButtonElement.<anonymous> (VehiclesIndex:1557:15)
+Set data-grid, data-url, and data-id-field in Razor
+In main view (Index.cshtml) grid:
+
+csharp
+Copy
+Edit
+command.Custom("Delete")
+    .Click("showDeleteConfirmation")
+    .Text(" ")
+    .IconClass("k-icon k-i-delete")
+    .HtmlAttributes(new {
+        @class = "text-danger",
+        title = "Delete",
+        data_grid = "VehicleGrid",
+        data_url = Url.Action("DeleteVehicle", "Vehicles"),
+        data_id_field = "VehicleListId"
+    });
+In partial view (_LabourDetails.cshtml) grid:
+
+csharp
+Copy
+Edit
+command.Custom("Delete")
+    .Click("showDeleteConfirmation")
+    .Text(" ")
+    .IconClass("k-icon k-i-delete")
+    .HtmlAttributes(new {
+        @class = "text-danger",
+        title = "Delete",
+        data_grid = $"LabourDetailsGrid_{ViewBag.PartNum}",
+        data_url = Url.Action("DeleteLabourDetail", "Parts"),
+        data_id_field = "LabourDetailId"
+    });
+Still no JS in the partial — this just sets metadata on the buttons.
+
+2. Generic JS for Confirmation Dialog in Main View
+javascript
+Copy
+Edit
+function showDeleteConfirmation(e) {
+    e.preventDefault();
+
+    var $btn = $(e.currentTarget);
+    var gridId = $btn.data("grid");
+    var deleteUrl = $btn.data("url");
+    var idField = $btn.data("id-field");
+
+    var grid = $("#" + gridId).data("kendoGrid");
+    var dataItem = grid.dataItem($btn.closest("tr"));
+
+    var $dialog = $("#deleteConfirmationDialog");
+    $dialog.data("grid", grid);
+    $dialog.data("dataItem", dataItem);
+    $dialog.data("url", deleteUrl);
+    $dialog.data("idField", idField);
+
+    deleteDialog.center().open();
+}
+
+$(document).on("click", "#deleteConfirmationDialog .confirm-btn", function () {
+    var $dialog = $("#deleteConfirmationDialog");
+    var grid = $dialog.data("grid");
+    var dataItem = $dialog.data("dataItem");
+    var deleteUrl = $dialog.data("url");
+    var idField = $dialog.data("idField");
+    var notification = $("#notification").data("kendoNotification");
+
+    var dataToSend = {};
+    dataToSend[idField] = dataItem[idField];
+
+    $.ajax({
+        url: deleteUrl,
+        type: 'POST',
+        data: dataToSend,
+        success: function () {
+            grid.dataSource.remove(dataItem);
+            notification.success("Record deleted successfully");
+            deleteDialog.close();
+        },
+        error: function (xhr) {
+            notification.error("Delete failed: " + xhr.responseText);
+            deleteDialog.close();
+        }
+    });
+});
