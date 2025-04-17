@@ -1,0 +1,70 @@
+I have main view (Index.cshtml) and shared partial view(_LabourDetails.cshtml).
+I want to call differnet controller action based on the call ex. user clicked delete in partial view or user clicked button in index.cshtml).
+How can I reuse the notification code for multiple delete? Call showDeleteConfirmation for index, call showLabourDeleteConfirmation for _LabourDetails.cshtml.
+
+partial view  (LabourDetails.cshtml):
+@(Html.Kendo().Grid<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel>()
+    //.Name((string)ViewBag.PartNum)
+    .Name($"LabourDetailsGrid_{ViewBag.PartNum}")
+....
+command.Custom("Delete").Click("showLabourDeleteConfirmation").Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { @class = "text-danger", title = "Delete" });
+main view (Index.cshtml):
+ @(Html.Kendo().Grid<VehicleViewModel>()
+ .Name("VehicleGrid")
+..
+command.Custom("Delete").Click("showDeleteConfirmation").Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { @class = "text-danger", title = "Delete" });
+<!-- Custom Delete Confirmation Dialog -->
+<div id="deleteConfirmationDialog" style="display: none;">
+    <div class="confirmation-message">
+        <span class="k-icon k-i-warning confirmation-icon"></span>
+        <span>Are you sure you want to delete this item?</span>
+    </div>
+    <div class="confirmation-buttons">
+        <button type="button" class="k-button cancel-btn">Cancel</button>
+        <button type="button" class="k-button confirm-btn">Delete</button>
+    </div>
+</div>
+js :
+<script>
+    // Initialize custom confirmation dialog
+    var deleteDialog = $("#deleteConfirmationDialog").kendoWindow({
+        width: "400px",
+        title: "Confirm Delete",
+        modal: true,
+        visible: false,
+        actions: ["Close"]
+    }).data("kendoWindow");
+
+    function showDeleteConfirmation(e) {
+        e.preventDefault();
+        var grid = $("#VehicleGrid").data("kendoGrid");
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        deleteDialog.dataItem = dataItem;
+        deleteDialog.center().open();
+    }
+
+    $(document).on("click", "#deleteConfirmationDialog .confirm-btn", function () {
+        var grid = $("#VehicleGrid").data("kendoGrid");
+        var dataItem = deleteDialog.dataItem;
+        var notification = $("#notification").data("kendoNotification");
+        $.ajax({
+            url: '@Url.Action("DeleteVehicle", "Vehicles")',
+            type: 'POST',
+            data: { VehicleListId: dataItem.VehicleListId },
+            success: function () {
+                grid.dataSource.remove(dataItem);
+                notification.success("Record deleted successfully");
+                deleteDialog.close();
+            },
+            error: function (xhr) {
+                notification.error("Delete failed: " + xhr.responseText);
+                deleteDialog.close();
+            }
+        });
+    });
+
+    $(document).on("click", "#deleteConfirmationDialog .cancel-btn", function () {
+        deleteDialog.close();
+    });
+</script>
+
