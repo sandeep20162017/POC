@@ -1,0 +1,92 @@
+Exception :
+Sequence contains no element
+        private async Task<int> AddVehicleAsync(VehicleViewModel vehicleViewModel)
+        {
+            var userName = ViewBag.UserName;
+            var maxVehicleListId =
+                        _dbConnection.QueryFirstOrDefault<int>(@"SELECT MAX(VehicleListId) + 1  FROM SBCES.VehicleList");
+
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Insert into the main RbMasterlist table
+                    var insertVehlistQuery = @"
+                                                        INSERT INTO SBCES.VehicleList ( VehicleListId,NumOfVehicles,
+                                                            Sopnumber, ProjDesc, Differential, Engine, 
+                                                             Make, Model, VehSeriesCode, Year,  EnteredBy,
+                                                            DateEntered, ModifiedLastBy, ModifiedLastDate
+                                                        )
+                                                        VALUES (
+                                                            @VehicleListId,@NumOfVehicles, @Sopnumber, @ProjDesc, @Differential, @Engine, 
+                                                             @Make, @Model, @VehSeriesCode, @Year,  @EnteredBy,
+                                                            @DateEntered, @ModifiedLastBy, @ModifiedLastDate
+                                                        );
+                                                        
+                                                    ";
+
+                    var vehicleListId = await _dbConnection.QuerySingleAsync<int>(insertVehlistQuery, new
+                    {
+                        VehicleListId = maxVehicleListId,
+                        vehicleViewModel.NumOfVehicles,
+                        vehicleViewModel.Sopnumber,
+                        vehicleViewModel.ProjDesc,
+                        vehicleViewModel.Differential,
+                        vehicleViewModel.Engine,                     
+                        
+                        vehicleViewModel.Make,
+                        vehicleViewModel.Model,
+                        vehicleViewModel.Transmission,
+                        vehicleViewModel.VehSeriesCode,
+                        vehicleViewModel.Year,
+                        
+                        EnteredBy=userName,
+                        DateEntered=DateTime.Now,
+                        ModifiedLastBy = userName,
+                        ModifiedLastDate=DateTime.Now
+
+                    }, transaction);
+
+
+
+                    // Commit the transaction
+                    transaction.Commit();
+
+                    return vehicleListId;
+                    
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of an error
+                   // transaction.Rollback();
+                    Console.WriteLine($"Error creating Vehicle data: {ex.Message}");
+                    throw; // Re-throw the exception to propagate it
+                }
+            }
+
+        }
+Table schema :
+CREATE TABLE [SBCES].[VehicleList](
+	[VehicleListId] [int] NOT NULL,
+	[VehSeriesCode] [varchar](500) NOT NULL,
+	[NumOfVehicles] [varchar](10) NOT NULL,
+	[ProjDesc] [varchar](200) NOT NULL,
+	[DateEntered] [datetime] NOT NULL,
+	[EnteredBy] [varchar](25) NOT NULL,
+	[ModifiedLastBy] [varchar](25) NOT NULL,
+	[ModifiedLastDate] [datetime] NOT NULL,
+	[Make] [varchar](25) NULL,
+	[Model] [varchar](25) NULL,
+	[Year] [varchar](4) NULL,
+	[Engine] [varchar](25) NULL,
+	[Transmission] [varchar](25) NULL,
+	[Differential] [varchar](25) NULL,
+	[Sopnumber] [varchar](30) NULL,
+ CONSTRAINT [PK_VehicleList] PRIMARY KEY CLUSTERED 
+(
+	[VehicleListId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
