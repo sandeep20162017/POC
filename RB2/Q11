@@ -1,0 +1,135 @@
+  Controller :
+ [HttpPost]
+I need to pass MMSSctockCode in the following ASP.NET core  and Telerik control to controller. MMSStockCode is dynamic. It shuld be like we pass Id to controller.
+
+[AllowAnonymous]
+ public async Task<IActionResult> DeleteScPartsUsedInEstimates(
+                                                  [DataSourceRequest] DataSourceRequest request,
+                                                  [Bind(Prefix = "models")] IEnumerable<StockCodedPartsViewModel> models,
+                                                  string id,
+                                                  string mmsstockcode, //Pass mmsstockcode here
+                                                  string gridType)
+PartialView _ScPartsUsed.cshtml 
+@(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()    
+     .Name($"ScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}")  
+...  
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.MMSStockCode).Title("Stock Code").EditorTemplateName("ComboBoxEditor").Width(70); 
+
+     columns.Command(command =>
+     {
+         if (@ViewBag.RoleId == 1)
+         {
+             // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+         }
+         if (@ViewBag.RoleId == 1)
+         {
+
+             command.Custom("Delete")
+              .Click("showDeleteConfirmation")
+              .Text(" ")
+              .IconClass("k-icon k-i-delete")
+              .HtmlAttributes(new
+              {
+                  @class = "text-danger",
+                  title = "Delete",
+                  data_grid = $"ScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}",
+                  data_url = Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates"),
+                  data_id_field = "id",
+                  data_mmsstockcode_field = //Pass MMSStoclCode Here,
+                  data_grid_type = "VehicleGrid"
+              });
+         }
+     }).Width(100);
+ })
+..
+DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(true)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.MMSStockCode); 
+            model.Field(c => c.MMSStockCode);
+       
+        })
+Index.cshtml :
+    <script>
+        // Initialize custom confirmation dialog
+        var deleteDialog = $("#deleteConfirmationDialog").kendoWindow({
+            width: "400px",
+            title: "Confirm Delete",
+            modal: true,
+            visible: false,
+            actions: ["Close"]
+        }).data("kendoWindow");
+
+        function showDeleteConfirmation(e) {
+            console.log("inside showDeleteConfirmation");
+            e.preventDefault();
+
+            var $btn = $(e.currentTarget);
+            var gridId = $btn.data("grid");
+            var deleteUrl = $btn.data("url");
+            var idField = $btn.data("id-field");
+            var gridType = $btn.data("grid-type");
+            var mmsstockcodeField = $btn.data("mmsstockcode-field");
+
+            var grid = $("#" + gridId).data("kendoGrid");
+            var dataItem = grid.dataItem($btn.closest("tr"));
+
+            var $dialog = $("#deleteConfirmationDialog");
+            console.log("inside showDeleteConfirmation -2");
+            $dialog.data("grid", grid);
+            $dialog.data("dataItem", dataItem);
+            $dialog.data("url", deleteUrl);
+            $dialog.data("idField", idField);
+            $dialog.data("mmstockcodeField", mmsstockcodeField);
+            $dialog.data("gridType", gridType); // add gridType
+            console.log("inside showDeleteConfirmation gridType = ", gridType);
+            deleteDialog.center().open();
+        }
+
+
+        $(document).on("click", "#deleteConfirmationDialog .confirm-btn", function () {
+            console.log("inside deleteConfirmationDialog - 1");
+            var $dialog = $("#deleteConfirmationDialog");
+            var grid = $dialog.data("grid");
+            var dataItem = $dialog.data("dataItem");
+            var deleteUrl = $dialog.data("url");
+            console.log("deleteUrl=", deleteUrl);
+            var idField = $dialog.data("idField");
+            var mmsstockcodeField = $dialog.data("mmsstockcodeField");
+            var gridType = $dialog.data("gridType");
+            var notification = $("#notification").data("kendoNotification");
+            console.log("******* inside deleteConfirmationDialog - 2");
+            console.log("idField : ", idField);
+            console.log("***mmsstockcodeField : ", mmsstockcodeField);
+            console.log("gridType :", gridType);
+           
+            var dataToSend = {};
+            dataToSend[idField] = dataItem[idField];
+            dataToSend[mmsstockcodeField] = dataItem[mmsstockcodeField]; //pass MMSSctockCode Here
+            dataToSend["gridType"] = gridType; // static param
+
+            $.ajax({
+                url: deleteUrl,
+                type: 'POST',
+                data: dataToSend,
+                success: function () {
+                   // grid.dataSource.remove(dataItem);
+                    grid.dataSource.read(); //force refresh grid
+                    notification.success("Record deleted successfully");
+                    deleteDialog.close();
+                },
+                error: function (xhr) {
+                    notification.error("Delete failed: " + xhr.responseText);
+                    deleteDialog.close();
+                }
+            });
+        });
+        $(document).on("click", "#deleteConfirmationDialog .cancel-btn", function () {
+            deleteDialog.close();
+        });
+    </script>
