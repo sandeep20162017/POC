@@ -1,0 +1,83 @@
+
+Kendo notification is shown when button (refreshScPartDetails) is clicked. I want to show the notification When user hovers mouse 
+on the first column columns.Bound(c => c.MMSStockCode).
+Shared View : ScPartsUsed.cshtml :
+
+@(
+Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()    
+     .Name($"ScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}")    
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.MMSStockCode).Title("Stock Code").IncludeInMenu(false).EditorTemplateName("ComboBoxEditor").Width(70);
+        columns.Command(command =>
+        {
+            command.Custom("Populate Details").Click("refreshScPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+        }).Width(60);
+...
+@(Html.Kendo().Dialog()
+    .Name("partDetailsDialog")
+    .Title("Part Details")
+    .Width(400)
+    .Modal(true)
+    .Visible(false)
+    .Actions(actions =>
+    {
+        actions.Add().Text("Close").Primary(true);
+    })
+)
+<script>
+    function refreshScPartDetails(e) {
+           
+           var gridName = $("#scGridNameField").val(); // Get grid name from hidden field
+           if (!gridName) {
+                console.warn("SC Grid name not found.");
+                return;
+            }
+
+            var grid = $("#" + gridName).data("kendoGrid"); // Select the grid dynamically
+
+            if (grid) {
+                grid.dataSource.read(); // Refresh grid data
+            } else {
+                console.warn("Grid not found: " + gridName);
+            }
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        var notification = $("#notification").data("kendoNotification");
+
+        if (!dataItem.MMSStockCode) {
+            notification.show("Please enter a valid Stock Code before refreshing", "error");
+            return;
+        }
+
+        $.ajax({
+            url: '@Url.Action("GetScPartDetails", "ScPartsUsedInEstimates")',
+            data: { mmsStockCode: dataItem.MMSStockCode },
+            beforeSend: function () {
+                notification.show("Fetching part details...", "info");
+            },
+            success: function (response) {
+                if (response && response.PartType && response.DetailedDesc) {
+                    var dialog = $("#partDetailsDialog").data("kendoDialog");
+                    dialog.content(`
+                        <div style="padding: 10px;">
+                            <p><strong>Part Type:</strong> ${response.PartType}</p>
+                            <p><strong>Part Description:</strong> ${response.DetailedDesc}</p>
+                            <p><strong>Part Unit CostCentre ($/unit):</strong> ${response.UnitCost}</p>
+                        </div>
+                    `);
+                    dialog.open();
+                } else {
+                    notification.show("No matching parts found for this Stock Code", "warning");
+                }
+            },
+            error: function (xhr) {
+                var errorMessage = xhr.status === 404
+                    ? "Stock Code not found in system"
+                    : "Error retrieving part details";
+                notification.show(errorMessage, "error");
+            }
+        });
+    }
+
+</script>
