@@ -1,0 +1,87 @@
+🛠️ 1. Update the Grid Column (Shared View: _ScPartsUsed.cshtml)
+We’ll attach a custom class and data attribute to the MMSStockCode cell:
+
+csharp
+Copy
+Edit
+columns.Bound(c => c.MMSStockCode)
+    .Title("Stock Code")
+    .HtmlAttributes(new { @class = "stock-code-cell", data_field = "MMSStockCode" })
+    .IncludeInMenu(false)
+    .EditorTemplateName("ComboBoxEditor")
+    .Width(70);
+🧪 2. JavaScript: Handle Hover with Delay
+Right below your existing <script>, add this:
+
+html
+Copy
+Edit
+<script>
+    var hoverTimer;
+
+    $(document).on("mouseenter", ".stock-code-cell", function () {
+        var $cell = $(this);
+        var grid = $cell.closest(".k-grid").data("kendoGrid");
+        var dataItem = grid.dataItem($cell.closest("tr"));
+
+        if (!dataItem || !dataItem.MMSStockCode) return;
+
+        // Start timer so we don't instantly show the dialog
+        hoverTimer = setTimeout(function () {
+            fetchPartDetails(dataItem.MMSStockCode);
+        }, 500); // half-second delay before showing
+    });
+
+    $(document).on("mouseleave", ".stock-code-cell", function () {
+        clearTimeout(hoverTimer);
+    });
+
+    function fetchPartDetails(mmsStockCode) {
+        var notification = $("#notification").data("kendoNotification");
+
+        $.ajax({
+            url: '@Url.Action("GetScPartDetails", "ScPartsUsedInEstimates")',
+            data: { mmsStockCode: mmsStockCode },
+            beforeSend: function () {
+                notification.show("Fetching part details...", "info");
+            },
+            success: function (response) {
+                if (response && response.PartType && response.DetailedDesc) {
+                    var dialog = $("#partDetailsDialog").data("kendoDialog");
+                    dialog.content(`
+                        <div style="padding: 10px;">
+                            <p><strong>Part Type:</strong> ${response.PartType}</p>
+                            <p><strong>Part Description:</strong> ${response.DetailedDesc}</p>
+                            <p><strong>Part Unit CostCentre ($/unit):</strong> ${response.UnitCost}</p>
+                        </div>
+                    `);
+                    dialog.open();
+                } else {
+                    notification.show("No matching parts found for this Stock Code", "warning");
+                }
+            },
+            error: function (xhr) {
+                var errorMessage = xhr.status === 404
+                    ? "Stock Code not found in system"
+                    : "Error retrieving part details";
+                notification.show(errorMessage, "error");
+            }
+        });
+    }
+</script>
+✅ 3. No Changes Needed to Your Controller or Dialog
+Your current controller action:
+
+csharp
+Copy
+Edit
+public async Task<IActionResult> GetScPartDetails(string mmsStockCode)
+And your existing dialog:
+
+csharp
+Copy
+Edit
+@(Html.Kendo().Dialog()
+    .Name("partDetailsDialog")
+    ...
+)
