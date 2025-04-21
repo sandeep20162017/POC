@@ -1,0 +1,276 @@
+Use case : User keys in Supplier number. Based on Supplier number, Supplier number should hav auto complte (call controller ation). Based on 
+Supplier number and Supplir name, populate Keyword, Description and part cost (call anothr controller action). All should be Ajax calls.
+Modify following code and give me the files. App uses dapper for SQL calls. Assume dbconnetion and dbContet is available. App doesn't have any services.
+@model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+Modify blow code :
+@{
+    ViewData["Title"] = "Non Stock Coded Parts Details";
+    var nscGridName = $"NScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}"; /* save gridname in hidden field for JS */
+}
+
+<h6>Non Stock Coded Parts Used</h6>
+<input type="hidden" id="nscGridNameField" value="@nscGridName" /> @* save gridname in hidden field for JS *@
+@(
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+                
+                @* .Name($"NscPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}") *@
+                .Name($"NscPartsMaterialDetailsRebuiltPartsGrid")
+                .Columns(columns =>
+                {
+                    columns.Bound(c => c.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("ComboBoxEditor").Width(60);
+                    columns.Command(command =>
+                   {
+                       command.Custom("Populate Details").Click("refreshNscPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+                   }).Width(60);
+                    columns.Bound(c => c.OrigSupplierName).Title("Supplier Name").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("ComboBoxEditor").Width(50);
+
+                    //  columns.Bound(c => c.OemPartCost).Title("Unit Cost").Format("{0:N2}").Width(30);
+                    columns.Bound(c => c.CC).Title("CC").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("ComboBoxEditor").Width(40); ;
+                    columns.Bound(c => c.Qty).Title("Qty").Width(30);                    
+                    columns.Bound(c => c.Percentage).Title("Percentage").HtmlAttributes(new { data_field = "Percentage"}).Width(30);
+                    columns.Bound(c => c.OemPartCost).Title("Part Cost").Width(30);
+                    columns.Bound(c => c.CoreCost).Title("Core Cost").Width(30);
+                    columns.Command(command =>
+                    {
+                        command.Custom("Re-Calculate")
+                            .Click("recalculateTotalCost")
+                            .HtmlAttributes(new { @class = "k-grid-recalculate" });
+                    }).HtmlAttributes( new { data_field = "Commands" }).Width(80);
+
+                    columns.Bound(c => c.TotalCost).Title("Total Cost").Width(30);
+                    columns.Bound(c => c.Description).Title("Description").Width(50);
+                    columns.Bound(c => c.KeyWord).Title("KeyWord").Width(50);
+                    // columns.Bound(c => c.DateRevised).Title("Date Revised");
+                    // columns.Command(command => command.Edit()).Title("Actions");
+                    columns.Command(command =>
+                    {
+                        if (@ViewBag.RoleId == 1)
+                        {
+                            // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+                        }
+                        if (@ViewBag.RoleId == 1)
+                        {
+
+                            command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Delete button with tooltip
+                        }
+                    }).Width(100);
+                })
+                .Events (events => 
+                {
+                    //events.Edit("onEdit") ;
+                    //events.Save("onSave");
+                    events.CellClose("onCellClose");
+                    events.SaveChanges("onSaveChanges");
+
+                })
+
+     .ToolBar(toolbar =>
+    {
+        if (@ViewBag.RoleId == 1)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    .Resizable(r => r.Columns(true))
+   // .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(true)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.OrigSuppNum);
+            model.Field(c => c.OrigSupplierName).Editable(true);
+            model.Field(c => c.OrigSuppNum).Editable(true);
+            model.Field(c => c.OemPartCost).Editable(true);
+            model.Field(c => c.TotalCost).Editable(true);
+         
+            model.Field("needsRecalculation", typeof(bool)).DefaultValue(false);
+        })
+        .Events(events =>
+        {
+                      
+            events.RequestEnd("onRequestEnd");
+            events.Error("onDataSourceError");
+        })
+
+        .Read(read => read.Url(Url.Action("GetNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+       
+        .Create(create => create.Url(Url.Action("CreateNscPartsUsedInEstimatess", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsedInRbtParts", "NscPartsUsedInEstimates") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+
+)
+AutoCompleteController (you can keep it or create a new one)
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+
+
+namespace BCES.Controllers.Common
+{
+    public class AutoCompleteController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public AutoCompleteController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet]
+        public IActionResult GetAutoCompleteData(string columnName, string searchText)
+        {
+            try
+            {
+                // 1. Validate parameters
+                if (string.IsNullOrEmpty(columnName))
+                    return BadRequest("Column name is required.");
+
+                // 2. Column whitelist
+                var columnMappings = new Dictionary<string, (string SqlColumn, string Table)>
+            {
+                //Admin Labour Tasks
+                { "TaskDescription", ("TaskDescription", "[SBCES].[LabourTaskDescriptions]") },
+                //NSC Parts 
+                { "OrigSuppNum", ("OrigSupplierNum", "[SBCES].[NonStockCodedParts]") },
+                { "OrigSupplierName", ("OrigSupplierName", "[SBCES].[NonStockCodedParts]") },
+                { "Description", ("DetailedDesc", "[SBCES].[NonStockCodedParts]") },
+                { "KeyWord", ("KeyWord", "[SBCES].[NonStockCodedParts]") },
+                 { "Keyword", ("Keyword", "[SBCES].[NonStockCodedParts]") },
+                //RB Parts
+                { "DetailedDesc", ("DetailedDesc", "[SBCES].[RbMasterlist]") },
+                { "LabourDefn", ("LabourDefn", "[SBCES].[EMPLCLASS]") },
+                { "CC", ("COSTCENTRE", "[SBCES].[COSTCENTRES]") },
+                { "CostCentre", ("COSTCENTRE", "[SBCES].[COSTCENTRES]") },
+                { "Task", ("TaskDescription", "[SBCES].[LabourTaskDescriptions]") },
+                { "MMSStockCode", ("MMSSTOCKCODE", "[SBCES].[STOCKCODEDPARTS]") },
+                { "MmsStockCode", ("MMSSTOCKCODE", "[SBCES].[STOCKCODEDPARTS]") },
+
+                { "RebuiltStockNum", ("RebuiltStockNum", "[SBCES].[RbMasterlist]") },
+                //LabourType
+                 { "WAGEGROUP", ("WAGEGROUP", "[SBCES].[EMPLCLASS]") },
+                //user management
+                {"RoleName", ("RoleName", "[SBCES].Roles") },
+                //Vehicle
+                {"VehSeriesCode", ("[VehSeriesCode]", "[SBCES].[VehicleList]") },
+                {"ProjDesc", ("[ProjDesc]", "[SBCES].[VehicleList]") },
+                {"Make", ("[Make]", "[SBCES].[TYPEOFVEHICLE]") },
+                {"Model", ("[Model]", "[SBCES].[TYPEOFVEHICLE]") },
+                {"Year", ("[Year]", "[SBCES].[TYPEOFVEHICLE]") },
+                {"Engine", ("[Name]", "[SBCES].[Engines]") },
+                {"Transmission", ("[Name]", "[SBCES].[TRANSMISSIONS]") },
+                
+
+                //{ "KeyWord", ("KeyWord", "[SBCES].[RbMasterlist]") }
+            };
+
+                if (!columnMappings.TryGetValue(columnName, out var mapping))
+                    return BadRequest("Invalid column name.");
+
+                // 3. Parameterized query
+                using (var connection = _dbConnection)
+                {
+                    var sql = "";
+                    //if (columnName == "RebuiltStockNum")
+                    //{
+                    //    sql = $@"
+                    //                SELECT distinct 
+                    //                  [MmsStockCode]      
+                    //              FROM [CES].[SBCES].[ScPartsUsed]
+                    //              where RebuiltPart = 'Y'
+                    //              AND {mapping.SqlColumn} LIKE @SearchText + '%'
+                    //           ";
+                    //}
+                    //else
+                   
+                        sql = $@"
+                                SELECT DISTINCT {mapping.SqlColumn} AS Text
+                                FROM {mapping.Table} 
+                                WHERE {mapping.SqlColumn} LIKE @SearchText + '%'";
+                 
+
+                    var results = connection.Query<string>(sql, new { SearchText = searchText ?? "" });
+
+                    // Wrap results in objects with "Text" property
+                    var data = results.Select(x => new { Text = x }).ToList();
+                    return Json(data);
+
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+                return Json(null);
+            }
+
+
+        }
+
+    }
+}
+CoboBox.cshtml (Modify ths or create a new one)
+  @model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .Placeholder("Search...")
+    .AutoBind(false) // Only bind data when user types
+    
+    .MinLength(2)    // Trigger server filtering after 1 character
+    @* .HtmlAttributes(new
+    {
+        data_column = fieldName
+    }) *@
+     .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+       // { "data-role", "combobox" },
+        { "data-column", fieldName }
+    })
+    @* .Events(e =>
+    {
+        e.Change("validateSelection"); // Validate on selection
+        e.DataBound("clearInvalidInput"); // Optional clanup
+    }) *@
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #")
+    
+
+)
+     
+
+
