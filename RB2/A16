@@ -1,0 +1,124 @@
+✅ 1. Editor Template: Views/Shared/EditorTemplates/NscSupplierComboBox.cshtml
+csharp
+Copy
+Edit
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Text")
+    .Filter(FilterType.Contains)
+    .Placeholder("Enter supplier number...")
+    .AutoBind(false)
+    .MinLength(2)
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-column", fieldName }
+    })
+    .Events(e =>
+    {
+        e.Select("onNscPartsComboBoxSelect");
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getNscPartsComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+)
+✅ 2. JavaScript Functions (add to your view or layout)
+javascript
+Copy
+Edit
+function getNscPartsComboBoxParams() {
+    return {
+        columnName: this.element.attr("data-column"),
+        searchText: this.input.val()
+    };
+}
+
+function onNscPartsComboBoxSelect(e) {
+    var dataItem = this.dataItem(e.item.index());
+    var supplierNumber = dataItem.Text;
+
+    var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+    var row = this.element.closest("tr");
+    var data = grid.dataItem(row);
+
+    data.set("OrigSuppNum", supplierNumber);
+
+    $.ajax({
+        url: '/AutoComplete/GetSupplierDetails',
+        type: 'GET',
+        data: { supplierNumber: supplierNumber },
+        success: function (result) {
+            if (result) {
+                data.set("OrigSupplierName", result.SupplierName);
+                data.set("KeyWord", result.KeyWord);
+                data.set("Description", result.Description);
+                data.set("OemPartCost", result.PartCost);
+            }
+        },
+        error: function (xhr, status, error) {
+            console.error("Error fetching supplier details:", error);
+        }
+    });
+}
+✅ 3. Controller Update: AutoCompleteController.cs
+This part should already exist if you followed the previous instructions, but here's the full method again for clarity:
+
+csharp
+Copy
+Edit
+[HttpGet]
+public IActionResult GetSupplierDetails(string supplierNumber)
+{
+    if (string.IsNullOrEmpty(supplierNumber))
+        return BadRequest("Supplier number is required.");
+
+    var sql = @"
+        SELECT TOP 1 
+            OrigSupplierName AS SupplierName,
+            KeyWord,
+            DetailedDesc AS Description,
+            OemPartCost AS PartCost
+        FROM [SBCES].[NonStockCodedParts]
+        WHERE OrigSupplierNum = @SupplierNumber
+    ";
+
+    var result = _dbConnection.QueryFirstOrDefault(sql, new { SupplierNumber = supplierNumber });
+
+    if (result == null)
+        return NotFound("Supplier not found.");
+
+    return Json(result);
+}
+✅ 4. Update Your Grid to Use the New Editor
+When defining your columns in the Kendo Grid, update the EditorTemplateName for OrigSuppNum:
+
+csharp
+Copy
+Edit
+columns.Bound(c => c.OrigSuppNum)
+       .Title("Supplier Number")
+       .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+       .EditorTemplateName("NscSupplierComboBox")
+       .Width(60);
+🎉 Done!
+You now have a dedicated Supplier ComboBox that:
+
+Filters based on the supplier number
+
+Uses AJAX to populate related fields like name, keyword, description, and cost
+
+Has uniquely named JavaScript functions to avoid conflicts
