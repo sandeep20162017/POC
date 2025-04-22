@@ -1,0 +1,118 @@
+When supplierName is selected in the ComboBox, I want to pouplate 
+SELECT 
+    OrigSupplierName AS SupplierName
+     KeyWord,
+   DetailedDesc AS Description,
+   OemPartCost AS PartCost
+FROM [SBCES].[NonStockCodedParts]
+WHERE OrigSupplierNum = @SupplierNumber
+and OrigSupplierName = @SupplierName
+cshtml :
+ @model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+
+@{
+    ViewData["Title"] = "Non Stock Coded Parts Details";
+    var nscGridName = $"NScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}"; /* save gridname in hidden field for JS */
+}
+
+<h6>Non Stock Coded Parts Used</h6>
+<input type="hidden" id="nscGridNameField" value="@nscGridName" /> @* save gridname in hidden field for JS *@
+@(
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+                
+                @* .Name($"NscPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}") *@
+                .Name($"NscPartsMaterialDetailsRebuiltPartsGrid")
+                .Columns(columns =>
+                {
+                    columns.Bound(c => c.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).EditorTemplateName("ComboBoxEditor").Width(60);
+                   @*  columns.Command(command =>
+                   {
+                       command.Custom("Populate Details").Click("refreshNscPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+                   }).Width(60); *@
+                    columns.Bound(c => c.OrigSupplierName).Title("Supplier Name").Filterable(ftb => ftb.Cell(cell => cell.Operator("Contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("NscSupplierComboBox").Width(50);
+
+                    //  columns.Bound(c => c.OemPartCost).Title("Unit Cost").Format("{0:N2}").Width(30);
+                    columns.Bound(c => c.CC).Title("CC").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("ComboBoxEditor").Width(40); ;
+                    columns.Bound(c => c.Qty).Title("Qty").Width(30);                    
+                    columns.Bound(c => c.Percentage).Title("Percentage").HtmlAttributes(new { data_field = "Percentage"}).Width(30);
+                    columns.Bound(c => c.OemPartCost).Title("Part Cost").Width(30);
+                    columns.Bound(c => c.CoreCost).Title("Core Cost").Width(30);
+                    @* columns.Command(command =>
+                    {
+                        command.Custom("Re-Calculate")
+                            .Click("recalculateTotalCost")
+                            .HtmlAttributes(new { @class = "k-grid-recalculate" });
+                    }).HtmlAttributes( new { data_field = "Commands" }).Width(80);
+
+                    columns.Bound(c => c.TotalCost).Title("Total Cost").Width(30); *@
+                    columns.Bound(c => c.Description).Title("Description").Width(50);
+                    columns.Bound(c => c.KeyWord).Title("KeyWord").Width(50);
+                    // columns.Bound(c => c.DateRevised).Title("Date Revised");
+                    // columns.Command(command => command.Edit()).Title("Actions");
+                    columns.Command(command =>
+                    {
+                        if (@ViewBag.RoleId == 1)
+                        {
+                            // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+                        }
+                        if (@ViewBag.RoleId == 1)
+                        {
+
+                            command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Delete button with tooltip
+                        }
+                    }).Width(100);
+                })
+                .Events (events => 
+                {
+                    //events.Edit("onEdit") ;
+                    //events.Save("onSave");
+                    events.CellClose("onCellClose");
+                    events.SaveChanges("onSaveChanges");
+
+                })
+
+     .ToolBar(toolbar =>
+    {
+        if (@ViewBag.RoleId == 1)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    .Resizable(r => r.Columns(true))
+   // .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(true)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.OrigSuppNum);
+            model.Field(c => c.OrigSupplierName).Editable(true);
+            model.Field(c => c.OrigSuppNum).Editable(true);
+            model.Field(c => c.OemPartCost).Editable(true);
+           // model.Field(c => c.TotalCost).Editable(true);
+         
+          //  model.Field("needsRecalculation", typeof(bool)).DefaultValue(false);
+        })
+        .Events(events =>
+        {
+                      
+            events.RequestEnd("onRequestEnd");
+            events.Error("onDataSourceError");
+        })
+
+        .Read(read => read.Url(Url.Action("GetNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+       
+        .Create(create => create.Url(Url.Action("CreateNscPartsUsedInEstimatess", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsedInRbtParts", "NscPartsUsedInEstimates") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+
+)
+
+
