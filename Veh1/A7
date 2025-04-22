@@ -1,0 +1,156 @@
+1. New Controller Action: GetSupplierNames
+This returns a list of supplier names for a given supplier number.
+
+csharp
+Copy
+Edit
+[HttpGet]
+public IActionResult GetSupplierNames(string supplierNumber)
+{
+    if (string.IsNullOrEmpty(supplierNumber))
+        return BadRequest("Supplier number is required.");
+
+    var sql = @"
+        SELECT DISTINCT OrigSupplierName AS Text
+        FROM [SBCES].[NonStockCodedParts]
+        WHERE OrigSupplierNum = @SupplierNumber";
+
+    var result = _dbConnection.Query(sql, new { SupplierNumber = supplierNumber });
+    return Json(result);
+}
+✅ 2. New Controller Action: GetSupplierDetailsByName
+csharp
+Copy
+Edit
+[HttpGet]
+public IActionResult GetSupplierDetailsByName(string supplierNumber, string supplierName)
+{
+    if (string.IsNullOrEmpty(supplierNumber) || string.IsNullOrEmpty(supplierName))
+        return BadRequest("Supplier number and name are required.");
+
+    var sql = @"
+        SELECT 
+            OrigSupplierName AS SupplierName,
+            KeyWord,
+            DetailedDesc AS Description,
+            OemPartCost AS PartCost
+        FROM [SBCES].[NonStockCodedParts]
+        WHERE OrigSupplierNum = @SupplierNumber
+          AND OrigSupplierName = @SupplierName";
+
+    var result = _dbConnection.QueryFirstOrDefault(sql, new { SupplierNumber = supplierNumber, SupplierName = supplierName });
+    return Json(result);
+}
+✅ 3. Update NscSupplierComboBox.cshtml
+Update the ComboBox to load based on OrigSuppNum:
+
+csharp
+Copy
+Edit
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Text")
+    .Filter(FilterType.Contains)
+    .AutoBind(false)
+    .MinLength(1)
+    .Placeholder("Select supplier name...")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "data-column", fieldName }
+    })
+    .Events(e => e.Select("onNscPartsComboBoxSelect"))
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetSupplierNames", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getSupplierNameParams");
+        })
+        .ServerFiltering(true);
+    })
+)
+✅ 4. JavaScript Functions
+🌟 Fetch Supplier Names
+js
+Copy
+Edit
+function getSupplierNameParams() {
+    var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+    var row = grid.editable ? grid.editable.element.closest("tr") : null;
+    var data = row ? grid.dataItem(row) : null;
+
+    return {
+        supplierNumber: data ? data.OrigSuppNum : ""
+    };
+}
+🌟 On Supplier Name Selection: Populate Other Fields
+js
+Copy
+Edit
+function onNscPartsComboBoxSelect(e) {
+    var supplierName = this.dataItem(e.item.index()).Text;
+
+    var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+    var row = this.element.closest("tr");
+    var data = grid.dataItem(row);
+
+    var supplierNumber = data ? data.OrigSuppNum : "";
+
+    data.set("OrigSupplierName", supplierName);
+
+    if (supplierNumber && supplierName) {
+        $.ajax({
+            url: '/AutoComplete/GetSupplierDetailsByName',
+            type: 'GET',
+            data: {
+                supplierNumber: supplierNumber,
+                supplierName: supplierName
+            },
+            success: function (result) {
+                if (result) {
+                    data.set("OemPartCost", result.PartCost);
+                    data.set("Description", result.Description);
+                    data.set("KeyWord", result.KeyWord);
+                }
+            },
+            error: function () {
+                console.error("Failed to fetch supplier details.");
+            }
+        });
+    }
+}
+✅ 5. Validation in SaveChanges
+js
+Copy
+Edit
+function onSaveChanges(e) {
+    var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+    var notify = $("<div/>").kendoNotification({
+        stacking: "down",
+        templates: [{
+            type: "error",
+            template: "<div class='k-notification-error'>Supplier name is required when supplier number is entered.</div>"
+        }]
+    }).data("kendoNotification");
+
+    var invalid = false;
+
+    grid.dataSource.data().forEach(function (item) {
+        if (item.OrigSuppNum && !item.OrigSupplierName) {
+            invalid = true;
+        }
+    });
+
+    if (invalid) {
+        notify.show({}, "error");
+        e.preventDefault();
+    }
+}
+✅ 6. Mark Fields as Required (in Model)
+csharp
+Copy
+Edit
+model.Field(c => c.OrigSuppNum).Editable(true).DefaultValue("").Nullable(false);
+model.Field(c => c.OrigSupplierName).Editable(true).DefaultValue("").Nullable(false);
