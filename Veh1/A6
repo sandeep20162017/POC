@@ -1,0 +1,114 @@
+
+✅ Step 1: Update Your Controller
+Make sure your GetSupplierDetails action accepts both supplier number and name:
+
+csharp
+Copy
+Edit
+[HttpGet]
+public IActionResult GetSupplierDetails(string supplierNumber, string supplierName)
+{
+    if (string.IsNullOrEmpty(supplierNumber) || string.IsNullOrEmpty(supplierName))
+        return BadRequest("Supplier number and name are required.");
+
+    var sql = @"
+        SELECT 
+            OrigSupplierName AS SupplierName,
+            KeyWord,
+            DetailedDesc AS Description,
+            OemPartCost AS PartCost
+        FROM [SBCES].[NonStockCodedParts]
+        WHERE OrigSupplierNum = @SupplierNumber
+          AND OrigSupplierName = @SupplierName";
+
+    var result = _dbConnection.QueryFirstOrDefault(sql, new { SupplierNumber = supplierNumber, SupplierName = supplierName });
+
+    if (result == null)
+        return NotFound("Supplier not found.");
+
+    return Json(result);
+}
+✅ Step 2: Update Your ComboBox onSelect JS
+Modify the existing onNscPartsComboBoxSelect function to send both values:
+
+js
+Copy
+Edit
+function onNscPartsComboBoxSelect(e) {
+    var dataItem = this.dataItem(e.item.index());
+
+    var supplierNumber = e.sender.element.closest("tr").find("td:eq(0)").text().trim(); // assuming OrigSuppNum is column 0
+    var supplierName = dataItem.Text;
+
+    var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+    var row = this.element.closest("tr");
+    var data = grid.dataItem(row);
+
+    data.set("OrigSupplierName", supplierName);
+
+    $.ajax({
+        url: '/AutoComplete/GetSupplierDetails',
+        type: 'GET',
+        data: {
+            supplierNumber: supplierNumber,
+            supplierName: supplierName
+        },
+        success: function (result) {
+            if (result) {
+                data.set("OemPartCost", result.PartCost);
+                data.set("Description", result.Description);
+                data.set("KeyWord", result.KeyWord);
+            }
+        },
+        error: function (xhr, status, error) {
+            console.error("Error fetching supplier details:", error);
+        }
+    });
+}
+✅ Step 3: Add Validation in onSaveChanges
+Add this JS function:
+
+js
+Copy
+Edit
+function onSaveChanges(e) {
+    var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+    var invalid = false;
+
+    grid.dataSource.data().forEach(function (item) {
+        if (item.OrigSuppNum && !item.OrigSupplierName) {
+            invalid = true;
+
+            // Show notification
+            $("<div/>").kendoNotification({
+                stacking: "down",
+                templates: [{
+                    type: "error",
+                    template: "<div class='k-notification-error'>Please select a supplier name for supplier number " + item.OrigSuppNum + ".</div>"
+                }]
+            }).data("kendoNotification").show({}, "error");
+        }
+    });
+
+    if (invalid) {
+        e.preventDefault(); // stops the save
+    }
+}
+This gets wired up already via .Events(events => { events.SaveChanges("onSaveChanges"); }).
+
+✅ Step 4: Make Fields Required in DataSource Model
+In your grid's .Model() block:
+
+csharp
+Copy
+Edit
+model.Field(c => c.OrigSuppNum).Editable(true).DefaultValue("").Nullable(false);
+model.Field(c => c.OrigSupplierName).Editable(true).DefaultValue("").Nullable(false);
+✅ Summary
+✅ AJAX populates OemPartCost, Description, KeyWord based on selected supplier.
+
+✅ Grid prevents save if OrigSuppNum is filled but OrigSupplierName is missing.
+
+✅ Telerik notification alerts the user using existing styles.
+
+✅ All works inside your InCell editing flow.
