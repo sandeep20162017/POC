@@ -1,0 +1,108 @@
+
+Exception :
+kendo.all.js:47781 Uncaught TypeError: Cannot read properties of undefined (reading 'replace')
+    at init.text (kendo.all.js:47781:70)
+    at init._inputFocusout (kendo.all.js:47433:21)
+    at HTMLInputElement.i (jquery-3.7.1.min.js:2:86755)
+    at HTMLInputElement.dispatch (jquery-3.7.1.min.js:2:40035)
+    at HTMLInputElement.<anonymous> (jquery-3.7.1.min.js:2:38006)
+    at Object.trigger (jquery-3.7.1.min.js:2:70124)
+    at Object.simulate (jquery-3.7.1.min.js:2:70632)
+ JS :
+    <script>
+    function onRebuiltStockNumSelect(e) {
+        console.log("%%%%%% Inside onRebuiltStockNumSelect");
+        var dataItem = this.dataItem(e.item.index());
+        var rebuiltStockNum =  dataItem.RebuiltStockNum;
+       
+
+        var grid = $("#RbPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+        var row = this.element.closest("tr");
+        var data = grid.dataItem(row);
+        console.log("%%%%%% Inside onRebuiltStockNumSelect : rebuiltStockNum :", rebuiltStockNum);
+
+
+        // Reset values first
+        data.set("CoreCharge", "");
+        data.set("Description", "");
+        data.set("KeyWord", "");
+
+        if (rebuiltStockNum) {
+            $.ajax({
+                url: "/AutoComplete/GetRbPartDetails",
+                type: "GET",
+                data: { rebuiltStockNum: rebuiltStockNum },
+                success: function (result) {
+                    if (result) {
+                        data.set("CoreCharge", result.CoreCharge || "");
+                        data.set("Description", result.Description || "");
+                        data.set("KeyWord", result.KeyWord || "");
+                    }
+                },
+                error: function (xhr) {
+                    console.error("Error loading part details:", xhr.responseText);
+                }
+            });
+        }
+    }
+</script>
+RbComboBox.cshtml :
+@model string
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("RebuiltStockNum")
+    .DataValueField("RebuiltStockNum")
+    .Filter("contains")
+    .MinLength(2)
+    .Placeholder("Enter Rebuilt Number...")
+    .AutoBind(false)
+    .Events(events => events.Select("onRebuiltStockNumSelect"))
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #")
+   
+)
+AutoCompleteController.cs
+[HttpGet]
+public IActionResult GetRbPartDetails(string rebuiltStockNum)
+{
+    try
+    {
+        if (string.IsNullOrWhiteSpace(rebuiltStockNum))
+            return BadRequest("RebuiltStockNum is required.");
+
+        var sql = @"
+                SELECT TOP 1
+                    UPPER(B.CoreCost) AS CoreCharge,
+                    UPPER(C.detailedDesc) AS Description,
+                    UPPER(C.keyword) AS KeyWord
+                FROM SBCES.ScPartsUsed B
+                INNER JOIN SBCES.RbMasterlist C ON C.rebuiltStockNum = B.mmsRebuiltCode
+                WHERE B.LinkType = 'BUS' 
+                  AND B.RebuiltStockNum = @RebuiltStockNum 
+                  AND B.RebuiltStockNum IS NOT NULL";
+
+        var result = _dbConnection.QueryFirstOrDefault(sql, new { RebuiltStockNum = rebuiltStockNum });
+
+        if (result == null)
+            return NotFound("Part not found.");
+
+        return Json(result);
+    }
+    catch (Exception ex)
+    {
+        // You can log the exception here if needed
+        return StatusCode(500, "An error occurred while retrieving the data.");
+    }
+}
