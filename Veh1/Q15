@@ -1,0 +1,128 @@
+My App uses Telerik grid. In my custom delete I want to pass RebuiltStockNum column value. I don't want to make any major changes
+in J as it used by other pages and grids. Pls make it simple to pass RebuiltStockNum to controller action.
+
+@(Html.Kendo().Grid<BCES.Models.Parts.RebuiltPartsViewModel>()
+   
+    .Name($"RbPartsMaterialDetailsRebuiltPartsGrid")
+    .Columns(columns =>
+    {
+       
+        columns.Bound(c => c.Id).Title("Id").Hidden(true);
+        columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Number").EditorTemplateName("RbComboBox").Width(100);
+..
+if (@ViewBag.RoleId == 1)
+{
+
+    command.Custom("Delete")
+     .Click("showDeleteConfirmation")
+     .Text(" ")
+     .IconClass("k-icon k-i-delete")
+     .HtmlAttributes(new
+     {
+         @class = "text-danger",
+         title = "Delete",
+         data_grid = $"RbPartsMaterialDetailsRebuiltPartsGrid",
+         data_url = Url.Action("DeleteRbPartsUsedInRbtParts", "RbPartsUsedInEstimates"),
+         data_id_field = "Id",       
+         data_grid_type = "RbPartGrid"
+     });
+JS : <script>
+    // Initialize custom confirmation dialog
+    var deleteDialog = $("#deleteConfirmationDialog").kendoWindow({
+        width: "400px",
+        title: "Confirm Delete",
+        modal: true,
+        visible: false,
+        actions: ["Close"]
+    }).data("kendoWindow");
+
+    function showDeleteConfirmation(e) {
+        console.log("inside showDeleteConfirmation");
+        e.preventDefault();
+
+        var $btn = $(e.currentTarget);
+        var gridId = $btn.data("grid");
+        var deleteUrl = $btn.data("url");
+        var idField = $btn.data("id-field");
+        var gridType = $btn.data("grid-type");
+        // var mmsstockcodeField = $btn.data("mmsstockcode-field");
+        // console.log("$$$$$ mmsstockcodeField :", mmsstockcodeField);
+        // console.log("%%%%% parentGridId :", parentGridId);
+
+        var grid = $("#" + gridId).data("kendoGrid");
+
+        var dataItem = grid.dataItem($btn.closest("tr"));
+
+        var $dialog = $("#deleteConfirmationDialog");
+        console.log("inside showDeleteConfirmation -2");
+        $dialog.data("grid", grid);
+        $dialog.data("dataItem", dataItem);
+        $dialog.data("url", deleteUrl);
+        $dialog.data("idField", idField);
+       
+        $dialog.data("gridType", gridType); // add gridType
+        console.log("inside showDeleteConfirmation gridType = ", gridType);
+        deleteDialog.center().open();
+    }
+
+
+    $(document).on("click", "#deleteConfirmationDialog .confirm-btn", function () {
+        console.log("inside deleteConfirmationDialog - 1");
+        var $dialog = $("#deleteConfirmationDialog");
+        var grid = $dialog.data("grid");
+        var dataItem = $dialog.data("dataItem");
+        var deleteUrl = $dialog.data("url");
+        console.log("deleteUrl=", deleteUrl);
+        var idField = $dialog.data("idField");
+      //  var parentPartId = $dialog.data("parentGridId");
+       // var mmsstockcodeField = $dialog.data("mmsstockcodeField");
+        var gridType = $dialog.data("gridType");
+        var notification = $("#notification").data("kendoNotification");
+        console.log("******* inside deleteConfirmationDialog - 2");
+        console.log("idField : ", idField);
+     //   console.log("***mmsstockcodeField : ", mmsstockcodeField);
+        console.log("gridType :", gridType);
+        // console.log("DEBUG >>>", {
+        //     mmsstockcodeField,
+        //     value: dataItem[mmsstockcodeField],
+        //     dataItem
+        // });
+        var dataToSend = {};
+      //  var mmsValue = dataItem[mmsstockcodeField] || "";
+        dataToSend[idField] = dataItem[idField];
+        console.log("***** parentGridId :", parentGridId);
+      //  dataToSend[parentPartId] = dataItem[parentGridId];
+        dataToSend["parentPartId"] = parentGridId;// dataItem[mmsValue];
+        dataToSend["gridType"] = gridType; // static param
+
+        $.ajax({
+            url: deleteUrl,
+            type: 'POST',
+            data: dataToSend,
+            success: function () {
+               // grid.dataSource.remove(dataItem);
+                grid.dataSource.read(); //force refresh grid
+                notification.success("Record deleted successfully");
+                deleteDialog.close();
+            },
+            error: function (xhr) {
+                notification.error("Delete failed: " + xhr.responseText);
+                deleteDialog.close();
+            }
+        });
+    });
+    $(document).on("click", "#deleteConfirmationDialog .cancel-btn", function () {
+        deleteDialog.close();
+    });
+</script>
+Controller : //Pass RebuiltPartNum here
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> DeleteRbPartsUsedInRbtParts(
+                                                [DataSourceRequest] DataSourceRequest request,
+                                                RebuiltPartsViewModel model,
+                                                string id,
+                                                 string parentPartId,
+                                                  string gridType)
+{
+    if (!ModelState.IsValid)
