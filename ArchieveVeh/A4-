@@ -75,19 +75,30 @@ BEGIN
             LinkType, CoreCost, ArchVehicleListId, TotalCost, ScKeyword, ScDescription
         )
         SELECT
-            UPPER(SPU.MmsStockCode), SPU.DateEntered,
-            ISNULL(A.RbUnitCost, 0), UPPER(SPU.UserEntered),
-            ISNULL(SPU.MmsCost, 0), ISNULL(SPU.OemCost, 0),
-            UPPER(SPU.MmsRebuiltCode), UPPER(SPU.CostCentre),
-            SPU.QtyReqd, REPLACE(SPU.PercentUsage, ',', '.'),
-            @LinkNumber, 'Y', 'RB', SPU.CoreCost, @ArchId,
-            ISNULL(A.RbCost, 0), UPPER(RM.Keyword), UPPER(RM.DetailedDesc)
+            UPPER(SPU.MmsStockCode), 
+            SPU.DateEntered,
+            ISNULL(A.RbUnitCost, 0), 
+            UPPER(SPU.UserEntered),
+            ISNULL(SPU.MmsCost, 0), 
+            ISNULL(SPU.OemCost, 0),
+            UPPER(SPU.MmsRebuiltCode), 
+            UPPER(SPU.CostCentre),
+            SPU.QtyReqd, 
+            REPLACE(SPU.PercentUsage, ',', '.'),
+            @LinkNumber, 
+            'Y', 
+            'RB', 
+            SPU.CoreCost, 
+            @ArchId,
+            ISNULL(A.RbCost, 0), 
+            UPPER(RM.Keyword), 
+            UPPER(RM.DetailedDesc)
         FROM SBCES.ScPartsUsed SPU
         LEFT JOIN SBCES.RbMasterlist RM ON RM.RebuiltStockNum = SPU.MmsRebuiltCode
         LEFT JOIN (
             SELECT RbReference,
-                ROUND(SUM(ISNULL(TRY_CAST(TotalCost AS DECIMAL(18,2)), 2) AS RbCost,
-                ROUND(SUM(ISNULL(TRY_CAST(TotalUnitCost AS DECIMAL(18,2)), 2) AS RbUnitCost
+                ROUND(SUM(ISNULL(TRY_CAST(TotalCost AS DECIMAL(18,2)), 0)), 2) AS RbCost,
+                ROUND(SUM(ISNULL(TRY_CAST(TotalUnitCost AS DECIMAL(18,2)), 0)), 2) AS RbUnitCost
             FROM SBCES.TempMaterialsList
             GROUP BY RbReference
         ) A ON A.RbReference = SPU.MmsRebuiltCode
@@ -103,17 +114,34 @@ BEGIN
             LinkType, CoreCost, ArchVehicleListId, TotalCost, ScKeyword, ScDescription
         )
         SELECT
-            SPU.MmsStockCode, SPU.DateEntered, SPU.RebPartCost, SPU.UserEntered,
-            SPU.MmsCost, SPU.OemCost, SPU.MmsRebuiltCode, SPU.CostCentre,
-            SPU.QtyReqd, SPU.PercentUsage, @LinkNumber, 'N', @TypeId,
-            SBCES.FinalCost(
-                TRY_CAST(REPLACE(SPU.PercentUsage, ',', '.') AS DECIMAL(5,2)),
-                TRY_CAST(SPU.QtyReqd AS DECIMAL(18,2)),
-                SPU.CoreCost, 0
-            ), @ArchId,
-            ISNULL(SPU.MmsCost * TRY_CAST(SPU.QtyReqd AS DECIMAL(18,2)) 
-                * (TRY_CAST(REPLACE(SPU.PercentUsage, ',', '.') AS DECIMAL(5,2))/100), 0),
-            ISNULL(SCP.PartType, ''), ISNULL(SCP.DetailedDesc, '')
+            SPU.MmsStockCode, 
+            SPU.DateEntered, 
+            TRY_CAST(SPU.RebPartCost AS DECIMAL(18,2)),
+            SPU.UserEntered,
+            TRY_CAST(SPU.MmsCost AS DECIMAL(18,2)),
+            TRY_CAST(SPU.OemCost AS DECIMAL(18,2)),
+            SPU.MmsRebuiltCode, 
+            SPU.CostCentre,
+            TRY_CAST(SPU.QtyReqd AS DECIMAL(18,2)),
+            SPU.PercentUsage, 
+            @LinkNumber, 
+            'N', 
+            @TypeId,
+            TRY_CAST(SBCES.FinalCost(
+                REPLACE(SPU.PercentUsage, ',', '.'),
+                SPU.QtyReqd,
+                SPU.CoreCost, 
+                0
+            ) AS DECIMAL(18,2)), 
+            @ArchId,
+            ROUND(
+                TRY_CAST(SPU.MmsCost AS DECIMAL(18,2)) 
+                * TRY_CAST(SPU.QtyReqd AS DECIMAL(18,2))
+                * (TRY_CAST(REPLACE(SPU.PercentUsage, ',', '.') AS DECIMAL(5,2))/100, 
+                2
+            ),
+            ISNULL(SCP.PartType, ''), 
+            ISNULL(SCP.DetailedDesc, '')
         FROM SBCES.ScPartsUsed SPU
         LEFT JOIN SBCES.StockCodedParts SCP ON SCP.MmsStockCode = SPU.MmsStockCode
         WHERE SPU.LinkCode = @LinkNumber 
@@ -128,36 +156,56 @@ BEGIN
             ArchVehicleListId, TotalCost
         )
         SELECT
-            NPU.OrigSuppNum, NPU.OrigSupplierName, NPU.CostCentre,
-            NPU.QtyReqd, NPU.PercentUsage, NPU.DateEntered, NPU.EnteredBy,
-            NPU.LinkCode, NPU.Cost, NPU.LinkType,
-            SBCES.FinalCost(
-                TRY_CAST(REPLACE(NPU.PercentUsage, ',', '.') AS DECIMAL(5,2)),
-                TRY_CAST(NPU.QtyReqd AS DECIMAL(18,2)),
-                NPU.CoreCost, 0
-            ), @ArchId,
-            ISNULL(NPU.Cost * TRY_CAST(NPU.QtyReqd AS DECIMAL(18,2)) 
-                * (TRY_CAST(REPLACE(NPU.PercentUsage, ',', '.') AS DECIMAL(5,2))/100), 0)
+            NPU.OrigSuppNum, 
+            NPU.OrigSupplierName, 
+            NPU.CostCentre,
+            NPU.QtyReqd, 
+            NPU.PercentUsage, 
+            NPU.DateEntered, 
+            NPU.EnteredBy,
+            NPU.LinkCode, 
+            NPU.Cost, 
+            NPU.LinkType,
+            TRY_CAST(SBCES.FinalCost(
+                REPLACE(NPU.PercentUsage, ',', '.'),
+                NPU.QtyReqd,
+                NPU.CoreCost, 
+                0
+            ) AS DECIMAL(18,2)), 
+            @ArchId,
+            ROUND(
+                TRY_CAST(NPU.Cost AS DECIMAL(18,2)) 
+                * TRY_CAST(NPU.QtyReqd AS DECIMAL(18,2))
+                * (TRY_CAST(REPLACE(NPU.PercentUsage, ',', '.') AS DECIMAL(5,2))/100, 
+                2
+            )
         FROM SBCES.NscPartsUsed NPU
-        WHERE NPU.LinkCode = @LinkNumber AND NPU.LinkType = @TypeId;
+        WHERE NPU.LinkCode = @LinkNumber 
+          AND NPU.LinkType = @TypeId;
 
-        -- Step 5: Archive Labour CC Totals
+        -- Step 5: Archive Labour CC Totals (Fixed SUM)
         PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Step 5: Inserting into ArchVehLabourCcTotal';
         SELECT @Price = SBCES.GetLabourCost(@LinkNumber, @TypeId);
 
         INSERT INTO SBCES.ArchVehLabourCcTotal (
             CostCentre, TotalHours, ArchVehicleListId
         )
-        SELECT CC, SUM(TRY_CAST(ExtendedTime AS DECIMAL(18,2))), @ArchId
+        SELECT 
+            CC, 
+            ROUND(SUM(TRY_CAST(ExtendedTime AS DECIMAL(18,2)), 2),
+            @ArchId
         FROM SBCES.TempLabourList
         GROUP BY CC;
 
-        -- Step 6: Archive Materials CC Totals
+        -- Step 6: Archive Materials CC Totals (Fixed SUM)
         PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Step 6: Inserting into ArchVehMaterialsCcTotal';
         INSERT INTO SBCES.ArchVehMaterialsCcTotal (
             CostCentre, TotalCost, ArchVehicleListId
         )
-        SELECT CostCentre, SUM(TRY_CAST(TotalCost AS DECIMAL(18,2))), @ArchId
+        SELECT 
+            CostCentre, 
+            ROUND(SUM(TRY_CAST(TotalCost AS DECIMAL(18,2))), 2),
+            @ArchId
         FROM SBCES.TempMaterialsList
         GROUP BY CostCentre;
 
@@ -166,7 +214,10 @@ BEGIN
         INSERT INTO SBCES.ArchVehKits (
             PartNumber, EstimatedCost, ArchVehicleListId
         )
-        SELECT KU.PartNumber, KM.EstimatedCost, @ArchId
+        SELECT 
+            KU.PartNumber, 
+            TRY_CAST(KM.EstimatedCost AS DECIMAL(18,2)), 
+            @ArchId
         FROM SBCES.KitsUsed KU
         INNER JOIN SBCES.KitsMasterlist KM ON KU.PartNumber = KM.PartNumber
         WHERE KU.LinkCode = @LinkNumber;
