@@ -1,0 +1,125 @@
+ALTER FUNCTION [SBCES].[FinalCost]
+    (@ViPercent VARCHAR(20),
+     @ViQuantity VARCHAR(20),
+     @ViCost DECIMAL(10,2),
+     @ViCoreCost DECIMAL(10,2))
+RETURNS DECIMAL(18,2) AS  -- Changed return type to DECIMAL
+BEGIN
+    DECLARE @Total DECIMAL(38,4);
+    
+    SET @Total = (CAST(REPLACE(ISNULL(@ViPercent,'0'),',','.') AS DECIMAL(10,4))/100 
+                * TRY_CAST(@ViQuantity AS DECIMAL(10,4)) 
+                * @ViCost;
+    RETURN ROUND(@Total - @ViCoreCost, 2);
+END;
+GO
+
+CREATE PROCEDURE [SBCES].[GetMaterialCost]
+    @IdNum VARCHAR(50),
+    @Type VARCHAR(50),
+    @Result DECIMAL(18,2) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @FinalPrice DECIMAL(18,2),
+            @KitTotal DECIMAL(18,2),
+            @Count INT,
+            @ErrorMessage NVARCHAR(4000),
+            @SqlCommand NVARCHAR(MAX);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Starting GetMaterialCost procedure';
+        TRUNCATE TABLE SBCES.TempMaterialsList;
+
+        -- Fixed column list for INSERT
+        INSERT INTO SBCES.TempMaterialsList 
+            (AssemblyArea, CostCentre, TotalCost, TaxableCost, LinkCode, TotalCostCopy)
+        SELECT
+            ISNULL(C.Name, 'NONE'),
+            ISNULL(A.CostCentre, '0'),
+            ISNULL(SUM(A.Cost), 0),
+            ISNULL(SUM(A.TaxCost), 0),
+            @IdNum,
+            ISNULL(SUM(A.Cost), 0)  -- Separate column for copy
+        FROM (
+            SELECT 
+                CostCentre,
+                SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) 
+                - SBCES.FinalCost(PercentUsage, QtyReqd, CoreCost, 0) AS Cost,
+                SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS TaxCost
+            FROM SBCES.ScPartsUsed
+            WHERE LinkCode = UPPER(@IdNum)
+                AND RebuiltPart = 'N'
+                AND LinkType = UPPER(@Type)
+            
+            UNION ALL
+            
+            SELECT 
+                NP.CostCentre,
+                SBCES.FinalCost(NP.PercentUsage, NP.QtyReqd, NSC.OemPartCost, 0)
+                - SBCES.FinalCost(NP.PercentUsage, NP.QtyReqd, NP.CoreCost, 0),
+                SBCES.FinalCost(NP.PercentUsage, NP.QtyReqd, NSC.OemPartCost, 0)
+            FROM SBCES.NscPartsUsed NP
+            LEFT JOIN SBCES.NonStockCodedParts NSC ON NSC.Id = NP.Id
+            WHERE NP.LinkCode = UPPER(@IdNum)
+                AND NP.LinkType = UPPER(@Type)
+        ) A
+        LEFT JOIN SBCES.CostCentres C ON C.CostCentre = A.CostCentre
+        GROUP BY A.CostCentre, C.Name;
+
+        -- Dynamic SQL execution for WriteMaterials
+        SET @SqlCommand = N'';
+        
+        SELECT @SqlCommand += 
+            N'EXEC SBCES.WriteMaterials ' +
+            N'@RebuiltCode = ''' + MmsRebuiltCode + ''', ' +
+            N'@Quantity = ' + CONVERT(NVARCHAR(50), 
+                QtyReqd * TRY_CAST(REPLACE(ISNULL(PercentUsage, '0'), ',', '.') AS DECIMAL(5,2)) / 100) + ', ' +
+            N'@LinkCode = ''' + MmsRebuiltCode + ''', ' +
+            N'@Mode = 1; '
+        FROM SBCES.ScPartsUsed
+        WHERE RebuiltPart = 'Y'
+            AND LinkType = UPPER(@Type)
+            AND UPPER(LinkCode) = UPPER(@IdNum)
+        GROUP BY MmsRebuiltCode, QtyReqd, PercentUsage;
+
+        IF @SqlCommand <> N''
+        BEGIN
+            EXEC sp_executesql @SqlCommand;
+        END
+
+        -- Kit processing
+        IF UPPER(@Type) = 'BUS'
+        BEGIN
+            SELECT @KitTotal = TotalKitCost 
+            FROM SBCES.OemKitsTotal2 
+            WHERE Link = @IdNum;
+
+            IF @KitTotal IS NOT NULL
+            BEGIN
+                INSERT INTO SBCES.TempMaterialsList 
+                    (AssemblyArea, CostCentre, TotalCost, TaxableCost, LinkCode, TotalCostCopy)
+                VALUES ('KITS', '05H7', @KitTotal, @KitTotal, @IdNum, @KitTotal);
+            END
+        END
+
+        -- Final calculation
+        SELECT @FinalPrice = ROUND(SUM(TotalCost), 2)
+        FROM SBCES.TempMaterialsList;
+
+        SET @Result = @FinalPrice;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        SET @ErrorMessage = ERROR_MESSAGE();
+        PRINT 'Error: ' + @ErrorMessage;
+        SET @Result = -1;
+        THROW;
+    END CATCH
+END;
+GO
