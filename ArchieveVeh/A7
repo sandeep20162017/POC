@@ -1,0 +1,157 @@
+ALTER PROCEDURE [SBCES].[GetMaterialCost]
+    @IdNum VARCHAR(50),
+    @Type VARCHAR(50),
+    @Result DECIMAL(18,2) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @FinalPrice DECIMAL(18,2),
+            @KitTotal DECIMAL(18,2),
+            @Count INT,
+            @ErrorMessage NVARCHAR(4000),
+            @SqlCommand NVARCHAR(MAX),
+            @ErrorLine INT;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Starting GetMaterialCost procedure';
+        
+        -- Line 15: Truncate temp table
+        TRUNCATE TABLE SBCES.TempMaterialsList;
+
+        -- Line 18: Process main materials with enhanced casting
+        INSERT INTO SBCES.TempMaterialsList 
+            (AssemblyArea, CostCentre, TotalCost, TaxableCost, RbReference, TotalUnitCost)
+        SELECT
+            ISNULL(C.Name, 'NONE'),
+            ISNULL(A.CostCentre, '0'),
+            ISNULL(SUM(A.Cost), 0),
+            ISNULL(SUM(A.TaxCost), 0),
+            @IdNum,
+            ISNULL(SUM(A.Cost), 0)
+        FROM (
+            SELECT 
+                CostCentre,
+                TRY_CAST(SBCES.FinalCost(
+                    REPLACE(ISNULL(PercentUsage,'0'), ',', '.'), 
+                    ISNULL(TRY_CAST(QtyReqd AS DECIMAL(18,2)), 0), 
+                    ISNULL(MmsCost, 0), 
+                    0
+                ) AS DECIMAL(18,2)) 
+                - TRY_CAST(SBCES.FinalCost(
+                    REPLACE(ISNULL(PercentUsage,'0'), ',', '.'), 
+                    ISNULL(TRY_CAST(QtyReqd AS DECIMAL(18,2)), 0), 
+                    ISNULL(CoreCost, 0), 
+                    0
+                ) AS DECIMAL(18,2)) AS Cost,
+                TRY_CAST(SBCES.FinalCost(
+                    REPLACE(ISNULL(PercentUsage,'0'), ',', '.'), 
+                    ISNULL(TRY_CAST(QtyReqd AS DECIMAL(18,2)), 0), 
+                    ISNULL(MmsCost, 0), 
+                    0
+                ) AS DECIMAL(18,2)) AS TaxCost
+            FROM SBCES.ScPartsUsed
+            WHERE LinkCode = UPPER(@IdNum)
+                AND RebuiltPart = 'N'
+                AND LinkType = UPPER(@Type)
+            
+            UNION ALL
+            
+            SELECT 
+                NP.CostCentre,
+                TRY_CAST(SBCES.FinalCost(
+                    REPLACE(ISNULL(NP.PercentUsage,'0'), ',', '.'), 
+                    ISNULL(TRY_CAST(NP.QtyReqd AS DECIMAL(18,2)), 0), 
+                    ISNULL(NSC.OemPartCost, 0), 
+                    0
+                ) AS DECIMAL(18,2))
+                - TRY_CAST(SBCES.FinalCost(
+                    REPLACE(ISNULL(NP.PercentUsage,'0'), ',', '.'), 
+                    ISNULL(TRY_CAST(NP.QtyReqd AS DECIMAL(18,2)), 0), 
+                    ISNULL(NP.CoreCost, 0), 
+                    0
+                ) AS DECIMAL(18,2)),
+                TRY_CAST(SBCES.FinalCost(
+                    REPLACE(ISNULL(NP.PercentUsage,'0'), ',', '.'), 
+                    ISNULL(TRY_CAST(NP.QtyReqd AS DECIMAL(18,2)), 0), 
+                    ISNULL(NSC.OemPartCost, 0), 
+                    0
+                ) AS DECIMAL(18,2))
+            FROM SBCES.NscPartsUsed NP
+            LEFT JOIN SBCES.NonStockCodedParts NSC ON NSC.Id = NP.Id
+            WHERE NP.LinkCode = UPPER(@IdNum)
+                AND NP.LinkType = UPPER(@Type)
+        ) A
+        LEFT JOIN SBCES.CostCentres C ON C.CostCentre = A.CostCentre
+        GROUP BY A.CostCentre, C.Name;
+
+        -- Line 61: Process rebuilt parts with safe numeric conversion (FIXED)
+        SET @SqlCommand = N'';
+        
+        SELECT @SqlCommand += 
+            N'EXEC SBCES.WriteMaterials ' +
+            N'@ViIdnum = ''' + MmsRebuiltCode + ''', ' +
+            N'@Quantity = ' + CONVERT(NVARCHAR(50), 
+                ISNULL(TRY_CAST(
+                    TRY_CAST(QtyReqd AS DECIMAL(18,2)) 
+                    * TRY_CAST(REPLACE(ISNULL(PercentUsage, '0'), ',', '.') AS DECIMAL(5,2)) 
+                    / 100 AS DECIMAL(18,2)), 0)
+                ) + ', ' +
+            N'@RBReference = ''' + MmsRebuiltCode + ''', ' +
+            N'@ViAdjustment2 = 1.0; '
+        FROM SBCES.ScPartsUsed
+        WHERE RebuiltPart = 'Y'
+            AND LinkType = UPPER(@Type)
+            AND UPPER(LinkCode) = UPPER(@IdNum)
+        GROUP BY MmsRebuiltCode, QtyReqd, PercentUsage;
+
+        IF @SqlCommand <> N''
+        BEGIN
+            EXEC sp_executesql @SqlCommand;
+        END
+
+        -- Line 89: Process kits with null handling
+        IF UPPER(@Type) = 'BUS'
+        BEGIN
+            SELECT @KitTotal = ISNULL(TRY_CAST(TotalKitCost AS DECIMAL(18,2)), 0)
+            FROM SBCES.OemKitsTotal2 
+            WHERE Link = @IdNum;
+
+            IF @KitTotal > 0
+            BEGIN
+                INSERT INTO SBCES.TempMaterialsList 
+                    (AssemblyArea, CostCentre, TotalCost, TaxableCost, RbReference, TotalUnitCost)
+                VALUES ('KITS', '05H7', @KitTotal, @KitTotal, @IdNum, @KitTotal);
+            END
+        END
+
+        -- Line 103: Final calculation with null protection
+        SELECT @FinalPrice = ROUND(ISNULL(SUM(TRY_CAST(TotalUnitCost AS DECIMAL(18,2)), 0), 2)
+        FROM SBCES.TempMaterialsList;
+
+        SET @Result = @FinalPrice;
+        COMMIT TRANSACTION;
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Procedure completed successfully';
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        
+        SET @ErrorLine = ERROR_LINE();
+        SET @ErrorMessage = 
+            'Error in line ' + CAST(@ErrorLine AS VARCHAR(10)) + ': ' + 
+            ERROR_MESSAGE();
+        
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] ' + @ErrorMessage;
+        SET @Result = -1;
+        
+        -- Optional: Insert error details into error logging table
+        -- INSERT INTO SBCES.ErrorLog (ErrorMessage, ErrorLine, ErrorTime)
+        -- VALUES (@ErrorMessage, @ErrorLine, GETDATE());
+        
+        THROW;
+    END CATCH
+END;
+GO
