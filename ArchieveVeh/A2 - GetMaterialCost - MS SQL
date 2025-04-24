@@ -1,0 +1,141 @@
+CREATE PROCEDURE [SBCES].[GetMaterialCost]
+    @IdNum VARCHAR(50),
+    @Type VARCHAR(50),
+    @Result DECIMAL(18,2) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @Price DECIMAL(18,2),
+            @FinalPrice DECIMAL(18,2),
+            @KitTotal DECIMAL(18,2),
+            @Count INT,
+            @ErrorMessage NVARCHAR(4000);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Starting GetMaterialCost procedure';
+
+        -- Truncate temp table
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Truncating TempMaterialsList';
+        TRUNCATE TABLE SBCES.TempMaterialsList;
+
+        -- Process main materials
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Processing main materials';
+        INSERT INTO SBCES.TempMaterialsList (AssemblyArea, CostCentre, TotalCost, TaxableCost, LinkCode, TotalCostCopy)
+        SELECT
+            ISNULL(C.Name, 'NONE') AS AssemblyArea,
+            ISNULL(A.CostCentre, '0') AS CostCentre,
+            ISNULL(SUM(A.Cost), 0) AS TotalCost,
+            ISNULL(SUM(A.TaxCost), 0) AS TaxableCost,
+            @IdNum,
+            ISNULL(SUM(A.Cost), 0)
+        FROM (
+            SELECT 
+                CostCentre,
+                SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) 
+                - SBCES.FinalCost(PercentUsage, QtyReqd, CoreCost, 0) AS Cost,
+                SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS TaxCost
+            FROM SBCES.ScPartsUsed
+            WHERE LinkCode = UPPER(@IdNum)
+                AND RebuiltPart = 'N'
+                AND LinkType = UPPER(@Type)
+            
+            UNION ALL
+            
+            SELECT 
+                NP.CostCentre,
+                SBCES.FinalCost(NP.PercentUsage, NP.QtyReqd, NSC.OemPartCost, 0)
+                - SBCES.FinalCost(NP.PercentUsage, NP.QtyReqd, NP.CoreCost, 0) AS Cost,
+                SBCES.FinalCost(NP.PercentUsage, NP.QtyReqd, NSC.OemPartCost, 0) AS TaxCost
+            FROM SBCES.NscPartsUsed NP
+            LEFT JOIN SBCES.NonStockCodedParts NSC ON NSC.Id = NP.Id
+            WHERE NP.LinkCode = UPPER(@IdNum)
+                AND NP.LinkType = UPPER(@Type)
+        ) A
+        LEFT JOIN SBCES.CostCentres C ON C.CostCentre = A.CostCentre
+        GROUP BY A.CostCentre, C.Name;
+
+        -- Check for rebuilt parts
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Checking rebuilt parts';
+        SELECT @Count = COUNT(*) 
+        FROM SBCES.ScPartsUsed
+        WHERE RebuiltPart = 'Y'
+            AND LinkType = UPPER(@Type)
+            AND UPPER(LinkCode) = UPPER(@IdNum);
+
+        IF @Count > 0
+        BEGIN
+            PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Processing rebuilt parts';
+            DECLARE rebCur CURSOR FOR
+                SELECT DISTINCT
+                    UPPER(LinkCode) AS LinkCode,
+                    QtyReqd,
+                    PercentUsage,
+                    MmsRebuiltCode
+                FROM SBCES.ScPartsUsed
+                WHERE RebuiltPart = 'Y'
+                    AND LinkType = UPPER(@Type)
+                    AND UPPER(LinkCode) = UPPER(@IdNum);
+
+            DECLARE @LinkCode VARCHAR(30),
+                    @QtyReqd DECIMAL(18,2),
+                    @PercentUsage VARCHAR(10),
+                    @RebuiltCode VARCHAR(50);
+
+            OPEN rebCur;
+            FETCH NEXT FROM rebCur INTO @LinkCode, @QtyReqd, @PercentUsage, @RebuiltCode;
+
+            WHILE @@FETCH_STATUS = 0
+            BEGIN
+                EXEC SBCES.WriteMaterials 
+                    @RebuiltCode = @RebuiltCode,
+                    @Quantity = @QtyReqd * TRY_CAST(REPLACE(ISNULL(@PercentUsage, '0'), ',', '.') AS DECIMAL(5,2)) / 100,
+                    @LinkCode = @RebuiltCode,
+                    @Mode = 1;
+
+                FETCH NEXT FROM rebCur INTO @LinkCode, @QtyReqd, @PercentUsage, @RebuiltCode;
+            END
+
+            CLOSE rebCur;
+            DEALLOCATE rebCur;
+        END
+
+        -- Process kits
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Checking kits';
+        SELECT @KitTotal = COUNT(*) 
+        FROM SBCES.OemKitsTotal2 
+        WHERE Link = @IdNum;
+
+        IF UPPER(@Type) = 'BUS' AND @KitTotal > 0
+        BEGIN
+            PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Inserting kit costs';
+            SELECT @KitTotal = TotalKitCost 
+            FROM SBCES.OemKitsTotal2 
+            WHERE Link = @IdNum;
+
+            INSERT INTO SBCES.TempMaterialsList 
+                (AssemblyArea, CostCentre, TotalCost, TaxableCost, LinkCode, TotalCostCopy)
+            VALUES ('KITS', '05H7', @KitTotal, @KitTotal, @IdNum, @KitTotal);
+        END
+
+        -- Calculate final price
+        SELECT @FinalPrice = ROUND(SUM(ISNULL(TotalCost, 0)), 2)
+        FROM SBCES.TempMaterialsList;
+
+        SET @Result = @FinalPrice;
+        COMMIT TRANSACTION;
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Procedure completed successfully';
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        
+        SET @ErrorMessage = ERROR_MESSAGE();
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Error: ' + @ErrorMessage;
+        SET @Result = -1;
+        THROW;
+    END CATCH
+END;
+GO
