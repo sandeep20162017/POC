@@ -1,110 +1,191 @@
-CREATE PROCEDURE [SBCES].[GetMaterialCost]
-    @IdNum VARCHAR(50),
-    @Type VARCHAR(50),
-    @Result DECIMAL(18,2) OUTPUT
+CREATE PROCEDURE [SBCES].[ArchiveVehicle]
+    @VehSeriesCode VARCHAR(50),
+    @Username VARCHAR(50),
+    @LinkNumber VARCHAR(25),
+    @TypeId VARCHAR(25),
+    @LabourCost DECIMAL(18,2),
+    @LabourOverheadAmount DECIMAL(18,2),
+    @LabourTotal DECIMAL(18,2),
+    @MaterialsTotal DECIMAL(18,2),
+    @TotalBusEstimateCost DECIMAL(18,2),
+    @TaxTotal DECIMAL(18,2),
+    @TotalCostTax DECIMAL(18,2),
+    @OemKitsTotal DECIMAL(18,2),
+    @RetVal INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @FinalPrice DECIMAL(18,2),
-            @KitTotal DECIMAL(18,2),
-            @Count INT,
+    DECLARE @ArchId INT,
+            @Price DECIMAL(18,2),
             @ErrorMessage NVARCHAR(4000),
-            @SqlCommand NVARCHAR(MAX);
+            @RowCount INT;
 
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Starting GetMaterialCost procedure';
-        TRUNCATE TABLE SBCES.TempMaterialsList;
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Starting ArchiveVehicle procedure';
 
-        -- Process main materials with explicit casting
-        INSERT INTO SBCES.TempMaterialsList 
-            (AssemblyArea, CostCentre, TotalCost, TaxableCost, LinkCode, TotalCostCopy)
+        -- Step 1: Generate ArchID and insert into ArchVehicleList
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Step 1: Inserting into ArchVehicleList';
+        SELECT @ArchId = ISNULL(MAX(ArchVehicleListId), 0) + 1 
+        FROM SBCES.ArchVehicleList;
+
+        INSERT INTO SBCES.ArchVehicleList (
+            VehSeriesCode, ProjDesc, Make, Model, Year, Engine, Transmission,
+            Differential, DateArchived, ArchivedBy, ArchVehicleListId, LabourCost,
+            LabourOverheadAmount, LabourTotal, MaterialsTotal, TotalBusEstimateCost,
+            TotalTax, TotalCostTax, OemKitsTotal, SopNumber, OldId, NumOfVehicles
+        )
         SELECT
-            ISNULL(C.Name, 'NONE'),
-            ISNULL(A.CostCentre, '0'),
-            ISNULL(SUM(TRY_CAST(A.Cost AS DECIMAL(18,2))), 0),
-            ISNULL(SUM(TRY_CAST(A.TaxCost AS DECIMAL(18,2))), 0),
-            @IdNum,
-            ISNULL(SUM(TRY_CAST(A.Cost AS DECIMAL(18,2))), 0)
-        FROM (
-            SELECT 
-                CostCentre,
-                TRY_CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18,2)) 
-                - TRY_CAST(SBCES.FinalCost(PercentUsage, QtyReqd, CoreCost, 0) AS DECIMAL(18,2)) AS Cost,
-                TRY_CAST(SBCES.FinalCost(PercentUsage, QtyReqd, MmsCost, 0) AS DECIMAL(18,2)) AS TaxCost
-            FROM SBCES.ScPartsUsed
-            WHERE LinkCode = UPPER(@IdNum)
-                AND RebuiltPart = 'N'
-                AND LinkType = UPPER(@Type)
-            
-            UNION ALL
-            
-            SELECT 
-                NP.CostCentre,
-                TRY_CAST(SBCES.FinalCost(NP.PercentUsage, NP.QtyReqd, NSC.OemPartCost, 0) AS DECIMAL(18,2))
-                - TRY_CAST(SBCES.FinalCost(NP.PercentUsage, NP.QtyReqd, NP.CoreCost, 0) AS DECIMAL(18,2)),
-                TRY_CAST(SBCES.FinalCost(NP.PercentUsage, NP.QtyReqd, NSC.OemPartCost, 0) AS DECIMAL(18,2))
-            FROM SBCES.NscPartsUsed NP
-            LEFT JOIN SBCES.NonStockCodedParts NSC ON NSC.Id = NP.Id
-            WHERE NP.LinkCode = UPPER(@IdNum)
-                AND NP.LinkType = UPPER(@Type)
-        ) A
-        LEFT JOIN SBCES.CostCentres C ON C.CostCentre = A.CostCentre
-        GROUP BY A.CostCentre, C.Name;
+            VehSeriesCode, ProjDesc, Make, Model, Year, Engine, Transmission,
+            Differential, GETDATE(), @Username, @ArchId, @LabourCost,
+            @LabourOverheadAmount, @LabourTotal, @MaterialsTotal, @TotalBusEstimateCost,
+            @TaxTotal, @TotalCostTax, @OemKitsTotal, SopNumber, VehicleListId, NumOfVehicles
+        FROM SBCES.VehicleList
+        WHERE VehicleListId = @LinkNumber;
 
-        -- Process rebuilt parts using dynamic SQL
-        SET @SqlCommand = N'';
-        
-        SELECT @SqlCommand += 
-            N'EXEC SBCES.WriteMaterials ' +
-            N'@RebuiltCode = ''' + MmsRebuiltCode + ''', ' +
-            N'@Quantity = ' + CONVERT(NVARCHAR(50), 
-                TRY_CAST(QtyReqd AS DECIMAL(18,2)) 
-                * TRY_CAST(REPLACE(ISNULL(PercentUsage, '0'), ',', '.') AS DECIMAL(5,2)) 
-                / 100) + ', ' +
-            N'@LinkCode = ''' + MmsRebuiltCode + ''', ' +
-            N'@Mode = 1; '
-        FROM SBCES.ScPartsUsed
-        WHERE RebuiltPart = 'Y'
-            AND LinkType = UPPER(@Type)
-            AND UPPER(LinkCode) = UPPER(@IdNum)
-        GROUP BY MmsRebuiltCode, QtyReqd, PercentUsage;
-
-        IF @SqlCommand <> N''
+        SELECT @RowCount = @@ROWCOUNT;
+        IF @RowCount = 0
         BEGIN
-            EXEC sp_executesql @SqlCommand;
-        END
+            SET @ErrorMessage = 'No data found in VehicleList for LinkNumber: ' + @LinkNumber;
+            RAISERROR(@ErrorMessage, 16, 1);
+        END;
 
-        -- Process kits
-        IF UPPER(@Type) = 'BUS'
-        BEGIN
-            SELECT @KitTotal = TRY_CAST(TotalKitCost AS DECIMAL(18,2))
-            FROM SBCES.OemKitsTotal2 
-            WHERE Link = @IdNum;
+        -- Step 2: Archive Employee Labour
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Step 2: Inserting into ArchVehEmployeeLabour';
+        INSERT INTO SBCES.ArchVehEmployeeLabour (
+            LabourDefn, DateEntered, LinkNumber, TypeId, CostCentre, Task,
+            LabourType, Usage, HrsReqd, AdjHrs, TimeAddition, ArchVehicleListId
+        )
+        SELECT
+            LabourDefn, DateEntered, LinkNumber, TypeId, CostCentre, Task,
+            LabourType, Usage, HrsReqd, AdjHrs, TimeAddition, @ArchId
+        FROM SBCES.EmployeeLabour
+        WHERE LinkNumber = @LinkNumber AND TypeId = @TypeId;
 
-            IF @KitTotal IS NOT NULL
-            BEGIN
-                INSERT INTO SBCES.TempMaterialsList 
-                    (AssemblyArea, CostCentre, TotalCost, TaxableCost, LinkCode, TotalCostCopy)
-                VALUES ('KITS', '05H7', @KitTotal, @KitTotal, @IdNum, @KitTotal);
-            END
-        END
+        -- Step 3: Archive SC Parts (Rebuilt)
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Step 3: Inserting Rebuilt SC Parts';
+        SELECT @Price = SBCES.GetMaterialCost(@LinkNumber, @TypeId);
 
-        -- Final calculation
-        SELECT @FinalPrice = ROUND(SUM(TRY_CAST(TotalCost AS DECIMAL(18,2)), 2)
-        FROM SBCES.TempMaterialsList;
+        INSERT INTO SBCES.ArchVehScPartsUsed (
+            MmsStockCode, DateEntered, RebPartCost, UserEntered, MmsCost, OemCost,
+            MmsRebuiltCode, CostCentre, QtyReqd, PercentUsage, LinkCode, RebuiltPart,
+            LinkType, CoreCost, ArchVehicleListId, TotalCost, ScKeyword, ScDescription
+        )
+        SELECT
+            UPPER(SPU.MmsStockCode), SPU.DateEntered,
+            ISNULL(A.RbUnitCost, 0), UPPER(SPU.UserEntered),
+            ISNULL(SPU.MmsCost, 0), ISNULL(SPU.OemCost, 0),
+            UPPER(SPU.MmsRebuiltCode), UPPER(SPU.CostCentre),
+            SPU.QtyReqd, REPLACE(SPU.PercentUsage, ',', '.'),
+            @LinkNumber, 'Y', 'RB', SPU.CoreCost, @ArchId,
+            ISNULL(A.RbCost, 0), UPPER(RM.Keyword), UPPER(RM.DetailedDesc)
+        FROM SBCES.ScPartsUsed SPU
+        LEFT JOIN SBCES.RbMasterlist RM ON RM.RebuiltStockNum = SPU.MmsRebuiltCode
+        LEFT JOIN (
+            SELECT RbReference,
+                ROUND(SUM(ISNULL(TRY_CAST(TotalCost AS DECIMAL(18,2)), 2) AS RbCost,
+                ROUND(SUM(ISNULL(TRY_CAST(TotalUnitCost AS DECIMAL(18,2)), 2) AS RbUnitCost
+            FROM SBCES.TempMaterialsList
+            GROUP BY RbReference
+        ) A ON A.RbReference = SPU.MmsRebuiltCode
+        WHERE SPU.LinkCode = @LinkNumber 
+          AND SPU.RebuiltPart = 'Y' 
+          AND SPU.LinkType = @TypeId;
 
-        SET @Result = ISNULL(@FinalPrice, 0);
+        -- Step 3b: Archive SC Parts (Non-Rebuilt)
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Step 3b: Inserting Non-Rebuilt SC Parts';
+        INSERT INTO SBCES.ArchVehScPartsUsed (
+            MmsStockCode, DateEntered, RebPartCost, UserEntered, MmsCost, OemCost,
+            MmsRebuiltCode, CostCentre, QtyReqd, PercentUsage, LinkCode, RebuiltPart,
+            LinkType, CoreCost, ArchVehicleListId, TotalCost, ScKeyword, ScDescription
+        )
+        SELECT
+            SPU.MmsStockCode, SPU.DateEntered, SPU.RebPartCost, SPU.UserEntered,
+            SPU.MmsCost, SPU.OemCost, SPU.MmsRebuiltCode, SPU.CostCentre,
+            SPU.QtyReqd, SPU.PercentUsage, @LinkNumber, 'N', @TypeId,
+            SBCES.FinalCost(
+                TRY_CAST(REPLACE(SPU.PercentUsage, ',', '.') AS DECIMAL(5,2)),
+                TRY_CAST(SPU.QtyReqd AS DECIMAL(18,2)),
+                SPU.CoreCost, 0
+            ), @ArchId,
+            ISNULL(SPU.MmsCost * TRY_CAST(SPU.QtyReqd AS DECIMAL(18,2)) 
+                * (TRY_CAST(REPLACE(SPU.PercentUsage, ',', '.') AS DECIMAL(5,2))/100), 0),
+            ISNULL(SCP.PartType, ''), ISNULL(SCP.DetailedDesc, '')
+        FROM SBCES.ScPartsUsed SPU
+        LEFT JOIN SBCES.StockCodedParts SCP ON SCP.MmsStockCode = SPU.MmsStockCode
+        WHERE SPU.LinkCode = @LinkNumber 
+          AND SPU.LinkType = @TypeId 
+          AND SPU.RebuiltPart = 'N';
+
+        -- Step 4: Archive NSC Parts
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Step 4: Inserting into ArchVehNscPartsUsed';
+        INSERT INTO SBCES.ArchVehNscPartsUsed (
+            OrigSuppNum, OrigSupplierName, CostCentre, QtyReqd, PercentUsage,
+            DateEntered, EnteredBy, LinkCode, Cost, LinkType, CoreCost,
+            ArchVehicleListId, TotalCost
+        )
+        SELECT
+            NPU.OrigSuppNum, NPU.OrigSupplierName, NPU.CostCentre,
+            NPU.QtyReqd, NPU.PercentUsage, NPU.DateEntered, NPU.EnteredBy,
+            NPU.LinkCode, NPU.Cost, NPU.LinkType,
+            SBCES.FinalCost(
+                TRY_CAST(REPLACE(NPU.PercentUsage, ',', '.') AS DECIMAL(5,2)),
+                TRY_CAST(NPU.QtyReqd AS DECIMAL(18,2)),
+                NPU.CoreCost, 0
+            ), @ArchId,
+            ISNULL(NPU.Cost * TRY_CAST(NPU.QtyReqd AS DECIMAL(18,2)) 
+                * (TRY_CAST(REPLACE(NPU.PercentUsage, ',', '.') AS DECIMAL(5,2))/100), 0)
+        FROM SBCES.NscPartsUsed NPU
+        WHERE NPU.LinkCode = @LinkNumber AND NPU.LinkType = @TypeId;
+
+        -- Step 5: Archive Labour CC Totals
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Step 5: Inserting into ArchVehLabourCcTotal';
+        SELECT @Price = SBCES.GetLabourCost(@LinkNumber, @TypeId);
+
+        INSERT INTO SBCES.ArchVehLabourCcTotal (
+            CostCentre, TotalHours, ArchVehicleListId
+        )
+        SELECT CC, SUM(TRY_CAST(ExtendedTime AS DECIMAL(18,2))), @ArchId
+        FROM SBCES.TempLabourList
+        GROUP BY CC;
+
+        -- Step 6: Archive Materials CC Totals
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Step 6: Inserting into ArchVehMaterialsCcTotal';
+        INSERT INTO SBCES.ArchVehMaterialsCcTotal (
+            CostCentre, TotalCost, ArchVehicleListId
+        )
+        SELECT CostCentre, SUM(TRY_CAST(TotalCost AS DECIMAL(18,2))), @ArchId
+        FROM SBCES.TempMaterialsList
+        GROUP BY CostCentre;
+
+        -- Step 7: Archive Kits
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Step 7: Inserting into ArchVehKits';
+        INSERT INTO SBCES.ArchVehKits (
+            PartNumber, EstimatedCost, ArchVehicleListId
+        )
+        SELECT KU.PartNumber, KM.EstimatedCost, @ArchId
+        FROM SBCES.KitsUsed KU
+        INNER JOIN SBCES.KitsMasterlist KM ON KU.PartNumber = KM.PartNumber
+        WHERE KU.LinkCode = @LinkNumber;
+
+        SET @RetVal = 0;
         COMMIT TRANSACTION;
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Procedure completed successfully';
     END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        
         SET @ErrorMessage = ERROR_MESSAGE();
-        PRINT 'Error: ' + @ErrorMessage;
-        SET @Result = -1;
+        PRINT '[' + CONVERT(VARCHAR, GETDATE(), 121) + '] Error: ' + @ErrorMessage;
+        
+        SET @RetVal = CASE 
+            WHEN ERROR_NUMBER() = 50000 THEN -1   -- No data found
+            ELSE -2                               -- Other errors
+        END;
+        
         THROW;
     END CATCH
 END;
