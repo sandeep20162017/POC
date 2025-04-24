@@ -1,0 +1,642 @@
+I have Oracle function  called ARCHIVE_VEHICLE. I want to migrate this function to MS SQL. MS SQL table schema is setup. Table column and function names with Oracle and 
+MS SQL match. Only difference is MS SQL uses CamelCase for Table, column an function names. Pls assist me in migrating following to MS SQL. Use schema name SBCES.
+I have aded a similar  migrated [ArchiveRBEstimate] for your reference. Add logging for debugging purpose. Use Camel Cases.
+FUNCTION ARCHIVE_VEHICLE
+    (vi_veh_series_code IN ARCH_VEHICLE_LIST.veh_series_code%TYPE,
+     vi_username IN ARCH_VEHICLE_LIST.archived_by%TYPE,
+     vi_link_number IN EMPLOYEE_LABOUR.link_number%TYPE,
+     vi_typeid IN EMPLOYEE_LABOUR.typeid%TYPE,
+     vi_labour_cost IN ARCH_VEHICLE_LIST.labour_cost%TYPE,
+     vi_labour_overhead_amount IN ARCH_VEHICLE_LIST.labour_overhead_amount%TYPE,
+     vi_labour_total IN ARCH_VEHICLE_LIST.labour_total%TYPE,
+     vi_materials_total IN ARCH_VEHICLE_LIST.materials_total%TYPE,
+     vi_total_bus_estimate_cost IN ARCH_VEHICLE_LIST.total_bus_estimate_cost%TYPE,
+     vi_tax_total IN ARCH_VEHICLE_LIST.total_tax%TYPE,
+     vi_total_cost_tax IN ARCH_VEHICLE_LIST.total_cost_tax%TYPE,
+     vi_oem_kits_total IN ARCH_VEHICLE_LIST.oem_kits_total%TYPE,
+     vo_ret_val OUT NUMBER) RETURN NUMBER IS
+
+arch_id NUMBER;
+ V_PRICE NUMBER;
+ emesg VARCHAR2(250);
+
+BEGIN
+    -- 1. Insert new record into the ARCH_RB_MASTERLIST table
+    INSERT INTO ARCH_VEHICLE_LIST
+        (veh_series_code,
+         proj_desc,
+         make,
+         model,
+         year,
+         engine,
+         transmission,
+         differential,
+         date_archived,
+         archived_by,
+         arch_vehicle_list_id,
+         labour_cost,
+         labour_overhead_amount,
+         labour_total,
+         materials_total,
+         total_bus_estimate_cost,
+         total_tax,
+         total_cost_tax,
+         oem_kits_total,
+         sopnumber,
+         OLD_ID,
+         num_of_vehicles
+        )
+    SELECT
+        veh_series_code,
+        proj_desc,
+        make,
+        model,
+        year,
+        engine,
+        transmission,
+        differential,
+        SYSDATE,
+        vi_username,
+        ARCH_VEHICLE_LIST_SEQ.NEXTVAL,
+        vi_labour_cost,
+        vi_labour_overhead_amount,
+        vi_labour_total,
+        vi_materials_total,
+        vi_total_bus_estimate_cost,
+        vi_tax_total,
+        vi_total_cost_tax,
+        vi_oem_kits_total,
+        sopnumber,
+        vehicle_list_id,
+        num_of_vehicles
+    FROM
+        VEHICLE_LIST
+    WHERE
+        vehicle_list_id = VI_LINK_NUMBER;
+
+-- 2. Insert record(s) into the ARCH_RB_EMPLOYEE_LABOUR table
+    INSERT INTO ARCH_VEH_EMPLOYEE_LABOUR
+        (
+         labour_defn,
+         date_entered,
+         link_number,
+         typeid,
+         costcentre,
+         ARCH_VEH_EMPLOYEE_LABOUR.task,
+         labour_type,
+         usage,
+         hrs_reqd,
+         adj_hrs,
+         time_addition,
+         arch_vehicle_list_id
+        )
+    SELECT
+        labour_defn,
+        date_entered,
+        link_number,
+        typeid,
+        costcentre,
+        EMPLOYEE_LABOUR.task,
+        labour_type,
+        usage,
+        hrs_reqd,
+        adj_hrs,
+        time_addition,
+        ARCH_VEHICLE_LIST_SEQ.CURRVAL
+    FROM
+        EMPLOYEE_LABOUR
+    WHERE
+        link_number = vi_link_number AND
+        typeid = vi_typeid;
+
+    -- 3. Insert record(s) into the ARCH_VEH_SC_PARTS_USED table
+V_PRICE := get_material_cost(vi_link_number,vi_typeid);
+
+    INSERT INTO ARCH_VEH_SC_PARTS_USED
+        (
+         mms_stock_code,
+         date_entered,
+         reb_part_cost,
+         user_entered,
+         mms_cost,
+         oem_cost,
+         mms_rebuilt_code,
+         cost_centre,
+         qty_reqd,
+         percent_usage,
+         link_code,
+         rebuilt_part,
+         link_type,
+         corecost,
+         arch_vehicle_list_id,
+         total_cost,
+         SC_KEYWORD,
+         SC_DESCRIPTION)
+
+        SELECT
+            upper(SC_PARTS_USED.mms_stock_code),
+            SC_PARTS_USED.date_entered,
+            nvl(A.RB_UNIT_COST,0) AS "UNIT COST",
+            upper(SC_PARTS_USED.user_entered),
+            nvl(SC_PARTS_USED.mms_cost,0),
+            nvl(SC_PARTS_USED.oem_cost,0),
+            UPPER(SC_PARTS_USED.mms_rebuilt_code) AS "REBUILT NUMBER",
+            UPPER(SC_PARTS_USED.cost_centre) AS "CC",
+            UPPER(SC_PARTS_USED.qty_reqd) AS "QTY",
+            REPLACE(SC_PARTS_USED.percent_usage,',','.') AS "%",
+            vi_link_number,
+            'Y',
+            'RB',
+            SC_PARTS_USED.corecost AS "CORE COST",
+            ARCH_VEHICLE_LIST_SEQ.CURRVAL,
+            nvl(A.RB_COST,0) AS "TOTAL COST",
+            UPPER(RB_MASTERLIST.keyword) AS "KEYWORD",
+            UPPER(RB_MASTERLIST.detailed_desc) AS "DESCRIPTION"
+        FROM
+            SC_PARTS_USED,
+            RB_MASTERLIST,
+            (SELECT
+            round(sum(total_cost),2) as RB_COST, round(sum(total_unit_cost),2) as RB_UNIT_COST , rb_reference
+        FROM
+            TEMP_materials_list
+        group by
+            rb_reference) A
+        WHERE
+            SC_PARTS_USED.link_code = vi_link_number AND
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = vi_typeid AND
+            RB_MASTERLIST.rebuilt_stock_num(+)= SC_PARTS_USED.mms_rebuilt_code AND
+            rb_reference (+)= SC_PARTS_USED.mms_rebuilt_code;
+
+   -- 3b. Insert record(s) into the ARCH_VEH_SC_PARTS_USED table
+    INSERT INTO ARCH_VEH_SC_PARTS_USED
+        (
+         mms_stock_code,
+         date_entered,
+         reb_part_cost,
+         user_entered,
+         mms_cost,
+         oem_cost,
+         mms_rebuilt_code,
+         cost_centre,
+         qty_reqd,
+         percent_usage,
+         link_code,
+         rebuilt_part,
+         link_type,
+         corecost,
+         arch_vehicle_list_id,
+         total_cost,
+         SC_KEYWORD,
+         SC_DESCRIPTION)
+    SELECT
+        A.mms_stock_code,
+        A.date_entered,
+        A.reb_part_cost,
+        A.user_entered,
+        A.mms_cost,
+        A.oem_cost,
+        A.mms_rebuilt_code,
+        A.cost_centre,
+        A.qty_reqd,
+        A.percent_usage,
+        A.link_code,
+        A.rebuilt_part,
+        A.link_type,
+        cast(FINAL_COST(a.percent_usage, a.qty_reqd, a.corecost, 0)as number) as CORECOST,
+        ARCH_VEHICLE_LIST_SEQ.CURRVAL,
+        A.mms_cost * cast(A.qty_reqd as number) * (to_number(replace(nvl(A.percent_usage,'0'),',','.'))/ 100),
+        NVL(B.part_type,'') ,
+        NVL(B.detailed_desc,'')
+    FROM
+        SC_PARTS_USED A, STOCK_CODED_PARTS B
+    WHERE
+        B.mms_stock_code (+)= A.mms_stock_code AND
+        link_code = vi_link_number AND
+        link_type = vi_typeid and
+        rebuilt_part = 'N';
+
+    -- 4. Insert record(s) into the ARCH_VEH_NSC_PARTS_USED table
+    INSERT INTO ARCH_VEH_NSC_PARTS_USED
+        (orig_supp_num,
+         orig_supplier_name,
+         cost_centre,
+         qty_reqd,
+         percent_usage,
+         date_entered,
+         entered_by,
+         link_code,
+         cost,
+         link_type,
+         corecost,
+         arch_vehicle_list_id,
+         total_cost)
+    SELECT
+        orig_supp_num,
+        orig_supplier_name,
+        cost_centre,
+        qty_reqd,
+        percent_usage,
+        date_entered,
+        entered_by,
+        link_code,
+        cost,
+        link_type,
+        cast(FINAL_COST(percent_usage, qty_reqd, corecost, 0)as number) as CORECOST,
+        ARCH_VEHICLE_LIST_SEQ.CURRVAL,
+        cost * cast(qty_reqd as number) * (to_number(replace(nvl(percent_usage,'0'),',','.'))/ 100)
+    FROM
+         NSC_PARTS_USED
+    WHERE
+        link_code = vi_link_number AND
+        link_type = vi_typeid;
+
+
+
+    SELECT
+        max(arch_vehicle_list_id)
+    INTO
+        arch_id
+    FROM ARCH_VEHICLE_LIST;
+
+    -- 5. Insert record(s) into the ARCH_RB_LABOUR_CC_TOTAL table
+      V_PRICE := get_labour_cost(vi_link_number,vi_typeid);
+
+    -- 5. Insert record(s) into the ARCH_RB_LABOUR_CC_TOTAL table
+    INSERT INTO ARCH_VEH_LABOUR_CC_TOTAL
+        (
+
+         cost_centre,
+         total_hours,
+         ARCH_VEHICLE_LIST_ID
+        )
+       SELECT
+            CC AS "COST CENTRE",
+            SUM(extended_time) AS "LABOUR HRS",
+            arch_id
+        FROM
+            TEMP_LABOUR_LIST
+        GROUP BY
+            CC;
+/*
+-- 6. Insert record(s) into the ARCH_RB_MATERIALS_CC_TOTAL table
+    INSERT INTO ARCH_VEH_MATERIALS_CC_TOTAL
+        (
+         cost_centre,
+         total_cost,
+         arch_vehicle_list_id
+        )
+
+
+    SELECT
+        a.cost_centre AS cost_centre,
+        sum(a.cost) AS total_cost,
+        arch_id
+    FROM
+        (SELECT
+            cost_centre,
+            FINAL_COST(percent_usage, qty_reqd, mms_cost, corecost) AS cost
+         FROM
+            SC_PARTS_USED
+         WHERE
+            link_code = vi_link_number AND
+            rebuilt_part = 'N' AND
+            link_type =vi_typeid
+            UNION ALL
+                SELECT
+                    cost_centre,
+                    FINAL_COST(percent_usage, qty_reqd, reb_part_cost, corecost) as cost
+                FROM
+                    SC_PARTS_USED
+                WHERE
+                    link_code = vi_link_number AND
+                    rebuilt_part = 'Y' AND
+                    link_type =vi_typeid
+                    UNION ALL
+                        SELECT
+                            cost_centre,
+                            FINAL_COST(percent_usage, qty_reqd, cost, corecost) as cost
+                        FROM
+                            NSC_PARTS_USED
+                        WHERE
+                            link_code = vi_link_number AND
+                            link_type =vi_typeid) a
+        GROUP BY
+            A.cost_centre; */
+/*Archive the kits attached to the vehicle estimate along with their prices */
+     INSERT INTO ARCH_VEH_KITS
+        (
+         part_number,
+         estimated_cost,
+         arch_vehicle_list_id
+        )
+    SELECT
+        KITS_USED.part_number,
+        KITS_MASTERLIST.estimated_cost,
+        ARCH_VEHICLE_LIST_SEQ.CURRVAL
+    FROM
+        KITS_USED,
+        KITS_MASTERLIST
+    WHERE
+        KITS_USED.part_number = KITS_MASTERLIST.part_number and
+        KITS_USED.link_code = vi_link_number;
+
+V_PRICE := get_material_cost(vi_link_number,vi_typeid);
+
+INSERT INTO ARCH_VEH_MATERIALS_CC_TOTAL
+        (COST_CENTRE,
+        TOTAL_COST,
+        ARCH_VEHICLE_LIST_ID
+
+        )
+        SELECT
+            COST_CENTRE AS "CC",
+            SUM(TOTAL_COST) AS "TOTAL COST",
+            arch_id
+        FROM
+            TEMP_MATERIALS_LIST
+        GROUP BY
+            COST_CENTRE;
+ --ARCHIVE RB PARTS IN VEHICLE
+
+
+    vo_ret_val := 0;
+    RETURN 0;
+
+    EXCEPTION
+        WHEN no_data_found THEN
+            ROLLBACK;
+            emesg := SQLERRM;
+            dbms_output.put_line(emesg);
+		    vo_ret_val := -1;
+		    RETURN -1;
+        WHEN others THEN
+            ROLLBACK;
+            emesg := SQLERRM;
+            dbms_output.put_line(emesg);
+
+            vo_ret_val := -2;
+            RETURN -1;
+END ARCHIVE_VEHICLE;
+Sample [ArchiveRBEstimate] for your reference :
+CREATE   PROCEDURE [SBCES].[ArchiveRBEstimate]
+    @RebuiltPartNum VARCHAR(25),
+    @LinkNumber VARCHAR(25),
+    @TypeId VARCHAR(25) = 'RB',
+    @Username VARCHAR(50)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE 
+        @ArchId INT,
+        @EmployeeLabourBaseId INT,
+        @ViLabourCost DECIMAL(18,2) = 0,
+        @ViLabourOverhead DECIMAL(18,2) = 0,
+        @ViMaterialsTotal DECIMAL(18,2) = 0,
+        @ViTaxTotal DECIMAL(18,2) = 0,
+        @ViTotalCostTax DECIMAL(18,2) = 0;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Step 1: Calculate Costs
+        EXEC SBCES.CalculateTotalLabourAndMaterialsPartsInRB
+            @RebuiltPartNum = @LinkNumber,
+            @TotalLabourCost = @ViLabourCost OUTPUT,
+            @TotalLabourOverHeadCost = @ViLabourOverhead OUTPUT,
+            @TotalMaterialCost = @ViMaterialsTotal OUTPUT,
+            @TaxTotal = @ViTaxTotal OUTPUT,
+            @TotalRebuiltPartCostWithTax = @ViTotalCostTax OUTPUT;
+
+        -- Force non-NULL values
+        SELECT 
+            @ViLabourCost = ISNULL(@ViLabourCost, 0),
+            @ViLabourOverhead = ISNULL(@ViLabourOverhead, 0),
+            @ViMaterialsTotal = ISNULL(@ViMaterialsTotal, 0),
+            @ViTaxTotal = ISNULL(@ViTaxTotal, 0),
+            @ViTotalCostTax = ISNULL(@ViTotalCostTax, 0);
+
+        -- Step 2: Generate ArchRbMasterlistId
+        SELECT @ArchId = ISNULL(MAX(ArchRbMasterlistId), 0) + 1 
+        FROM SBCES.ArchRbMasterlist;
+
+        -- Step 3: Insert into ArchRbMasterlist
+        INSERT INTO SBCES.ArchRbMasterlist (
+            ArchRbMasterlistId, MmsStockCode, ItemRefNumber, DetailedDesc, Keyword,
+            CorePartNum, RebuiltStockNum, CoreCharge, JobNumber, EstimatedCost,
+            SopNumber, DateEntered, EnteredBy, LabourCost, LabourOverheadAmount,
+            LabourTotal, MaterialsTotal, TotalRebuiltPartCost, TaxTotal, TotalCostTax
+        )
+        SELECT
+            @ArchId,
+            ISNULL(RM.MmsStockCode, ''),
+            ISNULL(RM.ItemRefNumber, ''),
+            ISNULL(RM.DetailedDesc, ''),
+            ISNULL(RM.Keyword, ''),
+            ISNULL(RM.CorePartNum, ''),
+            ISNULL(RM.RebuiltStockNum, ''),
+            ISNULL(RM.CoreCharge, ''),
+            ISNULL(RM.JobNumber, ''),
+            ISNULL(RM.EstimatedCost, 0),
+            ISNULL(RM.SopNumber, ''),
+            GETDATE(),
+            @Username,
+            @ViLabourCost,
+            @ViLabourOverhead,
+            @ViLabourCost + @ViLabourOverhead,
+            @ViMaterialsTotal,
+            @ViLabourCost + @ViMaterialsTotal,
+            @ViTaxTotal,
+            @ViTotalCostTax
+        FROM SBCES.RbMasterlist RM
+        WHERE RM.RebuiltStockNum = @RebuiltPartNum;
+
+        -- Step 4: Insert into ArchRbEmployeeLabour (with identity insert)
+        SELECT @EmployeeLabourBaseId = ISNULL(MAX(Id), 0) 
+        FROM SBCES.ArchRbEmployeeLabour;
+
+        SET IDENTITY_INSERT SBCES.ArchRbEmployeeLabour ON;
+
+        INSERT INTO SBCES.ArchRbEmployeeLabour (
+            Id, LabourDefn, DateEntered, LinkNumber, TypeId,
+            CostCentre, Task, LabourType, [Usage], HrsReqd, 
+            AdjHrs, TimeAddition, ArchRbMasterlistId
+        )
+        SELECT
+            @EmployeeLabourBaseId + ROW_NUMBER() OVER (ORDER BY EL.LabourDefn),
+            ISNULL(EL.LabourDefn, ''),
+            ISNULL(EL.DateEntered, GETDATE()),
+            ISNULL(EL.LinkNumber, ''),
+            ISNULL(EL.TypeId, ''),
+            ISNULL(EL.CostCentre, ''),
+            ISNULL(EL.Task, ''),
+            ISNULL(EL.LabourType, ''),
+            ISNULL(EL.[Usage], ''),
+            ISNULL(EL.HrsReqd, ''),
+            ISNULL(EL.AdjHrs, ''),
+            ISNULL(EL.TimeAddition, 0),
+            @ArchId
+        FROM SBCES.EmployeeLabour EL
+        WHERE EL.LinkNumber = @LinkNumber
+            AND EL.TypeId = @TypeId;
+
+        SET IDENTITY_INSERT SBCES.ArchRbEmployeeLabour OFF;
+
+        -- Step 5: Insert into ArchRbScPartsUsed (Rebuilt)
+        INSERT INTO SBCES.ArchRbScPartsUsed (
+            MmsStockCode, DateEntered, RebPartCost, UserEntered,
+            MmsCost, OemCost, MmsRebuiltCode, CostCentre,
+            QtyReqd, PercentUsage, LinkCode, RebuiltPart,
+            LinkType, CoreCost, ArchRbMasterlistId, TotalCost,
+            ScKeyword, ScDescription
+        )
+        SELECT
+            ISNULL(UPPER(SU.MmsStockCode), ''),
+            ISNULL(SU.DateEntered, GETDATE()),
+            ISNULL(A.RbUnitCost, 0),
+            ISNULL(UPPER(SU.EnteredBy), ''),
+            ISNULL(SU.MmsCost, 0),
+            ISNULL(SU.OemCost, 0),
+            ISNULL(UPPER(SU.MmsRebuiltCode), ''),
+            ISNULL(UPPER(SU.CostCentre), ''),
+            ISNULL(SU.QtyReqd, ''),
+            ISNULL(SU.PercentUsage, ''),
+            @LinkNumber,
+            'Y',
+            'RB',
+            ISNULL(SU.CoreCost, 0),
+            @ArchId,
+            ISNULL(A.RbCost, 0),
+            ISNULL(UPPER(RM.Keyword), ''),
+            ISNULL(UPPER(RM.DetailedDesc), '')
+        FROM SBCES.ScPartsUsed SU
+        LEFT JOIN SBCES.RbMasterlist RM 
+            ON RM.RebuiltStockNum = SU.MmsRebuiltCode
+        LEFT JOIN (
+            SELECT 
+                RbReference,
+                SUM(ISNULL(TRY_CAST(TotalCost AS DECIMAL(18,2)), 0)) AS RbCost,
+                SUM(ISNULL(TRY_CAST(TotalUnitCost AS DECIMAL(18,2)), 0)) AS RbUnitCost
+            FROM SBCES.TempMaterialsList
+            GROUP BY RbReference
+        ) A ON A.RbReference = SU.MmsRebuiltCode
+        WHERE SU.LinkCode = @LinkNumber
+            AND SU.RebuiltPart = 'Y'
+            AND SU.LinkType = @TypeId;
+
+        -- Step 6: Insert into ArchRbScPartsUsed (Non-Rebuilt)
+        INSERT INTO SBCES.ArchRbScPartsUsed (
+            MmsStockCode, DateEntered, RebPartCost, UserEntered,
+            MmsCost, OemCost, MmsRebuiltCode, CostCentre,
+            QtyReqd, PercentUsage, LinkCode, RebuiltPart,
+            LinkType, CoreCost, ArchRbMasterlistId, TotalCost,
+            ScKeyword, ScDescription
+        )
+        SELECT
+            ISNULL(A.MmsStockCode, ''),
+            ISNULL(A.DateEntered, GETDATE()),
+            ISNULL(A.RebPartCost, 0),
+            ISNULL(A.EnteredBy, ''),
+            ISNULL(A.MmsCost, 0),
+            ISNULL(A.OemCost, 0),
+            ISNULL(A.MmsRebuiltCode, ''),
+            ISNULL(A.CostCentre, ''),
+            ISNULL(A.QtyReqd, ''),
+            ISNULL(A.PercentUsage, ''),
+            @LinkNumber,
+            'N',
+            @TypeId,
+            ISNULL(SBCES.FinalCost(
+                ISNULL(TRY_CAST(REPLACE(A.PercentUsage, ',', '.') AS DECIMAL(5,2)), 0),
+                ISNULL(TRY_CAST(A.QtyReqd AS DECIMAL(18,2)), 0),
+                ISNULL(A.CoreCost, 0), 
+                0
+            ), 0),
+            @ArchId,
+            ISNULL(A.MmsCost * ISNULL(TRY_CAST(A.QtyReqd AS DECIMAL(18,2)), 0) 
+                * (ISNULL(TRY_CAST(REPLACE(ISNULL(A.PercentUsage, '0'), ',', '.') AS DECIMAL(5,2)), 0)/100), 0),
+            ISNULL(B.PartType, ''),
+            ISNULL(B.DetailedDesc, '')
+        FROM SBCES.ScPartsUsed A
+        LEFT JOIN SBCES.StockCodedParts B 
+            ON B.MmsStockCode = A.MmsStockCode
+        WHERE A.LinkCode = @LinkNumber
+            AND A.LinkType = @TypeId
+            AND A.RebuiltPart = 'N';
+
+        -- Step 7: Insert into ArchRbNscPartsUsed
+        INSERT INTO SBCES.ArchRbNscPartsUsed (
+            OrigSuppNum, OrigSupplierName, CostCentre,
+            QtyReqd, PercentUsage, DateEntered, EnteredBy,
+            LinkCode, Cost, LinkType, CoreCost,
+            ArchRbMasterlistId, TotalCost
+        )
+        SELECT
+            ISNULL(NP.OrigSuppNum, ''),
+            ISNULL(NP.OrigSupplierName, ''),
+            ISNULL(NP.CostCentre, ''),
+            ISNULL(NP.QtyReqd, ''),
+            ISNULL(NP.PercentUsage, ''),
+            ISNULL(NP.DateEntered, GETDATE()),
+            ISNULL(NP.EnteredBy, ''),
+            ISNULL(NP.LinkCode, ''),
+            ISNULL(NP.Cost, 0),
+            ISNULL(NP.LinkType, ''),
+            ISNULL(SBCES.FinalCost(
+                ISNULL(TRY_CAST(REPLACE(NP.PercentUsage, ',', '.') AS DECIMAL(5,2)), 0),
+                ISNULL(TRY_CAST(NP.QtyReqd AS DECIMAL(18,2)), 0),
+                ISNULL(NP.CoreCost, 0), 
+                0
+            ), 0),
+            @ArchId,
+            ISNULL(NP.Cost * ISNULL(TRY_CAST(NP.QtyReqd AS DECIMAL(18,2)), 0) 
+                * (ISNULL(TRY_CAST(REPLACE(ISNULL(NP.PercentUsage, '0'), ',', '.') AS DECIMAL(5,2)), 0)/100), 0)
+        FROM SBCES.NscPartsUsed NP
+        WHERE NP.LinkCode = @LinkNumber
+            AND NP.LinkType = @TypeId;
+
+        -- Step 8: Insert into ArchRbLabourCcTotal
+        INSERT INTO SBCES.ArchRbLabourCcTotal (
+            CostCentre, TotalHours, ArchRbMasterlistId
+        )
+        SELECT
+            ISNULL(CC, ''),
+            CAST(ISNULL(SUM(ISNULL(TRY_CAST(ExtendedTime AS DECIMAL(18,2)), 0)), 0) AS VARCHAR(25)),
+            @ArchId
+        FROM SBCES.TempLabourList
+        GROUP BY CC;
+
+        -- Step 9: Insert into ArchRbMaterialsCcTotal
+        INSERT INTO SBCES.ArchRbMaterialsCcTotal (
+            CostCentre, TotalCost, ArchRbMasterlistId
+        )
+        SELECT
+            ISNULL(CostCentre, ''),
+            ISNULL(SUM(ISNULL(TRY_CAST(TotalCost AS DECIMAL(18,2)), 0)), 0),
+            @ArchId
+        FROM SBCES.TempMaterialsList
+        GROUP BY CostCentre;
+
+        -- Step 10: Insert into ArchRbListBuses
+        INSERT INTO SBCES.ArchRbListBuses (
+            BusDescription, ArchRbMasterlistId
+        )
+        SELECT
+            ISNULL(LB.Description, ''),
+            @ArchId
+        FROM SBCES.RbListOfBuses RB
+        INNER JOIN SBCES.ListOfBuses LB
+            ON RB.ListId = LB.ListId
+        WHERE RB.RebuiltStockNum = @RebuiltPartNum;
+
+        COMMIT TRANSACTION;
+        SELECT 'RB Estimate archived sucessfully' AS RESULT;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
