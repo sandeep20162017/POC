@@ -1,0 +1,513 @@
+When user clicks on Add New, controller action CreateRbPartsUsedInEstimates gets called. Do I need new event and new JS fuction 
+or grid.datasoirce.read after sucessful save?
+Pls assist me .
+My Controller :
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.Data.SqlClient;
+using BCES.Models.OEMKit;
+using static SQLite.SQLite3;
+
+
+namespace BCES.Controllers.Parts
+{
+    public class RbPartsUsedInEstimatesController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public RbPartsUsedInEstimatesController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<ActionResult> GetRbPartsUsedInEstimates([DataSourceRequest] DataSourceRequest request, [FromQuery] string id,  [FromQuery] string gridType)
+        {
+            // Fetch data for the grid
+
+            if (string.IsNullOrEmpty(id))
+            {
+                return BadRequest("id is required for :" + gridType);
+            }
+                        
+            if (gridType == "RbGrid")
+            {
+                var rbNscModel = await GetRbPartsUsedInRBEstimates(id, gridType);
+                return Json(rbNscModel.ToDataSourceResult(request));
+            }
+            if (gridType == "VehicleGrid")
+            {
+                var vehNscmodel = await GetRbPartsUsedInVehicleEstimates(id, gridType);
+                return Json(vehNscmodel.ToDataSourceResult(request));
+            }
+
+            return null; //Add exception
+
+        }
+
+        [AllowAnonymous]
+        private async Task<IEnumerable<RebuiltPartsViewModel>> GetRbPartsUsedInVehicleEstimates(string id, string gridType)
+        {
+
+            try
+            {
+
+                var query = @"
+                            SELECT
+                                ROW_NUMBER() OVER (ORDER BY B.mmsRebuiltCode) AS Id,
+                                UPPER(B.mmsRebuiltCode) AS RebuiltStockNum,
+                                UPPER(B.MmsStockCode) AS MmsStockCode,
+                                UPPER(B.CoreCost) AS CoreCharge,
+
+                                --ISNULL(A.RbUnitCost, 0) AS UnitCost,
+                                UPPER(B.costCentre) AS CC,
+                                UPPER(B.qtyReqd) AS QTY,
+                                REPLACE(B.percentUsage, ',', '.') AS Percentage,
+                                B.coreCost AS TotalCost,
+                                --ISNULL(A.RbCost, 0) AS TotalCost,
+                                UPPER(C.detailedDesc) AS Description,
+                                UPPER(C.keyword) AS KeyWord,
+                                linkCode,
+                                rebuiltPart,
+                                linkType
+                            FROM
+                                SBCES.ScPartsUsed B
+                                INNER JOIN SBCES.RbMasterlist C ON C.rebuiltStockNum = B.mmsRebuiltCode
+                                where B.LinkType = 'BUS'
+                                and B.LinkCode = '" + id + "' and RebuiltStockNum is not null";
+
+                return await _dbConnection.QueryAsync<RebuiltPartsViewModel>(query);
+
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+
+        [AllowAnonymous]
+        private async Task<IEnumerable<RebuiltPartsViewModel>> GetRbPartsUsedInRBEstimates(string id, string gridType)
+        {
+            
+            try
+            {
+               
+                var query = @"
+                            SELECT
+                                ROW_NUMBER() OVER (ORDER BY B.mmsRebuiltCode) AS Id,
+                                UPPER(B.mmsRebuiltCode) AS RebuiltStockNum,
+                                UPPER(B.MmsStockCode) AS MmsStockCode,
+                                UPPER(B.CoreCost) AS CoreCharge,
+
+                                --ISNULL(A.RbUnitCost, 0) AS UnitCost,
+                                UPPER(B.costCentre) AS CC,
+                                UPPER(B.qtyReqd) AS QTY,
+                                REPLACE(B.percentUsage, ',', '.') AS Percentage,
+                                B.coreCost AS TotalCost,
+                                --ISNULL(A.RbCost, 0) AS TotalCost,
+                                UPPER(C.detailedDesc) AS Description,
+                                UPPER(C.keyword) AS KeyWord,
+                                linkCode,
+                                rebuiltPart,
+                                linkType
+                            FROM
+                                SBCES.ScPartsUsed B
+                                LEFT JOIN SBCES.RbMasterlist C ON C.rebuiltStockNum = B.mmsRebuiltCode
+                                where B.LinkType = 'RB'
+                                and B.LinkCode = '" + id + "'";
+                             
+                return await _dbConnection.QueryAsync<RebuiltPartsViewModel>(query);
+
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> CreateRbPartsUsedInEstimates(
+           [DataSourceRequest] DataSourceRequest request,
+           //IEnumerable<RebuiltPartsViewModel> models,
+           RebuiltPartsViewModel model,
+           [FromQuery] string id,
+           [FromQuery] string gridType)
+        {
+            //if (!ModelState.IsValid)
+            //{
+            //    //return Json(model.ToDataSourceResult(request, ModelState));
+            //}
+
+            _dbConnection.Open();
+
+            using var transaction = _dbConnection.BeginTransaction();
+            try
+            {
+                // Get values from ViewBag and system
+                var enteredBy = ViewBag.UserADId?.ToString().ToUpper() ?? "SYSTEM";
+                var dateEntered = DateTime.Now;
+                var linkCode = id;// ViewBag.MMsCode?.ToString().ToUpper() ?? "DEFAULT_CODE";
+                
+                var isRebuiltPart = 'Y';
+
+                string linkType = "";
+                if (gridType == "RbGrid")
+                {
+                    linkType = "RB";
+                }
+                if (gridType == "VehicleGrid")
+                {
+                    linkType = "BUS";
+                }
+
+
+                //   foreach (var model in models)
+                {
+                    var parameters = new DynamicParameters();
+
+                    // Convert all string values to uppercase
+                    parameters.Add("MMSStockCode", model.MmsStockCode?.ToUpperInvariant());
+                    
+                    parameters.Add("CorePartNumber", model.CorePartNum?.ToUpperInvariant() ?? " ");
+                    parameters.Add("EnteredBy", enteredBy);
+                    parameters.Add("DateEntered", dateEntered);
+                    parameters.Add("LinkCode", linkCode);
+                    parameters.Add("LinkType", linkType);
+                    parameters.Add("RebuiltPartNum", model.RebuiltStockNum);
+                    parameters.Add("IsRebuiltPart", isRebuiltPart);
+
+                    // Decimal values with defaults
+                    parameters.Add("UnitCost", model.CoreCharge);
+                    parameters.Add("MmsNewCost", model.BuyNewCost);
+                    parameters.Add("CoreCost", model.CoreCharge);
+                    parameters.Add("RebPartCost", model.RemanCost);
+                    parameters.Add("CC", model.CostCentre);
+
+
+                    // String values with uppercase conversion and defaults
+                    parameters.Add("Qty", (model.Qty ?? "0").ToUpperInvariant());
+                    parameters.Add("Percentage", (model.Percentage ?? "0").ToUpperInvariant());
+
+                    var sql = @"
+                            INSERT INTO SBCES.SCPartsUsed (
+                                MMSStockCode, DateEntered, EnteredBy, MMSCost, OEMCost,
+                                LastModifiedBy, LastModifiedDate, CostCentre, QtyReqd,
+                                PercentUsage, LinkCode, RebuiltPart, LinkType, MMSRebuiltCode,
+                                CoreCost, RebPartCost
+                            ) VALUES (
+                                UPPER(@MMSStockCode), 
+                                @DateEntered, 
+                                UPPER(@EnteredBy),
+                                @UnitCost, 
+                                @MmsNewCost,
+                                UPPER(@EnteredBy), 
+                                @DateEntered, 
+                                UPPER(@CC),
+                                UPPER(@Qty), 
+                                UPPER(@Percentage),
+                                UPPER(@LinkCode), 
+                                UPPER(@IsRebuiltPart), 
+                                UPPER(@LinkType),
+                                UPPER(@RebuiltPartNum), 
+                                @CoreCost,
+                                @RebPartCost
+                            )";
+
+                    var result = await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+                    transaction.Commit();
+                   
+                    return Ok(model);
+
+                }
+
+                
+                //  return Ok(model);
+                // return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+                //    return Json(model.ToDataSourceResult(request));
+            }
+            catch (SqlException sqlEx)
+            {
+                transaction.Rollback();
+                ModelState.AddModelError("", $"Database error: {sqlEx.Message}");
+                return StatusCode(500, "An error occurred while adding the Rebuilt Part.");
+               // return Json(models.ToDataSourceResult(request, ModelState));
+            }
+            catch (Exception ex)
+            {
+                transaction.Rollback();
+                ModelState.AddModelError("", $"Unexpected error: {ex.Message}");
+                return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+                //return Json(model.ToDataSourceResult(request, ModelState));
+            }
+        }
+
+        [AcceptVerbs("Post")]
+        [AllowAnonymous]
+        public async Task<IActionResult> UpdateRbPartsUsedInEstimates(
+                                                    [DataSourceRequest] DataSourceRequest request,
+                                                    [Bind(Prefix = "models")] IEnumerable<RebuiltPartsViewModel> models,
+                                                    [FromQuery] string id,
+                                                    [FromQuery] string gridType)
+        {
+            if (!ModelState.IsValid)
+            {
+                return Json(models.ToDataSourceResult(request, ModelState));
+            }
+            _dbConnection.Open();
+            using var transaction = _dbConnection.BeginTransaction();
+            try
+            {
+                var enteredBy = ViewBag.UserADId?.ToString().ToUpper() ?? "SYSTEM";
+                var dateModified = DateTime.Now;
+
+                foreach (var model in models)
+                {
+                    var parameters = new DynamicParameters();
+                  //  parameters.Add("MMSStockCode", model.MMSStockCode?.ToUpperInvariant());
+                   // parameters.Add("CC", model.CC?.ToUpperInvariant() ?? " ");
+                   // parameters.Add("UnitCost", model.UnitCost ?? 0m);
+                    parameters.Add("Qty", (model.Qty ?? "0").ToUpperInvariant());
+                    parameters.Add("Percentage", (model.Percentage ?? "0").ToUpperInvariant());
+                  //  parameters.Add("CoreCost", model.CoreCost ?? 0m);
+                    parameters.Add("RebuiltPartNum", id?.ToUpperInvariant());
+                    parameters.Add("LastModifiedBy", enteredBy);
+                    parameters.Add("LastModifiedDate", dateModified);
+
+                    var sql = @"
+                                UPDATE SBCES.SCPartsUsed 
+                                SET 
+                                    CostCentre = UPPER(@CC),
+                                    MMSCost = @UnitCost,
+                                    QtyReqd = UPPER(@Qty),
+                                    PercentUsage = UPPER(@Percentage),
+                                    CoreCost = @CoreCost,
+                                    LastModifiedBy = @LastModifiedBy,
+                                    LastModifiedDate = @LastModifiedDate
+                                WHERE 
+                                    MMSStockCode = @MMSStockCode
+                                    AND MMSRebuiltCode = @RebuiltPartNum";
+
+                    await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+                }
+
+                transaction.Commit();
+                return Json(models.ToDataSourceResult(request));
+            }
+            catch (Exception ex)
+            {
+                transaction.Rollback();
+                ModelState.AddModelError("", $"Error updating record: {ex.Message}");
+                return Json(models.ToDataSourceResult(request, ModelState));
+            }
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> DeleteRbPartsUsedInRbtParts(
+                                                        [DataSourceRequest] DataSourceRequest request,
+                                                        RebuiltPartsViewModel model,
+                                                        string id,
+                                                         string parentPartId,
+                                                         string gridType,
+                                                          string rebuiltStockNum)
+        {
+            if (!ModelState.IsValid)
+            {
+               // return Json(model.ToDataSourceResult(request, ModelState));
+            }
+
+            _dbConnection.Open();
+            using var transaction = _dbConnection.BeginTransaction();
+            try
+            {
+               // foreach (var model in models)
+                {
+                    var parameters = new
+                    {
+                      //  MMSStockCode = model.MMSStockCode?.ToUpperInvariant(),
+                        id = id?.ToUpperInvariant()
+                    };
+
+                    var sql = @"
+                                DELETE FROM SBCES.SCPartsUsed 
+                                WHERE 
+                                    MmsRebuiltCode = '" + rebuiltStockNum + "'" + 
+                                    
+                                    " AND  LinkCode = '" + parentPartId + "'" + " AND RebuiltPart = 'Y'";
+
+                    await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+                    transaction.Commit();
+                    return Ok(model);
+                }              
+               
+            }
+            catch (Exception ex)
+            {
+                transaction.Rollback();
+                ModelState.AddModelError("", $"Error deleting record: {ex.Message}");
+                // return Json(models.ToDataSourceResult(request, ModelState));
+               
+                return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+            }
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> RefreshRbPartDetails(string rebuiltStockNum)
+        {
+            if (string.IsNullOrEmpty(rebuiltStockNum))
+            {
+                return BadRequest(new { Message = "RebuiltStock Number is required." });
+            }
+
+            try
+            {
+                var query = @"
+                            SELECT  [RbMasterlistId]
+                              ,[MmsStockCode]      
+                              ,[DetailedDesc]
+                              ,[Keyword]      
+                              ,[RebuiltStockNum]
+                              ,[CoreCharge]      
+                          FROM [CES].[SBCES].[RbMasterlist] where RebuiltStockNum = @rebuiltStockNum";
+
+                using (var connection = _db.CreateConnection())
+                {
+                    var result = await connection.QueryFirstOrDefaultAsync(query, new { rebuiltStockNum });
+
+                    if (result == null)
+                    {
+                        return NotFound(new { Message = "Rebuilt Stock Number not found." });
+                    }
+
+                    // Validate OemPartCost
+                    //if (result.OemPartCost < 0)
+                    //{
+                    //    return Ok(new
+                    //    {
+                    //        Message = "Invalid Part Cost - must be greater than 0",
+                    //        Data = result // Send data anyway if needed
+                    //    });
+                    //}
+
+                    return Ok(new
+                    {
+                      //  RebuiltStockNum = result.RebuiltPartNum,
+                        KeyWord = result.Keyword,
+                        Description = result.DetailedDesc,
+                        OemPartCost = result.CoreCharge
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                // _logger.LogError(ex, "Error refreshing NSC part details");
+                return StatusCode(500, new { Message = "An error occurred while refreshing part details." });
+            }
+        }
+    }
+}
+View :
+@model IEnumerable<BCES.Models.Parts.RebuiltPartsViewModel>
+
+@{
+    ViewData["Title"] = "Rebuilt Parts Used";
+}
+
+<h6>Rebuilt Parts Used</h6>
+
+@(Html.Kendo().Grid<BCES.Models.Parts.RebuiltPartsViewModel>()
+   
+    .Name($"RbPartsMaterialDetailsRebuiltPartsGrid")
+    .Columns(columns =>
+    {
+        //columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Number").Width(60);
+        columns.Bound(c => c.Id).Title("Id").Hidden(true);
+        columns.Bound(c => c.RebuiltStockNum).Title("Rebuilt Number").EditorTemplateName("RbComboBox").Filterable(ftb => ftb.Cell(cell => cell.Operator("gte"))).Width(100);
+        columns.Bound(c => c.MmsStockCode).Title("MMS Stock Code").EditorTemplateName("ComboBoxEditor").Width(70);
+       @*  columns.Command(command =>
+       {)
+            command.Custom(""Populate Details").Click("refreshRbPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+           command.Custom("Populate Details").Click("refreshRbPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+       }).Width(60); *@
+        columns.Bound(c => c.CoreCharge).Title("Unit Cost").Width(60);
+        columns.Bound(c => c.Qty).Title("Qty").Width(40);
+       
+        columns.Bound(c => c.Percentage).Title("Percentage").Width(50);
+       @*  columns.Bound(c => c.TotalCost).Title("TotalCost").Width(60); *@
+        columns.Bound(c => c.Description).Title("Description").Width(70);
+        columns.Bound(c => c.KeyWord).Title("KeyWord").Width(50);
+        
+        // columns.Bound(c => c.DateRevised).Title("Date Revised");
+        //columns.Command(command => command.Edit()).Title("Actions");
+        columns.Command(command =>
+      {
+          if (@ViewBag.RoleId == 1)
+          {
+              // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+          }
+          if (@ViewBag.RoleId == 1)
+          {
+
+              command.Custom("Delete")
+               .Click("showDeleteConfirmation")
+               .Text(" ")
+               .IconClass("k-icon k-i-delete")
+               .HtmlAttributes(new
+               {
+                   @class = "text-danger",
+                   title = "Delete",
+                   data_grid = $"RbPartsMaterialDetailsRebuiltPartsGrid",
+                   data_url = Url.Action("DeleteRbPartsUsedInRbtParts", "RbPartsUsedInEstimates"),
+                   data_id_field = "Id",
+                   data_rebuiltstocknum_field = "RebuiltStockNum", //ssk 4
+                 //  data_mmsstockcode_field = "parentPartId",
+                   data_grid_type = "RbPartGrid" 
+               });
+          }
+      }).Width(100);
+    })
+
+    .ToolBar(toolbar =>
+    {
+        if (@ViewBag.RoleId == 1)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    .Resizable(r => r.Columns(true))
+    // .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.Id);
+            model.Field(c => c.Id);
+            model.Field(c => c.RebuiltStockNum);
+        })
+
+        .Read(read => read.Url(Url.Action("GetRbPartsUsedInEstimates", "RbPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("CreateRbPartsUsedInEstimates", "RbPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateRbPartsUsedInEstimates", "RbPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteRbPartsUsedInRbtParts", "RbPartsUsedInEstimates") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+)
