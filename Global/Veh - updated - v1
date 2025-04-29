@@ -1,0 +1,129 @@
+Here's the complete solution with CSS and JavaScript files to handle the requirements:
+
+wwwroot/css/grid-controls.css:
+
+css
+/* Disabled state for grid toolbar buttons */
+.k-grid .k-grid-toolbar .k-button:disabled,
+.k-grid .k-grid-toolbar .k-button.k-state-disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background-color: #f5f5f5;
+    border-color: #ddd;
+    color: #999;
+}
+
+/* Disabled state for grid command buttons */
+.k-grid .k-command-cell .k-button:disabled,
+.k-grid .k-command-cell .k-button.k-state-disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Visual indicator for disabled save buttons */
+.k-grid-save-changes.k-state-disabled {
+    background-color: #e9e9e9 !important;
+    border-color: #d9d9d9 !important;
+    color: #a0a0a0 !important;
+}
+wwwroot/js/grid-management.js:
+
+javascript
+$(document).ready(function() {
+    // 1. Disable all Save/Cancel buttons on page load
+    disableAllSaveCancelButtons();
+    
+    // Initialize grid change tracking
+    initializeGridChangeHandlers();
+    
+    // 2. Handle parent tab expansion
+    initializeTabStripHandlers();
+});
+
+function disableAllSaveCancelButtons() {
+    $('.k-grid').each(function() {
+        const grid = $(this).data('kendoGrid');
+        toggleSaveCancelButtons(grid, false);
+    });
+}
+
+function toggleSaveCancelButtons(grid, enable) {
+    const toolbar = grid.wrapper.find('.k-grid-toolbar');
+    toolbar.find('.k-grid-save-changes, .k-grid-cancel-changes')
+           .prop('disabled', !enable)
+           .toggleClass('k-state-disabled', !enable);
+}
+
+function initializeGridChangeHandlers() {
+    // Handle main grid changes
+    const mainGrid = $('#VehicleGrid').data('kendoGrid');
+    mainGrid.dataSource.bind('change', function(e) {
+        handleGridChanges(mainGrid);
+    });
+
+    // Handle child grids in tabs
+    $(document).on('click', '.k-tabstrip-item', function() {
+        setTimeout(() => {
+            $('.k-grid').each(function() {
+                const grid = $(this).data('kendoGrid');
+                if (grid && !grid.dataSource._initialized) {
+                    grid.dataSource.bind('change', function(e) {
+                        handleGridChanges(grid);
+                    });
+                    grid.dataSource._initialized = true;
+                }
+            });
+        }, 100);
+    });
+}
+
+function handleGridChanges(grid) {
+    const isChildGrid = grid.element.closest('.k-detail-row').length > 0;
+    const hasChanges = grid.dataSource.hasChanges();
+    
+    // 3. Enable/disable current grid buttons
+    toggleSaveCancelButtons(grid, hasChanges);
+    
+    // 4. Disable parent grid when child has changes
+    if (isChildGrid && hasChanges) {
+        const mainGrid = $('#VehicleGrid').data('kendoGrid');
+        toggleSaveCancelButtons(mainGrid, false);
+        mainGrid.wrapper.find('.k-grid-add').prop('disabled', true);
+    }
+    
+    // 5. Disable Add buttons when any grid has changes
+    const anyChanges = $('.k-grid').toArray().some(g => {
+        const grid = $(g).data('kendoGrid');
+        return grid.dataSource.hasChanges();
+    });
+    
+    $('.k-grid-add').prop('disabled', anyChanges);
+}
+
+function initializeTabStripHandlers() {
+    const tabStrip = $('#vehicleTabStrip').data('kendoTabStrip');
+    tabStrip.bind('activate', function(e) {
+        // 2. Disable save buttons when tab is activated
+        $('.k-grid').each(function() {
+            const grid = $(this).data('kendoGrid');
+            toggleSaveCancelButtons(grid, false);
+        });
+    });
+}
+Update your Index.cshtml:
+
+html
+@section Scripts {
+    <link href="~/css/grid-controls.css" rel="stylesheet" />
+    <script src="~/js/grid-management.js"></script>
+    <!-- Keep your existing scripts -->
+}
+Explanation:
+
+Initial State Management:
+
+Disables all Save/Cancel buttons on page load using disableAllSaveCancelButtons()
+
+Uses CSS to style disabled buttons appropriately
+
+Tabstrip Handling:
