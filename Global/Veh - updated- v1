@@ -1,0 +1,198 @@
+wwwroot/css/grid-controls.css:
+
+css
+/* Grid Toolbar Button States */
+.k-grid-toolbar .k-button.k-grid-save-changes,
+.k-grid-toolbar .k-button.k-grid-cancel-changes {
+    transition: all 0.3s ease;
+}
+
+.k-grid-toolbar .k-button[disabled],
+.k-grid-toolbar .k-button.k-state-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: #f5f5f5 !important;
+    border-color: #ddd !important;
+    color: #999 !important;
+}
+
+/* Add Button States */
+.k-grid-toolbar .k-grid-add {
+    transition: all 0.3s ease;
+}
+
+.k-grid-toolbar .k-grid-add[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: #f5f5f5 !important;
+    border-color: #ddd !important;
+    color: #999 !important;
+}
+
+/* Unsaved Changes Indicator */
+.k-tabstrip-items .has-unsaved {
+    position: relative;
+    color: #d9534f !important;
+}
+
+.k-tabstrip-items .has-unsaved::after {
+    content: "•";
+    position: absolute;
+    right: 8px;
+    top: 6px;
+    color: #d9534f;
+    font-size: 1.2em;
+}
+wwwroot/js/grid-management.js:
+
+javascript
+$(document).ready(function () {
+    // Initialize main grid and tabstrip
+    const mainGrid = $('#VehicleGrid').data('kendoGrid');
+    const tabStrip = $('#vehicleTabStrip').data('kendoTabStrip');
+
+    // 1. Disable all buttons initially
+    disableAllGridButtons();
+
+    // Initialize main grid events
+    initGridStateManagement(mainGrid);
+
+    // Tabstrip event handlers
+    tabStrip.bind('activate', function (e) {
+        // 2. Disable save on tab activation
+        disableAllSaveButtons();
+        
+        // Initialize grid in activated tab
+        setTimeout(() => initTabGrids(e.contentElement), 100);
+    });
+
+    // Detail grid initialization
+    mainGrid.bind('detailInit', function (e) {
+        initDetailGrid(e.detailCell.find('.k-grid'));
+    });
+});
+
+function disableAllGridButtons() {
+    $('.k-grid').each(function () {
+        const grid = $(this).data('kendoGrid');
+        toggleGridButtons(grid, false);
+    });
+}
+
+function initGridStateManagement(grid) {
+    if (!grid) return;
+
+    // Initialize change tracking
+    grid.dataSource.bind('change', function (e) {
+        handleGridChanges(grid);
+    });
+
+    // Initial state check
+    toggleGridButtons(grid, grid.dataSource.hasChanges());
+}
+
+function initTabGrids(container) {
+    container.find('.k-grid').each(function () {
+        const grid = $(this).data('kendoGrid');
+        initGridStateManagement(grid);
+    });
+}
+
+function handleGridChanges(grid) {
+    const isChildGrid = grid.element.closest('.k-detail-row').length > 0;
+    const hasChanges = grid.dataSource.hasChanges();
+
+    // 3. Enable/disable current grid buttons
+    toggleGridButtons(grid, hasChanges);
+
+    // 4. Parent grid handling
+    if (isChildGrid) {
+        const mainGrid = $('#VehicleGrid').data('kendoGrid');
+        const mainHasChanges = mainGrid.dataSource.hasChanges();
+        
+        toggleGridButtons(mainGrid, mainHasChanges && !hasChanges);
+        mainGrid.wrapper.find('.k-grid-add').prop('disabled', hasChanges);
+    }
+
+    // 5. Global add button handling
+    const anyChanges = $('.k-grid').toArray().some(g => {
+        return $(g).data('kendoGrid').dataSource.hasChanges();
+    });
+    
+    $('.k-grid-add').prop('disabled', anyChanges);
+}
+
+function toggleGridButtons(grid, enable) {
+    const toolbar = grid.wrapper.find('.k-grid-toolbar');
+    const saveButton = toolbar.find('.k-grid-save-changes');
+    const cancelButton = toolbar.find('.k-grid-cancel-changes');
+    
+    saveButton.prop('disabled', !enable).toggleClass('k-state-disabled', !enable);
+    cancelButton.prop('disabled', !enable).toggleClass('k-state-disabled', !enable);
+}
+
+function disableAllSaveButtons() {
+    $('.k-grid').each(function () {
+        const grid = $(this).data('kendoGrid');
+        grid.wrapper.find('.k-grid-save-changes')
+            .prop('disabled', true)
+            .addClass('k-state-disabled');
+    });
+}
+
+function initDetailGrid(detailCell) {
+    const detailGrid = detailCell.data('kendoGrid');
+    if (!detailGrid) return;
+
+    // Initialize detail grid events
+    initGridStateManagement(detailGrid);
+
+    // Tab handling within detail grid
+    detailGrid.wrapper.closest('.k-tabstrip').on('click', '.k-tabstrip-item', function () {
+        setTimeout(() => initTabGrids($(this).next('.k-content')), 100);
+    });
+}
+Implementation Notes:
+
+Initialization:
+
+Call disableAllGridButtons() on page load to disable all buttons
+
+Initialize main grid and tabstrip events
+
+Handle detail grid initialization through the detailInit event
+
+Change Detection:
+
+Uses Kendo's dataSource change event
+
+Automatically handles dynamically created grids in tabs
+
+Maintains proper button states across grid hierarchies
+
+Button States:
+
+toggleGridButtons() manages Save/Cancel states
+
+disableAllSaveButtons() handles tab activation requirements
+
+Add buttons are managed globally across all grids
+
+CSS Enhancements:
+
+Visual feedback for disabled states
+
+Unsaved changes indicators for tabs
+
+Smooth transitions for button states
+
+Updated Index.cshtml:
+
+html
+@section Scripts {
+    <link rel="stylesheet" href="~/css/grid-controls.css" />
+    <script src="~/js/grid-management.js"></script>
+    
+    <!-- Keep existing scripts below -->
+    <!-- ... -->
+}
