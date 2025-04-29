@@ -1,0 +1,102 @@
+
+$(document).ready(function () {
+
+    function updateSaveCancelButtons(grid) {
+        const hasChanges = grid.dataSource.hasChanges();
+        const save = grid.wrapper.find(".k-grid-save-changes");
+        const cancel = grid.wrapper.find(".k-grid-cancel-changes");
+
+        save.prop("disabled", !hasChanges).toggleClass("k-state-disabled", !hasChanges);
+        cancel.prop("disabled", !hasChanges).toggleClass("k-state-disabled", !hasChanges);
+    }
+
+    function markRequiredColumns(grid) {
+        const fields = grid.dataSource.options.schema.model.fields;
+
+        grid.columns.forEach((col, idx) => {
+            const th = grid.thead.find("th").eq(idx);
+            if (fields[col.field] && fields[col.field].validation && fields[col.field].validation.required) {
+                th.addClass("required-cell");
+            }
+        });
+    }
+
+    function handleInlineRequiredValidation(cell, fieldName, value) {
+        const msg = "This field is required.";
+        cell.removeClass("invalid-cell");
+        cell.find(".validation-message").remove();
+
+        if (!value || value.trim() === "") {
+            cell.addClass("invalid-cell");
+            cell.append(`<div class='validation-message'>${msg}</div>`);
+            return false;
+        }
+
+        return true;
+    }
+
+    function disableAddIfEditing(grid) {
+        const addBtn = grid.wrapper.find(".k-grid-add");
+        const isEditing = grid.tbody.find(".k-grid-edit-row").length > 0;
+        addBtn.prop("disabled", isEditing).toggleClass("k-button-disabled", isEditing);
+    }
+
+    $(".k-grid").each(function () {
+        const grid = $(this).data("kendoGrid");
+        if (!grid) return;
+
+        grid.bind("dataBound", function () {
+            updateSaveCancelButtons(grid);
+            markRequiredColumns(grid);
+            disableAddIfEditing(grid);
+        });
+
+        grid.bind("edit", function (e) {
+            const row = $(e.container).closest("tr");
+            row.removeClass("adding-row editing-row");
+
+            if (e.model.isNew && e.model.isNew()) {
+                row.addClass("adding-row");
+            } else {
+                row.addClass("editing-row");
+            }
+
+            updateSaveCancelButtons(grid);
+            disableAddIfEditing(grid);
+        });
+
+        grid.bind("save", function () {
+            updateSaveCancelButtons(grid);
+            disableAddIfEditing(grid);
+        });
+
+        grid.bind("cancel", function () {
+            updateSaveCancelButtons(grid);
+            disableAddIfEditing(grid);
+        });
+
+        // Validate required fields on blur
+        grid.table.on("focusout", "td.k-edit-cell input, td.k-edit-cell textarea", function () {
+            const input = $(this);
+            const cell = input.closest("td");
+            const field = cell.attr("data-container-for");
+            const value = input.val();
+            const schema = grid.dataSource.options.schema.model.fields;
+
+            if (schema[field] && schema[field].validation && schema[field].validation.required) {
+                handleInlineRequiredValidation(cell, field, value);
+            } else {
+                cell.removeClass("invalid-cell").find(".validation-message").remove();
+            }
+        });
+    });
+
+    // Menu highlight based on current URL
+    $(".k-menu .k-item").each(function () {
+        const link = $(this).find(".k-link")[0];
+        if (link && link.href && window.location.href.includes(link.href)) {
+            $(this).addClass("k-state-active");
+        }
+    });
+
+});
