@@ -1,0 +1,210 @@
+Let's fix all these issues with a complete solution:
+
+Updated CSS (grid-controls.css):
+
+css
+/* Grid Toolbar Button States */
+.k-grid-toolbar .k-button.k-grid-save-changes,
+.k-grid-toolbar .k-button.k-grid-cancel-changes {
+    transition: opacity 0.3s ease;
+}
+
+.k-grid-toolbar .k-button[disabled],
+.k-grid-toolbar .k-button.k-state-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: #f5f5f5 !important;
+    border-color: #ddd !important;
+    color: #999 !important;
+}
+
+/* Tabstrip Grid Handling */
+.k-tabstrip-content .k-grid {
+    margin: 10px 0;
+}
+
+/* Unsaved Changes Indicator */
+.k-tabstrip-items .has-unsaved {
+    position: relative;
+    color: #d9534f !important;
+}
+
+.k-tabstrip-items .has-unsaved::after {
+    content: "•";
+    position: absolute;
+    right: 8px;
+    top: 6px;
+    color: #d9534f;
+    font-size: 1.2em;
+}
+Updated JavaScript (grid-management.js):
+
+javascript
+$(document).ready(function () {
+    // Initialize main grid and tabstrip
+    const mainGrid = $('#VehicleGrid').data('kendoGrid');
+    const mainTabStrip = $('#vehicleTabStrip').data('kendoTabStrip');
+
+    // 1. Disable all buttons initially
+    disableAllGridControls();
+
+    // Initialize main grid
+    if (mainGrid) {
+        initGridStateManagement(mainGrid);
+        mainGrid.bind('detailInit', function (e) {
+            initDetailGrid(e.detailCell);
+        });
+    }
+
+    // Initialize tabstrip
+    if (mainTabStrip) {
+        initTabstripGrids(mainTabStrip);
+    }
+});
+
+// Core Functions
+function initTabstripGrids(tabStrip) {
+    if (!tabStrip || !tabStrip.items) return;
+
+    // Convert items to array for safe iteration
+    const items = Array.from(tabStrip.items());
+    
+    items.forEach(item => {
+        const content = $(item.contentElement);
+        initTabGrids(content);
+    });
+
+    // Single activation handler
+    tabStrip.unbind('activate').bind('activate', function (e) {
+        setTimeout(() => {
+            initTabGrids(e.contentElement);
+            disableAllGridControls();
+        }, 100);
+    });
+}
+
+function disableAllGridControls() {
+    // Main grids
+    $('.k-grid').each(function () {
+        const grid = $(this).data('kendoGrid');
+        toggleGridButtons(grid, false);
+    });
+
+    // Tabstrip grids
+    $('.k-tabstrip').each(function () {
+        const tabStrip = $(this).data('kendoTabStrip');
+        if (tabStrip && tabStrip.items) {
+            Array.from(tabStrip.items()).forEach(item => {
+                initTabGrids(item.contentElement);
+            });
+        }
+    });
+
+    // Detail grids
+    $('.k-detail-row .k-grid').each(function () {
+        const grid = $(this).data('kendoGrid');
+        toggleGridButtons(grid, false);
+    });
+}
+
+function initGridStateManagement(grid) {
+    if (!grid) return;
+
+    // Initialize change tracking
+    grid.dataSource.unbind('change').bind('change', function () {
+        handleGridChanges(grid);
+    });
+
+    // Initial state
+    toggleGridButtons(grid, grid.dataSource.hasChanges());
+}
+
+function initTabGrids(container) {
+    const $container = $(container);
+    
+    $container.find('.k-grid').each(function () {
+        const grid = $(this).data('kendoGrid');
+        if (grid) {
+            initGridStateManagement(grid);
+            
+            // Handle nested tabstrips
+            const nestedTabStrip = $container.find('.k-tabstrip').data('kendoTabStrip');
+            if (nestedTabStrip) {
+                initTabstripGrids(nestedTabStrip);
+            }
+        }
+    });
+}
+
+function handleGridChanges(grid) {
+    const hasChanges = grid.dataSource.hasChanges();
+    toggleGridButtons(grid, hasChanges);
+
+    // Parent grid handling
+    const isChildGrid = $(grid.element).closest('.k-detail-row').length > 0;
+    if (isChildGrid) {
+        const mainGrid = $('#VehicleGrid').data('kendoGrid');
+        if (mainGrid) {
+            const mainHasChanges = mainGrid.dataSource.hasChanges();
+            toggleGridButtons(mainGrid, mainHasChanges && !hasChanges);
+            mainGrid.wrapper.find('.k-grid-add').prop('disabled', hasChanges);
+        }
+    }
+
+    // Global add buttons
+    const anyChanges = $('.k-grid').toArray().some(el => {
+        const g = $(el).data('kendoGrid');
+        return g && g.dataSource.hasChanges();
+    });
+    $('.k-grid-add').prop('disabled', anyChanges);
+}
+
+function toggleGridButtons(grid, enable) {
+    if (!grid || !grid.wrapper) return;
+    
+    const toolbar = grid.wrapper.find('.k-grid-toolbar');
+    const saveButton = toolbar.find('.k-grid-save-changes');
+    const cancelButton = toolbar.find('.k-grid-cancel-changes');
+
+    saveButton.prop('disabled', !enable).toggleClass('k-state-disabled', !enable);
+    cancelButton.prop('disabled', !enable).toggleClass('k-state-disabled', !enable);
+}
+
+function initDetailGrid(detailCell) {
+    const $detailCell = $(detailCell);
+    const detailGrid = $detailCell.find('.k-grid').data('kendoGrid');
+    
+    if (detailGrid) {
+        initGridStateManagement(detailGrid);
+        
+        // Nested tabstrip handling
+        const tabStrip = $detailCell.find('.k-tabstrip').data('kendoTabStrip');
+        if (tabStrip) {
+            initTabstripGrids(tabStrip);
+        }
+    }
+}
+Error Fixes Explained:
+
+forEach is not a function:
+
+Use Array.from() to convert tab items to proper arrays
+
+Added null checks for tabStrip.items()
+
+undefined 'success' error:
+
+Ensure notification element exists before use:
+
+javascript
+// In your existing code, modify the onRequestEnd handler:
+function onRequestEnd(e) {
+    const notificationElement = $("#notification");
+    if (notificationElement.length) {
+        const notification = notificationElement.data("kendoNotification");
+        if (notification) {
+            notification.success(e.type);
+        }
+    }
+    // ... rest of your code
+}
