@@ -1,0 +1,165 @@
+grid-controls.css
+
+css
+/* Grid Toolbar and Button States */
+.k-grid-toolbar .k-button {
+    transition: opacity 0.3s ease;
+}
+
+.k-grid-toolbar .k-button[disabled],
+.k-grid-toolbar .k-button.k-state-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: #f5f5f5 !important;
+    border-color: #ddd !important;
+    color: #999 !important;
+}
+
+/* Ensure grid visibility */
+.k-tabstrip-content .k-grid {
+    visibility: visible !important;
+}
+
+/* Add button spacing */
+.k-grid-toolbar .k-grid-add {
+    margin-right: 5px;
+}
+grid-management.js
+
+javascript
+$(document).ready(function () {
+    // Initialize main grid
+    const mainGrid = $('#VehicleGrid').data('kendoGrid');
+    if (mainGrid) {
+        initGridStateManagement(mainGrid);
+        mainGrid.bind('dataBound', function() {
+            this.refresh();
+        });
+    }
+
+    // Initialize tabstrip
+    const mainTabStrip = $('#vehicleTabStrip').data('kendoTabStrip');
+    if (mainTabStrip) {
+        initTabstripGrids(mainTabStrip);
+    }
+
+    // Initial button states
+    setTimeout(disableAllGridControls, 100);
+});
+
+// Core Functions
+function initTabstripGrids(tabStrip) {
+    if (!tabStrip || !tabStrip.items) return;
+
+    // Initialize existing tabs
+    Array.from(tabStrip.items()).forEach(item => {
+        initTabGrids(item.contentElement);
+    });
+
+    // Handle tab activations
+    tabStrip.unbind('activate').bind('activate', function (e) {
+        setTimeout(() => {
+            initTabGrids(e.contentElement);
+            updateAllButtonStates();
+        }, 100);
+    });
+}
+
+function disableAllGridControls() {
+    // Main grids
+    $('.k-grid').each(function () {
+        const grid = $(this).data('kendoGrid');
+        if (grid) {
+            toggleGridButtons(grid, false);
+            toggleAddButton(grid, false);
+        }
+    });
+}
+
+function initGridStateManagement(grid) {
+    if (!grid) return;
+
+    // Initialize change tracking
+    grid.dataSource.unbind('change').bind('change', function () {
+        handleGridChanges(grid);
+    });
+
+    // Handle add button
+    grid.wrapper.find('.k-grid-add').click(function() {
+        setTimeout(() => grid.refresh(), 100);
+    });
+
+    // Initial state
+    updateGridButtonStates(grid);
+}
+
+function updateAllButtonStates() {
+    $('.k-grid').each(function () {
+        const grid = $(this).data('kendoGrid');
+        if (grid) updateGridButtonStates(grid);
+    });
+}
+
+function updateGridButtonStates(grid) {
+    const hasChanges = grid.dataSource.hasChanges();
+    toggleGridButtons(grid, hasChanges);
+    toggleAddButton(grid, !hasChanges);
+}
+
+function initTabGrids(container) {
+    const $container = $(container);
+    $container.find('.k-grid').each(function () {
+        const grid = $(this).data('kendoGrid');
+        if (grid) {
+            initGridStateManagement(grid);
+            grid.wrapper.show().css('visibility', 'visible');
+        }
+    });
+}
+
+function handleGridChanges(grid) {
+    const hasChanges = grid.dataSource.hasChanges();
+    
+    // Update current grid buttons
+    toggleGridButtons(grid, hasChanges);
+    toggleAddButton(grid, !hasChanges);
+
+    // Handle parent grid if child grid
+    if ($(grid.element).closest('.k-detail-row').length > 0) {
+        const mainGrid = $('#VehicleGrid').data('kendoGrid');
+        if (mainGrid) {
+            const mainHasChanges = mainGrid.dataSource.hasChanges();
+            toggleGridButtons(mainGrid, mainHasChanges);
+            toggleAddButton(mainGrid, !hasChanges);
+        }
+    }
+}
+
+function toggleGridButtons(grid, enable) {
+    if (!grid || !grid.wrapper) return;
+    
+    const toolbar = grid.wrapper.find('.k-grid-toolbar');
+    const saveButton = toolbar.find('.k-grid-save-changes');
+    const cancelButton = toolbar.find('.k-grid-cancel-changes');
+
+    saveButton.prop('disabled', !enable).toggleClass('k-state-disabled', !enable);
+    cancelButton.prop('disabled', !enable).toggleClass('k-state-disabled', !enable);
+}
+
+function toggleAddButton(grid, enable) {
+    if (!grid || !grid.wrapper) return;
+    
+    const addButton = grid.wrapper.find('.k-grid-add');
+    addButton.prop('disabled', !enable).toggleClass('k-state-disabled', !enable);
+}
+
+function initDetailGrid(detailCell) {
+    const $detailCell = $(detailCell);
+    const detailGrid = $detailCell.find('.k-grid').data('kendoGrid');
+    
+    if (detailGrid) {
+        initGridStateManagement(detailGrid);
+        const tabStrip = $detailCell.find('.k-tabstrip').data('kendoTabStrip');
+        if (tabStrip) initTabstripGrids(tabStrip);
+    }
+}
