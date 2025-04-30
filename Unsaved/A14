@@ -1,0 +1,158 @@
+Full JavaScript (site.js) — Persistent Tags Until Save/Cancel
+js
+Copy
+Edit
+(function ($) {
+    $.fn.trackUnsavedChanges = function () {
+        const gridEl = this;
+        const grid = gridEl.data("kendoGrid");
+        const gridId = gridEl.attr("id");
+
+        if (!grid) {
+            console.warn("trackUnsavedChanges: Grid not initialized for", gridId);
+            return;
+        }
+
+        console.log("✅ trackUnsavedChanges initialized for grid:", gridId);
+
+        // Show tags on edit and data change
+        grid.bind("edit", function () {
+            console.log("🖊 Grid edit event triggered");
+            setTimeout(() => showUnsavedTags(grid), 100);
+        });
+
+        grid.bind("change", function () {
+            console.log("🔁 Grid change event triggered");
+            setTimeout(() => showUnsavedTags(grid), 100);
+        });
+
+        // Remove tags on save, cancel, or server sync
+        ["save", "cancel", "requestEnd"].forEach(event => {
+            grid.bind(event, function () {
+                console.log(`🧹 Grid ${event} event — clearing tags`);
+                clearUnsavedTags(grid);
+            });
+        });
+
+        // Adjust tag position on scroll/resize
+        $(window).off("resize.scroll" + gridId).on("resize.scroll" + gridId, () => {
+            updateFloatingTagPositions(grid);
+        });
+
+        gridEl.off("scroll.scroll" + gridId).on("scroll.scroll" + gridId, ".k-grid-content", () => {
+            updateFloatingTagPositions(grid);
+        });
+    };
+
+    function showUnsavedTags(grid) {
+        const ds = grid.dataSource;
+        if (!ds) return;
+
+        ds.view().forEach(item => {
+            const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+            if (!row.length) return;
+
+            const rowOffset = row.offset();
+            if (!rowOffset) return;
+
+            const isAlreadyTagged = $(`.unsaved-floating-tag[data-uid='${item.uid}']`).length > 0;
+            const showEdit = item.dirty && !item.isNew();
+            const showNew = item.isNew();
+
+            if ((showEdit || showNew) && !isAlreadyTagged) {
+                row.addClass("unsaved-row");
+
+                const message = showNew ? "🆕 New item" : "⚠ Edited but not saved";
+
+                const tag = $(`
+                    <div class='unsaved-floating-tag animated-fade-in' data-uid='${item.uid}'>
+                        ${message}
+                    </div>
+                `).css({
+                    position: "absolute",
+                    top: rowOffset.top + row.outerHeight(),
+                    left: rowOffset.left,
+                    width: row.outerWidth(),
+                    zIndex: 1000
+                });
+
+                $("body").append(tag);
+                console.log("✅ Tag shown:", message, "for uid:", item.uid);
+            }
+        });
+
+        updateFloatingTagPositions(grid);
+    }
+
+    function updateFloatingTagPositions(grid) {
+        $(".unsaved-floating-tag").each(function () {
+            const tag = $(this);
+            const uid = tag.data("uid");
+            const row = grid.tbody.find(`tr[data-uid='${uid}']`);
+            if (!row.length) return;
+
+            const rowOffset = row.offset();
+            if (!rowOffset) return;
+
+            tag.css({
+                top: rowOffset.top + row.outerHeight(),
+                left: rowOffset.left,
+                width: row.outerWidth()
+            });
+        });
+    }
+
+    function clearUnsavedTags(grid) {
+        $(".unsaved-row").removeClass("unsaved-row");
+        $(".unsaved-floating-tag").remove();
+        console.log("🧹 Cleared all UNSAVED tags and styles");
+    }
+
+    // Detect blur to catch uncommitted cell edits
+    $(document).on("focusout", ".k-grid input", function () {
+        const grid = $(this).closest(".k-grid").data("kendoGrid");
+        if (grid) {
+            console.log("🧠 Input blur detected — checking for changes");
+            setTimeout(() => showUnsavedTags(grid), 100);
+        }
+    });
+})(jQuery);
+
+🎨 Final CSS (Persistent + Styled)
+css
+Copy
+Edit
+.unsaved-row {
+    background-color: #fff9e6 !important;
+}
+
+.unsaved-floating-tag {
+    background-color: #d4edda; /* soft green */
+    color: #155724;
+    font-weight: bold;
+    text-align: center;
+    padding: 4px 10px;
+    font-size: 6px;
+    border: 1px solid #c3e6cb;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0.95;
+}
+
+.animated-fade-in {
+    animation: fadeInTag 0.4s ease-in-out;
+}
+
+@keyframes fadeInTag {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
