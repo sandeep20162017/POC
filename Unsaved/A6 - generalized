@@ -1,0 +1,141 @@
+. JavaScript: trackGridUnsavedChanges.js
+Place this in your site-wide JS bundle or layout.
+
+js
+Copy
+Edit
+function showUnsavedTags(grid) {
+    if (!grid) return;
+
+    const ds = grid.dataSource;
+    $(".unsaved-floating-tag").remove();
+
+    setTimeout(() => {
+        ds.view().forEach(item => {
+            if (item.dirty || item.isNew()) {
+                const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+                if (!row.length) return;
+
+                row.addClass("unsaved-row");
+
+                const rowOffset = row.offset();
+                if (!rowOffset) return;
+
+                const tag = $(`
+                    <div class='unsaved-floating-tag animated-fade-in' data-uid='${item.uid}'>
+                        ⚠ UNSAVED CHANGES
+                    </div>
+                `).css({
+                    position: "absolute",
+                    top: rowOffset.top + row.outerHeight(),
+                    left: rowOffset.left,
+                    width: row.outerWidth(),
+                    zIndex: 1000
+                });
+
+                $("body").append(tag);
+            }
+        });
+
+        updateFloatingTagPositions(grid);
+    }, 100);
+}
+
+function updateFloatingTagPositions(grid) {
+    $(".unsaved-floating-tag").each(function () {
+        const tag = $(this);
+        const uid = tag.data("uid");
+        const row = grid.tbody.find(`tr[data-uid='${uid}']`);
+        if (!row.length) return;
+
+        const rowOffset = row.offset();
+        if (!rowOffset) return;
+
+        tag.css({
+            top: rowOffset.top + row.outerHeight(),
+            left: rowOffset.left,
+            width: row.outerWidth()
+        });
+    });
+}
+
+function attachGridFloatingHandlers(gridId) {
+    const grid = $("#" + gridId).data("kendoGrid");
+    if (!grid) return;
+
+    // Attach scroll & resize handlers just once per grid
+    $(window).off("resize.scroll" + gridId).on("resize.scroll" + gridId, () => {
+        updateFloatingTagPositions(grid);
+    });
+
+    $("#" + gridId).off("scroll.scroll" + gridId).on("scroll.scroll" + gridId, ".k-grid-content", () => {
+        updateFloatingTagPositions(grid);
+    });
+}
+
+function clearUnsavedTags() {
+    $(".unsaved-row").removeClass("unsaved-row");
+    $(".unsaved-floating-tag").remove();
+}
+🧼 2. Global CSS
+Put this in your site.css or _Layout.cshtml:
+
+css
+Copy
+Edit
+.unsaved-row {
+    background-color: #fff9e6 !important;
+}
+
+.unsaved-floating-tag {
+    background-color: #fff3cd;
+    color: #856404;
+    font-weight: bold;
+    text-align: center;
+    padding: 4px 10px;
+    font-size: 13px;
+    border: 1px solid #ffeeba;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.animated-fade-in {
+    animation: fadeInTag 0.4s ease-in-out;
+}
+
+@keyframes fadeInTag {
+    from { opacity: 0; transform: translateY(-5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+🧩 3. Each Partial Grid (e.g. in Partial Views)
+In each grid config, wire up:
+
+csharp
+Copy
+Edit
+.Events(events => events
+    .Change("onGridDataSourceChange")
+    .RequestEnd("onGridRequestEnd")
+)
+In the same partial view or script block:
+
+html
+Copy
+Edit
+<script>
+    function onGridDataSourceChange(e) {
+        const grid = e.sender;
+        showUnsavedTags(grid);
+    }
+
+    function onGridRequestEnd(e) {
+        clearUnsavedTags();
+    }
+
+    $(document).ready(function () {
+        const gridId = "@Html.Kendo().Grid<...>().Name"; // or hardcode: "RbPartsMaterialDetailsRebuiltPartsGrid"
+        attachGridFloatingHandlers(gridId);
+    });
+</script>
