@@ -1,0 +1,126 @@
+Final Simplified Setup (All-in-One)
+📦 JS: Unified onRbDataSourceChange (handles add + edit)
+js
+Copy
+Edit
+function onRbDataSourceChange(e) {
+    const grid = e.sender;
+    const ds = grid.dataSource;
+
+    $(".unsaved-floating-tag").remove(); // Clear existing
+
+    // Slight delay to let DOM settle
+    setTimeout(() => {
+        ds.view().forEach(item => {
+            if (item.dirty || item.isNew()) {
+                const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+                if (!row.length) return;
+
+                row.addClass("unsaved-row");
+
+                const rowOffset = row.offset();
+                if (!rowOffset) return;
+
+                const tag = $(`
+                    <div class='unsaved-floating-tag animated-fade-in' data-uid='${item.uid}'>
+                        ⚠ UNSAVED CHANGES
+                    </div>
+                `).css({
+                    position: "absolute",
+                    top: rowOffset.top + row.outerHeight(),
+                    left: rowOffset.left,
+                    width: row.outerWidth(),
+                    zIndex: 1000
+                });
+
+                $("body").append(tag);
+            }
+        });
+
+        updateUnsavedTagPositions(grid);
+    }, 100);
+}
+🧱 Helper: updateUnsavedTagPositions
+js
+Copy
+Edit
+function updateUnsavedTagPositions(grid) {
+    $(".unsaved-floating-tag").each(function () {
+        const tag = $(this);
+        const uid = tag.data("uid");
+        const row = grid.tbody.find(`tr[data-uid='${uid}']`);
+        if (!row.length) return;
+
+        const rowOffset = row.offset();
+        if (!rowOffset) return;
+
+        tag.css({
+            top: rowOffset.top + row.outerHeight(),
+            left: rowOffset.left,
+            width: row.outerWidth()
+        });
+    });
+}
+📌 One-Time Hook (Put inside $(document).ready)
+js
+Copy
+Edit
+$(document).ready(function () {
+    $(window).on("resize scroll", function () {
+        const grid = $("#RbPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+        if (grid) updateUnsavedTagPositions(grid);
+    });
+
+    $("#RbPartsMaterialDetailsRebuiltPartsGrid").on("scroll", ".k-grid-content", function () {
+        const grid = $("#RbPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+        if (grid) updateUnsavedTagPositions(grid);
+    });
+});
+🎨 CSS (unchanged)
+css
+Copy
+Edit
+.unsaved-row {
+    background-color: #fff9e6 !important;
+}
+
+.unsaved-floating-tag {
+    background-color: #fff3cd;
+    color: #856404;
+    font-weight: bold;
+    text-align: center;
+    padding: 4px 10px;
+    font-size: 13px;
+    border: 1px solid #ffeeba;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.animated-fade-in {
+    animation: fadeInTag 0.4s ease-in-out;
+}
+
+@keyframes fadeInTag {
+    from { opacity: 0; transform: translateY(-5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+🧼 Optional: Clean Tag on Save
+You're likely already using this:
+
+js
+Copy
+Edit
+function onRbRequestEnd(e) {
+    $(".unsaved-row").removeClass("unsaved-row");
+    $(".unsaved-floating-tag").remove();
+}
+✅ Now Everything is Handled With Just:
+onRbDataSourceChange
+
+onRbRequestEnd
+
+One-time setup in $(document).ready
+
+No need to write a separate Edit event handler anymore — clean, maintainable, and reliable. Want a timeout auto-hide for the UNSAVED tag too?
