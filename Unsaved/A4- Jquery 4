@@ -1,0 +1,94 @@
+(function ($) {
+    $.fn.trackUnsavedChanges = function () {
+        const gridEl = this;
+        const grid = gridEl.data("kendoGrid");
+        if (!grid) {
+            console.warn("trackUnsavedChanges: Grid not initialized for", gridEl.attr("id"));
+            return;
+        }
+
+        console.log("trackUnsavedChanges initialized for grid:", gridEl.attr("id"));
+
+        // Trigger on cell value change or new row
+        grid.bind("change", function () {
+            console.log("Grid change event triggered");
+            setTimeout(() => showUnsavedTags(grid), 100);
+        });
+
+        // Also show tag on edit start (before 'dirty' is true)
+        grid.bind("edit", function () {
+            console.log("Grid edit event triggered");
+            setTimeout(() => showUnsavedTags(grid), 100);
+        });
+
+        // Clear tag on save
+        grid.bind("requestEnd", function () {
+            console.log("Grid requestEnd - clearing UNSAVED tags");
+            clearUnsavedTags();
+        });
+
+        // Handle scroll and resize
+        const gridId = gridEl.attr("id");
+        $(window).off("resize.scroll" + gridId).on("resize.scroll" + gridId, function () {
+            updateFloatingTagPositions(grid);
+        });
+
+        gridEl.off("scroll.scroll" + gridId).on("scroll.scroll" + gridId, ".k-grid-content", function () {
+            updateFloatingTagPositions(grid);
+        });
+    };
+
+    function showUnsavedTags(grid) {
+        const ds = grid.dataSource;
+        if (!ds) {
+            console.warn("No dataSource found.");
+            return;
+        }
+
+        $(".unsaved-floating-tag").remove();
+
+        ds.view().forEach(item => {
+            console.log("Checking item:", item);
+            if (item.dirty || item.isNew()) {
+                const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+                if (!row.length) {
+                    console.warn("Row not found for item.uid:", item.uid);
+                    return;
+                }
+
+                console.log("Adding UNSAVED tag for uid:", item.uid);
+                row.addClass("unsaved-row");
+
+                const rowOffset = row.offset();
+                if (!rowOffset) {
+                    console.warn("Row offset not available for uid:", item.uid);
+                    return;
+                }
+
+                const tag = $(`
+                    <div class='unsaved-floating-tag animated-fade-in' data-uid='${item.uid}'>
+                        ⚠ UNSAVED CHANGES
+                    </div>
+                `).css({
+                    position: "absolute",
+                    top: rowOffset.top + row.outerHeight(),
+                    left: rowOffset.left,
+                    width: row.outerWidth(),
+                    zIndex: 1000
+                });
+
+                $("body").append(tag);
+            }
+        });
+
+        updateFloatingTagPositions(grid);
+    }
+
+    function updateFloatingTagPositions(grid) {
+        $(".unsaved-floating-tag").each(function () {
+            const tag = $(this);
+            const uid = tag.data("uid");
+            const row = grid.tbody.find(`tr[data-uid='${uid}']`);
+
+            if (!row.length) {
+                console.warn("Row not found during position update for uid
