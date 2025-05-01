@@ -1,0 +1,215 @@
+Thanks for your patience. Let's address the issue where the "🆕 New item" and "⚠ Edited but not saved" tags are not visible on the screen, despite console logs indicating they are applied.
+
+🛠️ Updated JavaScript (site.js)
+javascript
+Copy
+Edit
+(function ($) {
+    $.fn.trackUnsavedChanges = function () {
+        const gridEl = this;
+        const grid = gridEl.data("kendoGrid");
+        const gridId = gridEl.attr("id");
+
+        if (!grid) {
+            console.warn("trackUnsavedChanges: Grid not initialized for", gridId);
+            return;
+        }
+
+        console.log("✅ trackUnsavedChanges initialized for grid:", gridId);
+
+        // Ensure grid content area is relative for tag positioning
+        grid.wrapper.find(".k-grid-content").css("position", "relative");
+
+        // Track changes and edits
+        ["edit", "change"].forEach(event => {
+            grid.bind(event, function () {
+                console.log(`✏ Grid ${event} event triggered`);
+                setTimeout(() => showUnsavedTags(grid), 100);
+            });
+        });
+
+        // Clear tags on cancel, save or server-side update
+        ["save", "cancel", "requestEnd"].forEach(event => {
+            grid.bind(event, function () {
+                console.log(`🧹 Grid ${event} event — clearing tags`);
+                clearUnsavedTags(grid);
+            });
+        });
+
+        // Re-align tags on scroll/resize
+        $(window).off("resize.scroll" + gridId).on("resize.scroll" + gridId, () => {
+            updateFloatingTagPositions(grid);
+        });
+
+        gridEl.off("scroll.scroll" + gridId).on("scroll.scroll" + gridId, ".k-grid-content", () => {
+            updateFloatingTagPositions(grid);
+        });
+    };
+
+    function showUnsavedTags(grid) {
+        const ds = grid.dataSource;
+        if (!ds) return;
+
+        const contentArea = grid.wrapper.find(".k-grid-content");
+
+        ds.view().forEach(item => {
+            const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+            if (!row.length) return;
+
+            const rowOffset = row.position(); // use .position() relative to .k-grid-content
+            if (!rowOffset) return;
+
+            const uid = item.uid;
+            const tagExists = contentArea.find(`.unsaved-floating-tag[data-uid='${uid}']`).length > 0;
+
+            const showEdit = item.dirty && !item.isNew();
+            const showNew = item.isNew();
+
+            if ((showEdit || showNew) && !tagExists) {
+                row.addClass("unsaved-row");
+
+                const message = showNew ? "🆕 New item" : "⚠ Edited but not saved";
+
+                const tag = $(`
+                    <div class='unsaved-floating-tag animated-fade-in' data-uid='${uid}'>
+                        ${message}
+                    </div>
+                `).css({
+                    position: "absolute",
+                    top: rowOffset.top + row.outerHeight(),
+                    left: rowOffset.left,
+                    width: row.outerWidth(),
+                    zIndex: 1000
+                });
+
+                contentArea.append(tag);
+                console.log("✅ Tag shown:", message, "for uid:", uid);
+            }
+        });
+
+        updateFloatingTagPositions(grid);
+    }
+
+    function updateFloatingTagPositions(grid) {
+        const contentArea = grid.wrapper.find(".k-grid-content");
+
+        contentArea.find(".unsaved-floating-tag").each(function () {
+            const tag = $(this);
+            const uid = tag.data("uid");
+            const row = grid.tbody.find(`tr[data-uid='${uid}']`);
+            if (!row.length) return;
+
+            const rowOffset = row.position();
+            if (!rowOffset) return;
+
+            tag.css({
+                top: rowOffset.top + row.outerHeight(),
+                left: rowOffset.left,
+                width: row.outerWidth()
+            });
+        });
+    }
+
+    function clearUnsavedTags(grid) {
+        grid.tbody.find(".unsaved-row").removeClass("unsaved-row");
+        grid.wrapper.find(".unsaved-floating-tag").remove();
+        console.log("🧽 Tags cleared");
+    }
+
+    // Catch input blur (uncaptured edits)
+    $(document).on("focusout", ".k-grid input", function () {
+        const grid = $(this).closest(".k-grid").data("kendoGrid");
+        if (grid) {
+            console.log("🧠 Input blur detected — checking for unsaved changes");
+            setTimeout(() => showUnsavedTags(grid), 100);
+        }
+    });
+})(jQuery);
+🎨 Updated CSS (site.css)
+css
+Copy
+Edit
+/* Highlight unsaved rows */
+.unsaved-row {
+    background-color: #fff9e6 !important;
+}
+
+/* Floating tag style */
+.unsaved-floating-tag {
+    background-color: #d4edda;
+    color: #155724;
+    font-weight: bold;
+    text-align: center;
+    padding: 4px 10px;
+    font-size: 6px;
+    border: 1px solid #c3e6cb;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0.95;
+}
+
+/* Animation */
+.animated-fade-in {
+    animation: fadeInTag 0.4s ease-in-out;
+}
+
+@keyframes fadeInTag {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Ensure .k-grid-content is positioned for relative tag placement */
+.k-grid-content {
+    position: relative;
+}
+✅ Integration Steps
+Include the CSS and JS Files:
+
+Ensure that the updated site.css and site.js files are included in your project and referenced appropriately in your HTML or layout files.
+
+Initialize the Tracking:
+
+After your grid is rendered, initialize the tracking as follows:
+
+html
+Copy
+Edit
+<script>
+    $(document).ready(function () {
+        $("#RbPartsMaterialDetailsRebuiltPartsGrid").trackUnsavedChanges();
+    });
+</script>
+Verify Grid Configuration:
+
+Ensure that your Kendo UI Grid is configured correctly, especially if you're using virtual scrolling. If virtual scrolling is enabled, additional handling may be required to manage the visibility of tags for rows that are not currently in the DOM.
+
+🧪 Testing the Implementation
+Adding a New Row:
+
+Click the "Add New" button on the grid.
+
+A new row should appear with the background color #fff9e6.
+
+Below the new row, the tag "🆕 New item" should be visible.
+
+Editing an Existing Row:
+
+Edit any existing row.
+
+The edited row should have the background color #fff9e6.
+
+Below the edited row, the tag "⚠ Edited but not saved" should be visible.
+
+Saving or Canceling Changes:
+
+Upon saving or canceling the changes, the background color and the corresponding tag should be removed.
+
