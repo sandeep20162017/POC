@@ -1,0 +1,2947 @@
+Following are my index and css files. I want to set 
+1. Highlight new row (add new) with light green, preserv the color till user cliks on save or cancel
+2. Highlight edited row to light yellow, preeserv the hilight till user clicks on save or cancel
+Provide me complete css an changes in the index.cshtml
+@using BCES.Models.Vehicle
+@using BCES.Models.Common
+@model IEnumerable<BCES.Models.Vehicle.VehicleViewModel>
+
+@{
+    ViewData["Title"] = "Vehicle Estimate";
+    var parentGridId = $"{ViewBag.PartNum}";/* save gridname in hidden field for JS */
+}
+
+<h6>Vehicle Estimate</h6>
+
+@(Html.Kendo().TabStrip()
+    .Name("vehicleTabStrip")
+    .Animation(animation => animation.Open(effect => effect.Fade(FadeDirection.In)))
+    .Items(tabstrip =>
+    {
+        tabstrip.Add().Text("Vehicles")
+            .Selected(true)
+            .Content(@<text>
+    @try
+    {
+    @(Html.Kendo().Grid<VehicleViewModel>()
+    .Name("VehicleGrid")
+    .Columns(columns =>
+    {
+    columns.Bound(c => c.VehicleListId).Title("Estimate #")
+    .Filterable(ftb => ftb.Cell(cell => cell.Operator("gte")))
+    .EditorTemplateName("ComboBoxEditor")
+    .IncludeInMenu(false)
+    .Width(190).Lockable(true);
+
+     columns.Bound(c => c.VehSeriesCode).Title("Vehicle Series Code")
+    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+    .EditorTemplateName("ComboBoxEditor")
+    .Width(160);
+
+    columns.Bound(c => c.NumOfVehicles).Title("Number Of Vehicles")
+   // .ClientTemplate("#: truncateText(data.KeyWord) #")
+    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+    
+    .Width(160).Hidden(false).MinScreenWidth(768);
+
+     columns.Bound(c => c.ProjDesc).Title("Project Description")
+    //.ClientTemplate("#: truncateText(data.Description) #")
+    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+    .EditorTemplateName("ComboBoxEditor")
+    .Width(250).Hidden(false).MinScreenWidth(768);
+
+   columns.Bound(c => c.Make).Title("Make")
+   // .ClientTemplate("#: truncateText(data.JobNumber) #")
+    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+    .EditorTemplateName("ComboBoxEditor")
+    .Width(160).Hidden(false).MinScreenWidth(768);
+
+    @* columns.Bound(c => c.Model).Title("Model")
+    .ClientTemplate("#: truncateText(data.CorePartNum) #")
+    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+    .Width(100).Hidden(false).MinScreenWidth(768); *@
+
+    columns.Bound(c => c.Year).Title("Year")
+    //.ClientTemplate("#: truncateText(data.CoreCharge) #")
+    .Filterable(ftb => ftb.Cell(cell => cell.Operator("gte")))
+    //.Format("{0:C}").EditorTemplateName("Currency")
+    .EditorTemplateName("ComboBoxEditor")
+    .Width(150).Hidden(false).MinScreenWidth(768); 
+
+    columns.Bound(c => c.Engine).Title("Engine")
+   // .ClientTemplate("#: truncateText(data.CoreCharge) #")
+    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+    .EditorTemplateName("ComboBoxEditor")
+    //.Format("{0:C}").EditorTemplateName("Currency")
+    .Width(150).Hidden(false).MinScreenWidth(768);
+
+    columns.Bound(c => c.Transmission).Title("Transmission")
+    .EditorTemplateName("ComboBoxEditor")
+   // .ClientTemplate("#: truncateText(data.CoreCharge) #")
+    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+    //.Format("{0:C}").EditorTemplateName("Currency")
+    .Width(150).Hidden(false).MinScreenWidth(768);
+
+    columns.Bound(c => c.Sopnumber).Title("Sop Number")
+    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+   
+    .Width(150).Hidden(false).MinScreenWidth(768);  
+
+   
+
+    columns.Command(command =>
+    {
+    // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+    command.Custom("Archive").Text(" ").IconClass("k-icon k-i-folder").Click("onArchiveClick").HtmlAttributes(new { title = "Archive" }); // Archive button with tooltip
+    command.Custom("Delete")
+        .Click("showDeleteConfirmation")
+        .Text(" ")
+        .IconClass("k-icon k-i-delete")
+        .HtmlAttributes(new {
+            @class = "text-danger",
+            data_grid = "VehicleGrid",
+            data_url = Url.Action("DeleteVehicle", "Vehicles"),
+            data_id_field = "VehicleListId", //pk
+            data_grid_type = "VehicleGrid" // static value
+    });
+    command.Custom("Save to Excel").Text(" ").IconClass("k-icon k-i-file-excel").Click("onSaveToExcelClick").HtmlAttributes(new { title = "Save to Excel" }); // Save to Excel button with tooltip
+    command.Custom("Email Estimate").Text(" ").IconClass("k-icon k-i-email").Click("onEmailEstimateClick").HtmlAttributes(new { title = "Email Estimate" }); // Email Estimate button with tooltip
+    }).Title("Actions").IncludeInMenu(false).Width(300); // Set a fixed width for the Actions column
+    })
+
+    .ToolBar(toolbar => {
+    toolbar.Create().Text("Add").IconClass("k-icon k-i-plus").HtmlAttributes(new {
+    title = "Add new record",
+    @class = "k-primary"
+    });
+    toolbar.Save().SaveText("Save").CancelText("Cancel")
+    .HtmlAttributes(new {
+    title_save = "Save all changes",
+    title_cancel = "Discard changes"
+    });
+    toolbar.Excel().Text("Variance Report");
+    })
+    .Excel(excel =>
+    {
+    excel.FileName("VarianceReport.xlsx")
+    .Filterable(true)
+    .AllPages(true);
+
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Events(events => events
+        .ExcelExport("onExcelExport")
+        .DetailExpand("onDetailExpand")
+        .DetailCollapse("onDetailCollapse")
+        .DataBound("onVehGridDataBound")
+        .Save("onVehGridSave")
+    )
+    //.Pageable()
+    .Pageable(p => p
+    .PageSizes(new int[] {1, 10, 20, 50 }) // Dropdown options
+    .Position(GridPagerPosition.Top)    
+
+    )
+    .Sortable()
+    .ClientDetailTemplateId("template")
+    .Resizable(r => r.Columns(true))
+    .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+    .ColumnMenu(menu => menu.Enabled(true))
+    .Scrollable(s => s.Height("auto"))
+    .Reorderable(reorder => reorder.Columns(true))
+    .DataSource(dataSource => dataSource
+    .Ajax()
+    .PageSize(1)
+    .Model(model =>
+    {
+
+    model.Id(c => c.VehicleListId);
+    model.Field(c => c.VehicleListId).Editable(false);
+
+    })
+    .Events(events =>
+    {
+    events.RequestEnd("onRequestEnd");
+    events.Error("onDataSourceError");
+
+    })
+    .Read(read => read.Url(Url.Action("GetVehiclesView", "Vehicles")).Type(HttpVerbs.Get))
+    .Create(create => create.Url(Url.Action("AddVehiclesView", "Vehicles")).Type(HttpVerbs.Post))
+    .Update(update => update.Url(Url.Action("UpdateVehiclesView", "Vehicles")).Type(HttpVerbs.Post))
+    .Destroy(delete => delete.Url(Url.Action("DeleteVehiclesView", "Vehicles")).Type(HttpVerbs.Post))
+    )
+    )
+    }
+    catch (Exception ex)
+    {
+    <div class="alert alert-danger">Error loading Vehicle Estimate: @ex.Message</div>
+    }
+</text>);
+
+        tabstrip.Add().Text("Archived Vehicles")
+            .Content(@<text>
+    @try
+    {
+    @Html.Partial("_ArchivedVehicleIndex")
+    }
+    catch (Exception ex)
+    {
+    <div class="alert alert-danger">Error loading archived vehicles: @ex.Message</div>
+    }
+</text>);
+    })
+)
+
+<style>
+    .k-grid td {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .k-grid-header .k-header {
+        white-space: normal;
+        vertical-align: top;
+    }
+
+    .k-grid .k-hierarchy-col {
+        width: 10px; /* Fix detail template arrow column width */
+    }
+</style>
+<!-- Custom Delete Confirmation Dialog -->
+<div id="deleteConfirmationDialog" style="display: none;">
+    <div class="confirmation-message">
+        <span class="k-icon k-i-warning confirmation-icon"></span>
+        <span>Are you sure you want to delete this item?</span>
+    </div>
+    <div class="confirmation-buttons">
+        <button type="button" class="k-button cancel-btn">Cancel</button>
+        <button type="button" class="k-button confirm-btn">Delete</button>
+    </div>
+</div>
+
+<div id="notification"></div>
+<!-- Placeholder for dynamically loaded email estimate popup and notification -->
+<div id="email-estimate-container" style="display: none;">
+    @Html.Partial("_EmailEstimatePopup")
+    <div id="estimates-container"></div>
+
+</div>
+@* <input type="hidden" name="SelectedBuses" id="SelectedBusesHidden" value="" /> *@
+<!-- Rest of HTML remains unchanged -->
+@section Scripts {
+    <script>
+        // Truncation functions
+        function truncateText(text, max=25) {
+            return text?.length > max ? text.substr(0, max) + '...' : text;
+          // return text;
+        }
+
+        function truncateWords(text, wordCount=10) {
+            if (!text) return '';
+            const words = text.split(/\s+/);
+            return words.length > wordCount ?
+                words.slice(0, wordCount).join(' ') + '...' :
+                text;
+        }
+
+        // Vehicle Series display handler
+        function formatVehicleSeries(buses) {
+            if (!buses || !buses.length) return 'Select Vehicle';
+            return buses.map(b =>
+                `<span title="${b.BusName}">${truncateWords(b.BusName, 10)}</span>`
+            ).join(', ');
+        }
+
+        // Update client template for Vehicle Series
+        function refreshVehicleSeriesTemplate() {
+            const grid = $("#VehicleGrid").data("kendoGrid");
+            grid.refresh();
+        }
+
+
+    </script>
+
+    <script>
+            var tabIndex = -1; //-1 when  Main grid is acive, if below tabs are active get the resp. tabIndex ssk
+            var tabStripName = "";
+            $(document).ready(function () {
+
+               
+                /////////
+                $("#email-estimate-container").hide();
+                $("#archived-email-estimate-container").hide();
+
+                //// start visual save changes
+                // Initialize main TabStrip with proper error handling
+                 const mainTabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+                if (mainTabStrip) {
+                    // Correct tab item access using native array methods
+                    const tabs = mainTabStrip.items();
+                    if (tabs && tabs.length > 0) {
+                        // Access first tab using array index
+                        const firstTab = tabs[0];
+                        $(firstTab.element).find(".k-link").addClass("has-unsaved");
+                    }
+
+                    // Add tabstrip styling
+                    mainTabStrip.wrapper.find(".k-tabstrip-items").append(`
+                                <style>
+                                    .k-tabstrip-items .has-unsaved {
+                                        position: relative;
+                                        color: #d9534f !important;
+                                    }
+                                    .has-unsaved::after {
+                                        content: "•";
+                                        color: #d9534f;
+                                        position: absolute;
+                                        right: 8px;
+                                        top: 6px;
+                                        font-size: 1.5em;
+                                    }
+                                </style>
+                            `);
+                } else {
+                    console.warn("Main TabStrip not found");
+                }
+
+                ////end visual save changes
+            var grid = $("#VehicleGrid").data("kendoGrid");
+
+                // Initialize Kendo Notification for displaying messages
+                var notificationElement = $("#notification");
+                if (notificationElement.length === 0) {
+                    console.error("Notification element not found in the DOM.");
+                } else {
+                    var notification = notificationElement.kendoNotification({
+                        position: {
+                            pinned: true,
+                            top: 50,
+                            right: 50
+                        },
+                        autoHideAfter: 5000, // Hide after 5 seconds
+                        stacking: "down"
+                    }).data("kendoNotification");
+
+                    console.log("user clicks the Cancel button logic ");
+                  
+                    // Bind the Cancel event for the grid
+                    grid.bind("cancel", function (e) {
+                        // This event is triggered when the user clicks the Cancel button
+                    $.post('@Url.Action("CancelDetails", "Vehicles")', { vehicleListId: e.model.VehicleListId })
+                            .done(function (data) {
+                                if (notification) {
+                                    notification.show("Changes discarded!", "info");
+                                } else {
+                                    console.error("Notification is not initialized.");
+                                }
+                            })
+                            .fail(function (xhr, status, error) {
+                                console.error("Error discarding changes: ", error);
+                                if (notification) {
+                                    notification.show("An error occurred while discarding changes. Please try again.", "error");
+                                } else {
+                                    console.error("Notification is not initialized.");
+                                }
+                            });
+                    });
+
+                    console.log("calling detailInit");
+                    grid.bind("detailInit", function (e) {
+                        console.error("Inside detailInit");
+                    const vehicleListId = e.data.VehicleListId;
+                        parentGridId = vehicleListId;
+                    console.error("vehicleListId : ", vehicleListId);
+
+                    console.log("Detail initialization started for VehicleListId: " + e.data.VehicleListId);
+                    var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
+                    var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
+                    var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
+                    var tabScPartDetail = '@Url.Action("ScPartsUsedInEstimates", "Vehicles")' + '?id=' + e.data.VehicleListId;
+                    var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
+                    var tabUrlRbPartDetail = '@Url.Action("RbDetailsPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
+                    var tabUrlTotalCost = '@Url.Action("TotalCostPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
+
+                        // Get the container for the detail template
+                    var container = e.detailCell.find("#detail-template-" + e.data.VehicleListId);
+
+                        // Load the TabStrip structure
+                        container.html(`
+                                            <div id="tabstrip-container-${e.data.VehicleListId}">
+                                        <ul>
+                                             <li>Labour Details</li>
+                                            <li>Labour Hour</li>
+                                            <li>Material Cost</li>
+                                            <li>Stock Coded Parts</li>
+                                            <li>Non Stock Coded Parts</li>
+                                            <li>Rebuilt Parts</li>
+
+                                            <li>Total Cost</li>
+                                        </ul>
+
+                                                <div id="labour-details-content-${vehicleListId}"></div>
+                                                <div id="labour-hour-summary-content-${vehicleListId}"></div>
+                                                <div id="material-cost-summary-content-${vehicleListId}"></div>
+                                                <div id="material-details-content-${vehicleListId}"></div>
+                                                <div id="nsc-details-content-${vehicleListId}"></div>
+                                                <div id="rb-part-details-content-${vehicleListId}"></div>
+
+                                                <div id="total-cost-content-${vehicleListId}">"></div>
+                                    </div>
+                                `);
+
+                        // Initialize the Kendo TabStrip
+                        console.log("Initialize tabScript ");
+
+                    var tabStrip = $("#tabstrip-container-" + e.data.VehicleListId).kendoTabStrip({
+                            animation: { open: { effects: "fadeIn" } },
+                            select: function (e) {
+                                 tabIndex = $(e.item).index(); // Get the index of the selected tab
+                                 tabStripName = e.sender.element.attr("id") ; //ssk tabStripName
+
+                                // Check for unsaved changes in the current tab
+                                var currentTabContent = tabStrip.contentElement(tabStrip.select().index());
+                                var currentGrid = $(currentTabContent).find(".k-grid").data("kendoGrid");
+                                console.log("*******currentGrid :", currentGrid);
+
+                                 console.log("*******currentTabContent :", currentTabContent);
+                             //    var gridName = currentGrid.element.attr("id");
+                               //  console.log("*******currentGridName :", gridName);
+                              //  notification.show("currentGridName :" + gridName, "warning");
+
+
+
+                                 tabIndex = $(e.item).index(); // Get the index of the selected tab
+
+                                if (currentGrid &&  (currentGrid.dataSource.hasChanges()) ) { //kendoNotification show waring for reaonly
+                                    console.log("hasChanges :", currentGrid.dataSource.hasChanges());
+
+                                    // Show a warning notification
+                                    if (notification) {
+                                        notification.show("You have unsaved changes. Click on Update or Cancel changes before clicking next tab.", "warning");
+                                       // notification.show(currentGrid);
+                                      //  notification.show(currentGrid.dataSource.hasChanges());
+                                    } else {
+                                        console.error("****** Notification is not initialized.");
+                                    }
+                                    e.preventDefault(); // Prevent the tab switch
+                                    return;
+                                }
+                                console.log("Load the partial view content for the selected tab");
+                                // Load the partial view content for the selected tab
+                                var tabUrl = tabIndex == 0 ? tabUrlLabourDetail :
+                                    tabIndex == 1 ? tabUrlLabourHourSummary :
+                                        tabIndex == 2 ? tabUrlMaterialCostSummary :
+                                            tabIndex == 3 ? tabScPartDetail :
+                                                tabIndex == 4 ? tabUrlNscDetail :
+                                                    tabIndex == 5 ? tabUrlRbPartDetail :
+                                                        tabUrlTotalCost;
+
+                                $.get(tabUrl)
+                                    .done(function (data) {
+
+                                        $(e.contentElement).html(data);
+                                        kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
+                                        if (tabIndex == 0) {
+                                        var gridName = 'LabourDetailsGrid_' + vehicleListId; //ssk2
+                                            console.log('########  :gridName ', gridName);
+                                        }
+
+                                        console.log('########  :tabIndex ', tabIndex);
+                                        // Reset the hasChanges() state for read-only tabs
+                                        if (tabIndex == '6' || tabIndex == '1' || tabIndex == '2') { //read-only tab
+                                            var grid = $(e.contentElement).find(".k-grid").data("kendoGrid");
+                                            // console.log("*******currentGrid2 :", currentGrid);
+                                              var gridName = grid.element.attr("id");
+                                             console.log("*******currentGridName2 :", gridName);
+                                           // console.log("*******currentTabContent :", currentTabContent);
+                                                grid.dataSource.read(); // Refresh the data source
+                                        }
+                                    })
+                                    .fail(function (xhr, status, error) {
+                                        console.error("Error loading tab content: ", error);
+                                        if (notification) {
+                                            notification.show("An error occurred while loading the tab content. Please try again.", "error");
+                                        } else {
+                                            console.error("Notification is not initialized.");
+                                        }
+                                    });
+                            }
+                        }).data("kendoTabStrip");
+
+                        // Load the first tab's content
+                        $.get(tabUrlLabourDetail)
+                            .done(function (data) {
+                                $("#labour-details-content").html(data);
+                                kendo.init($("#labour-details-content")); // Reinitialize Kendo widgets
+                            })
+                            .fail(function (xhr, status, error) {
+                                console.error("Error loading initial tab content: ", error);
+                                if (notification) {
+                                    notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
+                                } else {
+                                    console.error("Notification is not initialized.");
+                                }
+                            });
+                    });
+                }
+                //archived --------------------------------------------
+                var grid = $("#ArchivedVehiclesGrid").data("kendoGrid");
+
+                // Initialize Kendo Notification for displaying messages
+                var notificationElement = $("#archived-notification");
+                if (notificationElement.length === 0) {
+                    console.error("Notification element not found in the DOM.");
+                } else {
+                    var notification = notificationElement.kendoNotification({
+                        position: {
+                            pinned: true,
+                            top: 50,
+                            right: 50
+                        },
+                        autoHideAfter: 5000, // Hide after 5 seconds
+                        stacking: "down"
+                    }).data("kendoNotification");
+                    //TODO : Revisit when View Archived Logic gets re-written. Need new controller
+                    //VB Code CES_INQUIRY.RETRIVE_RBP_USED
+                    //CES_ARCHICE.ARCHIVE_RB
+                //Uncomment ClientDetailTemplateId("archived-template") in ArchivedVehicleIndex.cshtml
+
+                    // Bind the detailInit event for the grid
+                    // grid.bind("detailInit", function (e) {
+                    //     console.log("Detail initialization started for RebuiltStockNum: " + e.data.RebuiltStockNum);
+                    //     var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "Vehicles")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                //     var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "Vehicles")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                //     var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "Vehicles")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                //     var tabScPartDetail = '@Url.Action("ScPartsUsedInRbParts", "Vehicles")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                //     var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "Vehicles")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                //     var tabUrlRbPartDetail = '@Url.Action("RbDetailsPartial", "Vehicles")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+                //     var tabUrlTotalCost = '@Url.Action("TotalCostPartial", "Vehicles")' + '?rebuiltPartNum=' + e.data.RebuiltStockNum;
+
+                    //     // Get the container for the detail template
+                    //     var container = e.detailCell.find("#archived-detail-template-" + e.data.RebuiltStockNum);
+
+                    //     // Load the TabStrip structure
+                    //     container.html(`
+                    //                 <div id="archived-tabstrip-container-${e.data.RebuiltStockNum}">
+                    //                     <ul>
+                    //                         <li class="k-state-active">Labour Details</li>
+                    //                         <li>Labour Hour</li>
+                    //                         <li>Material: Cost</li>
+                    //                         <li>Stock Coded Parts</li>
+                    //                         <li>Non Stock Coded Parts</li>
+                    //                         <li>Rebuilt Built Parts</li>
+                    //                         <li>Total Cost</li>
+                    //                     </ul>
+                    //                     <div id="archived-labour-details-content"></div>
+                    //                     <div id="archived-labour-hour-summary-content"></div>
+                    //                     <div id="archived-material-cost-summary-content"></div>
+                    //                     <div id="archived-material-details-content"></div>
+                    //                     <div id="archived-nsc-details-content"></div>
+                    //                     <div id="archived-rb-part-details-content"></div>
+                    //                     <div id="archived-total-cost-content"></div>
+                    //                 </div>
+                    //             `);
+
+                    //     // Initialize the Kendo TabStrip
+                    //     var tabStrip = $("#archived-tabstrip-container-" + e.data.RebuiltStockNum).kendoTabStrip({
+                    //         animation: { open: { effects: "fadeIn" } },
+                    //         select: function (e) {
+                    //              tabIndex = $(e.item).index(); // Get the index of the selected tab
+                    //               tabStripName = e.sender.element.attr("id") ; //ssk tabStripName
+
+                    //             // Load the partial view content for the selected tab
+                    //              tabUrl = tabIndex == 0 ? tabUrlLabourDetail :
+                    //                 tabIndex == 1 ? tabUrlLabourHourSummary :
+                    //                     tabIndex == 2 ? tabUrlMaterialCostSummary :
+                    //                         tabIndex == 3 ? tabScPartDetail :
+                    //                             tabIndex == 4 ? tabUrlNscDetail :
+                    //                                 tabIndex == 5 ? tabUrlRbPartDetail :
+                    //                                     tabUrlTotalCost;
+
+                    //             $.get(tabUrl)
+                    //                 .done(function (data) {
+                    //                     $(e.contentElement).html(data);
+                    //                     kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
+                    //                 })
+                    //                 .fail(function (xhr, status, error) {
+                    //                     console.error("Error loading tab content: ", error);
+                    //                     if (notification) {
+                    //                         notification.show("An error occurred while loading the tab content. Please try again.", "error");
+                    //                     } else {
+                    //                         console.error("Notification is not initialized.");
+                    //                     }
+                    //                 });
+                    //         }
+                    //     }).data("kendoTabStrip");
+
+                    //     // Load the first tab's content
+                    //     $.get(tabUrlLabourDetail)
+                    //         .done(function (data) {
+                    //             $("#archived-labour-details-content").html(data);
+                    //             kendo.init($("#archived-labour-details-content")); // Reinitialize Kendo widgets
+                    //         })
+                    //         .fail(function (xhr, status, error) {
+                    //             console.error("Error loading initial tab content: ", error);
+                    //             if (notification) {
+                    //                 notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
+                    //             } else {
+                    //                 console.error("Notification is not initialized.");
+                    //             }
+                    //         });
+                    // });
+                }
+                //archived end  ----------------------------------------
+            });
+
+            function onArchiveClick(e) {
+                e.preventDefault();
+                var grid = $("#VehicleGrid").data("kendoGrid");
+                var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+
+                // Call the controller action with the entire dataItem as JSON
+                $.ajax({
+                url: '@Url.Action("ArchiveVehicleDetails", "Vehicles")',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(dataItem),
+                    success: function (data) {
+                        // Display a Kendo Notification
+                        var notification = $("#notification").kendoNotification({
+                            position: {
+                                pinned: true,
+                                top: 50,
+                                right: 50
+                            },
+                            autoHideAfter: 5000, // Hide after 5 seconds
+                            stacking: "down"
+                        }).data("kendoNotification");
+
+                    notification.show("Archived successfully.", "info");
+                    },
+                    error: function (xhr, status, error) {
+                        console.error("Error archiving: ", error);
+                    }
+                });
+            }
+
+            function onEmailEstimateClick(e) {
+                e.preventDefault();
+                var grid = $("#VehiclesGrid").data("kendoGrid");
+                var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+                var vehicleListId = dataItem.VehicleListId;
+
+                // Show the email estimate container
+                $("#email-estimate-container").show();
+
+                // Generate the Excel file by calling SaveToExcel via AJAX
+                $.ajax({
+                    url: '@Url.Action("SaveToExcel", "Export")',
+                    type: 'GET',
+                     data: { vehicleListId: vehicleListId },
+                    xhrFields: {
+                        responseType: 'blob' // Ensure the response is treated as a binary file
+                    },
+                    success: function (data) {
+                        // Create a link element to trigger the file download
+                        var link = document.createElement('a');
+                        link.href = window.URL.createObjectURL(data);
+                        link.download = `${vehicleListId}_Vehicles_Estimate.xlsx`;
+                        link.click();
+
+                        // Set the subject with the rebuilt number and today's date
+                        var today = new Date();
+                        var subject = `Vehicle Estimates for ${vehicleListId} - Date ${today.toLocaleDateString()} ${today.toLocaleTimeString()}`;
+
+                        // Set the form values
+                        $("#to").val("");
+                        $("#subject").val(subject);
+                    $("#body").val(`Dear Sir/Madam,\nPlease find attached here with Vehicle Estimate for ${vehicleListId}.\n\nThank you`);
+
+                        // Open the Kendo Window
+                        var kendoWindow = $("#emailEstimateWindow").data("kendoWindow");
+                        if (kendoWindow) {
+                            kendoWindow.center().open();
+                        } else {
+                            console.error("Kendo Window not found.");
+                        }
+                    },
+                    error: function (xhr, status, error) {
+                        console.error("Error downloading Excel file:", error);
+                    }
+                });
+            }
+
+            function onSaveToExcelClick(e) {
+                e.preventDefault();
+                var grid = $("#VehiclesGrid").data("kendoGrid");
+                var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var vehicleListId = dataItem.VehicleListId;
+
+                // Directly trigger the file download
+            window.location.href = '@Url.Action("SaveToExcel", "Export")' + '?vehicleListId=' + vehicleListId;
+            }
+
+            function onCancelEmailClick() {
+                // Close the Kendo Window
+                var window = $("#emailEstimateWindow").data("kendoWindow");
+                window.close();
+
+                // Show a notification
+                var notification = $("#notification").data("kendoNotification");
+                notification.show("Email Request Cancelled", "info");
+            }
+
+        //     function getDropDownListParams() {
+        //        // debugger;
+        //        console.log("********** inside getDropDownListParams");
+        //         var gridName = "RebuiltPartsGrid";
+        //         console.log("tabStripName :", tabStripName); //ssk
+        //         console.log("tabIndex :", tabIndex);
+        //          //if columnName == "Keyword" and  we are in the main grid
+        //         if (tabIndex == -1)
+        //          {
+        //              gridName = "RebuiltPartsGrid";
+        //          }
+        //         else if (tabIndex == 0)
+        //         {
+        //              gridName = "LabourDetailsGrid";
+        //         }
+        //         else if (tabIndex == 3)
+        //         {
+        //              gridName = "ScPartsMaterialDetailsRebuiltPartsGrid";
+        //         }
+        //         else if (tabIndex == 4)
+        //         {
+        //              gridName = "NscPartsMaterialDetailsRebuiltPartsGrid";
+        //         }
+        //         else if (tabIndex == 5)
+        //         {
+        //              gridName = "RbPartsMaterialDetailsRebuiltPartsGrid";
+        //         }
+        //         console.log("gridName :", gridName);
+
+        //         var passedGridName = "#" +  gridName + "";
+        //         console.log("passedGridName :", passedGridName);
+        //         // 1. Get grid reference
+        //         var grid = $(passedGridName).data("kendoGrid");
+        //          console.log("*******currentGrid3 :", grid);
+        //         //  var gridName = grid.element.attr("id");
+        //           console.log("*******currentGridName3 :", gridName);
+        //                        //  console.log("*******currentTabContent :", currentTabContent);
+        //         if (!grid) {
+        //             console.warn("%%%%%%% Grid not found");
+        //             return {};
+        //         }
+
+        //         // 2. Find currently edited cell
+        //         var editCell = grid.element.find(".k-edit-cell");
+        //         if (editCell.length === 0) {
+        //             console.warn("No active edit cell");
+        //             return {};
+        //         }
+
+        //         // 3. Find dropdown input in edit cell
+        //         var dropdownInput = editCell.find("input[data-role='dropdownlist']");
+        //         if (!dropdownInput.length) {
+        //             console.warn("Dropdown input not found");
+        //             return {};
+        //         }
+
+        //         // 4. Get column name from data attribute
+        //         var columnName = dropdownInput.attr("data-column") || "";
+
+        //         // 5. Get dropdown instance and current filter value
+        //         var dropdown = dropdownInput.data("kendoDropDownList");
+        //         if (!dropdown) {
+        //             console.warn("Dropdown instance not found");
+        //             return {};
+        //         }
+
+        //         // 6. Get the ACTUAL FILTER TEXT from the DataSource
+        //         var searchText = "";
+        //         var currentFilter = dropdown.dataSource.filter();
+        //         if (currentFilter && currentFilter.filters && currentFilter.filters.length > 0) {
+        //             searchText = currentFilter.filters[0].value; // Get the filter value
+        //         }
+
+        //         console.log("Params:", {
+        //             columnName: columnName,
+        //             searchText: searchText
+        //         });
+
+        //         return {
+        //             columnName: columnName,
+        //             searchText: searchText
+        //         };
+        // }
+
+        // function getDropDownListParams() {
+        //     const activeCell = $(".k-edit-cell:visible");
+        //     const dropdownWrapper = activeCell.find(".k-dropdown");
+        //     console.log('columnName :', dropdownWrapper.data("column"));
+        //         console.log('partNum :', dropdownWrapper.data("column"));
+
+
+        //     return {
+        //         columnName: dropdownWrapper.data("column"),
+        //         partNum: dropdownWrapper.data("partnum"),
+        //         searchText: dropdownWrapper.find(".k-input").val() || ""
+        //     };
+        // }
+
+        //     function onDropDownChange(e) {
+        //         console.log("********* onDropDownChange");
+        //         var column = e.sender.element.attr("data-column");
+        //         console.log("column :", column);
+        //         //if columnName == "Keyword" and  we are in the main grid, reset tabIndex
+        //         if (column == "KeywWord") {
+        //             tabIndex = -1;
+        //         }
+        //     }
+    </script>
+
+    <script id="template" type="text/x-kendo-template">
+        <div id="detail-template-#=VehicleListId#"></div>
+    </script>
+    <script>
+
+
+        /////////////////
+         function onArchivedEmailEstimateClick(e) {
+            e.preventDefault();
+            var grid = $("#ArchivedVehiclesGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var vehicleListId = dataItem.VehicleListId;
+
+            // Show the email estimate container
+            $("#archived-email-estimate-container").show();
+
+            // Generate the Excel file by calling SaveToExcel via AJAX
+            $.ajax({
+                url: '@Url.Action("SaveToExcel", "Export")',
+                type: 'GET',
+                data: { vehicleListId: vehicleListId },
+                xhrFields: {
+                    responseType: 'blob' // Ensure the response is treated as a binary file
+                },
+                success: function (data) {
+                    // Create a link element to trigger the file download
+                    var link = document.createElement('a');
+                    link.href = window.URL.createObjectURL(data);
+                    link.download = `${vehicleListId}_Vehicles_Estimate.xlsx`;
+                    link.click();
+
+                    // Set the subject with the rebuilt number and today's date
+                    var today = new Date();
+                    var subject = `Vehiles  Estimates for ${vehicleListId} - Date ${today.toLocaleDateString()} ${today.toLocaleTimeString()}`;
+
+                    // Set the form values
+                    $("#to").val("");
+                    $("#subject").val(subject);
+                    $("#body").val(`Dear Sir/Madam,\nPlease find attached here with Vehicles Estimate for ${vehicleListId}.\n\nThank you`);
+
+                    // Open the Kendo Window
+                    var kendoWindow = $("#emailEstimateWindow").data("kendoWindow");
+                    if (kendoWindow) {
+                        kendoWindow.center().open();
+                    } else {
+                        console.error("Kendo Window not found.");
+                    }
+                },
+                error: function (xhr, status, error) {
+                    console.error("Error downloading Excel file:", error);
+                }
+            });
+        }
+
+        function onArchivedSaveToExcelClick(e) {
+            e.preventDefault();
+            var grid = $("#ArchivedVehiclesGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var vehicleListId = dataItem.VehicleListId;
+
+            // Directly trigger the file download
+            window.location.href = '@Url.Action("SaveToExcel", "Export")' + '?vehicleListId=' + vehicleListId;
+        }
+    </script>
+    <script id="archived-template" type="text/x-kendo-template">
+        <div id="archived-detail-template-#=VehicleListId#"></div>
+    </script>
+    @* <script>
+        // Event triggered before any CRUD operation (Read, Update, Destroy)
+        function onRequestStart(e) {
+            // Check if the request type is Update or Destroy
+            if (e.type === "update" || e.type === "destroy") {
+                var grid = $("#RebuiltPartsGrid").data("kendoGrid");
+                var selectedRow = grid.select(); // Get the selected row
+                var dataItem = grid.dataItem(selectedRow); // Get the data for the selected row
+
+                if (dataItem && dataItem.RebuiltStockNum) {
+                    // Append RebuiltStockNum to the request
+                    e.sender.transport.options.update.data = { RebuiltStockNum: dataItem.RebuiltStockNum };
+                    e.sender.transport.options.destroy.data = { RebuiltStockNum: dataItem.RebuiltStockNum };
+                }
+            }
+        }
+    </script> *@
+    <script>
+        function onBusChange(e) {
+                 console.log("event: buschange");
+                var selectedBuses = this.value();
+                console.log("selected buses :");
+                console.log(selectedBuses);
+
+                $.ajax({
+                url: '@Url.Action("GetSelectedBuses", "Vehicles")',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ buses: selectedBuses }),
+                beforeSend: function (xhr) {
+
+                    console.log("Sending data :", JSON.stringify({ buses: selectedBuses }));
+                },
+                success: function (data) {
+
+                    console.log('Success:', data);
+
+                },
+
+                error: function (error, data) {
+                    console.log('datasent : ', data);
+                    console.error('Error:', error);
+                }
+            });
+            }
+
+            function onBusDataBound() {
+                console.log("event: busdataBound");
+
+            }
+
+            function errorHandler(e) {
+            if (e.errors) {
+                var message = "Errors:\n";
+                $.each(e.errors, function (key, value) {
+                    if ('errors' in value) {
+                        $.each(value.errors, function () {
+                            message += this + "\n";
+                        });
+                    }
+                });
+                alert(message);
+            }
+        }
+
+    </script>
+    <script>
+
+        // Error handler
+        function onDataSourceError(e) {
+              // debugger;
+                let errorMessage = "onDataSourceError - Operation failed: ";
+
+                if (e.errors) {
+                    // Display validation errors
+                    $.each(e.errors, function (key, value) {
+                        if (value.errors) {
+                            errorMessage += value.errors.join(", ");
+                        }
+                    });
+                }
+                else if (e.errorThrown) {
+                    errorMessage += e.errorThrown;
+                } else if (e.xhr && e.xhr.responseText) {
+                    errorMessage += e.xhr.responseText;
+                }
+
+                var notification = $("#notification").data("kendoNotification");
+                notification.error(errorMessage);
+            }
+
+        // Success handler
+        function onRequestEnd(e) {
+           var notification = $("#notification").data("kendoNotification");
+           notification.success(e.type);
+          // Initialize notification FIRST
+
+                if (e.type === "create") {
+                    var notification = $("#notification").data("kendoNotification");
+                    location.reload();
+                    notification.success("Record created successfully");
+                  //  $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+                } else if (e.type === "update") {
+                   var notification = $("#notification").data("kendoNotification");
+                location.reload();
+                    notification.success("Record updated successfully");
+                  //   $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+                } else if (e.type === "destroy") {
+                    var notification = $("#notification").data("kendoNotification");
+                location.reload();
+                     notification.success("Record deleted successfully");
+                  //  $("#userGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+                }
+            }
+    </script>
+   
+    @* <script>
+        function onLabourRequestEnd(e) {
+            var notification = $("#notification").data("kendoNotification");
+            notification.success(e.type);
+            // Initialize notification FIRST
+
+            if (e.type === "create") {
+                var notification = $("#notification").data("kendoNotification");
+                notification.success("VEHICLE Record created successfully");
+                //location.reload();
+               // $("#LabourDetailsGrid_@ViewBag.PartNum").data("kendoGrid").dataSource.read(); //force refresh grid
+            } else if (e.type === "update") {
+                var notification = $("#notification").data("kendoNotification");
+                notification.success("VEHICLE Record updated successfully");
+                //location.reload();
+               // $("#LabourDetailsGrid_@ViewBag.PartNum").data("kendoGrid").dataSource.read();//force refresh grid
+            } else if (e.type === "destroy") {
+                var notification = $("#notification").data("kendoNotification");
+                notification.success("VEHICLE Record deleted successfully");
+                //location.reload();
+              //  $("#LabourDetailsGrid_@ViewBag.PartNum").data("kendoGrid").dataSource.read();
+            }
+        }
+    </script> *@
+
+    <script>
+        function getAutoCompleteParams() {
+            var input = $("input[data-role='autocomplete']:focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || "" // Handle empty search text
+            };
+        }
+
+        function getComboBoxParams() {
+            var input = $(".k-combobox input.k-input:focus");
+            return {
+                columnName: input.attr("name")?.replace("_input", "").split('.').pop(),
+                searchText: input.val() || ""
+            };
+        }
+
+    </script>
+
+
+    @* Start : Add following for validation *@
+    <script>
+        // Validation for AutoComplete
+        function validateAutoCompleteSelection(e) {
+            const column = e.sender.element.attr("data-column");
+            const value = e.sender.value();
+            let regex, error;
+
+            if (column === "LabourDefn") {
+                regex = /^[a-zA-Z0-9-()\s]*$/;
+                error = "Invalid Labour Definition, check for special characters";
+            }
+            else if (column === "CostCentre") {
+                regex = /^[a-zA-Z0-9-&()\s]*$/;
+                error = "Invalid Cost Centre, check for special characters";
+            }
+            else if (column === "Task") {
+                regex = /^[a-zA-Z0-9-&()\s]*$/;
+                error = "Invalid Task, check for special characters";
+            }
+
+            if (regex && !regex.test(value)) {
+                notification.error(error);
+                e.sender.value("");
+            }
+        }
+
+        // Inline Edit Validation
+        function onEdit(e) {
+            showNotification("info", "onEdit : " + e.field + ".");
+            //Recalculate Totalcost
+            if (["Percentage", "Qty", "OemPartCost"].includes(e.field)) {
+                e.model.set("needsRecalculation", true);
+                showNotification("info", "Please recalculate Total Cost after modifying " + e.field + ".");
+            }
+            const validationRules = {
+                "LabourDefn": {
+                    regex: /^[a-zA-Z0-9()\s]*$/,
+                    error: "Invalid Supplier Name, check for special characters"
+                },
+                "CostCentre": {
+                    regex: /^[a-zA-Z0-9&-()\s]*$/,
+                    error: "Invalid Supplier Name, check for special characters"
+                },
+                "Task": {
+                    regex: /^[a-zA-Z0-9&-()\s]*$/,
+                    error: "Invalid Task, check for special characters"
+                }
+            };
+
+            Object.entries(validationRules).forEach(([field, rule]) => {
+                const input = e.container.find(`input[name='${field}']`);
+                input.on("input", function() {
+                    if (!rule.regex.test(this.value)) {
+                        notification.error(rule.error);
+                        $(this).addClass("k-invalid");
+                    } else {
+                        $(this).removeClass("k-invalid");
+                    }
+                });
+            });
+
+
+        }
+
+        // Keep existing notification and error handlers
+    </script>
+    @* End : Add  validation *@
+    @* <script>
+        function refreshScPartDetails(e) {
+
+               var gridName = $("#scGridNameField").val(); // Get grid name from hidden field
+               if (!gridName) {
+                    console.warn("SC Grid name not found.");
+                    return;
+                }
+
+                var grid = $("#" + gridName).data("kendoGrid"); // Select the grid dynamically
+
+                if (grid) {
+                    grid.dataSource.read(); // Refresh grid data
+                } else {
+                    console.warn("Grid not found: " + gridName);
+                }
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var notification = $("#notification").data("kendoNotification");
+
+            if (!dataItem.MMSStockCode) {
+                notification.show("Please enter a valid Stock Code before refreshing", "error");
+                return;
+            }
+
+            $.ajax({
+                url: '@Url.Action("GetScPartDetails", "ScPartsUsedInEstimates")',
+                data: { mmsStockCode: dataItem.MMSStockCode },
+                beforeSend: function () {
+                    notification.show("Fetching part details...", "info");
+                },
+                success: function (response) {
+                    if (response && response.PartType && response.DetailedDesc) {
+                        var dialog = $("#partDetailsDialog").data("kendoDialog");
+                        dialog.content(`
+                            <div style="padding: 10px;">
+                                <p><strong>Part Type:</strong> ${response.PartType}</p>
+                                <p><strong>Part Description:</strong> ${response.DetailedDesc}</p>
+                                <p><strong>Part Unit CostCentre ($/unit):</strong> ${response.UnitCost}</p>
+                            </div>
+                        `);
+                        dialog.open();
+                    } else {
+                        notification.show("No matching parts found for this Stock Code", "warning");
+                    }
+                },
+                error: function (xhr) {
+                    var errorMessage = xhr.status === 404
+                        ? "Stock Code not found in system"
+                        : "Error retrieving part details";
+                    notification.show(errorMessage, "error");
+                }
+            });
+        }
+
+    </script> *@
+    <script>
+        function parseCurrency(value) {
+            try {
+                if (!value) return 0;
+                // Remove non-numeric characters except digits, dots, and minus signs
+                var numString = value.toString().replace(/[^0-9.-]/g, '');
+                var num = parseFloat(numString);
+                return isNaN(num) ? 0 : num;
+            } catch (e) {
+                showError("Error parsing currency: " + e.message);
+                return 0;
+            }
+        }
+
+        function formatNegative(value) {
+            try {
+
+                // Format to 2 decimal places and wrap negatives in parentheses
+                return value < 0 ? `(${Math.abs(value).toFixed(2)})` : value.toFixed(2);
+            } catch (e) {
+                showError("Error formatting number: " + e.message);
+                return '0.00';
+            }
+        }
+
+        function calculateCostSaving(BuyNewCost, RemanCost) {
+
+                  //  console.log('inside calculateCostSaving ');
+
+            try {
+              //  console.log('BuyNewCost :', BuyNewCost);
+                //    console.log('RemanCost :', RemanCost);
+                var buyNew = parseCurrency(BuyNewCost);
+                var reman = parseCurrency(RemanCost);
+                var costSaving = buyNew - reman;
+                //console.log("returning costSaving:", costSaving);
+               // console.log("returning formatNegative :", formatNegative(costSaving));
+                return formatNegative(costSaving);
+            } catch (e) {
+                showError("Error calculating cost saving: " + e.message);
+                return '0.00';
+            }
+        }
+
+        function calculatePercentageSaving(BuyNewCost, RemanCost) {
+
+            try {
+                var buyNew = parseCurrency(BuyNewCost);
+                var reman = parseCurrency(RemanCost);
+                var costSaving = buyNew - reman;
+
+                if (buyNew === 0) return '0.00%'; // Avoid division by zero
+
+                var percentage = (costSaving / buyNew) * 100;
+                return formatNegative(percentage) + '%';
+            } catch (e) {
+                console.log("Error calculating percentage saving: " + e.message);
+                return '0.00%';
+            }
+        }
+
+        function showError(message) {
+            var notification = $("#notification").data("kendoNotification");
+            if (notification) {
+                notification.error(message);
+            } else {
+                console.error("Notification widget not initialized. Error: " + message);
+            }
+        }
+    </script>
+
+    <script>
+        function refreshNscPartDetails(e) {
+           // var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+           var nscGridName = $("#nscGridNameField").val(); // Get grid name from hidden field
+           console.log('nscGridName :', nscGridName);
+            if (!nscGridName) {
+                console.warn("NSC Grid name not found. returning");
+                return;
+            }
+
+           // var grid = $("#" + nscGridName).data("kendoGrid"); // Select the grid dynamically
+            var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+
+            if (grid) {
+              //  grid.dataSource.read(); // Refresh grid data
+            } else {
+                    console.warn("Grid not found: " + nscGridName);
+            }
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var notification = $("#notification").data("kendoNotification");
+
+            if (!dataItem.OrigSuppNum) {
+                notification.show("Supplier Number is required to refresh details", "error");
+                return;
+            }
+
+            $.ajax({
+                url: '@Url.Action("RefreshNscPartDetails", "NscPartsUsedInEstimates")',
+                data: { origSuppNum: dataItem.OrigSuppNum },
+                beforeSend: function() {
+                    notification.show("Refreshing part details...", "info");
+                },
+                success: function(response) {
+                    if (response.Message) {
+                        // Handle cost validation error
+                        notification.show(response.Message, "error");
+
+                        // Optional: Update other fields even if cost is invalid
+                        if (response.Data) {
+                            dataItem.set("OrigSupplierName", response.Data.OrigSupplierName);
+                            dataItem.set("KeyWord", response.Data.KeyWord);
+                            dataItem.set("Description", response.Data.Description);
+
+                           // grid.refresh();
+                        }
+                    } else {
+                        // Update all fields
+                        dataItem.set("OrigSupplierName", response.OrigSupplierName);
+                        dataItem.set("KeyWord", response.KeyWord);
+                        dataItem.set("Description", response.Description);
+                        dataItem.set("OemPartCost", response.OemPartCost);
+
+                      //  grid.refresh();
+                        notification.show("Details updated successfully", "success");
+                    }
+                },
+                error: function(xhr) {
+                    var errorMessage = xhr.status === 404
+                        ? "Supplier not found"
+                        : "Error refreshing details";
+                    notification.show(errorMessage, "error");
+                }
+            });
+        }
+    </script>
+
+    <script>
+        function onCellClose(e) {
+            // Get grid instance and cell element
+            const grid = e.sender;
+            const cell = e.container || e.cell; // Handle different event argument structures
+
+            // Method 1: Get field name from column index
+            const columnIndex = $(cell).index();
+            const column = grid.columns[columnIndex];
+            let fieldName = column.field;
+
+            // Method 2: Fallback to data-field attribute
+            if (!fieldName) {
+                fieldName = $(cell).attr("data-field");
+            }
+
+            // Debugging: Uncomment to see values in console
+            console.log("Column Index:", columnIndex);
+            console.log("Column Object:", column);
+            console.log("Field Name:", fieldName);
+
+            // Fields that require recalculation
+            const criticalFields = ["Percentage", "Qty", "OemPartCost"];
+
+            if (criticalFields.includes(fieldName)) {
+                const dataItem = e.model;
+                dataItem.set("needsRecalculation", true);
+                showNotification("info", "Please recalculate Total Cost for this row.");
+            }
+        }
+
+
+
+        function onSaveChanges(e) {
+            const grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            const row = $(e.currentTarget).closest("tr");
+            const dataItem = grid.dataItem(row);
+           // const needsRecalc = dataItem.get("needsRecalculation"); //ssk4
+            const needsRecalc = grid.dataSource.data().some(item => item.needsRecalculation);
+          //  const needsRecalc = grid.dataSource.data().some(item => item.needsRecalculation);
+           // showNotification("error", needsRecalc);
+
+             //const needsRecalc = dataItem.some(item => item.needsRecalculation);
+            // showNotification("error", needsRecalc);
+          //  showNotification("error", "inside onSaveChanges :.needsRecalc = " + needsRecalc);
+
+            // if (needsRecalc) {
+            //     e.preventDefault();
+            //     showNotification("error", "Recalculate Total Cost for modified rows before saving.");
+            // }
+        }
+
+        function recalculateTotalCost(e) {
+            e.preventDefault();
+            const grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            const row = $(e.currentTarget).closest("tr");
+            const dataItem = grid.dataItem(row);
+
+            // Handle number formatting
+            const parseNumber = (value) => {
+                const num = typeof value === 'string'
+                    ? parseFloat(value.replace(/,/g, ''))
+                    : value;
+                return isNaN(num) ? 0 : num;
+            };
+
+            const percentage = parseNumber(dataItem.Percentage);
+            const qty = parseNumber(dataItem.Qty);
+            const oemPartCost = parseNumber(dataItem.OemPartCost);
+            console.log("Sending values:", {
+                percentage: percentage,
+                qty: qty,
+                oemPartCost: oemPartCost
+            });
+            $.ajax({
+                url: '@Url.Action("RecalculateTotalCost", "NscPartsUsedInEstimates")',
+                type: 'POST',
+                contentType: 'application/x-www-form-urlencoded',
+                data: {
+                    percentage: percentage,
+                    qty: qty,
+                    oemPartCost: oemPartCost
+                },
+                success: function (response) {
+                    if (response.success) {
+                        console.log("Now time to reset Recalculation. Received response:", response);
+
+                        // Update data item and refresh grid
+                        dataItem.set("TotalCost", response.totalCost);
+                        dataItem.set("needsRecalculation", false);
+
+                        // Force grid refresh
+
+                      //  grid.refresh(); //ssk2
+                       // grid.dataSource.sync(); //ssk2
+
+                        showNotification("success", "Total Cost updated: $" + response.totalCost.toFixed(2));
+                    } else {
+
+                        showNotification("error", response.message || "Recalculation failed");
+                    }
+                },
+                error: function (xhr) {
+                    showNotification("error", "Server error: " + xhr.statusText);
+                }
+            });
+        }
+
+        function showNotification(type, message) {
+            var notification = $("#notification").data("kendoNotification");
+            if (!notification) {
+                notification = $("#notification").kendoNotification({
+                    position: { pinned: true, top: 50, right: 50 },
+                    autoHideAfter: 5000
+                }).data("kendoNotification");
+            }
+            notification.show(message, type);
+        }
+    </script>
+
+    <script>
+        function refreshRbPartDetails(e) {
+            var grid = $("#RbPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var notification = $("#notification").data("kendoNotification");
+            notification.show(dataItem.RebuiltStockNum, "error");
+
+            if (!dataItem.RebuiltStockNum) {
+                notification.show(dataItem.RebuiltStockNum, "error");
+                notification.show("Rebuilt Part Number is required to refresh details", "error");
+                return;
+            }
+
+            $.ajax({
+                url: '@Url.Action("RefreshRbPartDetails", "RbPartsUsedInEstimates")',
+                data: { rebuiltStockNum: dataItem.RebuiltStockNum },
+                beforeSend: function () {
+                    notification.show("Refreshing part details...", "info");
+                },
+                success: function (response) {
+                    if (response.Message) {
+                        // Handle cost validation error
+                        notification.show(response.Message, "error");
+
+                        // Optional: Update other fields even if cost is invalid
+                        if (response.Data) {
+                            // dataItem.set("RebuiltStockNum", response.Data.RebuiltStockNum);
+                            dataItem.set("KeyWord", response.Data.KeyWord);
+                            dataItem.set("Description", response.Data.Description);
+                            grid.dataSource.read(); //ssk5
+                        }
+                    } else {
+                        // Update all fields
+                        //  dataItem.set("RebuiltStockNum", response.RebuiltStockNum);
+                        dataItem.set("KeyWord", response.KeyWord);
+                        dataItem.set("Description", response.Description);
+
+                        //   grid.refresh();
+                        grid.dataSource.read(); //ssk5
+                        notification.show("Details updated successfully", "success");
+                    }
+                },
+                error: function (xhr) {
+                    var errorMessage = xhr.status === 404
+                        ? "Rebuilt Part  not found"
+                        : "Error refreshing details";
+                    notification.show(errorMessage, "error");
+                }
+            });
+        }
+    </script>
+
+    <script>
+         function onExcelExport(e) {
+            console.log("onExcelExport called");
+
+            var grid = $("#VehiclesGrid").data("kendoGrid");
+            var dataSource = grid.dataSource;
+
+            //  Prevent automatic export until all data is ready
+            e.preventDefault();
+
+            dataSource.read().then(function () {
+                var data = dataSource.data(); //  Now holds ALL records across all pages
+                var sheet = e.workbook.sheets[0];
+
+                //  Allowed fields for the final report
+                var allowedFields = [
+                    "RebuiltStockNum", "MmsStockCode", "KeyWord",
+                    "DetailedDesc", "JobNumber", "BuyNewCost", "RemanCost"
+                ];
+
+                //  Filter out unwanted columns
+                sheet.columns = sheet.columns.filter(function (column, index) {
+                    var field = grid.columns[index] ? grid.columns[index].field : null;
+                    return allowedFields.includes(field);
+                });
+
+                //  Create header row
+                sheet.rows[0].cells = sheet.rows[0].cells.filter(function (cell, index) {
+                    var field = grid.columns[index] ? grid.columns[index].field : null;
+                    return allowedFields.includes(field);
+                });
+
+                //  Add calculated column headers
+                sheet.columns.push({ width: 150 });
+                sheet.rows[0].cells.push({
+                    value: "Cost Savings Per Unit",
+                    background: "#f3f3f3",
+                    color: "#000000",
+                    bold: true
+                });
+
+                sheet.columns.push({ width: 150 });
+                sheet.rows[0].cells.push({
+                    value: "Percentage Savings Per Unit",
+                    background: "#f3f3f3",
+                    color: "#000000",
+                    bold: true
+                });
+
+                //  Ensure rows exist for ALL data rows
+                while (sheet.rows.length <= data.length) {
+                    sheet.rows.push({ cells: [] });
+                }
+
+                //  Inject calculated values for ALL records
+                data.forEach(function (item, index) {
+                    var row = sheet.rows[index + 1]; // Create if missing
+
+                    // Ensure other allowed fields are populated
+                    row.cells = row.cells.filter(function (cell, index) {
+                        var field = grid.columns[index] ? grid.columns[index].field : null;
+                        return allowedFields.includes(field);
+                    });
+
+                    var buyNewCost = item.BuyNewCost || 0;
+                    var remanCost = item.RemanCost || 0;
+
+                    //  Inject calculated values
+                    row.cells.push({
+                        value: calculateCostSaving(buyNewCost, remanCost),
+                        background: "#f9f9f9",
+                        color: "#333"
+                    });
+
+                    row.cells.push({
+                        value: calculatePercentageSaving(buyNewCost, remanCost),
+                        background: "#f9f9f9",
+                        color: "#333"
+                    });
+                });
+
+                // Trigger export after processing
+                kendo.saveAs({
+                    dataURI: new kendo.ooxml.Workbook(e.workbook).toDataURL(),
+                    fileName: "Vehicle.xlsx"
+                });
+            });
+        }
+
+    </script>
+    <script>
+        var currentDropDown;
+
+          function onDropDownOpen(e) {
+              currentDropDown = e.sender; // Capture the currently opened dropdown instance
+          }
+
+          function getDropDownListParams() {
+              var $cell = $("td.k-edit-cell"); // Find the currently edited cell
+              var $dropdown = $cell.find("input[name]"); // Target the DropDownList's hidden input field (which stores the value)
+
+              if ($dropdown.length === 0) {
+                  console.warn("No input field found in the edited cell.");
+                  return {};
+              }
+
+              var dropdownWidget = $dropdown.data("kendoDropDownList"); // Get the DropDownList widget
+
+              if (!dropdownWidget) {
+                  console.warn("DropDownList widget is not initialized yet.");
+                  return {};
+              }
+              var fullColumnName = $dropdown.attr("name");
+              var colName = fullColumnName.split('.').pop();
+              return {
+                  columnName: colName,
+                  searchText: dropdownWidget.text() || "" // Get selected text
+              };
+          }
+    </script>
+    <script>
+        // Initialize custom confirmation dialog
+        var deleteDialog = $("#deleteConfirmationDialog").kendoWindow({
+            width: "400px",
+            title: "Confirm Delete",
+            modal: true,
+            visible: false,
+            actions: ["Close"]
+        }).data("kendoWindow");
+
+        function showDeleteConfirmation(e) {
+            console.log("inside showDeleteConfirmation");
+            e.preventDefault();
+
+            var $btn = $(e.currentTarget);
+            var gridId = $btn.data("grid");
+            var deleteUrl = $btn.data("url");
+            var idField = $btn.data("id-field");
+            var gridType = $btn.data("grid-type");
+            
+            // var mmsstockcodeField = $btn.data("mmsstockcode-field");
+            // console.log("$$$$$ mmsstockcodeField :", mmsstockcodeField);
+            // console.log("%%%%% parentGridId :", parentGridId);
+
+            var grid = $("#" + gridId).data("kendoGrid");
+
+            var dataItem = grid.dataItem($btn.closest("tr"));
+
+            var $dialog = $("#deleteConfirmationDialog");
+            console.log("inside showDeleteConfirmation -2");
+            $dialog.data("grid", grid);
+            $dialog.data("dataItem", dataItem);
+            $dialog.data("url", deleteUrl);
+            $dialog.data("idField", idField);
+           
+            $dialog.data("gridType", gridType); // add gridType
+            var rebuiltStockNumField = $btn.data("rebuiltstocknum-field"); //ssk4
+            $dialog.data("rebuiltStockNumField", rebuiltStockNumField); //ssk4
+            console.log("inside showDeleteConfirmation gridType = ", gridType); 
+            deleteDialog.center().open();
+        }
+
+
+        $(document).on("click", "#deleteConfirmationDialog .confirm-btn", function () {
+            console.log("inside deleteConfirmationDialog - 1");
+            var $dialog = $("#deleteConfirmationDialog");
+            var grid = $dialog.data("grid");
+            var dataItem = $dialog.data("dataItem");
+            var deleteUrl = $dialog.data("url");
+            console.log("deleteUrl=", deleteUrl);
+            var idField = $dialog.data("idField");
+          //  var parentPartId = $dialog.data("parentGridId");
+           // var mmsstockcodeField = $dialog.data("mmsstockcodeField");
+            var gridType = $dialog.data("gridType");
+            var notification = $("#notification").data("kendoNotification");
+            console.log("******* inside deleteConfirmationDialog - 2");
+            console.log("idField : ", idField);
+         //   console.log("***mmsstockcodeField : ", mmsstockcodeField);
+            console.log("gridType :", gridType);
+            // console.log("DEBUG >>>", {
+            //     mmsstockcodeField,
+            //     value: dataItem[mmsstockcodeField],
+            //     dataItem
+            // });
+            var dataToSend = {};
+          //  var mmsValue = dataItem[mmsstockcodeField] || "";
+            dataToSend[idField] = dataItem[idField];
+            console.log("***** parentGridId :", parentGridId);
+          //  dataToSend[parentPartId] = dataItem[parentGridId];
+            dataToSend["parentPartId"] = parentGridId;// dataItem[mmsValue];
+            dataToSend["gridType"] = gridType; // static param
+            var rebuiltStockNumField = $dialog.data("rebuiltStockNumField"); // ssk4
+            dataToSend["rebuiltStockNum"] = dataItem[rebuiltStockNumField]; // ssk4
+
+            $.ajax({
+                url: deleteUrl,
+                type: 'POST',
+                data: dataToSend,
+                success: function () {
+                   // grid.dataSource.remove(dataItem);
+                    grid.dataSource.read(); //force refresh grid
+                    notification.success("Record deleted successfully");
+                    deleteDialog.close();
+                },
+                error: function (xhr) {
+                    notification.error("Delete failed: " + xhr.responseText);
+                    deleteDialog.close();
+                }
+            });
+        });
+        $(document).on("click", "#deleteConfirmationDialog .cancel-btn", function () {
+            deleteDialog.close();
+        });
+    </script>
+   
+    <script>
+        // Track unsaved changes state
+        let unsavedChangesExist = false;
+
+        function onLabourGridDataBound(e) {
+            const grid = e.sender;
+            const ds = grid.dataSource;
+            unsavedChangesExist = false;
+
+            // Clear previous styling
+            $(".unsaved-row, .unsaved-cell, .unsaved-badge").remove();
+
+            // Apply new styling
+            ds.view().forEach(item => {
+                const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+
+                if (item.dirty || item.isNew()) {
+                    // Add row class
+                    row.addClass("unsaved-row");
+
+                    // Add badge to first cell
+                    const firstCell = row.find("td:first");
+                    if (!firstCell.find(".unsaved-badge").length) {
+                        firstCell.append(`<span class="unsaved-badge">UNSAVED</span>`);
+                    }
+
+                    // Highlight modified cells
+                    Object.keys(item.modified || {}).forEach(field => {
+                        row.find(`td[data-field='${field}']`)
+                            .addClass("unsaved-cell");
+                    });
+
+                    unsavedChangesExist = true;
+                }
+            });
+
+            // Update tab indicator
+            const tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+            if (tabStrip?.items().length) {
+                $(tabStrip.items()[0].element)
+                    .find(".k-link")
+                    .toggleClass("has-unsaved", unsavedChangesExist);
+            }
+
+            //ssk12 start - Disable Save/Add
+            var gridName = grid.element.attr('id'); //  like "LabourDetailsGrid_123"
+            var originalAddCommand = null;
+
+
+            // Initialize only once
+            if (!originalAddCommand) {
+                originalAddCommand = grid.addRow;
+            }
+
+            // Modify add command behavior
+            grid.addRow = function () {
+                if (!grid.dataSource.hasChanges()) {
+                    originalAddCommand.call(grid);
+                }
+            };
+
+            grid.dataSource.bind("change", function () {
+                updateToolbarButtons(gridName);
+            });
+            
+            updateToolbarButtons(gridName);
+            
+            //ssk12 end - Disable Save/Add
+           
+        }
+        
+
+        function onLabourGridSave(e) {
+            const notification = $("#notification").data("kendoNotification");
+
+            // Show save confirmation
+            notification.success("Changes saved successfully");
+
+            // Force full refresh to clear styling
+            e.sender.dataSource.read().then(() => {
+                unsavedChangesExist = false;
+            });
+        }
+        function onGridEdit(e) {
+            // Re-apply styles after edit
+            const grid = e.sender;
+            grid.one("dataBound", () => grid.refresh());
+        }
+    </script>
+    <script>
+        function onDetailExpand(e) {
+            // Add class to highlight row
+            console.log("onDetailExpand");
+            const grid = e.sender;
+            const ds = grid.dataSource;
+            console.log(e.masterRow);
+            //$(e.masterRow).addClass("selected-row");
+            $(e.masterRow).addClass("selected-row");
+
+        }
+
+        function onDetailCollapse(e) {
+            // Remove highlight when detail is collapsed
+            console.log("onDetailCollapse");
+            const grid = e.sender;
+            const ds = grid.dataSource;
+
+            $(e.masterRow).removeClass("selected-row");
+
+        }
+    </script>
+    <script>
+        function onVehGridSave(e) {
+            if (e.model.isNew()) {
+                const row = e.sender.tbody.find(`[data-uid='${e.model.uid}']`);
+                row.addClass("newly-added-row");
+            }
+        }
+
+        function onVehGridDataBound(e) {
+            // Maintain new row styling after paging/sorting
+            e.sender.items().each(function () {
+                const dataItem = e.sender.dataItem(this);
+                if (dataItem.isNew()) {
+                    $(this).addClass("newly-added-row");
+                }
+            });
+            //ssk12 - Add/Save buttons
+            const grid = e.sender;
+            const ds = grid.dataSource;
+            unsavedChangesExist = false;
+
+            // Clear previous styling
+            $(".unsaved-row, .unsaved-cell, .unsaved-badge").remove();
+
+            // Apply new styling
+            ds.view().forEach(item => {
+                const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+
+                if (item.dirty || item.isNew()) {
+                    // Add row class
+                    row.addClass("unsaved-row");
+
+                    // Add badge to first cell
+                    const firstCell = row.find("td:first");
+                    if (!firstCell.find(".unsaved-badge").length) {
+                        firstCell.append(`<span class="unsaved-badge">UNSAVED</span>`);
+                    }
+
+                    // Highlight modified cells
+                    Object.keys(item.modified || {}).forEach(field => {
+                        row.find(`td[data-field='${field}']`)
+                            .addClass("unsaved-cell");
+                    });
+
+                    unsavedChangesExist = true;
+                }
+            });
+
+            // Update tab indicator
+            const tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+            if (tabStrip?.items().length) {
+                $(tabStrip.items()[0].element)
+                    .find(".k-link")
+                    .toggleClass("has-unsaved", unsavedChangesExist);
+            }
+
+            //ssk12 start - Disable Save/Add
+            var gridName = grid.element.attr('id'); //  like "LabourDetailsGrid_123"
+            var originalAddCommand = null;
+
+
+            // Initialize only once
+            if (!originalAddCommand) {
+                originalAddCommand = grid.addRow;
+            }
+
+            // Modify add command behavior
+            grid.addRow = function () {
+                if (!grid.dataSource.hasChanges()) {
+                    originalAddCommand.call(grid);
+                }
+            };
+
+            grid.dataSource.bind("change", function () {
+                updateToolbarButtons(gridName);
+            });
+
+            updateToolbarButtons(gridName);
+
+            //ssk12 end - Disable Save/Add
+        }
+    </script>
+    <script>
+        var hoverTimer;
+
+        $(document).on("mouseenter", ".stock-code-cell", function () {
+            var $cell = $(this);
+            var grid = $cell.closest(".k-grid").data("kendoGrid");
+            var dataItem = grid.dataItem($cell.closest("tr"));
+
+            if (!dataItem || !dataItem.MMSStockCode) return;
+
+            // Start timer so we don't instantly show the dialog
+            hoverTimer = setTimeout(function () {
+                fetchPartDetails(dataItem.MMSStockCode);
+            }, 500); // half-second delay before showing
+        });
+
+        $(document).on("mouseleave", ".stock-code-cell", function () {
+            clearTimeout(hoverTimer);
+        });
+
+        function fetchPartDetails(mmsStockCode) {
+            var notification = $("#notification").data("kendoNotification");
+
+            $.ajax({
+                url: '@Url.Action("GetScPartDetails", "ScPartsUsedInEstimates")',
+                data: { mmsStockCode: mmsStockCode },
+                beforeSend: function () {
+                    notification.show("Fetching part details...", "info");
+                },
+                success: function (response) {
+                    if (response && response.PartType && response.DetailedDesc) {
+                        var dialog = $("#partDetailsDialog").data("kendoDialog");
+                        dialog.content(`
+                                <div style="padding: 10px;">
+                                    <p><strong>Part Type:</strong> ${response.PartType}</p>
+                                    <p><strong>Part Description:</strong> ${response.DetailedDesc}</p>
+                                    <p><strong>Part Unit CostCentre ($/unit):</strong> ${response.UnitCost}</p>
+                                </div>
+                            `);
+                        dialog.open();
+                    } else {
+                        notification.show("No matching parts found for this Stock Code", "warning");
+                    }
+                },
+                error: function (xhr) {
+                    var errorMessage = xhr.status === 404
+                        ? "Stock Code not found in system"
+                        : "Error retrieving part details";
+                    notification.show(errorMessage, "error");
+                }
+            });
+        }
+    </script>
+   @*  <script>
+       function getSupplierNumber() {
+            var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+
+            var currentRow = grid.editable ? grid.editable.element.closest("tr") : null;
+            if (!currentRow || currentRow.length === 0) return { supplierNumber: "" };
+
+            var data = grid.dataItem(currentRow);
+            return {
+                supplierNumber: data ? data.OrigSuppNum : ""
+            };
+        }
+        
+
+        function onNscPartsComboBoxSelect(e) {
+            var dataItem = this.dataItem(e.item.index());
+            var supplierNumber = dataItem.Text;
+
+            var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            var row = this.element.closest("tr");
+            var data = grid.dataItem(row);
+
+            data.set("OrigSuppNum", supplierNumber);
+
+            $.ajax({
+                url: '/AutoComplete/GetSupplierDetails',
+                type: 'GET',
+                data: { supplierNumber: supplierNumber },
+                success: function (result) {
+                    if (result) {
+                        data.set("OrigSupplierName", result.SupplierName);
+                        // data.set("KeyWord", result.KeyWord);
+                        // data.set("Description", result.Description);
+                        // data.set("OemPartCost", result.PartCost);
+                    }
+                },
+                error: function (xhr, status, error) {
+                    console.error("Error fetching supplier details:", error);
+                }
+            });
+        }
+    </script> *@
+    <script>
+        function getSupplierNameParams() {
+            var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            var row = grid.editable ? grid.editable.element.closest("tr") : null;
+            var data = row ? grid.dataItem(row) : null;
+            console.log("**** data.OrigSuppNum :", data.OrigSuppNum);
+
+            return {
+                supplierNumber: data ? data.OrigSuppNum : ""
+            };
+        }
+
+
+        function onNscPartsComboBoxSelect(e) {
+            var supplierName = this.dataItem(e.item.index()).Text;
+
+            var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            var row = this.element.closest("tr");
+            var data = grid.dataItem(row);
+
+            var supplierNumber = data ? data.OrigSuppNum : "";
+             console.log("**** onNscPartsComboBoxSelect -  supplierNumber :",supplierNumber);
+
+            data.set("OrigSupplierName", supplierName);
+
+            if (supplierNumber && supplierName) {
+                $.ajax({
+                    url: '/AutoComplete/GetSupplierDetailsByName',
+                    type: 'GET',
+                    data: {
+                        supplierNumber: supplierNumber,
+                        supplierName: supplierName
+                    },
+                    success: function (result) {
+                        if (result) {
+                            data.set("OemPartCost", result.PartCost);
+                            data.set("Description", result.Description);
+                            data.set("KeyWord", result.KeyWord);
+                        }
+                    },
+                    error: function () {
+                        console.error("Failed to fetch supplier details.");
+                    }
+                });
+            }
+        }
+    </script>
+    <script>
+    function onRebuiltStockNumSelect(e) {
+        console.log("%%%%%% Inside onRebuiltStockNumSelect");
+        var dataItem = this.dataItem(e.item.index());
+        var rebuiltStockNum =  dataItem.Text;
+       
+
+        var grid = $("#RbPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+        var row = this.element.closest("tr");
+        var data = grid.dataItem(row);
+        console.log("%%%%%% Inside onRebuiltStockNumSelect : rebuiltStockNum :", rebuiltStockNum);
+
+
+        // Reset values first
+        data.set("MmsStockCode", "");            
+        data.set("CoreCharge", "");
+        data.set("Description", "");
+        data.set("KeyWord", "");
+
+        if (rebuiltStockNum) {
+            $.ajax({
+                url: "/AutoComplete/GetRbPartDetails",
+                type: "GET",
+                data: { rebuiltStockNum: rebuiltStockNum },
+                success: function (result) {
+                    if (result) {
+                        data.set("RebuiltStockNum", result.RebuiltStockNum || "");
+                        data.set("MmsStockCode", result.MmsStockCode || "");
+                        data.set("CoreCharge", result.CoreCharge || "");
+                        data.set("Description", result.Description || "");
+                        data.set("KeyWord", result.KeyWord || "");
+                    }
+                },
+                error: function (xhr) {
+                    console.error("Error loading part details:", xhr.responseText);
+                }
+            });
+        }
+    }
+</script>
+<script>
+    //ssk 6 - disable save 
+        function onRbDataSourceChange(e) {
+            var grid = $("#RbPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            var saveButton = grid.wrapper.find(".k-grid-save-changes");
+
+            if (grid.dataSource.hasChanges()) {
+                saveButton.prop("disabled", false).removeClass("k-button-disabled"); // Enable Save
+            } else {
+                saveButton.prop("disabled", true).addClass("k-button-disabled"); // Disable Save + Add CSS class
+            }
+        }
+
+        function onRbRequestEnd(e) {
+            var notification = $("#notification").data("kendoNotification");
+            var grid = $("#RbPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+
+            if (e.type === "create" && !e.response.Errors) {
+                // Only refresh if create was successful (no errors)
+                grid.dataSource.read();
+                notification.success("Changes saved successfully");
+            }
+
+            if (e.type === "update" && !e.response.Errors) {
+                // Optional: if you also want to clear after update
+                grid.dataSource.read();
+                notification.success("Changes updated successfully");
+            }
+
+            if (e.type === "destroy" && !e.response.Errors) {
+                // Optional: reset after delete too
+                grid.dataSource.read();
+                notification.success("Changes deleted successfully");
+            }
+        }
+</script>
+<script>
+        function onEditRbParts(e) {
+            //ssk7 Disable columns on edit
+            var grid = $("#RbPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+
+            if (!e.model.isNew()) {
+
+                setTimeout(function () {
+                    // ----- RebuiltStockNum -----
+                    var rebuiltField = e.container.find("[name='RebuiltStockNum']");
+                    var rebuiltCombo = rebuiltField.data("kendoComboBox");
+
+                    if (rebuiltCombo) {
+                        rebuiltCombo.enable(false);
+                        rebuiltCombo.wrapper.addClass("field-disabled");
+
+                        // ALSO disable the input itself
+                        rebuiltCombo.input.prop("readonly", true); //IMPORTANT!
+                    }
+
+                    // ----- MmsStockCode -----
+                    var mmsField = e.container.find("[name='MmsStockCode']");
+                    var mmsCombo = mmsField.data("kendoComboBox");
+
+                    if (mmsCombo) {
+                        mmsCombo.enable(false);
+                        mmsCombo.wrapper.addClass("field-disabled");
+                        mmsCombo.input.prop("readonly", true); //Optional for extra safety
+                    }
+
+                }, 20); //ssk7 Disable columns on edit
+            }
+        }
+        
+</script>
+<script>
+        function onRebuiltStockNumChange(e) {
+            // ssk9 duplicate rebuilt part
+            var selectedValue = e.sender.value() ? e.sender.value().trim() : "";
+
+            console.log("Entered value:", selectedValue);
+
+            if (selectedValue) {
+                var grid = $("#RbPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+
+                // Get current row and model
+                var cell = $(e.sender.wrapper).closest("td");
+                var row = cell.closest("tr");
+                var editingModel = grid.dataItem(row);
+
+                console.log("Editing model ID:", editingModel && editingModel.Id, "UID:", editingModel && editingModel.uid);
+
+                var isDuplicate = false;
+
+                grid.dataSource.data().forEach(function (item, index) {
+                    console.log("Checking row", index, "value:", item.RebuiltStockNum, "UID:", item.uid);
+
+                    if (item && item.RebuiltStockNum && item !== editingModel) {
+                        var existingValue = item.RebuiltStockNum.trim().toLowerCase();
+                        var newValue = selectedValue.toLowerCase();
+
+                        console.log("Comparing existing:", existingValue, "with new:", newValue);
+
+                        if (existingValue === newValue) {
+                            console.log("DUPLICATE FOUND at row", index);
+                            isDuplicate = true;
+                        }
+                    }
+                });
+
+                if (isDuplicate) {
+                    kendo.confirm("Rebuilt Part already exists!").then(function () {
+                        setTimeout(function () {
+                            grid.closeCell(cell);
+                            grid.cancelChanges();
+                        }, 100);
+                    }, function () {
+                        setTimeout(function () {
+                            grid.closeCell(cell);
+                            grid.cancelChanges();
+                        }, 100);
+                    });
+                }
+            }
+        }
+</script>
+<script>
+    //ssk12 Save/Add button
+        function updateToolbarButtons(gridName) {
+            var grid = $("#" + gridName).data("kendoGrid");
+            var hasChanges = grid.dataSource.hasChanges();
+
+            $("#" + gridName).find(".k-grid-save-changes")
+                .prop("disabled", !hasChanges)
+                .toggleClass("k-state-disabled", !hasChanges);
+
+            $("#" + gridName).find(".k-grid-cancel-changes")
+                .prop("disabled", !hasChanges)
+                .toggleClass("k-state-disabled", !hasChanges);
+
+            $("#" + gridName).find(".k-grid-add")
+                .prop("disabled", hasChanges)
+                .toggleClass("k-state-disabled", hasChanges)
+                .off("click").on("click", function (e) {
+                    if (hasChanges) {
+                        e.preventDefault();
+                        e.stopImmediatePropagation();
+                    }
+                });
+        }
+</script>
+<script>
+        function onNscGridDataBound(e) {
+            const grid = e.sender;
+            const ds = grid.dataSource;
+            unsavedChangesExist = false;
+
+            // Clear previous styling
+            $(".unsaved-row, .unsaved-cell, .unsaved-badge").remove();
+
+            // Apply new styling
+            ds.view().forEach(item => {
+                const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+
+                if (item.dirty || item.isNew()) {
+                    // Add row class
+                    row.addClass("unsaved-row");
+
+                    // Add badge to first cell
+                    const firstCell = row.find("td:first");
+                    if (!firstCell.find(".unsaved-badge").length) {
+                        firstCell.append(`<span class="unsaved-badge">UNSAVED</span>`);
+                    }
+
+                    // Highlight modified cells
+                    Object.keys(item.modified || {}).forEach(field => {
+                        row.find(`td[data-field='${field}']`)
+                            .addClass("unsaved-cell");
+                    });
+
+                    unsavedChangesExist = true;
+                }
+            });
+
+            // Update tab indicator
+            const tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+            if (tabStrip?.items().length) {
+                $(tabStrip.items()[0].element)
+                    .find(".k-link")
+                    .toggleClass("has-unsaved", unsavedChangesExist);
+            }
+
+            //ssk12 start - Disable Save/Add
+            var gridName = grid.element.attr('id'); //  like "LabourDetailsGrid_123"
+            var originalAddCommand = null;
+
+
+            // Initialize only once
+            if (!originalAddCommand) {
+                originalAddCommand = grid.addRow;
+            }
+
+            // Modify add command behavior
+            grid.addRow = function () {
+                if (!grid.dataSource.hasChanges()) {
+                    originalAddCommand.call(grid);
+                }
+            };
+
+            grid.dataSource.bind("change", function () {
+                updateToolbarButtons(gridName);
+            });
+
+            updateToolbarButtons(gridName);
+
+            //ssk12 end - Disable Save/Add
+
+        }
+
+</script>
+    <script>
+        function onScGridDataBound(e) {
+            const grid = e.sender;
+            const ds = grid.dataSource;
+            unsavedChangesExist = false;
+
+            // Clear previous styling
+            $(".unsaved-row, .unsaved-cell, .unsaved-badge").remove();
+
+            // Apply new styling
+            ds.view().forEach(item => {
+                const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+
+                if (item.dirty || item.isNew()) {
+                    // Add row class
+                    row.addClass("unsaved-row");
+
+                    // Add badge to first cell
+                    const firstCell = row.find("td:first");
+                    if (!firstCell.find(".unsaved-badge").length) {
+                        firstCell.append(`<span class="unsaved-badge">UNSAVED</span>`);
+                    }
+
+                    // Highlight modified cells
+                    Object.keys(item.modified || {}).forEach(field => {
+                        row.find(`td[data-field='${field}']`)
+                            .addClass("unsaved-cell");
+                    });
+
+                    unsavedChangesExist = true;
+                }
+            });
+
+            // Update tab indicator
+            const tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+            if (tabStrip?.items().length) {
+                $(tabStrip.items()[0].element)
+                    .find(".k-link")
+                    .toggleClass("has-unsaved", unsavedChangesExist);
+            }
+
+            //ssk12 start - Disable Save/Add
+            var gridName = grid.element.attr('id'); //  like "LabourDetailsGrid_123"
+            var originalAddCommand = null;
+
+
+            // Initialize only once
+            if (!originalAddCommand) {
+                originalAddCommand = grid.addRow;
+            }
+
+            // Modify add command behavior
+            grid.addRow = function () {
+                if (!grid.dataSource.hasChanges()) {
+                    originalAddCommand.call(grid);
+                }
+            };
+
+            grid.dataSource.bind("change", function () {
+                updateToolbarButtons(gridName);
+            });
+
+            updateToolbarButtons(gridName);
+
+            //ssk12 end - Disable Save/Add
+
+        }
+
+    </script>
+    <script>
+        function onRbGridDataBound(e) {
+            const grid = e.sender;
+            const ds = grid.dataSource;
+            unsavedChangesExist = false;
+
+            // Clear previous styling
+            $(".unsaved-row, .unsaved-cell, .unsaved-badge").remove();
+
+            // Apply new styling
+            ds.view().forEach(item => {
+                const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+
+                if (item.dirty || item.isNew()) {
+                    // Add row class
+                    row.addClass("unsaved-row");
+
+                    // Add badge to first cell
+                    const firstCell = row.find("td:first");
+                    if (!firstCell.find(".unsaved-badge").length) {
+                        firstCell.append(`<span class="unsaved-badge">UNSAVED</span>`);
+                    }
+
+                    // Highlight modified cells
+                    Object.keys(item.modified || {}).forEach(field => {
+                        row.find(`td[data-field='${field}']`)
+                            .addClass("unsaved-cell");
+                    });
+
+                    unsavedChangesExist = true;
+                }
+            });
+
+            // Update tab indicator
+            const tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+            if (tabStrip?.items().length) {
+                $(tabStrip.items()[0].element)
+                    .find(".k-link")
+                    .toggleClass("has-unsaved", unsavedChangesExist);
+            }
+
+            //ssk12 start - Disable Save/Add
+            var gridName = grid.element.attr('id'); //  like "LabourDetailsGrid_123"
+            var originalAddCommand = null;
+
+
+            // Initialize only once
+            if (!originalAddCommand) {
+                originalAddCommand = grid.addRow;
+            }
+
+            // Modify add command behavior
+            grid.addRow = function () {
+                if (!grid.dataSource.hasChanges()) {
+                    originalAddCommand.call(grid);
+                }
+            };
+
+            grid.dataSource.bind("change", function () {
+                updateToolbarButtons(gridName);
+            });
+
+            updateToolbarButtons(gridName);
+
+            //ssk12 end - Disable Save/Add
+
+        }
+
+    </script>
+    <script>
+        //ssk12 Save/Add button
+        function updateToolbarButtons(gridName) {
+            var grid = $("#" + gridName).data("kendoGrid");
+            var hasChanges = grid.dataSource.hasChanges();
+
+            $("#" + gridName).find(".k-grid-save-changes")
+                .prop("disabled", !hasChanges)
+                .toggleClass("k-state-disabled", !hasChanges);
+
+            $("#" + gridName).find(".k-grid-cancel-changes")
+                .prop("disabled", !hasChanges)
+                .toggleClass("k-state-disabled", !hasChanges);
+
+            $("#" + gridName).find(".k-grid-add")
+                .prop("disabled", hasChanges)
+                .toggleClass("k-state-disabled", hasChanges)
+                .off("click").on("click", function (e) {
+                    if (hasChanges) {
+                        e.preventDefault();
+                        e.stopImmediatePropagation();
+                    }
+                });
+        }
+    </script>
+}
+css :
+.k-invalid {
+    border-color: #ff0000 !important;
+    background-color: #ffeeee !important;
+    transition: all 0.3s ease;
+}
+.k-dialog {
+    border-radius: 8px !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+}
+
+.k-dialog-titlebar {
+    background-color: #dc3545 !important; 
+    color: white !important;
+    font-weight: bold;
+    padding: 12px !important;
+}
+
+.k-dialog-content {
+    font-size: 16px !important;
+    padding: 20px !important;
+}
+
+.k-dialog-buttongroup {
+    padding: 10px 20px !important;
+    gap: 10px !important;
+}
+
+    .k-dialog-buttongroup .k-button {
+        border-radius: 5px !important;
+        padding: 8px 20px !important;
+    }
+
+/* Style "Yes" button */
+.k-dialog-buttongroup .k-button:first-child {
+    background-color: #28a745 !important;
+    border-color: #28a745 !important;
+}
+
+/* Style "No" button */
+.k-dialog-buttongroup .k-button:last-child {
+    background-color: #6c757d !important;
+    border-color: #6c757d !important;
+}
+.k-edit-cell .non-editable {
+    background-color: #f5f5f5;
+    pointer-events: none;
+}
+/* pop up confirmation*/
+#deleteConfirmationDialog {
+    padding: 20px;
+    background: #fff;
+    border-radius: 5px;
+}
+
+.confirmation-message {
+    font-size: 16px;
+    color: #333;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.confirmation-icon {
+    color: #dc3545;
+    font-size: 24px;
+}
+
+.confirmation-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.k-button.confirm-btn {
+    background-color: #d9534f;
+    border-color: #d43f3a;
+    color: white;
+    padding: 8px 20px;
+}
+
+    .k-button.confirm-btn:hover {
+        background-color: #c9302c;
+        border-color: #ac2925;
+    }
+
+.k-button.cancel-btn {
+    background-color: #5bc0de;
+    border-color: #46b8da;
+    color: white;
+    padding: 8px 20px;
+}
+
+    .k-button.cancel-btn:hover {
+        background-color: #31b0d5;
+        border-color: #269abc;
+    }
+
+/* Grid delete button styling */
+.k-grid .k-invalid {
+    border: 1px solid #ff0000 !important;
+    background: #ffe0e0 !important;
+}
+
+.invalid-cell {
+    background-color: #ffe0e0 !important;
+    box-shadow: inset 0 0 0 2px #ff0000;
+}
+
+
+.k-grid .invalid-cell input {
+    background-color: #ffe0e0;
+}
+..invalid-cell {
+    background-color: #ffe0e0 !important;
+    position: relative;
+    box-shadow: inset 0 0 0 2px red;
+}
+
+.invalid-cell::after {
+    content: "!";
+    color: red;
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-weight: bold;
+}
+/* Highlight the row being edited */
+.k-grid-edit-row {
+    background-color:  lightpink/*#f9f9f9 ssk2*/;
+}
+
+/* Highlight invalid fields */
+.k-invalid {
+    border-color: red !important;
+    background-color: #ffe6e6 !important;
+}
+
+.k-invalid-msg {
+    color: red;
+    font-size: 12px;
+    display: block;
+    margin-top: 2px;
+}
+.k-readonly .k-input {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
+}
+/* Ensure the extra expand arrow is hidden */
+.k-menu .k-menu-expand-arrow.k-icon.k-i-arrow-60-down {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+}
+/* Style for rows with unsaved changes */
+.k-grid table > tbody > tr.unsaved-row,
+.k-grid table > tbody > tr.unsaved-row.k-alt {
+    background-color: gold !important; /* Red background with transparency */
+    border-left: 3px solid red !important; /* Solid red border */
+}
+
+    /* Modified cells */
+    .k-grid table > tbody > tr.unsaved-row td.unsaved-cell {
+        background-color: lightsalmon !important; /* Lighter red for cells */
+        box-shadow: inset 0 0 0 1px #ff000040 !important; /* Red inner glow */
+    }
+
+    /* Badge styling */
+    .k-grid table > tbody > tr.unsaved-row .unsaved-badge {
+        background: #ff0000 !important; /* Pure red badge */
+        color: lightgoldenrodyellow !important;
+        font-size: 0.7em;
+        padding: 1px 4px;
+        border-radius: 2px;
+        position: absolute;
+        right: 2px;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 1000;
+    }
+/* TabStrip Selected Tab Styling */
+/* ============================== */
+.k-tabstrip-items .k-item.k-state-active {
+    background-color: lightcyan !important; /* Light background */
+    border-color: #dc3545 #dee2e6 #fff #dee2e6 !important; /* Red top border */
+}
+
+    .k-tabstrip-items .k-item.k-state-active .k-link {
+        color: black !important; /* Red text */
+        font-weight: bold;
+    }
+
+/* Hover effects */
+.k-tabstrip-items .k-item:not(.k-state-active):hover {
+    background-color: lightskyblue !important; /* Very light red */
+}
+
+.k-tabstrip-items .k-item:not(.k-state-active) .k-link:hover {
+    color: #a71d2a !important; /* Darker red on hover */
+}
+
+/* Focus state */
+.k-tabstrip-items .k-item.k-state-focused {
+    box-shadow: inset 0 0 0 2px #dc354540 !important; /* Subtle red glow */
+}
+/*parent row highlight*/
+/* Target both row and cells with !important */
+.k-grid tr.k-master-row.selected-row,
+.k-grid tr.k-master-row.selected-row > td {
+    background-color: gold !important;
+    background-image: none !important; /* Disable gradients */
+    color: #000 !important; /* Text color */
+}
+
+    /* Maintain highlight on hover */
+    .k-grid tr.k-master-row.selected-row:hover,
+    .k-grid tr.k-master-row.selected-row:hover > td {
+        background-color: blanchedalmond !important;
+    }
+
+/* Force highlight precedence */
+.k-grid .k-grid-content tr.k-master-row.selected-row {
+    z-index: 2;
+    position: relative;
+}
+/* New row in master grid*/
+/* For new rows being added */
+.k-grid tr.k-grid-edit-row,
+.k-grid tr.k-grid-edit-row > td {
+    background-color: palegoldenrod !important;
+    background-image: none !important;
+}
+
+/* For persisted new rows (after saving) */
+.k-grid tr.newly-added-row,
+.k-grid tr.newly-added-row > td {
+    background-color: lightgreen !important; /* Light green background */
+    border-bottom: 2px solid #43a047 !important; /* Dark green border */
+}
+
+/* start new menu*/
+/* --- Menu Styling Enhancements --- */
+
+/* Base styling for menu items */
+.k-menu .k-link {
+    padding: 10px 14px;
+    font-size: 15px;
+    color: #212529;
+    font-weight: 500;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Selected (active) menu item */
+.k-menu .k-item.k-state-active > .k-link {
+    background-color: #007bff !important; /* Bootstrap primary */
+    color: #fff !important;
+    font-weight: bold;
+    border-radius: 4px;
+}
+
+/* Hover effects for unselected menu items */
+.k-menu .k-item:not(.k-state-active):hover > .k-link {
+    background-color: #e2e6ea !important;
+    color: #0056b3 !important;
+    font-weight: bold;
+    border-radius: 4px;
+}
+
+/* Optional submenu hover effects */
+.k-menu .k-item.k-menu-item:hover > .k-link {
+    background-color: #f8f9fa !important;
+    color: #343a40 !important;
+}
+
+/* Keep font bold for selected sub-items too */
+.k-menu .k-item.k-state-selected > .k-link,
+.k-menu .k-item.k-state-highlight > .k-link {
+    font-weight: bold !important;
+    color: #fff !important;
+    background-color: #007bff !important;
+    border-radius: 4px;
+}
+
+/* Rounded corners for horizontal menu */
+.rounded-menu .k-menu-group {
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+/* Optional: submenu styling */
+.k-menu .k-menu-group .k-item .k-link {
+    background-color: #ffffff;
+    color: #333333;
+}
+
+.k-menu .k-menu-group .k-item.k-state-active > .k-link {
+    background-color: hotpink !important; /*#007bff*/
+    color: white !important;
+    font-weight: bold;
+}
+/* Normal disabled Save button */
+.k-button-disabled {
+    background-color: #cccccc !important; /* Medium-light gray background */
+    color: #666666 !important; /* Darker gray text */
+    border-color: #bbbbbb !important; /* Softer border */
+    cursor: not-allowed !important; /* Show 'no' cursor */
+    pointer-events: none; /* Block clicks */
+    opacity: 1; /* Full solid (no transparency) */
+}
+
+    /* Disable hover and active (click) styles for disabled button */
+    .k-button-disabled:hover,
+    .k-button-disabled:focus,
+    .k-button-disabled:active {
+        background-color: #cccccc !important; /* Keep the same color on hover */
+        color: #666666 !important; /* Keep the same text color */
+        border-color: #bbbbbb !important; /* Keep border soft */
+        cursor: not-allowed !important;
+        box-shadow: none !important; /* Remove any focus ring or shadow */
+        text-decoration: none !important; /* No underline, no hover tricks */
+    }
+/* Disabled Kendo ComboBox */
+.field-disabled {
+    background-color: #eeeeee !important; /* Light gray background */
+    color: #555555 !important; /* Slightly faded text */
+    border: 1px solid #cccccc !important; /* Soft border */
+    pointer-events: none; /* Block mouse interactions */
+    opacity: 0.7; /* Make it look dimmer */
+}
+
+    /* Also remove hover, focus, click styles */
+    .field-disabled:hover,
+    .field-disabled:focus,
+    .field-disabled:active {
+        background-color: #eeeeee !important;
+        border-color: #cccccc !important;
+        box-shadow: none !important;
+    }
+    /*Reb border for duplicate*/
+.invalid-combobox {
+    border: 2px solid #f44336 !important; /* Red border */
+    background-color: #ffe6e6 !important; /* Light pink background */
+}
+
+.k-grid-save-changes.k-state-disabled {
+    background: #cccccc !important;
+    color: #666666 !important;
+    cursor: not-allowed !important;
+    pointer-events: none !important;
+}
+/*start -  Global changes*/
+/* Row highlight for Editing (existing row) */
+.k-grid .editing-row {
+    border: 2px solid #388e3c !important; /* Nice dark green */
+    background-color: #e8f5e9 !important; /* Light green background */
+}
+
+/* Row highlight for Adding (new row) */
+.k-grid .adding-row {
+    border: 2px solid #1976d2 !important; /* Dark blue */
+    background-color: #e3f2fd !important; /* Light blue background */
+}
+
+/* Required field indicator */
+.k-grid td.required-cell {
+    background-color: #fff0f0 !important; /* Light pink background */
+    position: relative;
+}
+
+    .k-grid td.required-cell::after {
+        content: "*";
+        color: red;
+        font-size: 16px;
+        font-weight: bold;
+        position: absolute;
+        top: 4px;
+        right: 8px;
+    }
+
+/* Save button when enabled */
+.k-grid-save-changes {
+    background-color: #2196f3 !important; /* Light blue */
+    color: white !important;
+    border: 1px solid #1976d2 !important;
+}
+
+    /* Save button when disabled */
+    .k-grid-save-changes.k-state-disabled {
+        background: #e0e0e0 !important; /* Light grey */
+        color: #757575 !important;
+        border: 1px solid #bdbdbd !important;
+        cursor: not-allowed !important;
+        pointer-events: none !important;
+    }
+
+/* Cancel button when enabled */
+.k-grid-cancel-changes {
+    background-color: #f44336 !important; /* Red for cancel */
+    color: white !important;
+    border: 1px solid #d32f2f !important;
+}
+
+    /* Cancel button when disabled */
+    .k-grid-cancel-changes.k-state-disabled {
+        background: #e0e0e0 !important;
+        color: #757575 !important;
+        border: 1px solid #bdbdbd !important;
+        cursor: not-allowed !important;
+        pointer-events: none !important;
+    }
+
+/* Soft transitions for button color changes */
+.k-grid-save-changes, .k-grid-cancel-changes {
+    transition: background 0.3s, color 0.3s;
+}
+
+    /* (Optional) Save button glow when enabled */
+    .k-grid-save-changes:not(.k-state-disabled) {
+        box-shadow: 0 0 8px #2196f3;
+    }
+/*End Global changes*/
+/* Disabled state for grid toolbar buttons */
+/* Grid Toolbar and Button States */
+. /* Grid Visibility Fixes */
+.k-grid,
+.k-tabstrip-content .k-grid {
+    visibility: visible !important;
+    opacity: 1 !important;
+    height: auto !important;
+}
+
+/* Tabstrip Content Fix */
+.k-tabstrip-content {
+    display: block !important;
+    overflow: visible !important;
+    height: auto !important;
+    padding: 10px;
+}
+
+/* Grid Header Fix */
+.k-grid-header {
+    visibility: visible !important;
+}
+
+/* Add Button Fix */
+.k-grid .k-grid-add {
+    visibility: visible !important;
+    display: inline-block !important;
+    /* Ensure grid visibility */
+    .k-tabstrip-content .k-grid {
+    visibility: visible !important;
+}
+
+/* Add button spacing */
+.k-grid-toolbar .k-grid-add {
+    margin-right: 5px;
+}
+/* Disabled Save button styling */
+.k-grid-toolbar .k-grid-save-changes:disabled,
+.k-grid-toolbar .k-grid-save-changes.k-state-disabled {
+    opacity: 0.6 !important;
+    cursor: not-allowed !important;
+    background-color: #f0f0f0 !important;
+    border-color: #d0d0d0 !important;
+    color: #a0a0a0 !important;
+    background-image: none !important;
+    box-shadow: none !important;
+}
+
+/* Disabled Add button styling */
+.k-grid-toolbar .k-grid-add:disabled,
+.k-grid-toolbar .k-grid-add.k-state-disabled {
+    opacity: 0.6 !important;
+    cursor: not-allowed !important;
+    background-color: #f0f0f0 !important;
+    border-color: #d0d0d0 !important;
+    color: #a0a0a0 !important;
+    background-image: none !important;
+    box-shadow: none !important;
+}
+
+/* Pointer events fix for anchor-based buttons */
+.k-grid-toolbar a.k-grid-save-changes:disabled,
+.k-grid-toolbar a.k-grid-add:disabled {
+    pointer-events: none !important;
+}
+/* New*/
+/* ✅ Edited Row Highlight */
+.k-grid tr.editing-row,
+.k-grid tr.editing-row > td {
+    background-color: #fff9c4 !important; /* Soft yellow */
+    border-left: 4px solid #ffeb3b !important; /* Yellow side strip */
+}
+
+/* ✅ New Row Highlight */
+.k-grid tr.adding-row,
+.k-grid tr.adding-row > td {
+    background-color: #c8e6c9 !important; /* Light green */
+    border-left: 4px solid #66bb6a !important; /* Green side strip */
+}
+
+/* ✅ Hover for edited row */
+.k-grid tr.editing-row:hover > td {
+    background-color: #fff59d !important; /* Brighter yellow on hover */
+}
+
+/* ✅ Hover for new row */
+.k-grid tr.adding-row:hover > td {
+    background-color: #a5d6a7 !important; /* Brighter green on hover */
+}
