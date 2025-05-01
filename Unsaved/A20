@@ -1,0 +1,165 @@
+
+✅ Final Full jQuery Plugin (site.js)
+js
+Copy
+Edit
+(function ($) {
+    $.fn.trackUnsavedChanges = function () {
+        const gridEl = this;
+        const grid = gridEl.data("kendoGrid");
+        const gridId = gridEl.attr("id");
+
+        if (!grid) {
+            console.warn("trackUnsavedChanges: Grid not initialized for", gridId);
+            return;
+        }
+
+        console.log("✅ trackUnsavedChanges initialized for grid:", gridId);
+
+        // Event hooks
+        grid.bind("edit", function (e) {
+            const uid = e.model.uid;
+            const row = grid.tbody.find(`tr[data-uid="${uid}"]`);
+            row.removeClass("editing-row adding-row");
+
+            if (e.model.isNew()) {
+                row.addClass("adding-row");
+            } else {
+                row.addClass("editing-row");
+            }
+
+            setTimeout(() => showUnsavedTags(grid), 100);
+        });
+
+        grid.bind("change", function () {
+            setTimeout(() => showUnsavedTags(grid), 100);
+        });
+
+        ["save", "cancel", "requestEnd"].forEach(event => {
+            grid.bind(event, function () {
+                clearUnsavedTags(grid);
+            });
+        });
+
+        $(window).on("resize.unsaved" + gridId, () => updateFloatingTagPositions(grid));
+        gridEl.on("scroll.unsaved" + gridId, ".k-grid-content", () => updateFloatingTagPositions(grid));
+    };
+
+    function showUnsavedTags(grid) {
+        const ds = grid.dataSource;
+        if (!ds) return;
+
+        ds.view().forEach(item => {
+            const uid = item.uid;
+            const row = grid.tbody.find(`tr[data-uid='${uid}']`);
+            if (!row.length) return;
+
+            const rowOffset = row.offset();
+            if (!rowOffset) return;
+
+            const existingTag = $(`.unsaved-floating-tag[data-uid='${uid}']`);
+            if (existingTag.length > 0) return;
+
+            if (!item.dirty && !item.isNew()) return;
+
+            row.addClass("unsaved-row");
+
+            const message = item.isNew() ? "🆕 New item" : "⚠ Edited but not saved";
+
+            const tag = $(`<div class='unsaved-floating-tag animated-fade-in' data-uid='${uid}'>${message}</div>`)
+                .css({
+                    position: "absolute",
+                    top: rowOffset.top + row.outerHeight(),
+                    left: rowOffset.left,
+                    width: row.outerWidth(),
+                    zIndex: 1000
+                });
+
+            $("body").append(tag);
+            console.log("✅ Tag shown:", message, "for uid:", uid);
+        });
+
+        updateFloatingTagPositions(grid);
+    }
+
+    function updateFloatingTagPositions(grid) {
+        $(".unsaved-floating-tag").each(function () {
+            const tag = $(this);
+            const uid = tag.data("uid");
+            const row = grid.tbody.find(`tr[data-uid='${uid}']`);
+            if (!row.length) return;
+
+            const rowOffset = row.offset();
+            tag.css({
+                top: rowOffset.top + row.outerHeight(),
+                left: rowOffset.left,
+                width: row.outerWidth()
+            });
+        });
+    }
+
+    function clearUnsavedTags(grid) {
+        grid.tbody.find(".unsaved-row").removeClass("unsaved-row");
+        grid.tbody.find(".editing-row").removeClass("editing-row");
+        grid.tbody.find(".adding-row").removeClass("adding-row");
+        $(".unsaved-floating-tag").remove();
+        console.log("🧽 Cleared UNSAVED tags and row highlights");
+    }
+
+    $(document).on("focusout", ".k-grid input", function () {
+        const grid = $(this).closest(".k-grid").data("kendoGrid");
+        if (grid) {
+            setTimeout(() => showUnsavedTags(grid), 100);
+        }
+    });
+})(jQuery);
+🎨 CSS Additions Only (Keep Your Styles)
+Add the following at the end of your current site.css:
+
+css
+Copy
+Edit
+/* Highlight only when a row is actively being edited */
+.k-grid tr.editing-row {
+    background-color: #fff6b2 !important; /* yellow for edit mode */
+}
+
+/* Highlight only when a new row is being added */
+.k-grid tr.adding-row {
+    background-color: #d4edda !important; /* green for new item */
+}
+
+/* Floating tag for UNSAVED notification */
+.unsaved-floating-tag {
+    background-color: #d1ecf1; /* light cyan-blue */
+    color: #0c5460;
+    font-weight: bold;
+    text-align: center;
+    padding: 4px 10px;
+    font-size: 6px;
+    border: 1px solid #bee5eb;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0.95;
+}
+
+/* Smooth fade-in effect */
+.animated-fade-in {
+    animation: fadeInTag 0.4s ease-in-out;
+}
+
+@keyframes fadeInTag {
+    from { opacity: 0; transform: translateY(-5px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+✅ Usage in View
+html
+Copy
+Edit
+<script>
+    $(document).ready(function () {
+        $("#RbPartsMaterialDetailsRebuiltPartsGrid").trackUnsavedChanges();
+    });
+</script>
