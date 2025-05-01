@@ -1,0 +1,82 @@
+You have given me suggtion to display Id in the notification (bold - red). In the following code, after sucessful insert I want to iplay maxVehicleListId returned by the contoller,
+in th notification. Pls assist me in making the change.
+Controller :
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> AddVehiclesView([DataSourceRequest] DataSourceRequest request, VehicleViewModel vehicleViewModel)
+{
+    try
+    {
+        var busId = await AddVehicleAsync(vehicleViewModel);
+        ModelState.Clear();
+        return Json(new[] { vehicleViewModel }.ToDataSourceResult(request, ModelState));
+
+    }
+
+private async Task<int> AddVehicleAsync(VehicleViewModel vehicleViewModel)
+{
+    var userName = ViewBag.UserName;
+    var maxVehicleListId =
+                _dbConnection.QueryFirstOrDefault<int>(@"SELECT MAX(VehicleListId) + 1  FROM SBCES.VehicleList");
+
+    _dbConnection.Open();
+    using (var transaction = _dbConnection.BeginTransaction())
+    {
+        try
+        {
+            // Insert into the main RbMasterlist table
+            var insertVehlistQuery = @"
+                                                INSERT INTO SBCES.VehicleList ( VehicleListId,NumOfVehicles,
+                                                    Sopnumber, ProjDesc, Differential, Engine, 
+                                                     Make, Model, VehSeriesCode, Year, Transmission,  EnteredBy,
+                                                    DateEntered, ModifiedLastBy, ModifiedLastDate
+                                                )
+                                                VALUES (
+                                                    @VehicleListId,@NumOfVehicles, @Sopnumber, @ProjDesc, @Differential, @Engine, 
+                                                     @Make, @Model, @VehSeriesCode, @Year, @Transmission, @EnteredBy,
+                                                    @DateEntered, @ModifiedLastBy, @ModifiedLastDate
+                                                );
+                                                
+                                            ";
+
+             await _dbConnection.ExecuteAsync(insertVehlistQuery, new
+            {
+                VehicleListId = maxVehicleListId,
+                vehicleViewModel.NumOfVehicles,
+                vehicleViewModel.Sopnumber,
+                vehicleViewModel.ProjDesc,
+                vehicleViewModel.Differential,
+                vehicleViewModel.Engine,                     
+                
+                vehicleViewModel.Make,
+                vehicleViewModel.Model,
+                vehicleViewModel.Transmission,
+                vehicleViewModel.VehSeriesCode,
+                vehicleViewModel.Year,
+                
+
+                 EnteredBy =userName,
+                DateEntered=DateTime.Now,
+                ModifiedLastBy = userName,
+                ModifiedLastDate=DateTime.Now
+
+            }, transaction);
+
+
+
+            // Commit the transaction
+            transaction.Commit();
+
+            return maxVehicleListId;
+            
+        }
+View :
+ function onRequestEnd(e) {
+    var notification = $("#notification").data("kendoNotification");
+    notification.success(e.type);
+   // Initialize notification FIRST
+
+         if (e.type === "create") {
+             var notification = $("#notification").data("kendoNotification");
+             location.reload();
+             notification.success("Record created successfully");
