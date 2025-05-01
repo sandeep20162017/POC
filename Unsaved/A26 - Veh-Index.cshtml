@@ -1,0 +1,247 @@
+@using BCES.Models.Vehicle
+@using BCES.Models.Common
+@model IEnumerable<BCES.Models.Vehicle.VehicleViewModel>
+
+@{
+    ViewData["Title"] = "Vehicle Estimate";
+    var parentGridId = $"{ViewBag.PartNum}";
+}
+
+<h6>Vehicle Estimate</h6>
+
+@(Html.Kendo().TabStrip()
+    .Name("vehicleTabStrip")
+    .Animation(animation => animation.Open(effect => effect.Fade(FadeDirection.In)))
+    .Items(tabstrip =>
+    {
+        tabstrip.Add().Text("Vehicles").Selected(true).Content(@<text>
+            @try {
+                @(Html.Kendo().Grid<VehicleViewModel>()
+                    .Name("VehicleGrid")
+                    .Columns(columns => 
+                    {
+                        // Column configurations remain same
+                    })
+                    .ToolBar(toolbar => {
+                        toolbar.Create().Text("Add").IconClass("k-icon k-i-plus");
+                        toolbar.Save().SaveText("Save").CancelText("Cancel");
+                        toolbar.Excel().Text("Variance Report");
+                    })
+                    .Editable(editable => editable.Mode(GridEditMode.InCell))
+                    .Events(events => events
+                        .DataBound("onGridDataBound")
+                        .Save("onGridSave")
+                        .Cancel("onGridCancel")
+                        .DetailExpand("onDetailExpand")
+                        .DetailCollapse("onDetailCollapse")
+                    )
+                    .Pageable(p => p.PageSizes(new int[] {1, 10, 20, 50}).Position(GridPagerPosition.Top))
+                    .Sortable()
+                    .ClientDetailTemplateId("template")
+                    .Resizable(r => r.Columns(true))
+                    .DataSource(dataSource => dataSource
+                        .Ajax()
+                        .PageSize(1)
+                        .Model(model => model.Id(c => c.VehicleListId))
+                        .Read(read => read.Url(Url.Action("GetVehiclesView", "Vehicles")))
+                        .Create(create => create.Url(Url.Action("AddVehiclesView", "Vehicles")))
+                        .Update(update => update.Url(Url.Action("UpdateVehiclesView", "Vehicles")))
+                        .Destroy(delete => delete.Url(Url.Action("DeleteVehiclesView", "Vehicles")))
+                    )
+                )
+            } catch (Exception ex) {
+                <div class="alert alert-danger">Error loading Vehicle Estimate: @ex.Message</div>
+            }
+        </text>);
+
+        tabstrip.Add().Text("Archived Vehicles").Content(@<text>
+            @try { @Html.Partial("_ArchivedVehicleIndex") } 
+            catch (Exception ex) {
+                <div class="alert alert-danger">Error loading archived vehicles: @ex.Message</div>
+            }
+        </text>);
+    })
+)
+
+<style>
+    /* Consolidated Grid Styling */
+    .k-grid .status-indicator {
+        width: 4px;
+        height: 100%;
+        position: absolute;
+        left: 0;
+        top: 0;
+        z-index: 1;
+    }
+
+    .k-grid .unsaved-badge {
+        position: relative;
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 0.75rem;
+        font-weight: bold;
+    }
+
+    .k-state-created .status-indicator { background: #43a047; }
+    .k-state-edited .status-indicator { background: #ffeb3b; }
+    .k-state-created .unsaved-badge { background: #e8f5e9; color: #43a047; }
+    .k-state-edited .unsaved-badge { background: #fffde7; color: #c5a306; }
+
+    .k-grid tr:hover td { background: #f5f5f5 !important; }
+</style>
+
+<!-- Delete Confirmation Dialog -->
+<div id="deleteConfirmationDialog" style="display:none;">
+    <div class="confirmation-message">
+        <span class="k-icon k-i-warning"></span> Are you sure you want to delete this item?
+    </div>
+    <div class="confirmation-buttons">
+        <button type="button" class="k-button cancel-btn">Cancel</button>
+        <button type="button" class="k-button confirm-btn">Delete</button>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    // Global State Management
+    const gridState = {
+        parentGrid: null,
+        activeChildTab: null,
+        expandedRow: null,
+        childGrids: {}
+    };
+
+    // Initialize Grids
+    $(document).ready(function() {
+        gridState.parentGrid = $("#VehicleGrid").data("kendoGrid");
+        
+        gridState.parentGrid.bind("detailExpand", e => {
+            gridState.expandedRow = e.masterRow;
+            updateToolbarStates();
+        });
+
+        gridState.parentGrid.bind("detailCollapse", () => {
+            gridState.expandedRow = null;
+            updateToolbarStates();
+        });
+
+        initTabs();
+    });
+
+    // Unified Grid Handlers
+    function onGridDataBound(e) {
+        applyUnsavedStyling(e.sender);
+        updateToolbarStates();
+    }
+
+    function onGridSave(e) {
+        e.sender.tbody.find(".k-state-created, .k-state-edited")
+            .removeClass("k-state-created k-state-edited")
+            .find(".status-indicator, .unsaved-badge").remove();
+    }
+
+    function onGridCancel(e) {
+        onGridSave(e);
+    }
+
+    // Child Grid Management
+    function initChildGrid(gridName) {
+        const grid = $(`#${gridName}`).data("kendoGrid");
+        if (!grid) return;
+
+        gridState.childGrids[gridName] = {
+            instance: grid,
+            hasChanges: false
+        };
+
+        grid.bind({
+            dataBound: function(e) {
+                applyUnsavedStyling(grid);
+                updateToolbarStates();
+            },
+            save: onGridSave,
+            cancel: onGridCancel
+        });
+
+        grid.dataSource.bind("change", function(e) {
+            gridState.childGrids[gridName].hasChanges = grid.dataSource.hasChanges();
+            updateToolbarStates();
+        });
+    }
+
+    // Tab Handling
+    function initTabs() {
+        $("[data-role='tabstrip']").kendoTabStrip({
+            select: function(e) {
+                const tabContent = $(e.contentElement);
+                gridState.activeChildTab = tabContent.find(".k-grid").attr("id");
+                initChildGrid(gridState.activeChildTab);
+                updateToolbarStates();
+            }
+        });
+    }
+
+    // Toolbar State Management
+    function updateToolbarStates() {
+        // Parent Grid States
+        const parentHasChanges = gridState.parentGrid.dataSource.hasChanges();
+        const parentToolbar = gridState.parentGrid.wrapper.find(".k-grid-toolbar");
+        
+        parentToolbar.find(".k-grid-save-changes, .k-grid-cancel-changes")
+            .toggleClass("k-state-disabled", !!gridState.expandedRow || !parentHasChanges)
+            .prop("disabled", !!gridState.expandedRow || !parentHasChanges);
+
+        parentToolbar.find(".k-grid-add")
+            .toggleClass("k-state-disabled", !!gridState.expandedRow || parentHasChanges)
+            .prop("disabled", !!gridState.expandedRow || parentHasChanges);
+
+        // Child Grid States
+        Object.keys(gridState.childGrids).forEach(gridName => {
+            const childGrid = gridState.childGrids[gridName].instance;
+            const isActive = gridName === gridState.activeChildTab;
+            const hasChanges = gridState.childGrids[gridName].hasChanges;
+
+            childGrid.wrapper.find(".k-grid-save-changes, .k-grid-cancel-changes")
+                .toggleClass("k-state-disabled", !isActive || !hasChanges)
+                .prop("disabled", !isActive || !hasChanges);
+
+            childGrid.wrapper.find(".k-grid-add")
+                .toggleClass("k-state-disabled", !isActive || hasChanges)
+                .prop("disabled", !isActive || hasChanges);
+        });
+    }
+
+    // Visual Styling
+    function applyUnsavedStyling(grid) {
+        grid.tbody.find("tr").each(function() {
+            const row = $(this);
+            const dataItem = grid.dataItem(row);
+            const firstCell = row.find("td:first");
+
+            row.removeClass("k-state-created k-state-edited")
+               .find(".status-indicator, .unsaved-badge").remove();
+
+            if (dataItem) {
+                const stateClass = dataItem.isNew() ? "k-state-created" : 
+                                 dataItem.dirty ? "k-state-edited" : "";
+                const badgeText = dataItem.isNew() ? "NEW" : "EDITED";
+
+                if (stateClass) {
+                    row.addClass(stateClass);
+                    firstCell.prepend('<div class="status-indicator"></div>')
+                            .append(`<span class="unsaved-badge">${badgeText}</span>`);
+                }
+            }
+        });
+    }
+
+    // Delete Confirmation (Existing implementation remains)
+    // ... (Keep your existing delete confirmation logic) ...
+</script>
+
+<script id="template" type="text/x-kendo-template">
+    <div id="detail-template-#=VehicleListId#"></div>
+</script>
+}
