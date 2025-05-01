@@ -1,0 +1,252 @@
+Here's the comprehensive solution addressing all requirements:
+
+css
+/* CSS Adjustments - Add to your existing styles */
+/* Prevent layout disturbance */
+.k-grid .status-indicator {
+    width: 4px;
+    height: 100%;
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 1;
+}
+
+.k-grid .unsaved-badge {
+    position: relative;
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    vertical-align: middle;
+}
+
+.k-grid td:first-child {
+    position: relative;
+    padding-left: 12px !important;
+}
+
+/* Maintain grid structure */
+.k-grid table {
+    table-layout: fixed;
+    width: 100% !important;
+}
+
+.k-grid td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+    position: relative;
+}
+javascript
+// Global state manager
+const gridState = {
+    parentGrid: null,
+    activeChildTab: null,
+    expandedRow: null,
+    hasParentChanges: false,
+    childGrids: {}
+};
+
+// Initialize parent grid
+function initParentGrid() {
+    const grid = $("#VehicleGrid").data("kendoGrid");
+    gridState.parentGrid = grid;
+    
+    grid.bind("detailExpand", function(e) {
+        gridState.expandedRow = e.masterRow;
+        updateParentToolbar();
+    });
+    
+    grid.bind("detailCollapse", function() {
+        gridState.expandedRow = null;
+        updateParentToolbar();
+    });
+    
+    grid.bind("dataBound", function(e) {
+        updateParentToolbar();
+        applyUnsavedStyling(grid);
+    });
+}
+
+// Initialize child grids
+function initChildGrid(gridName) {
+    const grid = $(`#${gridName}`).data("kendoGrid");
+    
+    gridState.childGrids[gridName] = {
+        instance: grid,
+        hasChanges: false
+    };
+    
+    grid.bind("dataBound", function(e) {
+        applyUnsavedStyling(grid);
+        updateChildToolbar(gridName);
+    });
+    
+    grid.bind("saveChanges", function(e) {
+        gridState.childGrids[gridName].hasChanges = false;
+        updateChildToolbar(gridName);
+    });
+    
+    grid.bind("cancelChanges", function(e) {
+        gridState.childGrids[gridName].hasChanges = false;
+        updateChildToolbar(gridName);
+    });
+    
+    grid.dataSource.bind("change", function(e) {
+        gridState.childGrids[gridName].hasChanges = true;
+        updateChildToolbar(gridName);
+    });
+}
+
+// Toolbar management
+function updateParentToolbar() {
+    const grid = gridState.parentGrid;
+    const hasChanges = grid.dataSource.hasChanges();
+    const isExpanded = !!gridState.expandedRow;
+    
+    grid.wrapper.find(".k-grid-save-changes, .k-grid-cancel-changes")
+        .toggleClass("k-state-disabled", isExpanded || !hasChanges)
+        .prop("disabled", isExpanded || !hasChanges);
+    
+    grid.wrapper.find(".k-grid-add")
+        .toggleClass("k-state-disabled", isExpanded || hasChanges)
+        .prop("disabled", isExpanded || hasChanges);
+}
+
+function updateChildToolbar(gridName) {
+    const grid = gridState.childGrids[gridName].instance;
+    const hasChanges = gridState.childGrids[gridName].hasChanges;
+    const isActiveTab = gridState.activeChildTab === gridName;
+    
+    grid.wrapper.find(".k-grid-save-changes, .k-grid-cancel-changes")
+        .toggleClass("k-state-disabled", !isActiveTab || !hasChanges)
+        .prop("disabled", !isActiveTab || !hasChanges);
+    
+    grid.wrapper.find(".k-grid-add")
+        .toggleClass("k-state-disabled", !isActiveTab || hasChanges)
+        .prop("disabled", !isActiveTab || hasChanges);
+}
+
+// Tab handling
+function initTabs() {
+    $("[data-role='tabstrip']").kendoTabStrip({
+        select: function(e) {
+            gridState.activeChildTab = $(e.item).data("gridname");
+            Object.keys(gridState.childGrids).forEach(gridName => {
+                updateChildToolbar(gridName);
+            });
+            updateParentToolbar();
+        }
+    });
+}
+
+// Unified styling application
+function applyUnsavedStyling(grid) {
+    grid.tbody.find("tr").each(function() {
+        const row = $(this);
+        const dataItem = grid.dataItem(row);
+        const firstCell = row.find("td:first");
+        
+        row.removeClass("k-state-created k-state-edited");
+        row.find(".status-indicator, .unsaved-badge").remove();
+
+        if (dataItem) {
+            if (dataItem.isNew()) {
+                row.addClass("k-state-created");
+                firstCell.prepend('<div class="status-indicator"></div>');
+                firstCell.append('<span class="unsaved-badge">NEW</span>');
+            } else if (dataItem.dirty) {
+                row.addClass("k-state-edited");
+                firstCell.prepend('<div class="status-indicator"></div>');
+                firstCell.append('<span class="unsaved-badge">EDITED</span>');
+            }
+        }
+    });
+}
+
+// Initialization
+$(document).ready(function() {
+    initParentGrid();
+    initChildGrid("LabourDetailsGrid");
+    initChildGrid("ScPartsMaterialDetailsRebuiltPartsGrid");
+    initChildGrid("NscPartsMaterialDetailsRebuiltPartsGrid");
+    initChildGrid("RbPartsMaterialDetailsRebuiltPartsGrid");
+    initTabs();
+    
+    // Initial toolbar state
+    updateParentToolbar();
+    Object.keys(gridState.childGrids).forEach(updateChildToolbar);
+});
+Update your grid configurations:
+
+Parent Grid:
+
+csharp
+@(Html.Kendo().Grid<VehicleViewModel>()
+    .Name("VehicleGrid")
+    .Events(events => events
+        .DataBound("onVehGridDataBound")
+        .Save("onVehGridSave")
+        .Cancel("onVehGridCancel")
+        .DetailExpand("onDetailExpand")
+        .DetailCollapse("onDetailCollapse")
+    )
+    // Rest of configuration
+)
+Child Grids (example for Labour grid):
+
+csharp
+@(Html.Kendo().Grid<LabourDetailsRebuiltPartsViewModel>()
+    .Name("LabourDetailsGrid")
+    .Events(events => events
+        .DataBound("onChildGridDataBound")
+        .Save("onChildGridSave")
+        .Cancel("onChildGridCancel")
+    )
+    // Rest of configuration
+)
+Add these JavaScript handlers:
+
+javascript
+// Parent grid handlers
+function onVehGridDataBound(e) {
+    applyUnsavedStyling(e.sender);
+    updateParentToolbar();
+}
+
+function onVehGridSave(e) {
+    e.sender.tbody.find(".k-state-created, .k-state-edited")
+        .removeClass("k-state-created k-state-edited")
+        .find(".status-indicator, .unsaved-badge").remove();
+}
+
+function onVehGridCancel(e) {
+    onVehGridSave(e);
+}
+
+// Child grid handlers
+function onChildGridDataBound(e) {
+    applyUnsavedStyling(e.sender);
+    updateChildToolbar(e.sender.element.attr("id"));
+}
+
+function onChildGridSave(e) {
+    const grid = e.sender;
+    grid.tbody.find(`[data-uid='${e.model.uid}']`)
+        .removeClass("k-state-created k-state-edited")
+        .find(".status-indicator, .unsaved-badge").remove();
+}
+
+function onChildGridCancel(e) {
+    onChildGridSave(e);
+}
+Key Features:
+
+Maintains grid layout integrity
+
+Full toolbar state management
+
+Cross-grid dependency handling
