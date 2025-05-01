@@ -1,26 +1,146 @@
+🔧 Final site.js (Stable across all Telerik Grid layouts)
+js
+Copy
+Edit
+(function ($) {
+    $.fn.trackUnsavedChanges = function () {
+        const gridEl = this;
+        const grid = gridEl.data("kendoGrid");
+        const gridId = gridEl.attr("id");
 
-contentArea length is 0. Tags are still not shown. Pls give me full version of the changes
-Js snippet :
-row.addClass("unsaved-row");
+        if (!grid) {
+            console.warn("trackUnsavedChanges: Grid not initialized for", gridId);
+            return;
+        }
 
-const message = showNew ? "🆕 New item" : "⚠ Edited but not saved";
+        console.log("✅ trackUnsavedChanges initialized for grid:", gridId);
 
-const tag = $(`
-    <div class='unsaved-floating-tag animated-fade-in' data-uid='${uid}'>
-        ${message}
-    </div>
-`).css({
-    position: "absolute",
-    top: rowOffset.top + row.outerHeight(),
-    left: rowOffset.left,
-    width: row.outerWidth(),
-    zIndex: 1000
-});
+        // Track edit and change
+        ["edit", "change"].forEach(event => {
+            grid.bind(event, () => {
+                setTimeout(() => showUnsavedTags(grid), 100);
+            });
+        });
 
-contentArea.append(tag);
-console.log('contentArea :', contentArea);
- logs :
-contentArea : R.fn.init {length: 0, prevObject: R.fn.init}length: 0prevObject: R.fn.init {0: div#RbPartsMaterialDetailsRebuiltPartsGrid.k-grid.k-widget.k-grid-display-block.k-editable, length: 1}[[Prototype]]: ce
-site.js:89 ✅ Tag shown: 🆕 New item for uid: a705b4cf-b9d8-4231-b135-01f531860eb3
-site.js:88 contentArea : R.fn.init {length: 0, prevObject: R.fn.init}
-site.js:89 ✅ Tag shown: 🆕 New item for uid: a705b4cf-b9d8-4231-b135-01f531860eb3
+        // Clear tags on save, cancel, requestEnd
+        ["save", "cancel", "requestEnd"].forEach(event => {
+            grid.bind(event, () => {
+                clearUnsavedTags(grid);
+            });
+        });
+
+        // Update tag position on scroll/resize
+        $(window).on("resize.unsaved" + gridId, () => updateFloatingTagPositions(grid));
+        gridEl.on("scroll.unsaved" + gridId, ".k-grid-content", () => updateFloatingTagPositions(grid));
+    };
+
+    function showUnsavedTags(grid) {
+        const ds = grid.dataSource;
+        if (!ds) return;
+
+        ds.view().forEach(item => {
+            const uid = item.uid;
+            const row = grid.tbody.find(`tr[data-uid='${uid}']`);
+            if (!row.length) return;
+
+            const rowOffset = row.offset(); // use document-relative offset
+            if (!rowOffset) return;
+
+            const existingTag = grid.wrapper.find(`.unsaved-floating-tag[data-uid='${uid}']`);
+            if (existingTag.length) return;
+
+            row.addClass("unsaved-row");
+
+            const message = item.isNew() ? "🆕 New item" : (item.dirty ? "⚠ Edited but not saved" : "");
+            if (!message) return;
+
+            const tag = $(`<div class='unsaved-floating-tag animated-fade-in' data-uid='${uid}'>${message}</div>`)
+                .css({
+                    position: "absolute",
+                    top: rowOffset.top + row.outerHeight(),
+                    left: rowOffset.left,
+                    width: row.outerWidth(),
+                    zIndex: 1000
+                });
+
+            $("body").append(tag);
+            console.log(`✅ Tag shown: ${message} for uid: ${uid}`);
+        });
+
+        updateFloatingTagPositions(grid);
+    }
+
+    function updateFloatingTagPositions(grid) {
+        $(".unsaved-floating-tag").each(function () {
+            const tag = $(this);
+            const uid = tag.data("uid");
+            const row = grid.tbody.find(`tr[data-uid='${uid}']`);
+            if (!row.length) return;
+
+            const rowOffset = row.offset();
+            if (!rowOffset) return;
+
+            tag.css({
+                top: rowOffset.top + row.outerHeight(),
+                left: rowOffset.left,
+                width: row.outerWidth()
+            });
+        });
+    }
+
+    function clearUnsavedTags(grid) {
+        grid.tbody.find(".unsaved-row").removeClass("unsaved-row");
+        $(".unsaved-floating-tag").remove();
+        console.log("🧽 Tags cleared");
+    }
+
+    // Ensure tag shows after blur
+    $(document).on("focusout", ".k-grid input", function () {
+        const grid = $(this).closest(".k-grid").data("kendoGrid");
+        if (grid) {
+            setTimeout(() => showUnsavedTags(grid), 100);
+        }
+    });
+})(jQuery);
+🎨 CSS (site.css)
+css
+Copy
+Edit
+.unsaved-row {
+    background-color: #fff9e6 !important;
+}
+
+.unsaved-floating-tag {
+    background-color: #d4edda;
+    color: #155724;
+    font-weight: bold;
+    text-align: center;
+    padding: 4px 10px;
+    font-size: 6px;
+    border: 1px solid #c3e6cb;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0.95;
+}
+
+.animated-fade-in {
+    animation: fadeInTag 0.4s ease-in-out;
+}
+
+@keyframes fadeInTag {
+    from { opacity: 0; transform: translateY(-5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+✅ Hook It Up
+In your view/partial:
+
+html
+Copy
+Edit
+<script>
+    $(document).ready(function () {
+        $("#RbPartsMaterialDetailsRebuiltPartsGrid").trackUnsavedChanges();
+    });
+</script>
