@@ -1,57 +1,59 @@
-Drop down is working fine now. Controller is getting columnName and searchTExt. There's a new issue,  When I add new record. select some value in the drop down and move t the next column, 
-drop down value is not avaibale and displayed  and column is blank.
-Also in grid edit mode OrigSuppNum should be read only. Disable OrigSuppNum column.
-@(
-Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
-                
-                @* .Name($"NscPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}") *@
-                .Name($"NscPartsMaterialDetailsRebuiltPartsGrid")
-                .Events(events => events
-                    .DataBound("onNscGridDataBound")
-                    
-                )
-                .Columns(columns =>
-                {
-                    columns.Bound(c => c.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("Contains"))).EditorTemplateName("CommonDropDownEditor").Width(60);
-                   columns.Bound(c => c.CC).Title("CC").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("ComboBoxEditor").Width(40); 
-                  ...
-               .Events (events => 
-{
-    //events.Edit("onEdit") ;
-    //events.Save("onSave");
-    events.CellClose("onCellClose");
-    events.SaveChanges("onSaveChanges");
+You are ASP.NET core and telerik asp.net core expert. You are alo experienced UI/UX developer
+I have Kendo ASP.NET core grid, which uses ComboBox editor on multiple columns.
+When user serches value, slection is  displayed and I mark that column as read only This is working fine.
+When user keys in something and search didnot return any data, 'No Data Found' is displayed.
+Q1 : Is it possible to change the label to 'Invalid Selection' with bold red.
+Invalidate the selection (clear the user entered value) or any other way to restrict user to continue?
+My ComboBoxEditor :
+@model object
 
-})
-..
-Editable(editable => editable.Mode(GridEditMode.InCell))
-    .Pageable()
-    .Sortable()
-    .Resizable(r => r.Columns(true))
-   // .Scrollable()
-    .DataSource(dataSource => dataSource
-        .Ajax()
-        .Batch(true)
-        .ServerOperation(false)
-        .Model(model =>
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .EnforceMinLength(true)
+    .Placeholder("Search...")
+    .Events(e => e.DataBound("makeComboBoxReadOnly"))
+    .AutoBind(false) // Only bind data when user types
+    
+    .MinLength(2)    // Trigger server filtering after 1 character
+    @* .HtmlAttributes(new
+    {
+        data_column = fieldName
+    }) *@
+     .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+       // { "data-role", "combobox" },
+        { "data-column", fieldName }
+    })
+    @* .Events(e =>
+    {
+        e.Change("validateSelection"); // Validate on selection
+        e.DataBound("clearInvalidInput"); // Optional clanup
+    }) *@
+    .DataSource(source =>
+    {
+        source.Read(read =>
         {
-            model.Id(c => c.OrigSuppNum);
-            model.Field(c => c.OrigSupplierName);
-            model.Field(c => c.OrigSuppNum);
-..
-        .Events(events =>
-        {
-                      
-            events.RequestEnd("onRequestEnd");
-            events.Error("onDataSourceError");
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
         })
-
-        .Read(read => read.Url(Url.Action("GetNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
-       
-        .Create(create => create.Url(Url.Action("CreateNscPartsUsedInEstimatess", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
-        .Update(update => update.Url(Url.Action("UpdateNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
-        .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsedInRbtParts", "NscPartsUsedInEstimates") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
-    )
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #")
+    
 
 )
-
+   
+ <script>
+     function makeComboBoxReadOnly(e) {
+         e.sender.input.attr("readonly", true);
+     }
+ </script>
