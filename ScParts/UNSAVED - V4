@@ -1,0 +1,186 @@
+Here's an enhanced solution with improved UI/UX considerations:
+
+css
+/* Enhanced CSS with better visual hierarchy and transitions */
+.unsaved-badge {
+    position: absolute;
+    background-color: #dc3545;
+    color: #fff;
+    padding: 2px 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 4px;
+    z-index: 1000;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    white-space: nowrap;
+}
+
+/* Row highlighting with subtle animations */
+.k-grid tr.unsaved-new {
+    background-color: #f3faf7 !important;
+    border-left: 3px solid #28a745 !important;
+    transition: background-color 0.3s ease;
+}
+
+.k-grid tr.unsaved-edited {
+    background-color: #fffcf5 !important;
+    border-left: 3px solid #ffc107 !important;
+    transition: background-color 0.3s ease;
+}
+
+/* Hover states */
+.k-grid tr.unsaved-new:hover {
+    background-color: #e0f3ec !important;
+}
+
+.k-grid tr.unsaved-edited:hover {
+    background-color: #fff9e6 !important;
+}
+
+/* Badge hover enhancement */
+.unsaved-badge:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+}
+javascript
+// Enhanced JavaScript with performance optimizations
+function onVehGridDataBound(e) {
+    const grid = e.sender;
+    const gridContent = grid.wrapper.find('.k-grid-content');
+    const dataItems = grid.dataSource.view();
+    
+    // Clear previous state
+    $('.unsaved-badge').remove();
+    grid.tbody.find('tr').removeClass('unsaved-new unsaved-edited');
+
+    // Use requestAnimationFrame for smoother visual updates
+    requestAnimationFrame(() => {
+        dataItems.forEach(item => {
+            const row = grid.tbody.find(`tr[data-uid="${item.uid}"]`);
+            const isNew = item.isNew();
+            const isDirty = item.dirty;
+
+            if (isNew || isDirty) {
+                const className = isNew ? 'unsaved-new' : 'unsaved-edited';
+                row.addClass(className);
+                
+                // Create badge with additional data attributes
+                const $badge = $(
+                    `<div class="unsaved-badge" 
+                         data-uid="${item.uid}"
+                         data-status="${isNew ? 'new' : 'edited'}">
+                        UNSAVED
+                     </div>`
+                );
+                
+                grid.wrapper.append($badge);
+                positionUnsavedBadge($badge, row.find('td:first'), gridContent);
+            }
+        });
+
+        // Throttle scroll events for better performance
+        let lastScroll = 0;
+        gridContent.off('scroll.unsaved').on('scroll.unsaved', () => {
+            const now = Date.now();
+            if (now - lastScroll > 50) {
+                requestAnimationFrame(() => {
+                    $('.unsaved-badge').each((i, badge) => {
+                        const $badge = $(badge);
+                        const uid = $badge.attr('data-uid');
+                        const row = grid.tbody.find(`tr[data-uid="${uid}"]`);
+                        positionUnsavedBadge($badge, row.find('td:first'), gridContent);
+                    });
+                });
+                lastScroll = now;
+            }
+        });
+    });
+}
+
+// Improved positioning function using modern APIs
+function positionUnsavedBadge(badge, cell, gridContent) {
+    const cellRect = cell[0].getBoundingClientRect();
+    const gridRect = gridContent[0].getBoundingClientRect();
+    const scrollLeft = gridContent.scrollLeft();
+    
+    badge.css({
+        top: `${cellRect.bottom - gridRect.top + 4}px`,
+        left: `${cellRect.left - gridRect.left - scrollLeft + 4}px`
+    });
+}
+UI/UX Enhancements:
+
+Visual Hierarchy Improvements:
+
+Added subtle left border instead of full row color
+
+Used softer background colors for better readability
+
+Added smooth transitions for all animations
+
+Implemented hover states with appropriate contrast
+
+Performance Optimizations:
+
+Throttled scroll events using requestAnimationFrame
+
+Used modern getBoundingClientRect() instead of offset()
+
+Batch updates using requestAnimationFrame
+
+Accessibility Considerations:
+
+Increased font size for better readability
+
+Added proper contrast ratios for text/background
+
+Maintained keyboard navigability
+
+Visual Feedback Enhancements:
+
+Subtle box shadow on badge for depth
+
+Smooth transform on badge hover
+
+Clear status indication through border colors
+
+Implementation Notes:
+
+Wrap your grid content in a positioned container:
+
+html
+<div class="grid-container" style="position: relative;">
+    @(Html.Kendo().Grid<YourModel>()
+        .Name("VehicleGrid")
+        .Editable(editable => editable.Mode(GridEditMode.InCell))
+        .Events(events => events.DataBound("onVehGridDataBound"))
+        // ... other configuration ...
+    )
+</div>
+Add these CSS transitions to your base grid styles:
+
+css
+.k-grid {
+    --unsaved-accent-new: #28a745;
+    --unsaved-accent-edited: #ffc107;
+    --unsaved-bg-new: #f3faf7;
+    --unsaved-bg-edited: #fffcf5;
+    
+    transition: background-color 0.3s ease;
+}
+For better mobile experience, consider adding:
+
+css
+@media (max-width: 768px) {
+    .unsaved-badge {
+        font-size: 0.65rem;
+        padding: 1px 4px;
+    }
+    
+    .k-grid tr.unsaved-new,
+    .k-grid tr.unsaved-edited {
+        border-left-width: 2px;
+    }
+}
