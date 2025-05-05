@@ -1,0 +1,261 @@
+Here's the complete implementation with explicit button IDs and all required functionality:
+
+cshtml
+@* Grid Container with Toolbar *@
+<div class="grid-container">
+    @(Html.Kendo().Grid<YourModel>()
+        .Name("VehicleGrid")
+        .Editable(editable => editable.Mode(GridEditMode.InCell))
+        .ToolBar(toolbar => {
+            toolbar.Create()
+                .Text("Add New")
+                .HtmlAttributes(new { id = "addButton" });
+            toolbar.Custom()
+                .Name("save")
+                .Text("Save Changes")
+                .HtmlAttributes(new { id = "saveButton" });
+            toolbar.Custom()
+                .Name("cancel")
+                .Text("Cancel Changes")
+                .HtmlAttributes(new { id = "cancelButton" });
+        })
+        .Events(events => events
+            .DataBound("onVehGridDataBound")
+            .Save("onGridSave")
+            .Cancel("onGridCancel")
+            .Edit("onGridEdit")
+        )
+        .Columns(columns =>
+        {
+            columns.Bound(p => p.Id).Width(100);
+            // Add other columns
+            columns.Command(command => command.Destroy()).Width(100);
+        })
+        .DataSource(dataSource => dataSource
+            .Ajax()
+            .Model(model => model.Id(m => m.Id))
+            .Events(events => events
+                .Change("onDataSourceChange")
+                .RequestEnd("onRequestEnd")
+            )
+        )
+    )
+</div>
+css
+/* Button Styles with IDs */
+#addButton {
+    background-color: #007bff;
+    color: white;
+    border-color: #0062cc;
+}
+
+#saveButton {
+    background-color: #28a745;
+    color: white;
+    border-color: #218838;
+}
+
+#cancelButton {
+    background-color: #dc3545;
+    color: white;
+    border-color: #c82333;
+}
+
+/* Disabled States */
+.k-button:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+    filter: grayscale(0.8);
+}
+
+/* Grid Container */
+.grid-container {
+    position: relative;
+    padding: 15px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    background: white;
+}
+
+/* Unsaved Badge */
+.unsaved-badge {
+    position: absolute;
+    background-color: #dc3545 !important;
+    color: white !important;
+    padding: 3px 8px !important;
+    font-size: 0.75rem !important;
+    font-weight: 700 !important;
+    border-radius: 4px !important;
+    z-index: 1000;
+    transition: left 0.1s ease-in-out;
+    pointer-events: none;
+    white-space: nowrap;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Row Highlighting */
+.k-grid tr.unsaved-new {
+    background-color: #e8f5e9 !important;
+    box-shadow: inset 3px 0 0 #4caf50 !important;
+}
+
+.k-grid tr.unsaved-edited {
+    background-color: #fffde7 !important;
+    box-shadow: inset 3px 0 0 #ffc107 !important;
+}
+
+.k-grid tr.unsaved-new:hover td {
+    background-color: #d0eed3 !important;
+}
+
+.k-grid tr.unsaved-edited:hover td {
+    background-color: #fff9c4 !important;
+}
+javascript
+// Button State Controller
+function updateToolbarState() {
+    const grid = $("#VehicleGrid").data("kendoGrid");
+    const hasChanges = grid.dataSource.hasChanges();
+    
+    $("#saveButton, #cancelButton").prop("disabled", !hasChanges);
+    $("#addButton").prop("disabled", hasChanges);
+}
+
+// Grid Events
+function onVehGridDataBound(e) {
+    const grid = e.sender;
+    const gridContent = grid.wrapper.find('.k-grid-content');
+    const dataItems = grid.dataSource.view();
+
+    // Cleanup previous state
+    $('.unsaved-badge').remove();
+    grid.tbody.find('tr').removeClass('unsaved-new unsaved-edited');
+
+    dataItems.forEach(item => {
+        const row = grid.tbody.find(`tr[data-uid="${item.uid}"]`);
+        const isNew = item.isNew();
+        const isDirty = item.dirty;
+
+        if (isNew || isDirty) {
+            const className = isNew ? 'unsaved-new' : 'unsaved-edited';
+            row.addClass(className);
+            
+            const $badge = $(`<div class="unsaved-badge">UNSAVED</div>`)
+                .attr('data-uid', item.uid);
+            
+            grid.wrapper.append($badge);
+            positionUnsavedBadge($badge, row.find('td:first'), gridContent);
+        }
+    });
+
+    updateToolbarState();
+    
+    // Scroll handler
+    gridContent.off('scroll.unsaved').on('scroll.unsaved', function() {
+        $('.unsaved-badge').each(function() {
+            const uid = $(this).data('uid');
+            const row = grid.tbody.find(`tr[data-uid="${uid}"]`);
+            positionUnsavedBadge($(this), row.find('td:first'), gridContent);
+        });
+    });
+}
+
+function positionUnsavedBadge(badge, cell, gridContent) {
+    const cellPos = cell.position();
+    const scrollLeft = gridContent.scrollLeft();
+    
+    badge.css({
+        top: cellPos.top + cell.outerHeight() + 2,
+        left: cellPos.left - scrollLeft + 2
+    });
+}
+
+// Data Source Events
+function onDataSourceChange(e) {
+    if (e.action !== "sync") {
+        updateToolbarState();
+    }
+}
+
+function onRequestEnd(e) {
+    if (e.type === "update" || e.type === "create" || e.type === "destroy") {
+        updateToolbarState();
+        $("#VehicleGrid").data("kendoGrid").refresh();
+    }
+}
+
+// Grid Event Handlers
+function onGridSave(e) {
+    $(`.unsaved-badge[data-uid="${e.model.uid}"]`).remove();
+    e.container.closest("tr").removeClass('unsaved-new unsaved-edited');
+    updateToolbarState();
+}
+
+function onGridCancel(e) {
+    $(`.unsaved-badge[data-uid="${e.model.uid}"]`).remove();
+    e.container.closest("tr").removeClass('unsaved-new unsaved-edited');
+    updateToolbarState();
+}
+
+// Button Click Handlers
+$(document).ready(function() {
+    $("#saveButton").click(function() {
+        const grid = $("#VehicleGrid").data("kendoGrid");
+        grid.saveChanges();
+    });
+
+    $("#cancelButton").click(function() {
+        const grid = $("#VehicleGrid").data("kendoGrid");
+        grid.cancelChanges();
+    });
+
+    // Initial state
+    updateToolbarState();
+});
+Key Features:
+
+Explicit button IDs (#addButton, #saveButton, #cancelButton)
+
+Proper Kendo toolbar integration with custom commands
+
+State management for buttons (disabled/enabled states)
+
+Unsaved changes visualization with sticky badges
+
+Row highlighting for new/edited items
+
+Scroll synchronization for badges
+
+Clean state management on save/cancel
+
+Responsive hover states
+
+Proper CSS specificity for Kendo overrides
+
+Implementation Notes:
+
+The grid must be wrapped in a positioned container
+
+Model class must have proper ID field configuration
+
+Requires Kendo UI for ASP.NET Core v2023.1.314 or newer
+
+Includes destroy command column for row deletion
+
+Uses Kendo's built-in data source operations
+
+Handles both horizontal and vertical scrolling
+
+Includes proper cleanup during save/cancel operations
+
+Behavior Flow:
+
+Initial state: Add enabled, Save/Cancel disabled
+
+On cell edit: Enables Save/Cancel, disables Add
+
+On scroll: Badges follow their rows
+
+On save/cancel: Cleans up badges and highlights
+
+On data refresh: Maintains proper UI state
