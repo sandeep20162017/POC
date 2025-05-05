@@ -1,0 +1,103 @@
+✅ Step 1: Message Container (HTML in .cshtml)
+Put this right below your grid in the Razor view:
+
+html
+Copy
+Edit
+<div id="unsavedWarning" class="k-messagebox k-messagebox-warning k-align-center" style="display: none; margin-top: 10px;">
+    <span class="k-icon k-i-warning"></span>
+    You have unsaved changes. Please save or cancel before adding a new row.
+</div>
+This uses:
+
+k-messagebox and k-messagebox-warning for styling.
+
+k-i-warning for the icon.
+
+✅ Step 2: Full onVehGridDataBound Script with Styled Tooltip
+javascript
+Copy
+Edit
+function onVehGridDataBound(e) {
+    const grid = e.sender;
+    const ds = grid.dataSource;
+    unsavedChangesExist = false;
+
+    // Remove old styles and messages
+    $(".unsaved-row, .unsaved-cell, .unsaved-badge").remove();
+    $("#unsavedWarning").hide(); // Hide tooltip initially
+
+    ds.view().forEach(item => {
+        const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+
+        if (item.isNew()) {
+            row.addClass("newly-added-row");
+        }
+
+        if (item.dirty || item.isNew()) {
+            row.addClass("unsaved-row");
+
+            // Add UNSAVED badge
+            const firstCell = row.find("td:first");
+            if (!firstCell.find(".unsaved-badge").length) {
+                firstCell.append(`<span class="unsaved-badge k-badge k-badge-warning">UNSAVED</span>`);
+            }
+
+            // Highlight modified cells
+            Object.keys(item.modified || {}).forEach(field => {
+                row.find(`td[data-field='${field}']`).addClass("unsaved-cell");
+            });
+
+            unsavedChangesExist = true;
+        }
+    });
+
+    // Update tab style if needed
+    const tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+    if (tabStrip?.items().length) {
+        $(tabStrip.items()[0].element)
+            .find(".k-link")
+            .toggleClass("has-unsaved", unsavedChangesExist);
+    }
+
+    // Save original addRow if not yet saved
+    var gridName = grid.element.attr('id');
+    if (!grid._originalAddRow) {
+        grid._originalAddRow = grid.addRow;
+    }
+
+    // Override addRow
+    grid.addRow = function () {
+        if (!grid.dataSource.hasChanges()) {
+            $("#unsavedWarning").hide();
+            grid._originalAddRow.call(grid);
+        } else {
+            $("#unsavedWarning").fadeIn(); // Show styled warning
+        }
+    };
+
+    // Monitor data changes
+    grid.dataSource.bind("change", function () {
+        updateToolbarButtons(gridName);
+    });
+
+    updateToolbarButtons(gridName);
+}
+📝 Optional CSS (for extra polish)
+Add this to your site CSS if you want to fine-tune spacing or add animations:
+
+css
+Copy
+Edit
+.unsaved-row {
+    background-color: #fff8e1 !important;
+}
+
+.unsaved-cell {
+    border: 2px solid #f39c12 !important;
+}
+
+.unsaved-badge {
+    margin-left: 10px;
+    font-size: 0.8em;
+}
