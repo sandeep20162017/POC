@@ -1,5 +1,4 @@
 <script>
-    // Track unsaved changes state
     let unsavedChangesExist = false;
 
     function onLabourGridDataBound(e) {
@@ -7,34 +6,26 @@
         const ds = grid.dataSource;
         unsavedChangesExist = false;
 
-        // Clear previous styling
         $(".unsaved-row, .unsaved-cell, .unsaved-badge").remove();
 
-        // Apply new styling
         ds.view().forEach(item => {
             const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
-
             if (item.dirty || item.isNew()) {
-                // Add row class
                 row.addClass("unsaved-row");
 
-                // Add badge to first cell
                 const firstCell = row.find("td:first");
                 if (!firstCell.find(".unsaved-badge").length) {
                     firstCell.append(`<span class="unsaved-badge">UNSAVED</span>`);
                 }
 
-                // Highlight modified cells
                 Object.keys(item.modified || {}).forEach(field => {
-                    row.find(`td[data-field='${field}']`)
-                        .addClass("unsaved-cell");
+                    row.find(`td[data-field='${field}']`).addClass("unsaved-cell");
                 });
 
                 unsavedChangesExist = true;
             }
         });
 
-        // Update tab indicator
         const tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
         if (tabStrip?.items().length) {
             $(tabStrip.items()[0].element)
@@ -42,31 +33,57 @@
                 .toggleClass("has-unsaved", unsavedChangesExist);
         }
 
-        //ssk12 start - Disable Save/Add
-        var gridName = grid.element.attr('id'); //  like "LabourDetailsGrid_123"
-        var originalAddCommand = null;
-
-
-        // Initialize only once
-        if (!originalAddCommand) {
-            originalAddCommand = grid.addRow;
+        // Disable Save/Add logic
+        const gridName = grid.element.attr('id');
+        if (!grid._originalAddCommand) {
+            grid._originalAddCommand = grid.addRow;
+            grid.addRow = function () {
+                if (!grid.dataSource.hasChanges()) {
+                    grid._originalAddCommand.call(grid);
+                }
+            };
         }
 
-        // Modify add command behavior
-        grid.addRow = function () {
-            if (!grid.dataSource.hasChanges()) {
-                originalAddCommand.call(grid);
-            }
-        };
-
+        grid.dataSource.unbind("change");
         grid.dataSource.bind("change", function () {
             updateToolbarButtons(gridName);
-           
         });
 
         updateToolbarButtons(gridName);
-        
-
-        //ssk12 end - Disable Save/Add
-
     }
+
+    function onLabourGridSave(e) {
+        console.warn('onLabourGridSave');
+
+        const grid = e.sender;
+        const notification = $("#notification").data("kendoNotification");
+
+        grid.one("dataBound", () => grid.refresh());
+
+        notification.success("Changes saved successfully");
+
+        // Retry refresh safely
+        let attempts = 0;
+        const maxAttempts = 5;
+
+        function tryReload() {
+            if (grid && grid.dataSource) {
+                if (!grid.dataSource.hasChanges()) {
+                    grid.dataSource.read().then(() => {
+                        unsavedChangesExist = false;
+                        console.log("Grid refreshed successfully after save.");
+                    });
+                } else {
+                    console.warn("Changes pending, skipping dataSource.read() to avoid conflict.");
+                }
+            } else if (attempts < maxAttempts) {
+                attempts++;
+                setTimeout(tryReload, 200);
+            } else {
+                console.error("Failed to refresh grid — dataSource not ready.");
+            }
+        }
+
+        tryReload();
+    }
+</script>
