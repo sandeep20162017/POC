@@ -1,0 +1,137 @@
+✅ 1. Updated ComboBoxEditor.cshtml Template (Full Version)
+File: Views/Shared/EditorTemplates/ComboBoxEditor.cshtml
+
+csharp
+Copy
+Edit
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+    var columnLockMap = ViewData["LockMap"]?.ToString() ?? ""; // Injected per column
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .EnforceMinLength(true)
+    .Placeholder("Search...")
+    .AutoBind(false)
+    .MinLength(2)
+    .NoDataTemplate("<div style='color: red; font-weight: bold;'>Invalid Selection</div>")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-column", fieldName },
+        { "data-role", "combobox" },
+        { "data-lock-map", columnLockMap },         // ✅ Inject lock rule map
+        { "class", "auto-lock-column" }             // ✅ Make column detectable in JS
+    })
+    .Events(e =>
+    {
+        e.DataBound("onComboBoxDataBound");
+        e.Change("onComboBoxChange");
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #")
+)
+✅ 2. Set Lock Maps Per Column in Your Grid
+In your grid (e.g., in RebuiltPartsUsed.cshtml), pass ViewData["LockMap"] to the editor template using .EditorViewData(...):
+
+csharp
+Copy
+Edit
+columns.Bound(c => c.KeyWord)
+    .EditorTemplateName("ComboBoxEditor")
+    .EditorViewData(new Dictionary<string, object> { { "LockMap", "MakevsBuy:always;RebuiltParts:none;Vehicle:notNew" } });
+
+columns.Bound(c => c.Description)
+    .EditorTemplateName("ComboBoxEditor")
+    .EditorViewData(new Dictionary<string, object> { { "LockMap", "MakevsBuy:notNew;RebuiltParts:none;Vehicle:always" } });
+
+columns.Bound(c => c.RebuiltStockNum)
+    .EditorTemplateName("ComboBoxEditor")
+    .EditorViewData(new Dictionary<string, object> { { "LockMap", "MakevsBuy:none;RebuiltParts:always;Vehicle:newOnly" } });
+✅ Now your lock rule is driven entirely from this data-lock-map string, per column, per grid context.
+
+✅ 3. Shared Grid Lock Script (if you haven't added it yet)
+Place this in Views/Shared/_GridEditLockHelper.cshtml:
+
+html
+Copy
+Edit
+<script>
+    function onGridEditLockHandler(e) {
+        var model = e.model;
+        var grid = e.sender;
+        var gridType = grid.wrapper.attr("data-grid-type");
+
+        setTimeout(function () {
+            var row = e.container.closest("tr");
+
+            row.find("td.auto-lock-column, .auto-lock-column").each(function () {
+                var $elem = $(this);
+                var $input = $elem.is("input") ? $elem : $elem.find("input[data-role='combobox']");
+                var lockMap = $input.attr("data-lock-map") || "";
+                var combo = $input.length ? $input.data("kendoComboBox") : null;
+
+                if (!combo || !gridType) return;
+
+                var shouldLock = false;
+
+                var rules = lockMap.split(";").reduce(function (acc, pair) {
+                    var [key, val] = pair.split(":");
+                    if (key && val) acc[key.trim()] = val.trim();
+                    return acc;
+                }, {});
+
+                var lockRule = rules[gridType] || "none";
+
+                switch (lockRule) {
+                    case "always": shouldLock = true; break;
+                    case "notNew": shouldLock = !model.isNew(); break;
+                    case "newOnly": shouldLock = model.isNew(); break;
+                    case "none":
+                    default: shouldLock = false; break;
+                }
+
+                if (shouldLock) {
+                    combo.enable(false);
+                    combo.wrapper.addClass("field-disabled");
+                    combo.input.prop("readonly", true);
+                }
+            });
+        }, 30);
+    }
+</script>
+✅ How to Use This
+In parent views (MakevsBuy, etc.):
+
+csharp
+Copy
+Edit
+@Html.Partial("RebuiltPartsUsed", new ViewDataDictionary { { "GridType", "MakevsBuy" } })
+In the shared grid (RebuiltPartsUsed.cshtml):
+
+csharp
+Copy
+Edit
+@(Html.Kendo().Grid<RebuiltPartsViewModel>()
+    .HtmlAttributes(new { data_grid_type = ViewData["GridType"] })
+    .Events(ev => ev.Edit("onGridEditLockHandler"))
+In each grid column, use .EditorViewData(...) to pass lock rules.
+
+This setup gives you field-level control, per context, all fully centralized in one place.
+
+Want me to also show how to apply the same data-lock-map pattern for standard text inputs or dropdowns too?
