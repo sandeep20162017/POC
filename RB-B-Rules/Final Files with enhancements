@@ -1,0 +1,157 @@
+Final Files With Enhancements
+🧱 1. ✅ Controller: Leave this exactly as-is
+csharp
+Copy
+Edit
+public IActionResult RbDetailsPartial([FromQuery] string id)
+{
+    ViewBag.PartNum = id;
+    ViewBag.GridType = "RbGrid"; // Keep as is — used by grid
+    var model = new List<BCES.Models.Parts.RebuiltPartsViewModel>();
+    return PartialView("_RbPartsUsed", model);
+}
+🧱 2. ✅ Shared Grid View: _RbPartsUsed.cshtml
+csharp
+Copy
+Edit
+@model IEnumerable<BCES.Models.Parts.RebuiltPartsViewModel>
+
+@Html.Partial("_GridEditLockHelper")
+
+@(Html.Kendo().Grid<BCES.Models.Parts.RebuiltPartsViewModel>()
+    .Name("RbPartsMaterialDetailsRebuiltPartsGrid")
+    .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "RbGrid" })
+    .Editable(edit => edit.Mode(GridEditMode.InLine))
+    .Events(e => e.Edit("onGridEditLockHandler"))
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RebuiltStockNum)
+            .Title("Rebuilt Number")
+            .EditorTemplateName("ComboBoxEditor")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:none;MakevsBuy:always;Vehicle:newOnly" }
+            });
+
+        columns.Bound(c => c.KeyWord)
+            .EditorTemplateName("ComboBoxEditor")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:always;MakevsBuy:notNew;Vehicle:notNew" }
+            });
+
+        columns.Bound(c => c.Description)
+            .EditorTemplateName("ComboBoxEditor")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:notNew;MakevsBuy:always;Vehicle:always" }
+            });
+
+        columns.Bound(c => c.MmsStockCode)
+            .EditorTemplateName("ComboBoxEditor")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:none;MakevsBuy:none;Vehicle:none" }
+            });
+
+        // Add other columns as needed
+    })
+)
+🧱 3. ✅ ComboBox Editor: Views/Shared/EditorTemplates/ComboBoxEditor.cshtml
+csharp
+Copy
+Edit
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+    var columnLockMap = ViewData["LockMap"]?.ToString() ?? "";
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .Placeholder("Search...")
+    .AutoBind(false)
+    .MinLength(2)
+    .EnforceMinLength(true)
+    .NoDataTemplate("<div style='color: red; font-weight: bold;'>Invalid Selection</div>")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-column", fieldName },
+        { "data-role", "combobox" },
+        { "data-lock-map", columnLockMap },
+        { "class", "auto-lock-column" }
+    })
+    .Events(e =>
+    {
+        e.DataBound("onComboBoxDataBound");
+        e.Change("onComboBoxChange");
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #")
+)
+🧱 4. ✅ Shared Script Partial: _GridEditLockHelper.cshtml
+html
+Copy
+Edit
+<script>
+    function onGridEditLockHandler(e) {
+        var model = e.model;
+        var grid = e.sender;
+        var gridType = grid.wrapper.attr("data-grid-type");
+
+        setTimeout(function () {
+            var row = e.container.closest("tr");
+
+            row.find("td.auto-lock-column, .auto-lock-column").each(function () {
+                var $elem = $(this);
+                var $input = $elem.is("input") ? $elem : $elem.find("input[data-role='combobox']");
+                var lockMap = $input.attr("data-lock-map") || "";
+                var combo = $input.length ? $input.data("kendoComboBox") : null;
+
+                if (!combo || !gridType) return;
+
+                var shouldLock = false;
+
+                var rules = lockMap.split(";").reduce(function (acc, pair) {
+                    var [key, val] = pair.split(":");
+                    if (key && val) acc[key.trim()] = val.trim();
+                    return acc;
+                }, {});
+
+                var lockRule = rules[gridType] || "none";
+
+                switch (lockRule) {
+                    case "always": shouldLock = true; break;
+                    case "notNew": shouldLock = !model.isNew(); break;
+                    case "newOnly": shouldLock = model.isNew(); break;
+                    case "none":
+                    default: shouldLock = false; break;
+                }
+
+                if (shouldLock) {
+                    combo.enable(false);
+                    combo.wrapper.addClass("field-disabled");
+                    combo.input.prop("readonly", true);
+                }
+            });
+        }, 30);
+    }
+</script>
+✅ You Now Have:
+💡 Per-column behavior tied to each GridType (RbGrid, MakevsBuy, Vehicle)
+
+✅ No changes to your controller or tab logic
+
+✅ Centralized lock rules in each column, reusable across grids
+
+✅ Future-proof logic: just update LockMap strings
