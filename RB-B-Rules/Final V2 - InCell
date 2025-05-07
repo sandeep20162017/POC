@@ -1,0 +1,92 @@
+1. Why onGridEditLockHandler isn't found?
+That’s because you haven’t included the partial (_GridEditLockHelper.cshtml) that contains it in your Index.cshtml.
+
+🔧 Fix:
+Yes — add this line to your Index.cshtml (or any view where the grid appears):
+
+csharp
+Copy
+Edit
+@Html.Partial("_GridEditLockHelper")
+Place it above where the grid is rendered or dynamically injected.
+
+This ensures the JavaScript function onGridEditLockHandler is available on the page.
+
+✅ 2. You're using InCell editing — important detail!
+In InCell mode, editors are initialized only when a cell is clicked, and the Edit event doesn't fire the same way as in InLine or Popup modes.
+
+🔧 Fix for InCell:
+Use the cellClose event instead of Edit
+
+And hook into editCell if you want to control right when the cell is being edited
+
+Here’s what you do:
+
+🔄 Update Your Grid Setup (In _RbPartsUsed.cshtml)
+Change this:
+
+csharp
+Copy
+Edit
+.Editable(edit => edit.Mode(GridEditMode.InLine))
+.Events(e => e.Edit("onGridEditLockHandler"))
+To this:
+
+csharp
+Copy
+Edit
+.Editable(edit => edit.Mode(GridEditMode.InCell))
+.Events(e => e.Edit("onGridEditLockHandler"))
+AND also listen to Edit or EditCell event depending on the editor behavior you want.
+
+Kendo's InCell mode does not fire .Edit() for every cell — instead, try this:
+
+🧩 Update _GridEditLockHelper.cshtml to Attach Properly for InCell Mode
+html
+Copy
+Edit
+<script>
+    function onGridEditLockHandler(e) {
+        var model = e.model;
+        var grid = e.sender;
+        var gridType = grid.wrapper.attr("data-grid-type");
+
+        setTimeout(function () {
+            var row = e.container.closest("tr");
+
+            row.find(".auto-lock-column").each(function () {
+                var $elem = $(this);
+                var $input = $elem.is("input") ? $elem : $elem.find("input[data-role='combobox']");
+                var lockMap = $input.attr("data-lock-map") || "";
+                var combo = $input.length ? $input.data("kendoComboBox") : null;
+
+                if (!combo || !gridType) return;
+
+                var rules = lockMap.split(";").reduce(function (acc, pair) {
+                    var [key, val] = pair.split(":");
+                    if (key && val) acc[key.trim()] = val.trim();
+                    return acc;
+                }, {});
+
+                var lockRule = rules[gridType] || "none";
+                var shouldLock = false;
+
+                switch (lockRule) {
+                    case "always": shouldLock = true; break;
+                    case "notNew": shouldLock = !model.isNew(); break;
+                    case "newOnly": shouldLock = model.isNew(); break;
+                    case "none":
+                    default: shouldLock = false; break;
+                }
+
+                if (shouldLock) {
+                    combo.enable(false);
+                    combo.wrapper.addClass("field-disabled");
+                    combo.input.prop("readonly", true);
+                }
+            });
+        }, 30);
+    }
+</script>
+If .Edit(...) still doesn't fire on cell click, you can also attach to dataBound and save events to enforce lock rules post-edit.
+
