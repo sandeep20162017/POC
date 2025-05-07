@@ -1,0 +1,135 @@
+Final Setup
+1️⃣ Razor View: Grid Setup (All 3 Grids)
+csharp
+Copy
+Edit
+@Html.Partial("_GridEditLockHelper")
+
+<!-- Grid 1: All fields editable always -->
+@(Html.Kendo().Grid<YourModel>()
+    .Name("Grid1")
+    .HtmlAttributes(new { data_lock_mode = "E-editableforNewAndEdit" })
+    .Events(ev => ev.Edit("onGridEditLockHandler"))
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RebuiltStockNum)
+            .HtmlAttributes(new { @class = "auto-lock-column", data_lock_rule = "none" });
+
+        columns.Bound(c => c.KeyWord)
+            .HtmlAttributes(new { @class = "auto-lock-column", data_lock_rule = "none" });
+
+        columns.Bound(c => c.Description)
+            .HtmlAttributes(new { @class = "auto-lock-column", data_lock_rule = "none" });
+    })
+)
+
+<!-- Grid 2: Rebuilt editable, others read-only after save -->
+@(Html.Kendo().Grid<YourModel>()
+    .Name("Grid2")
+    .HtmlAttributes(new { data_lock_mode = "R-readonlyforEdit" })
+    .Events(ev => ev.Edit("onGridEditLockHandler"))
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RebuiltStockNum)
+            .HtmlAttributes(new { @class = "auto-lock-column", data_lock_rule = "notNew" });
+
+        columns.Bound(c => c.KeyWord)
+            .HtmlAttributes(new { @class = "auto-lock-column", data_lock_rule = "always" });
+
+        columns.Bound(c => c.Description)
+            .HtmlAttributes(new { @class = "auto-lock-column", data_lock_rule = "always" });
+    })
+)
+
+<!-- Grid 3: Some columns editable for new only -->
+@(Html.Kendo().Grid<YourModel>()
+    .Name("Grid3")
+    .HtmlAttributes(new { data_lock_mode = "M-mixedEditableNewOnly" })
+    .Events(ev => ev.Edit("onGridEditLockHandler"))
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RebuiltStockNum)
+            .HtmlAttributes(new { @class = "auto-lock-column", data_lock_rule = "none" });
+
+        columns.Bound(c => c.KeyWord)
+            .HtmlAttributes(new { @class = "auto-lock-column", data_lock_rule = "newOnly" });
+
+        columns.Bound(c => c.Description)
+            .HtmlAttributes(new { @class = "auto-lock-column", data_lock_rule = "notNew" });
+    })
+)
+2️⃣ Shared Partial View: _GridEditLockHelper.cshtml
+Create this in Views/Shared/_GridEditLockHelper.cshtml:
+
+html
+Copy
+Edit
+<script>
+    function onGridEditLockHandler(e) {
+        var model = e.model;
+        var grid = e.sender;
+        var gridElement = grid.wrapper;
+        var lockMode = gridElement.attr("data-lock-mode") || "E-editableforNewAndEdit";
+
+        setTimeout(function () {
+            var row = e.container.closest("tr");
+
+            row.find("td.auto-lock-column").each(function () {
+                var $td = $(this);
+                var $input = $td.find("input[data-role='combobox']");
+                var lockRule = $td.attr("data-lock-rule") || "none";
+                var combo = $input.length ? $input.data("kendoComboBox") : null;
+
+                if (!combo) return;
+
+                var shouldLock = false;
+
+                switch (lockMode) {
+                    case "E-editableforNewAndEdit":
+                        shouldLock = false;
+                        break;
+
+                    case "R-readonlyforEdit":
+                        shouldLock = !model.isNew();
+                        break;
+
+                    case "M-mixedEditableNewOnly":
+                        if (lockRule === "always") shouldLock = true;
+                        if (lockRule === "notNew" && !model.isNew()) shouldLock = true;
+                        if (lockRule === "newOnly" && model.isNew()) shouldLock = true;
+                        break;
+                }
+
+                if (shouldLock) {
+                    combo.enable(false);
+                    combo.wrapper.addClass("field-disabled");
+                    combo.input.prop("readonly", true);
+                }
+            });
+        }, 30);
+    }
+</script>
+✅ Naming Summary
+Grid-level attribute: data_lock_mode (E-editableforNewAndEdit, R-readonlyforEdit, M-mixedEditableNewOnly)
+
+Column-level attribute: data_lock_rule (none, notNew, newOnly, always)
+
+Cell class: auto-lock-column
+
+📌 How to Use in Any View
+Include this at the top of any view with a Telerik Grid:
+
+csharp
+Copy
+Edit
+@Html.Partial("_GridEditLockHelper")
+On each grid:
+
+Set .HtmlAttributes(new { data_lock_mode = "..." })
+
+Add .Events(ev => ev.Edit("onGridEditLockHandler"))
+
+On each column:
+
+Add .HtmlAttributes(new { @class = "auto-lock-column", data_lock_rule = "..." })
+
