@@ -1,0 +1,100 @@
+<script>
+    function onRbGridDataBound(e) {
+        console.warn('onRbGridDataBound called');
+
+        const grid = e.sender;
+        const ds = grid.dataSource;
+        const gridType = grid.wrapper.attr("data-grid-type");
+        unsavedChangesExist = false;
+
+        // --- Your Original Logic Starts ---
+        $(".unsaved-row, .unsaved-cell, .unsaved-badge").remove();
+
+        ds.view().forEach(item => {
+            const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+
+            if (item.dirty || item.isNew()) {
+                row.addClass("unsaved-row");
+
+                const firstCell = row.find("td:first");
+                if (!firstCell.find(".unsaved-badge").length) {
+                    firstCell.append(`<span class="unsaved-badge">UNSAVED</span>`);
+                }
+
+                Object.keys(item.modified || {}).forEach(field => {
+                    row.find(`td[data-field='${field}']`)
+                        .addClass("unsaved-cell");
+                });
+
+                unsavedChangesExist = true;
+            }
+        });
+
+        const tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+        if (tabStrip?.items().length) {
+            $(tabStrip.items()[0].element)
+                .find(".k-link")
+                .toggleClass("has-unsaved", unsavedChangesExist);
+        }
+
+        var gridName = grid.element.attr('id');
+        var originalAddCommand = null;
+
+        if (!originalAddCommand) {
+            originalAddCommand = grid.addRow;
+        }
+
+        grid.addRow = function () {
+            if (!grid.dataSource.hasChanges()) {
+                originalAddCommand.call(grid);
+            }
+        };
+
+        grid.dataSource.bind("change", function () {
+            updateToolbarButtons(gridName);
+        });
+
+        updateToolbarButtons(gridName);
+        // --- Your Original Logic Ends ---
+
+        // === NEW LOCK LOGIC FOR COMBOBOX FIELDS ===
+        const dataItems = ds.view();
+
+        grid.tbody.find("tr").each(function (index) {
+            const row = $(this);
+            const model = dataItems[index];
+
+            row.find("td").each(function () {
+                const $td = $(this);
+                const $input = $td.find("input[data-role='combobox']");
+                const lockMap = $input.attr("data-lock-map");
+
+                if (!$input.length || !lockMap || !gridType) return;
+
+                const combo = $input.data("kendoComboBox");
+                if (!combo) return;
+
+                const rules = lockMap.split(";").reduce(function (acc, pair) {
+                    const [key, val] = pair.split(":");
+                    if (key && val) acc[key.trim()] = val.trim();
+                    return acc;
+                }, {});
+
+                const lockRule = rules[gridType] || "none";
+
+                let shouldLock = false;
+                if (lockRule === "always") shouldLock = true;
+                else if (lockRule === "notNew" && !model.isNew()) shouldLock = true;
+                else if (lockRule === "newOnly" && model.isNew()) shouldLock = true;
+
+                if (shouldLock) {
+                    combo.enable(false);
+                    combo.wrapper.addClass("field-disabled");
+                    combo.input.prop("readonly", true);
+                }
+            });
+        });
+
+        // Removed: onGridEditLockHandler(e); // not suitable for DataBound
+    }
+</script>
