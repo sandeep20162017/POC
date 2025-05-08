@@ -1,0 +1,64 @@
+Use the Edit event
+
+Inside it, check if the input has a data-lock-map
+
+Apply the lock logic just for that one field
+
+✅ Final Working onGridEditLockHandler (for InCell + ComboBox)
+html
+Copy
+Edit
+<script>
+    function onGridEditLockHandler(e) {
+        const model = e.model;
+        const grid = e.sender;
+        const gridType = grid.wrapper.attr("data-grid-type");
+
+        setTimeout(function () {
+            const row = e.container.closest("tr");
+            const $input = e.container.find("input[data-role='combobox'][data-lock-map].auto-lock-column");
+
+            if (!$input.length || !gridType) {
+                console.warn("⛔ No lockable ComboBox in this field.");
+                return;
+            }
+
+            const combo = $input.data("kendoComboBox");
+            const fieldName = $input.attr("name");
+            const lockMap = $input.attr("data-lock-map");
+
+            console.warn(`🔍 Editing ComboBox field: ${fieldName}, gridType: ${gridType}, lockMap: ${lockMap}`);
+
+            if (!combo || !lockMap) return;
+
+            const rules = lockMap.split(";").reduce(function (acc, pair) {
+                const [key, val] = pair.split(":");
+                if (key && val) acc[key.trim()] = val.trim();
+                return acc;
+            }, {});
+
+            const lockRule = rules[gridType] || "none";
+            let shouldLock = false;
+
+            if (lockRule === "always") shouldLock = true;
+            else if (lockRule === "notNew" && !model.isNew()) shouldLock = true;
+            else if (lockRule === "newOnly" && model.isNew()) shouldLock = true;
+
+            console.warn(`🔐 Field '${fieldName}' → Lock rule: ${lockRule} → ${shouldLock ? "LOCKED" : "EDITABLE"}`);
+
+            if (shouldLock) {
+                combo.enable(false);
+                combo.wrapper.addClass("field-disabled");
+                combo.input.prop("readonly", true);
+            }
+        }, 30);
+    }
+</script>
+✅ Use in Your Grid
+csharp
+Copy
+Edit
+.Events(ev => ev
+    .DataBound("onRbGridDataBound") // Your original
+    .Edit("onGridEditLockHandler")  // Fires when a cell with editor template is clicked
+)
