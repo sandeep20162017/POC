@@ -1,0 +1,109 @@
+<script>
+    function onRbGridDataBound(e) {
+        console.warn('onRbGridDataBound called');
+
+        const grid = e.sender;
+        const ds = grid.dataSource;
+        const gridType = grid.wrapper.attr("data-grid-type");
+        unsavedChangesExist = false;
+
+        // === Your Original Logic ===
+        $(".unsaved-row, .unsaved-cell, .unsaved-badge").remove();
+
+        ds.view().forEach(item => {
+            const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+            console.warn('row :', row);
+
+            if (item.dirty || item.isNew()) {
+                row.addClass("unsaved-row");
+
+                const firstCell = row.find("td:first");
+                if (!firstCell.find(".unsaved-badge").length) {
+                    firstCell.append(`<span class="unsaved-badge">UNSAVED</span>`);
+                }
+
+                Object.keys(item.modified || {}).forEach(field => {
+                    row.find(`td[data-field='${field}']`).addClass("unsaved-cell");
+                });
+
+                unsavedChangesExist = true;
+            }
+        });
+
+        const tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+        if (tabStrip?.items().length) {
+            $(tabStrip.items()[0].element)
+                .find(".k-link")
+                .toggleClass("has-unsaved", unsavedChangesExist);
+        }
+
+        const gridName = grid.element.attr('id');
+        var originalAddCommand = null;
+
+        if (!originalAddCommand) {
+            originalAddCommand = grid.addRow;
+        }
+
+        grid.addRow = function () {
+            if (!grid.dataSource.hasChanges()) {
+                originalAddCommand.call(grid);
+            }
+        };
+
+        grid.dataSource.bind("change", function () {
+            updateToolbarButtons(gridName);
+        });
+
+        updateToolbarButtons(gridName);
+
+        // === NEW: Deferred locking after edit field is created ===
+        setTimeout(() => {
+            const dataItems = ds.view();
+            console.warn('🔍 ComboBox Lock Check — dataItems:', dataItems);
+            console.warn('🔍 GridType:', gridType);
+
+            grid.tbody.find("tr").each(function (index) {
+                const row = $(this);
+                const model = dataItems[index];
+
+                // Find inputs only *if* they are rendered (after click)
+                row.find("input[data-role='combobox'][data-lock-map].auto-lock-column").each(function () {
+                    const $input = $(this);
+                    const lockMap = $input.attr("data-lock-map");
+                    const combo = $input.data("kendoComboBox");
+                    const fieldName = $input.attr("name");
+
+                    console.warn(`📌 ComboBox Field: ${fieldName}`);
+                    console.warn(`   - lockMap: ${lockMap}`);
+                    console.warn(`   - combo:`, combo);
+
+                    if (!combo || !lockMap || !gridType) {
+                        console.warn("⛔ Missing combo/lockMap/gridType");
+                        return;
+                    }
+
+                    const rules = lockMap.split(";").reduce((acc, pair) => {
+                        const [key, val] = pair.split(":");
+                        if (key && val) acc[key.trim()] = val.trim();
+                        return acc;
+                    }, {});
+
+                    const lockRule = rules[gridType] || "none";
+                    let shouldLock = false;
+
+                    if (lockRule === "always") shouldLock = true;
+                    else if (lockRule === "notNew" && !model.isNew?.()) shouldLock = true;
+                    else if (lockRule === "newOnly" && model.isNew?.()) shouldLock = true;
+
+                    console.warn(`🔐 Lock Decision for '${fieldName}' in '${gridType}': ${lockRule} → ${shouldLock ? "LOCKED" : "EDITABLE"}`);
+
+                    if (shouldLock) {
+                        combo.enable(false);
+                        combo.wrapper.addClass("field-disabled");
+                        combo.input.prop("readonly", true);
+                    }
+                });
+            });
+        }, 50); // delay ensures editors are rendered
+    }
+</script>
