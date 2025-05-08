@@ -1,0 +1,100 @@
+Thank you JS did get called so is the following controller action.
+The goal is to populate DetailedDesc, Keyword, PartType columns from the values passed by GetScPartDetails
+Currently all are blank. Query returns results. No JS errors
+
+Controller :
+[HttpGet]
+public IActionResult GetScPartDetails(string mmsStockCode)
+{
+    try
+    {
+        if (string.IsNullOrWhiteSpace(mmsStockCode))
+            return BadRequest("mmsStockCode is required.");
+
+        var sql = @"
+                    SELECT [MmsStockCode]
+                  ,[CorePartNumber]
+                  ,[PartType]
+                  ,[JobNumber]
+                  ,[DetailedDesc]
+                  ,[DateEntered]
+                  ,[ItemRefNumber]
+                  ,[OverheadType]
+                  ,[CoreCharge]
+                  ,[PartCost]
+                  ,[LastModifiedDate]
+                  ,[LastModifiedBy]
+                  ,[AddedBy]
+                  ,[MmsNewCost]
+                  ,[OemPartCost]
+                  ,[MmsSyncDate]
+                  ,[OrigSupplierNum]
+                  ,[OrigSupplierName]
+              FROM [CES].[SBCES].[StockCodedParts]
+                WHERE  MmsStockCode = '" + mmsStockCode + "'" +
+               @"Order By MmsStockCode
+                                            ";
+
+        var result = _dbConnection.QueryFirstOrDefault(sql, new { MmsStockCode = mmsStockCode });
+
+        if (result == null)
+            return NotFound("Part not found.");
+
+        return Json(result);
+    }
+  View :
+@(
+Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()    
+     .Name($"ScPartsMaterialDetailsRebuiltPartsGrid")  
+     .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "RbGrid" }) //lockcols
+      .Events(events => events
+                    .DataBound("onGridDataBound")
+
+                )
+    .Columns(columns =>
+    {
+       // columns.Bound(c => c.MMSStockCode).Title("Stock Code").IncludeInMenu(false).EditorTemplateName("ComboBoxEditor").Width(70);
+        columns.Bound(c => c.MMSStockCode)
+                        .Title("Stock Code")
+                        .HtmlAttributes(new { @class = "stock-code-cell", data_field = "MMSStockCode" })
+                        .IncludeInMenu(false)
+                        .EditorTemplateName("ScComboBox")
+                        .Width(150);
+      @*  columns.Command(command =>
+        {
+            command.Custom("Populate Details").Click("refreshScPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+        }).Width(60); *@
+        columns.Bound(c => c.PartType)
+        .Title("Part Type")
+        .EditorTemplateName("ComboBoxEditor")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+        ;
+        columns.Bound(c => c.Keyword)
+        .Title("Keyword")
+        .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains")
+        .SuggestionOperator(FilterType.Contains)))
+        .EditorTemplateName("ComboBoxEditor")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+        ;
+        columns.Bound(c => c.DetailedDesc)
+        .Title("Part Description")
+        .EditorTemplateName("ComboBoxEditor")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+        ;
+        columns.Bound(c => c.UnitCost)
+        .Title("Unit Cost")
+        .Width(30)
+        .EditorTemplateName("ComboBoxEditor")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+        ;
+        columns.Bound(c => c.Qty).Title("Qty").Width(70);
+        columns.Bound(c => c.Percentage).Title("%").Width(70);
