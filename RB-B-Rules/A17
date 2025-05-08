@@ -1,0 +1,56 @@
+Final Working JS (Per-Cell Lock Triggered on Cell Click)
+Add this inside onRbGridDataBound, right after updateToolbarButtons(gridName);:
+
+javascript
+Copy
+Edit
+// 🚨 New: Bind click handler to detect when user clicks into editable ComboBox field
+grid.tbody.off("click.combo-lock").on("click.combo-lock", "td", function () {
+    setTimeout(() => {
+        const $cell = $(this);
+        const $input = $cell.find("input[data-role='combobox'][data-lock-map].auto-lock-column");
+        if (!$input.length) return;
+
+        const gridType = grid.wrapper.attr("data-grid-type");
+        const combo = $input.data("kendoComboBox");
+        const fieldName = $input.attr("name");
+        const lockMap = $input.attr("data-lock-map");
+        const row = $input.closest("tr");
+        const model = grid.dataItem(row);
+
+        console.warn(`🧩 Clicked ComboBox Cell → Field: ${fieldName}`);
+        console.warn(`🔍 LockMap: ${lockMap}`);
+        console.warn(`🔍 GridType: ${gridType}`);
+        console.warn(`🔍 Model:`, model);
+
+        if (!combo || !lockMap || !gridType || !model) return;
+
+        const rules = lockMap.split(";").reduce((acc, pair) => {
+            const [key, val] = pair.split(":");
+            if (key && val) acc[key.trim()] = val.trim();
+            return acc;
+        }, {});
+
+        const lockRule = rules[gridType] || "none";
+        let shouldLock = false;
+
+        if (lockRule === "always") shouldLock = true;
+        else if (lockRule === "notNew" && !model.isNew?.()) shouldLock = true;
+        else if (lockRule === "newOnly" && model.isNew?.()) shouldLock = true;
+
+        console.warn(`🔐 Field '${fieldName}' in '${gridType}': ${lockRule} → ${shouldLock ? "LOCKED" : "EDITABLE"}`);
+
+        if (shouldLock) {
+            combo.enable(false);
+            combo.wrapper.addClass("field-disabled");
+            combo.input.prop("readonly", true);
+        }
+    }, 50); // short delay ensures combo is rendered
+});
+✅ Why This Works
+It waits until the user clicks into a cell
+
+After a small delay, the ComboBox input is in the DOM
+
+It reads data-lock-map, checks the rule, and locks the field
+
