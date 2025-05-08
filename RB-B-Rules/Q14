@@ -1,0 +1,131 @@
+In JS row is 0. Pls keep my existing logic. Give me full version of JS and changes. Also add debug logs in JS.
+{
+    "0": {},
+    "length": 1
+}
+combobox :
+.HtmlAttributes(new Dictionary<string, object>
+{
+    { "name", fieldName },
+    { "data-column", fieldName },
+    { "data-role", "combobox" },
+    { "data-lock-map", columnLockMap },
+    { "class", "auto-lock-column" }
+})
+shared view :
+.Events(events => events
+        .DataBound("onRbGridDataBound")       
+    )
+column :
+columns.Bound(c => c.KeyWord)
+ .Title("KeyWord")
+ .EditorTemplateName("ComboBoxEditor")
+ .EditorViewData(new Dictionary<string, object> {
+        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+    })
+ 
+.Width(100);
+JS :
+   <script>
+       function onRbGridDataBound(e) {
+           console.warn('onRbGridDataBound called');
+
+           const grid = e.sender;
+           const ds = grid.dataSource;
+           const gridType = grid.wrapper.attr("data-grid-type");
+           unsavedChangesExist = false;
+
+           // --- Your Original Logic Starts ---
+           $(".unsaved-row, .unsaved-cell, .unsaved-badge").remove();
+
+           ds.view().forEach(item => {
+               const row = grid.tbody.find(`tr[data-uid='${item.uid}']`);
+
+               if (item.dirty || item.isNew()) {
+                   row.addClass("unsaved-row");
+
+                   const firstCell = row.find("td:first");
+                   if (!firstCell.find(".unsaved-badge").length) {
+                       firstCell.append(`<span class="unsaved-badge">UNSAVED</span>`);
+                   }
+
+                   Object.keys(item.modified || {}).forEach(field => {
+                       row.find(`td[data-field='${field}']`)
+                           .addClass("unsaved-cell");
+                   });
+
+                   unsavedChangesExist = true;
+               }
+           });
+
+           const tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+           if (tabStrip?.items().length) {
+               $(tabStrip.items()[0].element)
+                   .find(".k-link")
+                   .toggleClass("has-unsaved", unsavedChangesExist);
+           }
+
+           var gridName = grid.element.attr('id');
+           var originalAddCommand = null;
+
+           if (!originalAddCommand) {
+               originalAddCommand = grid.addRow;
+           }
+
+           grid.addRow = function () {
+               if (!grid.dataSource.hasChanges()) {
+                   originalAddCommand.call(grid);
+               }
+           };
+
+           grid.dataSource.bind("change", function () {
+               updateToolbarButtons(gridName);
+           });
+
+           updateToolbarButtons(gridName);
+           // ---  Original Logic Ends ---
+
+           // === UPDATED LOCK LOGIC FOR COMBOBOX FIELDS ===
+           const dataItems = ds.view();
+           console.warn('dataItems :', dataItems);
+           grid.tbody.find("tr").each(function (index) {
+               const row = $(this);
+               console.warn('row :', row);
+               const model = dataItems[index];
+
+               // Find all combobox inputs in this row with a lock-map
+               row.find("input[data-role='combobox'][data-lock-map].auto-lock-column").each(function () {
+                   const $input = $(this);
+                   const lockMap = $input.attr("data-lock-map");
+                   const combo = $input.data("kendoComboBox");
+                   console.warn('$input :', $input);
+                   console.warn('lockMap :', lockMap);
+                   console.warn('combo :', combo);
+                   console.warn('gridType :', gridType);
+
+                           if (!combo || !lockMap || !gridType) return;
+
+                   // Parse lock map like "VehicleGrid:always;RbGrid:notNew"
+                   const rules = lockMap.split(";").reduce(function (acc, pair) {
+                       const [key, val] = pair.split(":");
+                       if (key && val) acc[key.trim()] = val.trim();
+                       return acc;
+                   }, {});
+
+                   const lockRule = rules[gridType] || "none";
+                   let shouldLock = false;
+
+                   if (lockRule === "always") shouldLock = true;
+                   else if (lockRule === "notNew" && !model.isNew?.()) shouldLock = true;
+                   else if (lockRule === "newOnly" && model.isNew?.()) shouldLock = true;
+
+                   if (shouldLock) {
+                       combo.enable(false);
+                       combo.wrapper.addClass("field-disabled");
+                       combo.input.prop("readonly", true);
+                   }
+               });
+           });
+         
+       }
+   </script>
