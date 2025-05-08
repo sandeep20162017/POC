@@ -1,0 +1,73 @@
+✅ Real-World Fix for InCell Editing (No Edit/CellClick)
+We’ll hook into DOM click events manually using jQuery inside your existing onRbGridDataBound. This approach:
+
+Works in InCell mode
+
+Triggers every time a cell is clicked
+
+Still supports your data-lock-map approach
+
+✅ Step-by-Step Implementation
+🔧 1. In your onRbGridDataBound, add this at the end:
+javascript
+Copy
+Edit
+// Attach click event for InCell editing (ComboBox lock logic)
+grid.tbody.off("click.lockable-cell").on("click.lockable-cell", "td", function () {
+    const $cell = $(this);
+    const grid = $("#RbPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+    const gridType = grid.wrapper.attr("data-grid-type");
+
+    setTimeout(() => {
+        const $input = $cell.find("input[data-role='combobox'][data-lock-map].auto-lock-column");
+        if (!$input.length) return;
+
+        const combo = $input.data("kendoComboBox");
+        const lockMap = $input.attr("data-lock-map");
+        const fieldName = $input.attr("name");
+        const model = grid.dataItem($cell.closest("tr"));
+
+        if (!combo || !lockMap || !gridType || !model) return;
+
+        const rules = lockMap.split(";").reduce((acc, pair) => {
+            const [key, val] = pair.split(":");
+            if (key && val) acc[key.trim()] = val.trim();
+            return acc;
+        }, {});
+
+        const lockRule = rules[gridType] || "none";
+        let shouldLock = false;
+
+        if (lockRule === "always") shouldLock = true;
+        else if (lockRule === "notNew" && !model.isNew?.()) shouldLock = true;
+        else if (lockRule === "newOnly" && model.isNew?.()) shouldLock = true;
+
+        console.warn(`🔐 Field '${fieldName}' → ${lockRule} → ${shouldLock ? "LOCKED" : "EDITABLE"}`);
+
+        if (shouldLock) {
+            combo.enable(false);
+            combo.wrapper.addClass("field-disabled");
+            combo.input.prop("readonly", true);
+        }
+    }, 30);
+});
+✅ 2. Make sure your ComboBox adds the required HTML attributes:
+Inside ComboBoxEditor.cshtml:
+
+csharp
+Copy
+Edit
+.HtmlAttributes(new Dictionary<string, object>
+{
+    { "name", fieldName },
+    { "data-role", "combobox" },
+    { "data-lock-map", columnLockMap },
+    { "class", "auto-lock-column" }
+})
+🔄 Optional: Make grid name dynamic
+If you reuse this on multiple grids, replace the hardcoded #RbPartsMaterialDetailsRebuiltPartsGrid with:
+
+javascript
+Copy
+Edit
+const grid = $cell.closest(".k-grid").data("kendoGrid");
