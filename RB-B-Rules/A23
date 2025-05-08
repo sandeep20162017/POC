@@ -1,0 +1,73 @@
+Problem: Field names returned from Dapper are likely case-sensitive and might not match your model's properties.
+In your JS you’re probably doing:
+
+js
+Copy
+Edit
+data.set("DetailedDesc", result.DetailedDesc || "");
+But if Dapper returns detailedDesc or detaileddesc (e.g., all lowercase), JavaScript can't access it via result.DetailedDesc.
+
+✅ Step 1: Inspect AJAX result in JS
+Inside your success: function, add:
+
+js
+Copy
+Edit
+console.warn("✅ AJAX result:", result);
+Look at the actual key names — you’ll likely see something like:
+
+js
+Copy
+Edit
+{
+  mmsstockcode: "061234",
+  parttype: "Engine",
+  keyword: "ENGINE",
+  detaileddesc: "ISL 9 CUMMINS BLOCK",
+  unitcost: "340.00"
+}
+✅ Step 2: Map with exact property names your grid model uses
+If your model properties are PartType, Keyword, etc., update your JS to map them properly:
+
+js
+Copy
+Edit
+data.set("PartType", result.parttype || "");
+data.set("Keyword", result.keyword || "");
+data.set("DetailedDesc", result.detaileddesc || "");
+data.set("UnitCost", result.unitcost || "");
+JS is case-sensitive — result.DetailedDesc won’t work if the key is detaileddesc.
+
+✅ Optional Step: Normalize Dapper Result in C#
+Instead of fixing the case in JavaScript, you can force Dapper to return PascalCase by using an anonymous object or a view model:
+
+csharp
+Copy
+Edit
+var sql = @"
+    SELECT 
+        MmsStockCode AS MMSStockCode,
+        PartType AS PartType,
+        Keyword AS Keyword,
+        DetailedDesc AS DetailedDesc,
+        CoreCharge AS CoreCharge,
+        UnitCost AS UnitCost
+    FROM [CES].[SBCES].[StockCodedParts]
+    WHERE MmsStockCode = @MmsStockCode
+";
+
+var result = _dbConnection.QueryFirstOrDefault(sql, new { MmsStockCode = mmsStockCode });
+This way, your JS stays as-is:
+
+js
+Copy
+Edit
+data.set("PartType", result.PartType || "");
+data.set("Keyword", result.Keyword || "");
+data.set("DetailedDesc", result.DetailedDesc || "");
+✅ Summary
+Fix	What to Do
+JS can’t find values	Use exact lowercase key names like result.parttype
+Want PascalCase in JS	Alias fields in SQL as AS PartType, etc.
+Confirm values are returned	Use console.warn(result) in success:
+
