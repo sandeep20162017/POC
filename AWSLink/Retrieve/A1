@@ -1,0 +1,91 @@
+import chromadb
+import numpy as np
+from langchain.embeddings.openai import OpenAIEmbeddings
+from sklearn.metrics.pairwise import cosine_similarity
+
+# Define constants
+CHROMA_PATH = "C:\\huggingfacefinance\\portfolio_balancer\\bci_chroma_db"
+COLLECTION_NAME = "financial_embeddings"
+MODEL_NAME = "text-embedding-ada-002"  # Ensures dimension matching
+api_key = "key"
+
+def main():
+    # Initialize ChromaDB with cosine similarity configuration
+    chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+    
+    # Get or create collection with proper configuration
+    collection = chroma_client.get_or_create_collection(
+        name=COLLECTION_NAME,
+        metadata={"hnsw:space": "cosine"}  # Explicit cosine configuration
+    )
+
+    # Initialize OpenAI embeddings
+    embeddings = OpenAIEmbeddings(api_key=api_key, model=MODEL_NAME)
+
+    # Display stored entries with metadata
+    print("\n🔹 Stored Embedding IDs in ChromaDB:")
+    stored_entries = collection.get(include=["ids", "metadatas"])
+    if stored_entries["ids"]:
+        for idx, metadata in zip(stored_entries["ids"], stored_entries["metadatas"]):
+            source = metadata.get("source", "Unknown") if metadata else "Unknown"
+            print(f"ID: {idx} | Source: {source}")
+    else:
+        print("⚠️ No stored embeddings found!")
+        return
+
+    # Process user query
+    query_text = input("\nEnter your financial question: ").strip()
+    if not query_text:
+        print("⚠️ Please enter a valid question.")
+        return
+
+    # Generate query embedding
+    try:
+        query_vector = embeddings.embed_query(query_text)
+    except Exception as e:
+        print(f"🚨 Error generating embedding: {e}")
+        return
+
+    # Query ChromaDB with cosine similarity
+    try:
+        results = collection.query(
+            query_embeddings=[query_vector],
+            n_results=5,
+            include=["embeddings", "documents", "metadatas", "distances"]
+        )
+    except Exception as e:
+        print(f"🚨 Database query failed: {e}")
+        return
+
+    # Process and validate results
+    if not results["ids"][0]:
+        print("⚠️ No relevant documents found.")
+        return
+
+    # Enhanced similarity validation
+    retrieved_embeddings = np.array(results["embeddings"][0])
+    query_embedding = np.array(query_vector).reshape(1, -1)
+    
+    # Calculate precise cosine similarities
+    similarity_scores = cosine_similarity(query_embedding, retrieved_embeddings)[0]
+    ranked_results = sorted(
+        zip(results["documents"][0], results["metadatas"][0], similarity_scores),
+        key=lambda x: x[2],
+        reverse=True
+    )
+
+    # Display top result with confidence
+    print("\n🔹 Best Matching Document (Cosine Similarity Score: {:.2f}%):".format(ranked_results[0][2] * 100))
+    print(f"Source: {ranked_results[0][1].get('source', 'Unknown')}")
+    print(f"Content: {ranked_results[0][0]}")
+
+    # Optional: Display full results
+    if input("\nShow all results? (y/n): ").lower() == "y":
+        print("\n🔍 Full Results:")
+        for doc, meta, score in ranked_results:
+            print(f"\n★ Score: {score:.2f}")
+            print(f"Source: {meta.get('source', 'Unknown')}")
+            print(f"Content: {doc}")
+
+if __name__ == "__main__":
+    main()
