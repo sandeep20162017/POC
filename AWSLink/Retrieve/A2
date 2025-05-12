@@ -1,0 +1,73 @@
+import chromadb
+import numpy as np
+from langchain.chat_models import ChatOpenAI
+from langchain.prompts import ChatPromptTemplate
+from langchain.embeddings.openai import OpenAIEmbeddings
+
+# Configuration
+CHROMA_PATH = "C:\\huggingfacefinance\\portfolio_balancer\\bci_chroma_db"
+ASSET_CLASSES = [
+    "Portfolio", "Public Markets", "Fixed Income", "Public Equities",
+    "Private Equity", "Infrastructure & Renewable Resources",
+    "Real Estate Equity", "Real Estate Debt", "Pooled Funds"
+]
+SYSTEM_PROMPT = f"""You are a portfolio analyst. Strict rules:
+1. Extract EXACT figures from context ONLY
+2. Use ONLY these asset classes: {ASSET_CLASSES}
+3. Respond with HTML table containing: Asset Class | Investment Amount | Percentage
+4. Calculate percentages if missing using total
+5. Format numbers as: $12.5M / $1,250,000 (12.5%)
+6. Include summary row with totals
+7. If data missing for any class, show 'N/A'"""
+
+def retrieve_financial_data(query: str, collection):
+    # Generate query embedding
+    embeddings = OpenAIEmbeddings(model="text-embedding-ada-002")
+    query_vector = embeddings.embed_query(query)
+    
+    # Retrieve with asset class filtering
+    results = collection.query(
+        query_embeddings=[query_vector],
+        n_results=10,
+        where={"asset_class": {"$in": ASSET_CLASSES}},
+        include=["documents", "metadatas"]
+    )
+    return results["documents"][0]
+
+def generate_response(query: str, context: list):
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", SYSTEM_PROMPT),
+        ("human", f"Query: {{query}}\nPDF Data:\n{{context}}")
+    ])
+    
+    return (
+        prompt
+        | ChatOpenAI(model="gpt-4-turbo", temperature=0)
+        | StrOutputParser()
+    ).invoke({"query": query, "context": "\n---\n".join(context)})
+
+def main():
+    # Initialize Chroma with metadata filtering
+    client = chromadb.PersistentClient(CHROMA_PATH)
+    collection = client.get_collection(
+        name="financial_embeddings",
+        metadata={"hnsw:space": "cosine"}
+    )
+    
+    query = input("Enter portfolio query: ")
+    context_docs = retrieve_financial_data(query, collection)
+    
+    if not context_docs:
+        print("No relevant PDF data found for specified asset classes")
+        return
+    
+    response = generate_response(query, context_docs)
+    
+    # Validate output
+    if all(cls in response for cls in ASSET_CLASSES) and "<table>" in response:
+        print(f"\n📊 Portfolio Breakdown:\n{response}")
+    else:
+        print("Incomplete data - check PDF source coverage")
+
+if __name__ == "__main__":
+    main()
