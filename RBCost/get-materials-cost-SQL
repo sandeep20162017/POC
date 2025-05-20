@@ -1,0 +1,95 @@
+WITH
+-- Compute material costs from SC_PARTS_USED
+material_costs AS (
+    SELECT
+        NVL(cc.name, 'NONE') AS assembly_area,
+        NVL(spu.cost_centre, '0') AS cost_centre,
+        SUM(
+            (spu.percent_usage / 100) * spu.qty_reqd * (spu.mms_cost - NVL(spu.corecost, 0))
+        ) AS total_cost,
+        SUM(
+            (spu.percent_usage / 100) * spu.qty_reqd * spu.mms_cost
+        ) AS taxable_cost
+    FROM
+        SC_PARTS_USED spu
+        LEFT JOIN cost_centres cc ON spu.cost_centre = cc.cost_centre
+    WHERE
+        spu.link_code = UPPER(:vi_idnum)
+        AND spu.link_type = UPPER(:vi_type)
+        AND spu.rebuilt_part = 'N'
+    GROUP BY
+        cc.name,
+        spu.cost_centre
+),
+-- Compute material costs from NSC_PARTS_USED and NON_STOCK_CODED_PARTS
+nsc_material_costs AS (
+    SELECT
+        NVL(cc.name, 'NONE') AS assembly_area,
+        NVL(nscpu.cost_centre, '0') AS cost_centre,
+        SUM(
+            (nscpu.percent_usage / 100) * nscpu.qty_reqd * (nscp.oem_part_cost - NVL(nscpu.corecost, 0))
+        ) AS total_cost,
+        SUM(
+            (nscpu.percent_usage / 100) * nscpu.qty_reqd * nscp.oem_part_cost
+        ) AS taxable_cost
+    FROM
+        NSC_PARTS_USED nscpu
+        JOIN NON_STOCK_CODED_PARTS nscp ON nscpu.ID = nscp.ID
+        LEFT JOIN cost_centres cc ON nscpu.cost_centre = cc.cost_centre
+    WHERE
+        nscpu.link_code = UPPER(:vi_idnum)
+        AND nscpu.link_type = UPPER(:vi_type)
+    GROUP BY
+        cc.name,
+        nscpu.cost_centre
+),
+-- Combine both material cost sources
+combined_materials AS (
+    SELECT * FROM material_costs
+    UNION ALL
+    SELECT * FROM nsc_material_costs
+),
+-- Compute total cost from combined materials
+total_material_cost AS (
+    SELECT
+        ROUND(SUM(NVL(total_cost, 0)), 2) AS rb_cost
+    FROM
+        combined_materials
+),
+-- Check for existing rebuilt parts
+rebuilt_parts_count AS (
+    SELECT
+        COUNT(*) AS count_rb
+    FROM
+        SC_PARTS_USED
+    WHERE
+        rebuilt_part = 'Y'
+        AND link_type = UPPER(:vi_type)
+        AND UPPER(link_code) = UPPER(:vi_idnum)
+),
+-- Retrieve kit total if applicable
+kit_total AS (
+    SELECT
+        CASE
+            WHEN UPPER(:vi_type) = 'BUS' AND EXISTS (
+                SELECT 1 FROM OEM_KITS_TOTAL2 WHERE LINK = :vi_idnum
+            )
+            THEN (
+                SELECT TOTAL_KIT_COST FROM OEM_KITS_TOTAL2 WHERE LINK = :vi_idnum
+            )
+            ELSE 0
+        END AS kit_cost
+    FROM dual
+),
+-- Final total cost including kits
+final_total AS (
+    SELECT
+        ROUND(NVL(tm.rb_cost, 0) + NVL(kt.kit_cost, 0), 2) AS final_price
+    FROM
+        total_material_cost tm,
+        kit_total kt
+)
+SELECT
+    final_price
+FROM
+    final_total;
