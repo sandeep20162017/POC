@@ -1,0 +1,104 @@
+Migrate following Oracle query to MS SQL query. Oracle and MS SQL database schema match. Only difference is Oracle and MS database naming convention. 
+Oracle database uses snake_naming and MS SQL database use CamelCase. Pls use SBCES schema for MS SQL database. Add exception handling and logs for 
+MS SQL query.
+-- Declare variables
+DECLARE
+    vi_list_id       VEHICLE_LIST.vehicle_list_id%TYPE := :vi_list_id;
+    vi_bus_series    VEHICLE_LIST.veh_series_code%TYPE := :vi_bus_series;
+    vi_description   VEHICLE_LIST.proj_desc%TYPE := :vi_description;
+    vi_entered_by    VEHICLE_LIST.entered_by%TYPE := :vi_entered_by;
+    vo_ret_val       NUMBER;
+    new_id           NUMBER;
+    str_old_id       VARCHAR2(30);
+    str_new_id       VARCHAR2(30);
+BEGIN
+    -- Copy the main information for the vehicle estimate
+    INSERT INTO VEHICLE_LIST (
+        vehicle_list_id, veh_series_code, proj_desc, num_of_vehicles, make, model, year,
+        engine, transmission, differential, date_entered, entered_by,
+        modified_last_by, modified_last_date, sopnumber
+    )
+    SELECT
+        vehicle_list_seq.NEXTVAL,
+        UPPER(NVL(vi_bus_series, ' ')),
+        UPPER(NVL(vi_description, ' ')),
+        num_of_vehicles, make, model, year, engine, transmission,
+        differential, SYSDATE, UPPER(NVL(vi_entered_by, ' ')),
+        UPPER(NVL(vi_entered_by, ' ')), SYSDATE, sopnumber
+    FROM VEHICLE_LIST
+    WHERE vehicle_list_id = vi_list_id;
+
+    -- Get the new ID
+    SELECT vehicle_list_seq.CURRVAL INTO new_id FROM DUAL;
+
+    -- Prepare string IDs
+    str_old_id := TO_CHAR(vi_list_id);
+    str_new_id := TO_CHAR(new_id);
+
+    -- Insert NSC parts
+    INSERT INTO NSC_PARTS_USED (
+        orig_supp_num, orig_supplier_name, cost_centre, percent_usage,
+        entered_by, date_entered, last_modified_by, last_modified_date,
+        link_code, qty_reqd, cost, link_type, corecost, id
+    )
+    SELECT
+        orig_supp_num, orig_supplier_name, cost_centre, percent_usage,
+        vi_entered_by, SYSDATE, vi_entered_by, SYSDATE,
+        str_new_id, qty_reqd, cost, 'BUS', corecost, id
+    FROM NSC_PARTS_USED
+    WHERE link_code = str_old_id AND link_type = 'BUS';
+
+    -- Insert SC parts
+    INSERT INTO SC_PARTS_USED (
+        mms_stock_code, cost_centre, percent_usage, user_entered,
+        date_entered, last_modified_by, last_modified_date,
+        link_code, qty_reqd, reb_part_cost, mms_rebuilt_code,
+        rebuilt_part, link_type, corecost, mms_cost, oem_cost
+    )
+    SELECT
+        mms_stock_code, cost_centre, percent_usage, vi_entered_by,
+        SYSDATE, vi_entered_by, SYSDATE, str_new_id, qty_reqd,
+        reb_part_cost, mms_rebuilt_code, rebuilt_part, 'BUS',
+        corecost, mms_cost, oem_cost
+    FROM SC_PARTS_USED
+    WHERE link_code = str_old_id AND link_type = 'BUS';
+
+    -- Insert labour records
+    INSERT INTO EMPLOYEE_LABOUR (
+        labour_defn, date_entered, link_number, typeid, costcentre,
+        task, labour_type, usage, hrs_reqd, adj_hrs,
+        date_revised, time_addition, rebuilt_part_num, last_modified_by
+    )
+    SELECT
+        labour_defn, SYSDATE, str_new_id, 'BUS', costcentre,
+        task, labour_type, usage, hrs_reqd, adj_hrs,
+        SYSDATE, time_addition, rebuilt_part_num, vi_entered_by
+    FROM EMPLOYEE_LABOUR
+    WHERE link_number = str_old_id AND typeid = 'BUS';
+
+    -- Insert OEM kits
+    INSERT INTO KITS_USED (
+        part_number, date_entered, user_entered, last_modified_by,
+        last_modified_date, cost_centre, link_code
+    )
+    SELECT
+        part_number, SYSDATE, vi_entered_by, vi_entered_by,
+        SYSDATE, cost_centre, str_new_id
+    FROM KITS_USED
+    WHERE link_code = str_old_id;
+
+    -- Commit changes
+    COMMIT;
+    vo_ret_val := new_id;
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        ROLLBACK;
+        vo_ret_val := -133;
+    WHEN DUP_VAL_ON_INDEX THEN
+        ROLLBACK;
+        vo_ret_val := -134;
+    WHEN OTHERS THEN
+        ROLLBACK;
+        vo_ret_val := -135;
+END;
