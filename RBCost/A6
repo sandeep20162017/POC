@@ -1,0 +1,75 @@
+let isUpdating = false;
+
+/**
+ * Handles cell save event for any Telerik Kendo Grid using InCell editing.
+ * Automatically recalculates CoreCharge and TotalCost based on Qty, CoreCost, and Percentage.
+ * Also performs validation for specific fields and updates the display in the grid.
+ */
+function onGridCellSave(e) {
+    const field = e.container.find("input").attr("name");
+    const value = e.values[field];
+
+    // Validation: Usage and Percentage should be between 0 and 100
+    if (field === "Usage" || field === "Percentage") {
+        if (value < 0 || value > 100) {
+            e.preventDefault();
+            notifyValidationError("Usage % must be between 0 and 100.");
+            clearCell(e.container);
+            return;
+        }
+    }
+
+    // Validation: Labour minutes range
+    if (field === "LabourMins") {
+        if (value < 0 || value > 59) {
+            e.preventDefault();
+            notifyValidationError("Minutes must be between 0 and 59.");
+            clearCell(e.container);
+            return;
+        }
+    }
+
+    // Grid calculation logic
+    if (!isUpdating && ["CoreCost", "Qty", "Percentage"].includes(field)) {
+        isUpdating = true;
+
+        const model = e.model;
+        const coreCost = parseFloat(model.CoreCost) || 0;
+        const qty = parseFloat(model.Qty) || 0;
+        const percentage = parseFloat(model.Percentage) || 0;
+
+        const coreCharge = qty * coreCost * percentage;
+        const totalCost = (coreCost * qty * percentage) - coreCharge;
+
+        setTimeout(() => {
+            model.set("CoreCharge", coreCharge);
+            model.set("TotalCost", totalCost);
+
+            // Dynamically detect the grid from the container
+            const gridElement = e.container.closest(".k-grid");
+            const grid = gridElement.data("kendoGrid");
+
+            if (grid) {
+                const uid = model.uid;
+                const row = grid.table.find("tr[data-uid='" + uid + "']");
+                const dataItem = grid.dataSource.getByUid(uid);
+
+                // Rebind only the "TotalCost" cell
+                const cells = row.find("td");
+                const columns = grid.columns;
+
+                for (let i = 0; i < columns.length; i++) {
+                    const column = columns[i];
+                    if (column.field === "TotalCost") {
+                        const cell = $(cells[i]);
+                        const formatted = kendo.toString(dataItem.TotalCost, "c2"); // Format as currency
+                        cell.html(kendo.htmlEncode(formatted));
+                        break;
+                    }
+                }
+            }
+
+            isUpdating = false;
+        }, 0);
+    }
+}
