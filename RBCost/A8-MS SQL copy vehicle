@@ -1,0 +1,108 @@
+BEGIN TRY
+    DECLARE 
+        @viListId        INT = @InputListId,
+        @viBusSeries     VARCHAR(50) = @InputBusSeries,
+        @viDescription   VARCHAR(255) = @InputDescription,
+        @viEnteredBy     VARCHAR(50) = @InputEnteredBy,
+        @voRetVal        INT,
+        @newId           INT,
+        @strOldId        VARCHAR(30),
+        @strNewId        VARCHAR(30);
+
+    BEGIN TRANSACTION;
+
+    -- Insert vehicle list and get new ID
+    INSERT INTO SBCES.VehicleList (
+        VehicleListId, VehSeriesCode, ProjDesc, NumOfVehicles, Make, Model, Year,
+        Engine, Transmission, Differential, DateEntered, EnteredBy,
+        ModifiedLastBy, ModifiedLastDate, SopNumber
+    )
+    OUTPUT INSERTED.VehicleListId INTO @newIdTable(NewId)
+    SELECT 
+        NEXT VALUE FOR SBCES.VehicleListSeq,
+        UPPER(ISNULL(@viBusSeries, '')),
+        UPPER(ISNULL(@viDescription, '')),
+        NumOfVehicles, Make, Model, Year, Engine, Transmission,
+        Differential, GETDATE(), UPPER(ISNULL(@viEnteredBy, '')),
+        UPPER(ISNULL(@viEnteredBy, '')), GETDATE(), SopNumber
+    FROM SBCES.VehicleList
+    WHERE VehicleListId = @viListId;
+
+    -- Get the new inserted ID
+    SELECT @newId = NewId FROM @newIdTable;
+    SET @strOldId = CAST(@viListId AS VARCHAR(30));
+    SET @strNewId = CAST(@newId AS VARCHAR(30));
+
+    -- Insert NSC parts
+    INSERT INTO SBCES.NscPartsUsed (
+        OrigSuppNum, OrigSupplierName, CostCentre, PercentUsage,
+        EnteredBy, DateEntered, LastModifiedBy, LastModifiedDate,
+        LinkCode, QtyReqd, Cost, LinkType, CoreCost, Id
+    )
+    SELECT 
+        OrigSuppNum, OrigSupplierName, CostCentre, PercentUsage,
+        @viEnteredBy, GETDATE(), @viEnteredBy, GETDATE(),
+        @strNewId, QtyReqd, Cost, 'BUS', CoreCost, Id
+    FROM SBCES.NscPartsUsed
+    WHERE LinkCode = @strOldId AND LinkType = 'BUS';
+
+    -- Insert SC parts
+    INSERT INTO SBCES.ScPartsUsed (
+        MmsStockCode, CostCentre, PercentUsage, UserEntered,
+        DateEntered, LastModifiedBy, LastModifiedDate,
+        LinkCode, QtyReqd, RebPartCost, MmsRebuiltCode,
+        RebuiltPart, LinkType, CoreCost, MmsCost, OemCost
+    )
+    SELECT 
+        MmsStockCode, CostCentre, PercentUsage, @viEnteredBy,
+        GETDATE(), @viEnteredBy, GETDATE(), @strNewId, QtyReqd,
+        RebPartCost, MmsRebuiltCode, RebuiltPart, 'BUS',
+        CoreCost, MmsCost, OemCost
+    FROM SBCES.ScPartsUsed
+    WHERE LinkCode = @strOldId AND LinkType = 'BUS';
+
+    -- Insert Employee Labour
+    INSERT INTO SBCES.EmployeeLabour (
+        LabourDefn, DateEntered, LinkNumber, TypeId, CostCentre,
+        Task, LabourType, Usage, HrsReqd, AdjHrs,
+        DateRevised, TimeAddition, RebuiltPartNum, LastModifiedBy
+    )
+    SELECT 
+        LabourDefn, GETDATE(), @strNewId, 'BUS', CostCentre,
+        Task, LabourType, Usage, HrsReqd, AdjHrs,
+        GETDATE(), TimeAddition, RebuiltPartNum, @viEnteredBy
+    FROM SBCES.EmployeeLabour
+    WHERE LinkNumber = @strOldId AND TypeId = 'BUS';
+
+    -- Insert OEM Kits
+    INSERT INTO SBCES.KitsUsed (
+        PartNumber, DateEntered, UserEntered, LastModifiedBy,
+        LastModifiedDate, CostCentre, LinkCode
+    )
+    SELECT 
+        PartNumber, GETDATE(), @viEnteredBy, @viEnteredBy,
+        GETDATE(), CostCentre, @strNewId
+    FROM SBCES.KitsUsed
+    WHERE LinkCode = @strOldId;
+
+    COMMIT;
+    SET @voRetVal = @newId;
+    
+    PRINT 'Success: New VehicleListId = ' + CAST(@newId AS VARCHAR);
+
+END TRY
+BEGIN CATCH
+    ROLLBACK;
+
+    DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
+    DECLARE @ErrorSeverity INT = ERROR_SEVERITY();
+    DECLARE @ErrorState INT = ERROR_STATE();
+
+    PRINT 'Error: ' + @ErrorMessage;
+
+    -- Optional: Insert log to error table
+    INSERT INTO SBCES.ErrorLog (ErrorMessage, ErrorSeverity, ErrorState, LogDate)
+    VALUES (@ErrorMessage, @ErrorSeverity, @ErrorState, GETDATE());
+
+    SET @voRetVal = -1;
+END CATCH;
