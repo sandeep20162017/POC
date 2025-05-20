@@ -1,0 +1,106 @@
+-- Declare input parameters
+DECLARE @LinkCode VARCHAR(50) = 'SW0702';  -- Replace with actual input
+DECLARE @LinkType VARCHAR(50) = 'RB';      -- Replace with actual input
+
+PRINT 'Starting Final Cost Calculation using CTEs...';
+
+WITH MaterialCosts AS (
+    SELECT
+        ISNULL(cc.Name, 'NONE') AS AssemblyArea,
+        ISNULL(spu.CostCentre, '0') AS CostCentre,
+        SUM(
+            (spu.PercentUsage / 100.0) * spu.QtyReqd * (spu.MmsCost - ISNULL(spu.CoreCost, 0))
+        ) AS TotalCost,
+        SUM(
+            (spu.PercentUsage / 100.0) * spu.QtyReqd * spu.MmsCost
+        ) AS TaxableCost
+    FROM
+        SBCES.ScPartsUsed spu
+        LEFT JOIN SBCES.CostCentres cc ON spu.CostCentre = cc.CostCentre
+    WHERE
+        spu.LinkCode = UPPER(@LinkCode)
+        AND spu.LinkType = UPPER(@LinkType)
+        AND spu.RebuiltPart = 'N'
+    GROUP BY
+        cc.Name,
+        spu.CostCentre
+),
+NscMaterialCosts AS (
+    SELECT
+        ISNULL(cc.Name, 'NONE') AS AssemblyArea,
+        ISNULL(nscpu.CostCentre, '0') AS CostCentre,
+        SUM(
+            (nscpu.PercentUsage / 100.0) * nscpu.QtyReqd * (nscp.OemPartCost - ISNULL(nscpu.CoreCost, 0))
+        ) AS TotalCost,
+        SUM(
+            (nscpu.PercentUsage / 100.0) * nscpu.QtyReqd * nscp.OemPartCost
+        ) AS TaxableCost
+    FROM
+        SBCES.NscPartsUsed nscpu
+        INNER JOIN SBCES.NonStockCodedParts nscp ON nscpu.Id = nscp.Id
+        LEFT JOIN SBCES.CostCentres cc ON nscpu.CostCentre = cc.CostCentre
+    WHERE
+        nscpu.LinkCode = UPPER(@LinkCode)
+        AND nscpu.LinkType = UPPER(@LinkType)
+    GROUP BY
+        cc.Name,
+        nscpu.CostCentre
+),
+CombinedMaterials AS (
+    SELECT * FROM MaterialCosts
+    UNION ALL
+    SELECT * FROM NscMaterialCosts
+),
+TotalMaterialCost AS (
+    SELECT
+        ROUND(SUM(ISNULL(TotalCost, 0)), 2) AS RbCost
+    FROM
+        CombinedMaterials
+),
+KitTotal AS (
+    SELECT
+        CASE
+            WHEN UPPER(@LinkType) = 'BUS' AND EXISTS (
+                SELECT 1 FROM SBCES.OemKitsTotal2 WHERE Link = @LinkCode
+            )
+            THEN (
+                SELECT TOP 1 TotalKitCost FROM SBCES.OemKitsTotal2 WHERE Link = @LinkCode
+            )
+            ELSE 0
+        END AS KitCost
+    FROM (SELECT 1 AS dummy) AS D
+),
+FinalTotal AS (
+    SELECT
+        ROUND(ISNULL(tm.RbCost, 0) + ISNULL(kt.KitCost, 0), 2) AS FinalPrice,
+        UPPER(@LinkCode) AS LinkCode
+    FROM
+        TotalMaterialCost tm,
+        KitTotal kt
+)
+
+PRINT 'Fetching RBMasterlist with computed UnitCost...';
+
+SELECT
+    UPPER(rb.MmsStockCode) AS MmsStockCode,
+    UPPER(rb.RebuiltStockNum) AS RebuiltStockNum,
+    UPPER(rb.JobNumber) AS JobNumber,
+    UPPER(rb.Keyword) AS KeyWord,
+    UPPER(rb.DetailedDesc) AS Description,
+    UPPER(rb.CoreCharge) AS CoreCharge,
+    UPPER(rb.CorePartNum) AS CorePartNum,
+    UPPER(rb.SopNumber) AS SopNumber,
+    UPPER(CAST(ft.FinalPrice AS VARCHAR)) AS UnitCost,  -- Derived from FinalTotal
+    UPPER(rb.RemanCost) AS RemanCost,
+    UPPER(rb.ExternalCost) AS ExternalCost,
+    rb.Active
+FROM
+    SBCES.RBMasterlist rb
+    LEFT JOIN FinalTotal ft ON UPPER(rb.RebuiltStockNum) = ft.LinkCode
+WHERE
+    rb.RebuiltStockNum = @LinkCode
+    AND rb.Active IS NOT NULL
+ORDER BY
+    rb.RebuiltStockNum;
+
+PRINT 'Query execution completed.';
