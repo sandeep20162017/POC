@@ -1,0 +1,224 @@
+For the following Oracle function, pls just give me SQL statements without function and declare all the function variables at the top of the 
+query
+SQL Query :
+FUNCTION COPY_VEHICLE_ESTIMATE
+    (vi_list_id IN VEHICLE_LIST.vehicle_list_id%TYPE,
+     vi_bus_series IN VEHICLE_LIST.veh_series_code%TYPE,
+     vi_description IN VEHICLE_LIST.proj_desc%TYPE,
+     vi_entered_by IN VEHICLE_LIST.entered_by%TYPE,
+     vo_ret_val OUT NUMBER) RETURN NUMBER IS
+     new_id NUMBER;
+     str_old_id VARCHAR2(30);
+     str_new_id VARCHAR2(30);
+BEGIN
+    -- Copy the main information for the vehicle estimate
+    INSERT INTO VEHICLE_LIST
+    (
+        vehicle_list_id,
+        veh_series_code,
+        proj_desc,
+        num_of_vehicles,
+        make,
+        model,
+        year,
+        engine,
+        transmission,
+        differential,
+        date_entered,
+        entered_by,
+        modified_last_by,
+        modified_last_date,
+        sopnumber
+    )
+    SELECT
+        vehicle_list_seq.NEXTVAL,
+        UPPER(NVL(vi_bus_series, ' ')),
+        UPPER(NVL(vi_description, ' ')),
+        num_of_vehicles,
+        make,
+        model,
+        year,
+        engine,
+        transmission,
+        differential,
+        SYSDATE,
+        UPPER(NVL(vi_entered_by, ' ')),
+        UPPER(NVL(vi_entered_by, ' ')),
+        SYSDATE,
+        sopnumber
+    FROM
+        VEHICLE_LIST
+    WHERE
+        vehicle_list_id = vi_list_id;
+
+    -- Store the new ID of the estimate and convert IDs to string
+    SELECT vehicle_list_seq.CURRVAL INTO new_id FROM DUAL;
+    str_old_id := CAST(vi_list_id AS VARCHAR2);
+    str_new_id := CAST(new_id AS VARCHAR2);
+
+    -- Add the Non Stock Coded Parts used in the estimate
+    INSERT INTO NSC_PARTS_USED
+    (
+        orig_supp_num,
+        orig_supplier_name,
+        cost_centre,
+        percent_usage,
+        entered_by,
+        date_entered,
+        last_modified_by,
+        last_modified_date,
+        link_code,
+        qty_reqd,
+        cost,
+        link_type,
+        corecost,
+        id
+    )
+    SELECT
+        orig_supp_num,
+        orig_supplier_name,
+        cost_centre,
+        percent_usage,
+        vi_entered_by,
+        SYSDATE,
+        vi_entered_by,
+        SYSDATE,
+        str_new_id,
+        qty_reqd,
+        cost,
+        'BUS',
+        corecost,
+        id
+    FROM
+        NSC_PARTS_USED
+    WHERE
+        link_code = str_old_id AND
+        link_type = 'BUS';
+
+    -- Add the Stock Coded and Rebuilt Parts used in the estimate
+    INSERT INTO SC_PARTS_USED
+    (
+        mms_stock_code,
+        cost_centre,
+        percent_usage,
+        user_entered,
+        date_entered,
+        last_modified_by,
+        last_modified_date,
+        link_code,
+        qty_reqd,
+        reb_part_cost,
+        mms_rebuilt_code,
+        rebuilt_part,
+        link_type,
+        corecost,
+        mms_cost,
+        oem_cost
+    )
+    SELECT
+        mms_stock_code,
+        cost_centre,
+        percent_usage,
+        vi_entered_by,
+        SYSDATE,
+        vi_entered_by,
+        SYSDATE,
+        str_new_id,
+        qty_reqd,
+        reb_part_cost,
+        mms_rebuilt_code,
+        rebuilt_part,
+        'BUS',
+        corecost,
+        mms_cost,
+        oem_cost
+    FROM
+        SC_PARTS_USED
+    WHERE
+        link_code = str_old_id AND
+        link_type = 'BUS';
+
+    -- Add Labour to the estimate
+    INSERT INTO EMPLOYEE_LABOUR
+    (
+        labour_defn,
+        date_entered,
+        link_number,
+        typeid,
+        costcentre,
+        EMPLOYEE_LABOUR.task,
+        labour_type,
+        usage,
+        hrs_reqd,
+        adj_hrs,
+        date_revised,
+        time_addition,
+        rebuilt_part_num,
+        last_modified_by
+    )
+    SELECT
+        labour_defn,
+        SYSDATE,
+        str_new_id,
+        'BUS',
+        costcentre,
+        EMPLOYEE_LABOUR.task,
+        labour_type,
+        usage,
+        hrs_reqd,
+        adj_hrs,
+        SYSDATE,
+        time_addition,
+        rebuilt_part_num,
+        vi_entered_by
+    FROM
+        EMPLOYEE_LABOUR
+    WHERE
+        link_number = str_old_id AND
+        typeid = 'BUS';
+
+    -- Add OEM Kits to the estimate
+    INSERT INTO KITS_USED
+    (
+        part_number,
+        date_entered,
+        user_entered,
+        last_modified_by,
+        last_modified_date,
+        cost_centre,
+        link_code
+    )
+    SELECT
+        part_number,
+        SYSDATE,
+        vi_entered_by,
+        vi_entered_by,
+        SYSDATE,
+        cost_centre,
+        str_new_id
+    FROM
+        KITS_USED
+    WHERE
+        link_code = str_old_id;
+
+    -- Commit the changes and return the ID of the new part
+    COMMIT;
+    vo_ret_val := new_id;
+    RETURN 0;
+
+    -- Handle Exceptions and Rollback the Database if necessary
+    EXCEPTION
+        WHEN no_data_found THEN
+            ROLLBACK;
+		    vo_ret_val := -133;
+		    RETURN -1;
+        WHEN DUP_VAL_ON_INDEX THEN
+            ROLLBACK;
+            vo_ret_val := -134;
+            RETURN -1;
+        WHEN others THEN
+            ROLLBACK;
+            vo_ret_val := -135;
+            RETURN -1;
+
+END COPY_VEHICLE_ESTIMATE;
