@@ -1,0 +1,255 @@
+SQL Server Stored Procedure
+sql
+Copy
+Edit
+CREATE PROCEDURE SBCES.CopyVehicleEstimate
+    @VehicleListId INT,
+    @BusSeriesCode NVARCHAR(50),
+    @ProjDesc NVARCHAR(255),
+    @EnteredBy NVARCHAR(50),
+    @NewVehicleListId INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Insert into VehicleListTable
+        INSERT INTO SBCES.VehicleListTable (
+            VehSeriesCode,
+            ProjDesc,
+            NumOfVehicles,
+            Make,
+            Model,
+            Year,
+            Engine,
+            Transmission,
+            Differential,
+            DateEntered,
+            EnteredBy,
+            ModifiedLastBy,
+            ModifiedLastDate,
+            SopNumber
+        )
+        SELECT
+            UPPER(ISNULL(@BusSeriesCode, '')),
+            UPPER(ISNULL(@ProjDesc, '')),
+            NumOfVehicles,
+            Make,
+            Model,
+            Year,
+            Engine,
+            Transmission,
+            Differential,
+            GETDATE(),
+            UPPER(ISNULL(@EnteredBy, '')),
+            UPPER(ISNULL(@EnteredBy, '')),
+            GETDATE(),
+            SopNumber
+        FROM SBCES.VehicleListTable
+        WHERE VehicleListId = @VehicleListId;
+
+        -- Get the new VehicleListId
+        SET @NewVehicleListId = SCOPE_IDENTITY();
+
+        DECLARE @StrOldId NVARCHAR(30) = CAST(@VehicleListId AS NVARCHAR(30));
+        DECLARE @StrNewId NVARCHAR(30) = CAST(@NewVehicleListId AS NVARCHAR(30));
+
+        -- Insert into NscPartsUsedTable
+        INSERT INTO SBCES.NscPartsUsedTable (
+            OrigSuppNum,
+            OrigSupplierName,
+            CostCentre,
+            PercentUsage,
+            EnteredBy,
+            DateEntered,
+            LastModifiedBy,
+            LastModifiedDate,
+            LinkCode,
+            QtyReqd,
+            Cost,
+            LinkType,
+            CoreCost,
+            Id
+        )
+        SELECT
+            OrigSuppNum,
+            OrigSupplierName,
+            CostCentre,
+            PercentUsage,
+            @EnteredBy,
+            GETDATE(),
+            @EnteredBy,
+            GETDATE(),
+            @StrNewId,
+            QtyReqd,
+            Cost,
+            'BUS',
+            CoreCost,
+            Id
+        FROM SBCES.NscPartsUsedTable
+        WHERE LinkCode = @StrOldId AND LinkType = 'BUS';
+
+        -- Insert into ScPartsUsedTable
+        INSERT INTO SBCES.ScPartsUsedTable (
+            MmsStockCode,
+            CostCentre,
+            PercentUsage,
+            UserEntered,
+            DateEntered,
+            LastModifiedBy,
+            LastModifiedDate,
+            LinkCode,
+            QtyReqd,
+            RebPartCost,
+            MmsRebuiltCode,
+            RebuiltPart,
+            LinkType,
+            CoreCost,
+            MmsCost,
+            OemCost
+        )
+        SELECT
+            MmsStockCode,
+            CostCentre,
+            PercentUsage,
+            @EnteredBy,
+            GETDATE(),
+            @EnteredBy,
+            GETDATE(),
+            @StrNewId,
+            QtyReqd,
+            RebPartCost,
+            MmsRebuiltCode,
+            RebuiltPart,
+            'BUS',
+            CoreCost,
+            MmsCost,
+            OemCost
+        FROM SBCES.ScPartsUsedTable
+        WHERE LinkCode = @StrOldId AND LinkType = 'BUS';
+
+        -- Insert into EmployeeLabourTable
+        INSERT INTO SBCES.EmployeeLabourTable (
+            LabourDefn,
+            DateEntered,
+            LinkNumber,
+            TypeId,
+            CostCentre,
+            Task,
+            LabourType,
+            Usage,
+            HrsReqd,
+            AdjHrs,
+            DateRevised,
+            TimeAddition,
+            RebuiltPartNum,
+            LastModifiedBy
+        )
+        SELECT
+            LabourDefn,
+            GETDATE(),
+            @StrNewId,
+            'BUS',
+            CostCentre,
+            Task,
+            LabourType,
+            Usage,
+            HrsReqd,
+            AdjHrs,
+            GETDATE(),
+            TimeAddition,
+            RebuiltPartNum,
+            @EnteredBy
+        FROM SBCES.EmployeeLabourTable
+        WHERE LinkNumber = @StrOldId AND TypeId = 'BUS';
+
+        -- Insert into KitsUsedTable
+        INSERT INTO SBCES.KitsUsedTable (
+            PartNumber,
+            DateEntered,
+            UserEntered,
+            LastModifiedBy,
+            LastModifiedDate,
+            CostCentre,
+            LinkCode
+        )
+        SELECT
+            PartNumber,
+            GETDATE(),
+            @EnteredBy,
+            @EnteredBy,
+            GETDATE(),
+            CostCentre,
+            @StrNewId
+        FROM SBCES.KitsUsedTable
+        WHERE LinkCode = @StrOldId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
+        RAISERROR (@ErrorMessage, 16, 1);
+    END CATCH
+END;
+2. ASP.NET MVC Controller Action Using Dapper
+csharp
+Copy
+Edit
+using System;
+using System.Data;
+using System.Data.SqlClient;
+using System.Web.Mvc;
+using Dapper;
+
+public class VehicleController : Controller
+{
+    private readonly IDbConnection _dbConnection;
+
+    public VehicleController()
+    {
+        // Initialize your database connection here
+        _dbConnection = new SqlConnection("YourConnectionString");
+    }
+
+    [HttpPost]
+    public ActionResult CopyVehicleEstimate(int vehicleListId, string oldVehSeriesCode, string newVehSeriesCode, string oldProjDesc, string newProjDesc)
+    {
+        try
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("@VehicleListId", vehicleListId, DbType.Int32);
+            parameters.Add("@BusSeriesCode", newVehSeriesCode, DbType.String);
+            parameters.Add("@ProjDesc", newProjDesc, DbType.String);
+            parameters.Add("@EnteredBy", ViewBag.UserName.ToString(), DbType.String);
+            parameters.Add("@NewVehicleListId", dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+            _dbConnection.Execute("SBCES.CopyVehicleEstimate", parameters, commandType: CommandType.StoredProcedure);
+
+            int newVehicleListId = parameters.Get<int>("@NewVehicleListId");
+
+            // You can now use newVehicleListId as needed
+            return Json(new { success = true, newVehicleListId });
+        }
+        catch (Exception ex)
+        {
+            // Log the exception (implement logging as needed)
+            // For example: _logger.LogError(ex, "Error copying vehicle estimate.");
+
+            return Json(new { success = false, message = ex.Message });
+        }
+    }
+}
+Please ensure that:
+
+The SBCES schema and all referenced tables exist in your SQL Server database.
+
+The VehicleListId column in VehicleListTable is an IDENTITY column to utilize SCOPE_IDENTITY().
+Stack Overflow
+
+Proper error handling and logging mechanisms are implemented as per your application's standards.
+
+Let me know if you need further assistance or modifications!
