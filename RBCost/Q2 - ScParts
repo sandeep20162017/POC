@@ -1,0 +1,106 @@
+I have Telerik grid (InCell edit). When I modify percent or quantity getting following exception (looks like code is called in infinite loop).
+exception :
+Maximum call stack size exceeded
+    at String.replace (<anonymous>)
+    at init._validate (kendo.all.js:57177:183)
+    at init.i (jquery-3.7.1.min.js:2:86755)
+    at init.trigger (kendo.all.js:164:37)
+    at init.set (kendo.all.js:5633:29)
+    at init.onGridCellSave (VehiclesIndex:2870:23)
+grid :
+(
+Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()    
+     .Name($"ScPartsMaterialDetailsRebuiltPartsGrid")  
+     .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "RbGrid" }) //lockcols
+      .Events(events => events
+                    .DataBound("onGridDataBound")
+                    .Save("onGridCellSave")
+
+                )
+    .Columns(columns =>
+    {
+      ..
+        columns.Bound(c => c.UnitCost)
+        .Title("Part Unit Cost ($/Unit)")
+        .Width(90)
+        .EditorTemplateName("ComboBoxEditor")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+        ;
+       
+        columns.Bound(c => c.CoreCost)
+        .Title("Core Cost ($/Unit)")
+        .Width(90)
+        .EditorTemplateName("ComboBoxEditor")
+       @*  .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols 
+        }) *@
+        ;
+        columns.Bound(c => c.Qty).Title("Qty").Width(70);
+        columns.Bound(c => c.Percentage).Title("%").Width(70);
+        columns.Bound(c => c.CoreCharge)
+       .Title("Total Core Cost")
+       .Width(90)
+       .EditorTemplateName("ComboBoxEditor")
+       .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+       })
+JS :
+function onGridCellSave(e) {
+    const field = e.container.find("input").attr("name");
+    const value = e.values[field];
+
+    if (field === "Usage" || field === "Percentage") {
+        if (value < 0 || value > 100) {
+            e.preventDefault(); // cancel save
+            notifyValidationError("Usage % must be between 0 and 100.");
+            clearCell(e.container);
+        }
+    }
+
+    if (field === "LabourMins") {
+        if (value < 0 || value > 59) {
+            e.preventDefault(); // cancel save
+            notifyValidationError("Minutes must be between 0 and 59.");
+            clearCell(e.container);
+        }
+    }
+
+    //SCParts
+    const editableFields = ["CoreCost", "Qty", "Percentage"];
+    if (editableFields.includes(field)) {
+        const model = e.model;
+
+        const coreCost = parseFloat(model.CoreCost) || 0;
+        console.warn('coreCost :', coreCost);
+
+        const qty = parseFloat(model.Qty) || 0;
+        console.warn('qty :', qty);
+
+        const percentage = parseFloat(model.Percentage) || 0;
+        console.warn('percentage :', percentage);
+
+        console.warn('coreCost :', coreCost);
+        console.warn('coreCost :', coreCost);
+
+                      
+
+        const coreCharge = qty * coreCost * percentage;
+        console.warn('coreCharge :', coreCharge);
+
+        const totalCost = (coreCost * qty * percentage) - coreCharge;
+        console.warn('totalCost :', totalCost);
+
+        model.set("CoreCharge", coreCharge);
+        model.set("TotalCost", totalCost);
+
+        // Optional: Notify the user
+        if (window.kendo && kendo.ui && kendo.ui.Notification) {
+            const notification = $("#notification").data("kendoNotification");
+            if (notification) {
+                notification.show("Total Cost recalculated.", "info");
+            }
+        }
+    }
+}
