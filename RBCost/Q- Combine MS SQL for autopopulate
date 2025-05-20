@@ -1,0 +1,119 @@
+Pls assist me combining following 2 SQL queries. UnitCost should be populated from SQL query 2 (FinalCost)
+SBCES.RBMasterlist has RebuiltStockNum column which you can use for linking. Add print statments. Keep same input parameters. Rename input parameter @ViIdNum as LinkCode and @ViType as LinkType.
+SQL query 1 :   
+ SELECT
+    UPPER(MmsStockCode) AS MmsStockCode,
+    UPPER(RebuiltStockNum) AS RebuiltStockNum,
+    UPPER(JobNumber) AS JobNumber,
+    UPPER(Keyword) AS KeyWord,
+    UPPER(DetailedDesc) AS Description,
+    UPPER(CoreCharge) AS CoreCharge,
+    UPPER(CorePartNum) AS CorePartNum,
+    UPPER(SopNumber) AS SopNumber,
+    UPPER(BuyNewCost) AS BuyNewCost,
+    UPPER(UnitCost) as FinalPrice //add this - Get this value from below SQL 
+    UPPER(RemanCost) AS RemanCost,
+    UPPER(ExternalCost) AS ExternalCost,
+    Active
+ 
+FROM SBCES.RBMasterlist
+WHERE  RebuiltStockNum = '" + rebuiltStockNum  + "'" +
+
+@"AND Active is not null
+Order By RebuiltStockNum
+
+SQL query 2 :
+-- Declare input parameters
+DECLARE @ViIdNum VARCHAR(50) = 'SW0702';  -- Replace with actual input
+DECLARE @ViType VARCHAR(50) = 'RB'; -- Replace with actual input
+
+PRINT 'Starting material_costs CTE...';
+
+WITH MaterialCosts AS (
+    SELECT
+        ISNULL(cc.Name, 'NONE') AS AssemblyArea,
+        ISNULL(spu.CostCentre, '0') AS CostCentre,
+        SUM(
+            (spu.PercentUsage / 100.0) * spu.QtyReqd * (spu.MmsCost - ISNULL(spu.CoreCost, 0))
+        ) AS TotalCost,
+        SUM(
+            (spu.PercentUsage / 100.0) * spu.QtyReqd * spu.MmsCost
+        ) AS TaxableCost
+    FROM
+        SBCES.ScPartsUsed spu
+        LEFT JOIN SBCES.CostCentres cc ON spu.CostCentre = cc.CostCentre
+    WHERE
+        spu.LinkCode = UPPER(@ViIdNum)
+        AND spu.LinkType = UPPER(@ViType)
+        AND spu.RebuiltPart = 'N'
+    GROUP BY
+        cc.Name,
+        spu.CostCentre
+),
+NscMaterialCosts AS (
+    SELECT
+        ISNULL(cc.Name, 'NONE') AS AssemblyArea,
+        ISNULL(nscpu.CostCentre, '0') AS CostCentre,
+        SUM(
+            (nscpu.PercentUsage / 100.0) * nscpu.QtyReqd * (nscp.OemPartCost - ISNULL(nscpu.CoreCost, 0))
+        ) AS TotalCost,
+        SUM(
+            (nscpu.PercentUsage / 100.0) * nscpu.QtyReqd * nscp.OemPartCost
+        ) AS TaxableCost
+    FROM
+        SBCES.NscPartsUsed nscpu
+        INNER JOIN SBCES.NonStockCodedParts nscp ON nscpu.Id = nscp.Id
+        LEFT JOIN SBCES.CostCentres cc ON nscpu.CostCentre = cc.CostCentre
+    WHERE
+        nscpu.LinkCode = UPPER(@ViIdNum)
+        AND nscpu.LinkType = UPPER(@ViType)
+    GROUP BY
+        cc.Name,
+        nscpu.CostCentre
+),
+CombinedMaterials AS (
+    SELECT * FROM MaterialCosts
+    UNION ALL
+    SELECT * FROM NscMaterialCosts
+),
+TotalMaterialCost AS (
+    SELECT
+        ROUND(SUM(ISNULL(TotalCost, 0)), 2) AS RbCost
+    FROM
+        CombinedMaterials
+),
+RebuiltPartsCount AS (
+    SELECT
+        COUNT(*) AS CountRb
+    FROM
+        SBCES.ScPartsUsed
+    WHERE
+        RebuiltPart = 'Y'
+        AND LinkType = UPPER(@ViType)
+        AND UPPER(LinkCode) = UPPER(@ViIdNum)
+),
+KitTotal AS (
+    SELECT
+        CASE
+            WHEN UPPER(@ViType) = 'BUS' AND EXISTS (
+                SELECT 1 FROM SBCES.OemKitsTotal2 WHERE Link = @ViIdNum
+            )
+            THEN (
+                SELECT TOP 1 TotalKitCost FROM SBCES.OemKitsTotal2 WHERE Link = @ViIdNum
+            )
+            ELSE 0
+        END AS KitCost
+    FROM (SELECT 1 AS dummy) AS dual
+),
+FinalTotal AS (
+    SELECT
+        ROUND(ISNULL(tm.RbCost, 0) + ISNULL(kt.KitCost, 0), 2) AS FinalPrice
+    FROM
+        TotalMaterialCost tm,
+        KitTotal kt
+)
+
+-- Final result output
+SELECT FinalPrice FROM FinalTotal;
+
+PRINT 'Completed all steps.';
