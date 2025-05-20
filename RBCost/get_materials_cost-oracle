@@ -1,0 +1,122 @@
+create or replace FUNCTION get_material_cost
+(vi_IDnum in varchar2, vi_type in varchar2)
+RETURN number IS
+
+V_LINK_CODE VARCHAR2(30);
+V_PRICE number (20,10);
+V_FINAL_PRICE number (20,10);
+V_RET_VAL VARCHAR2(25);
+V_KIT_TOTAL NUMBER(20,10);
+CURSOR C_RB_LIST_To_Prop (vi_IDnum IN varchar)
+IS
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS "link_code",
+                SC_PARTS_USED.qty_reqd AS "QTY",
+                SC_PARTS_USED.percent_usage AS "%",
+                SC_PARTS_USED.mms_rebuilt_code AS "Rebuilt Code"
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = UPPER(vi_type) AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_IDnum);
+
+cur_RBRec C_RB_LIST_To_Prop%ROWTYPE;
+
+
+CURSOR cur_Material (vi_IDnum IN varchar)
+IS
+
+       SELECT
+            nvl(C.name,'NONE') AS "ASSEMBLY AREA",
+            nvl(A.cost_centre, '0') AS "CC",
+            nvl(SUM(A.cost), '0') AS "TOTAL COST",
+            nvl(SUM(A.taxcost), '0')AS "TAXABLE COST"
+        FROM
+            (SELECT
+                cost_centre,
+                (FINAL_COST(percent_usage, qty_reqd, mms_cost, 0) - FINAL_COST(percent_usage, qty_reqd, corecost, 0)) AS cost,
+                FINAL_COST(percent_usage, qty_reqd, mms_cost, 0) AS taxcost
+             FROM
+                SC_PARTS_USED
+             WHERE
+                link_code = upper(vi_idnum) AND
+                rebuilt_part = 'N' AND
+                link_type =upper(vi_type)
+             UNION ALL
+                    SELECT
+                        NSC_PARTS_USED.cost_centre,
+                        (FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0) - FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NSC_PARTS_USED.corecost, 0)) as cost,
+                        FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0) AS taxcost
+                    FROM
+                        NSC_PARTS_USED NSC_PARTS_USED, NON_STOCK_CODED_PARTS NON_STOCK_CODED_PARTS
+                    WHERE
+                        NSC_PARTS_USED.link_code = upper(vi_IDnum) AND
+                        NSC_PARTS_USED.link_type = UPPER(vi_type) AND
+                        NON_STOCK_CODED_PARTS.ID (+)= NSC_PARTS_USED.ID) A,
+            cost_centres C
+        WHERE
+            C.cost_centre = A.cost_centre
+        GROUP BY
+            A.cost_centre,
+            C.name;
+
+cur_MaterialRec cur_Material%ROWTYPE;
+
+BEGIN
+
+EXECUTE IMMEDIATE 'TRUNCATE TABLE TEMP_MATERIALS_LIST';
+commit;
+open cur_Material(upper(vi_idnum));
+LOOP
+    FETCH cur_Material
+    INTO cur_MaterialRec;
+    EXIT WHEN cur_Material%NOTFOUND;
+    insert into TEMP_MATERIALS_LIST values  (cur_MaterialRec."ASSEMBLY AREA",cur_MaterialRec."CC" ,cur_MaterialRec."TOTAL COST",cur_MaterialRec."TAXABLE COST",vi_IDnum,cur_MaterialRec."TOTAL COST");
+
+END LOOP;
+CLOSE cur_Material;
+
+--checks to see how many rebuilt parts are attached to the rebuilt part number
+-- inputted(rb_num) into this procedure
+SELECT count(*) INTO V_PRICE FROM SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = UPPER(vi_type) AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_idnum);
+
+
+--if this current rebuilt part (rb_num) in this procedure resides
+--in any other rebuilt parts update the prices of those rebuilt parts as well.
+if V_PRICE > 0 then
+
+open C_RB_LIST_To_Prop(upper(vi_idnum));
+LOOP
+
+    FETCH C_RB_LIST_To_Prop
+    INTO cur_RBRec;
+    EXIT WHEN C_RB_LIST_To_Prop%NOTFOUND;
+
+    WRITE_MATERIALS (cur_RBRec."Rebuilt Code",cur_RBRec."QTY" * to_number(replace(NVL(cur_RBRec."%",'0'),',','.'))/100 , cur_RBRec."Rebuilt Code", 1 );
+
+END LOOP;
+CLOSE C_RB_LIST_To_Prop;
+
+end if;
+
+SELECT count(*) INTO V_KIT_TOTAL FROM OEM_KITS_TOTAL2 WHERE OEM_KITS_TOTAL2.LINK = VI_IDNUM;
+
+if upper(vi_type) = 'BUS' and V_KIT_TOTAL > 0 then
+    SELECT TOTAL_KIT_COST INTO V_KIT_TOTAL FROM OEM_KITS_TOTAL2 WHERE OEM_KITS_TOTAL2.LINK = VI_IDNUM;
+    insert into TEMP_MATERIALS_LIST values ('KITS','05H7',V_KIT_TOTAL,V_KIT_TOTAL,VI_IDNUM,V_KIT_TOTAL);
+end if;
+
+SELECT round(sum(NVL(total_cost,0)),2) as RB_COST INTO V_FINAL_PRICE
+        FROM
+            TEMP_MATERIALS_LIST;
+
+RETURN V_FINAL_PRICE;
+
+--EXCEPTION
+  --WHEN OTHERS THEN
+    --raise_application_error('-20001', sqlerrm);
+    --dbms_output.put_line(substr(TO_CHAR(SQLCODE) || ': '||SQLERRM,1,255));
+END GET_MATERIAL_COST;
