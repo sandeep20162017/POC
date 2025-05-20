@@ -1,0 +1,62 @@
+function onGridCellSave(e) {
+    const field = e.container.find("input").attr("name");
+    const value = e.values[field];
+
+    if (field === "Usage" || field === "Percentage") {
+        if (value < 0 || value > 100) {
+            e.preventDefault();
+            notifyValidationError("Usage % must be between 0 and 100.");
+            clearCell(e.container);
+            return;
+        }
+    }
+
+    if (field === "LabourMins") {
+        if (value < 0 || value > 59) {
+            e.preventDefault();
+            notifyValidationError("Minutes must be between 0 and 59.");
+            clearCell(e.container);
+            return;
+        }
+    }
+
+    if (!isUpdating && ["CoreCost", "Qty", "Percentage"].includes(field)) {
+        isUpdating = true;
+
+        const model = e.model;
+        const coreCost = parseFloat(model.CoreCost) || 0;
+        const qty = parseFloat(model.Qty) || 0;
+        const percentage = parseFloat(model.Percentage) || 0;
+
+        const coreCharge = qty * coreCost * percentage;
+        const totalCost = (coreCost * qty * percentage) - coreCharge;
+
+        setTimeout(() => {
+            model.set("CoreCharge", coreCharge);
+            model.set("TotalCost", totalCost);
+
+            // Manually trigger binding refresh if UI doesn't update
+            const grid = $("#ScPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            const uid = model.uid;
+            const row = grid.table.find("tr[data-uid='" + uid + "']");
+            const dataItem = grid.dataSource.getByUid(uid);
+
+            // Rebind row manually if needed
+            if (row.length && dataItem) {
+                const cells = row.find("td");
+                const columns = grid.columns;
+
+                for (let i = 0; i < columns.length; i++) {
+                    const column = columns[i];
+                    if (column.field === "TotalCost") {
+                        const cell = $(cells[i]);
+                        cell.html(kendo.htmlEncode(kendo.toString(dataItem.TotalCost, column.format || "n2")));
+                        break;
+                    }
+                }
+            }
+
+            isUpdating = false;
+        }, 0);
+    }
+}
