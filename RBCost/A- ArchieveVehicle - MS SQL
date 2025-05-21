@@ -1,0 +1,130 @@
+
+1. SBCES.ArchiveVehicle Stored Procedure
+sql
+Copy
+Edit
+CREATE PROCEDURE SBCES.ArchiveVehicle
+    @VehSeriesCode VARCHAR(50),
+    @Username VARCHAR(50),
+    @LinkNumber INT,
+    @TypeId VARCHAR(50),
+    @LabourCost DECIMAL(18,2),
+    @LabourOverheadAmount DECIMAL(18,2),
+    @LabourTotal DECIMAL(18,2),
+    @MaterialsTotal DECIMAL(18,2),
+    @TotalBusEstimateCost DECIMAL(18,2),
+    @TaxTotal DECIMAL(18,2),
+    @TotalCostTax DECIMAL(18,2),
+    @OemKitsTotal DECIMAL(18,2),
+    @RetVal INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @ArchId INT;
+        DECLARE @Price DECIMAL(18,2);
+        DECLARE @Message NVARCHAR(250);
+
+        PRINT 'Step 1: Insert into ArchVehicleList';
+        INSERT INTO SBCES.ArchVehicleList (
+            VehSeriesCode, ProjDesc, Make, Model, Year, Engine, Transmission, Differential,
+            DateArchived, ArchivedBy, ArchVehicleListId, LabourCost, LabourOverheadAmount, 
+            LabourTotal, MaterialsTotal, TotalBusEstimateCost, TotalTax, TotalCostTax, 
+            OemKitsTotal, SopNumber, OldId, NumOfVehicles
+        )
+        SELECT
+            VehSeriesCode, ProjDesc, Make, Model, Year, Engine, Transmission, Differential,
+            GETDATE(), @Username, NEXT VALUE FOR SBCES.ArchVehicleListSeq, @LabourCost, 
+            @LabourOverheadAmount, @LabourTotal, @MaterialsTotal, @TotalBusEstimateCost, 
+            @TaxTotal, @TotalCostTax, @OemKitsTotal, SopNumber, VehicleListId, NumOfVehicles
+        FROM SBCES.VehicleList
+        WHERE VehicleListId = @LinkNumber;
+
+        PRINT 'Step 2: Insert into ArchVehEmployeeLabour';
+        INSERT INTO SBCES.ArchVehEmployeeLabour (
+            LabourDefn, DateEntered, LinkNumber, TypeId, CostCentre, Task,
+            LabourType, Usage, HrsReqd, AdjHrs, TimeAddition, ArchVehicleListId
+        )
+        SELECT 
+            LabourDefn, DateEntered, LinkNumber, TypeId, CostCentre, Task,
+            LabourType, Usage, HrsReqd, AdjHrs, TimeAddition,
+            IDENT_CURRENT('SBCES.ArchVehicleList')
+        FROM SBCES.EmployeeLabour
+        WHERE LinkNumber = @LinkNumber AND TypeId = @TypeId;
+
+        PRINT 'Step 3: Retrieve Material Cost';
+        SET @Price = SBCES.GetMaterialCost(@LinkNumber, @TypeId);
+
+        PRINT 'Step 4: Retrieve Labour Cost';
+        SET @Price = SBCES.GetLabourCost(@LinkNumber, @TypeId);
+
+        SELECT @ArchId = MAX(ArchVehicleListId)
+        FROM SBCES.ArchVehicleList;
+
+        PRINT 'Step 5: Insert into ArchVehLabourCcTotal';
+        INSERT INTO SBCES.ArchVehLabourCcTotal (CostCentre, TotalHours, ArchVehicleListId)
+        SELECT CostCentre, SUM(ExtendedTime), @ArchId
+        FROM SBCES.TempLabourList
+        GROUP BY CostCentre;
+
+        PRINT 'Step 6: Insert into ArchVehMaterialsCcTotal';
+        INSERT INTO SBCES.ArchVehMaterialsCcTotal (CostCentre, TotalCost, ArchVehicleListId)
+        SELECT CostCentre, SUM(TotalCost), @ArchId
+        FROM SBCES.TempMaterialsList
+        GROUP BY CostCentre;
+
+        SET @RetVal = 0;
+        COMMIT;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK;
+        SET @RetVal = -1;
+        SET @Message = ERROR_MESSAGE();
+        PRINT 'Error: ' + @Message;
+    END CATCH
+
+    PRINT 'Output RetVal: ' + CAST(@RetVal AS VARCHAR);
+END
+GO
+2. SBCES.GetMaterialCost Scalar Function
+sql
+Copy
+Edit
+CREATE FUNCTION SBCES.GetMaterialCost (
+    @LinkNumber INT,
+    @TypeId VARCHAR(50)
+)
+RETURNS DECIMAL(18,2)
+AS
+BEGIN
+    DECLARE @TotalCost DECIMAL(18,2);
+
+    SELECT @TotalCost = SUM(TotalCost)
+    FROM SBCES.Materials
+    WHERE LinkNumber = @LinkNumber AND TypeId = @TypeId;
+
+    RETURN ISNULL(@TotalCost, 0);
+END
+GO
+3. SBCES.GetLabourCost Scalar Function
+sql
+Copy
+Edit
+CREATE FUNCTION SBCES.GetLabourCost (
+    @LinkNumber INT,
+    @TypeId VARCHAR(50)
+)
+RETURNS DECIMAL(18,2)
+AS
+BEGIN
+    DECLARE @TotalCost DECIMAL(18,2);
+
+    SELECT @TotalCost = SUM(HrsReqd * HourlyRate)
+    FROM SBCES.EmployeeLabour
+    WHERE LinkNumber = @LinkNumber AND TypeId = @TypeId;
+
+    RETURN ISNULL(@TotalCost, 0);
+END
+GO
