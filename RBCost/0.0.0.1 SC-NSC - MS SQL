@@ -1,0 +1,102 @@
+-- Insert Rebuilt Stock Coded Parts (Y)
+INSERT INTO SBCES.ArchVehScPartsUsed (
+    MmsStockCode, DateEntered, RebPartCost, UserEntered, MmsCost, OemCost,
+    MmsRebuiltCode, CostCentre, QtyReqd, PercentUsage, LinkCode, RebuiltPart,
+    LinkType, CoreCost, ArchVehicleListId, TotalCost, ScKeyword, ScDescription
+)
+SELECT
+    UPPER(SPU.MmsStockCode),
+    SPU.DateEntered,
+    ISNULL(A.RbUnitCost, 0),
+    UPPER(SPU.UserEntered),
+    ISNULL(SPU.MmsCost, 0),
+    ISNULL(SPU.OemCost, 0),
+    UPPER(SPU.MmsRebuiltCode),
+    UPPER(SPU.CostCentre),
+    UPPER(SPU.QtyReqd),
+    REPLACE(SPU.PercentUsage, ',', '.'),
+    @ViLinkNumber,
+    'Y',
+    'RB',
+    SPU.CoreCost,
+    CAST(IDENT_CURRENT('SBCES.ArchVehicleList') AS INT),
+    ISNULL(A.RbCost, 0),
+    UPPER(RM.Keyword),
+    UPPER(RM.DetailedDesc)
+FROM SBCES.ScPartsUsed SPU
+LEFT JOIN SBCES.RbMasterList RM ON RM.RebuiltStockNum = SPU.MmsRebuiltCode
+LEFT JOIN (
+    SELECT
+        RbReference,
+        ROUND(SUM(TotalCost), 2) AS RbCost,
+        ROUND(SUM(TotalUnitCost), 2) AS RbUnitCost
+    FROM SBCES.TempMaterialsList
+    GROUP BY RbReference
+) A ON A.RbReference = SPU.MmsRebuiltCode
+WHERE
+    SPU.LinkCode = @ViLinkNumber AND
+    SPU.RebuiltPart = 'Y' AND
+    SPU.LinkType = @ViTypeId;
+
+-- Insert Non-Rebuilt Stock Coded Parts (N)
+INSERT INTO SBCES.ArchVehScPartsUsed (
+    MmsStockCode, DateEntered, RebPartCost, UserEntered, MmsCost, OemCost,
+    MmsRebuiltCode, CostCentre, QtyReqd, PercentUsage, LinkCode, RebuiltPart,
+    LinkType, CoreCost, ArchVehicleListId, TotalCost, ScKeyword, ScDescription
+)
+SELECT
+    SPU.MmsStockCode,
+    SPU.DateEntered,
+    SPU.RebPartCost,
+    SPU.UserEntered,
+    SPU.MmsCost,
+    SPU.OemCost,
+    SPU.MmsRebuiltCode,
+    SPU.CostCentre,
+    SPU.QtyReqd,
+    SPU.PercentUsage,
+    SPU.LinkCode,
+    SPU.RebuiltPart,
+    SPU.LinkType,
+    CAST(SBCES.FinalCost(SPU.PercentUsage, SPU.QtyReqd, SPU.CoreCost, 0) AS NUMERIC(18,2)),
+    CAST(IDENT_CURRENT('SBCES.ArchVehicleList') AS INT),
+    SPU.MmsCost * CAST(SPU.QtyReqd AS NUMERIC(18,2)) *
+        (CAST(REPLACE(ISNULL(SPU.PercentUsage, '0'), ',', '.') AS NUMERIC(18,4)) / 100),
+    ISNULL(SCP.PartType, ''),
+    ISNULL(SCP.DetailedDesc, '')
+FROM SBCES.ScPartsUsed SPU
+LEFT JOIN SBCES.StockCodedParts SCP ON SCP.MmsStockCode = SPU.MmsStockCode
+WHERE
+    SPU.LinkCode = @ViLinkNumber AND
+    SPU.LinkType = @ViTypeId AND
+    SPU.RebuiltPart = 'N';
+
+-- Insert Non-Stock Coded Parts
+INSERT INTO SBCES.ArchVehNscPartsUsed (
+    OrigSuppNum, OrigSupplierName, CostCentre, QtyReqd, PercentUsage,
+    DateEntered, EnteredBy, LinkCode, Cost, LinkType, CoreCost,
+    ArchVehicleListId, TotalCost
+)
+SELECT
+    NSP.OrigSuppNum,
+    NSP.OrigSupplierName,
+    NSP.CostCentre,
+    NSP.QtyReqd,
+    NSP.PercentUsage,
+    NSP.DateEntered,
+    NSP.EnteredBy,
+    NSP.LinkCode,
+    NSP.Cost,
+    NSP.LinkType,
+    CAST(SBCES.FinalCost(NSP.PercentUsage, NSP.QtyReqd, NSP.CoreCost, 0) AS NUMERIC(18,2)),
+    CAST(IDENT_CURRENT('SBCES.ArchVehicleList') AS INT),
+    NSP.Cost * CAST(NSP.QtyReqd AS NUMERIC(18,2)) *
+        (CAST(REPLACE(ISNULL(NSP.PercentUsage, '0'), ',', '.') AS NUMERIC(18,4)) / 100)
+FROM SBCES.NscPartsUsed NSP
+WHERE
+    NSP.LinkCode = @ViLinkNumber AND
+    NSP.LinkType = @ViTypeId;
+
+-- Capture the inserted ArchVehicleListId
+SELECT @ArchId = MAX(ArchVehicleListId)
+FROM SBCES.ArchVehicleList;
