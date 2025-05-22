@@ -1,0 +1,158 @@
+1. JavaScript: onArchiveClick Function
+Enhance your existing onArchiveClick function to retrieve the necessary data from both grids and send it to the server.
+
+javascript
+Copy
+Edit
+function onArchiveClick(e) {
+    e.preventDefault();
+
+    // Retrieve the data item from the clicked row in VehicleGrid
+    var grid = $("#VehicleGrid").data("kendoGrid");
+    var row = $(e.currentTarget).closest("tr");
+    var vehicleItem = grid.dataItem(row);
+
+    if (!vehicleItem) {
+        console.error("Vehicle data not found.");
+        return;
+    }
+
+    // Extract PartNum from the vehicleItem
+    var partNum = vehicleItem.PartNum;
+    if (!partNum) {
+        console.error("PartNum is missing in the vehicle data.");
+        return;
+    }
+
+    // Construct the ID of the TotalCost grid using PartNum
+    var totalCostGridId = `#TotalCostInRbModelGrid_${partNum}`;
+    var totalCostGrid = $(totalCostGridId).data("kendoGrid");
+
+    if (!totalCostGrid) {
+        console.error(`TotalCost grid with ID ${totalCostGridId} not found.`);
+        return;
+    }
+
+    // Retrieve the first (and only) data item from the TotalCost grid
+    var totalCostDataItem = totalCostGrid.dataSource.view()[0];
+
+    if (!totalCostDataItem) {
+        console.error("TotalCost data not found.");
+        return;
+    }
+
+    // Prepare the payload to send to the server
+    var payload = {
+        VehicleListId: vehicleItem.VehicleListId,
+        VehSeriesCode: vehicleItem.VehSeriesCode,
+        TypeId: "BUS", // Default value as per stored procedure
+        Username: '@ViewBag.UserName?.ToString().ToUpper() ?? "SYSTEM"',
+        LabourCost: totalCostDataItem.TotalLabourCost || 0,
+        LabourOverheadAmount: totalCostDataItem.TotalLabourOverheadCost || 0,
+        LabourTotal: totalCostDataItem.TotalLabourCost || 0,
+        MaterialsTotal: totalCostDataItem.TotalMaterialCost || 0,
+        TotalBusEstimateCost: totalCostDataItem.TotalRebuiltPartCost || 0,
+        TaxTotal: totalCostDataItem.TaxTotal || 0,
+        TotalCostTax: totalCostDataItem.TotalRebuiltPartCostWithTax || 0,
+        OemKitsTotal: totalCostDataItem.OemKitsTotal || 0
+    };
+
+    console.log("Payload to be sent:", payload);
+
+    // Send the data to the server via AJAX
+    $.ajax({
+        url: '@Url.Action("ArchiveVehicleDetails", "Vehicles")',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(payload),
+        success: function (response) {
+            var notification = $("#notification").kendoNotification({
+                position: {
+                    pinned: true,
+                    top: 50,
+                    right: 50
+                },
+                autoHideAfter: 5000,
+                stacking: "down"
+            }).data("kendoNotification");
+
+            notification.show(response.message || "Archived successfully.", "info");
+        },
+        error: function (xhr, status, error) {
+            console.error("Error archiving:", error);
+        }
+    });
+}
+✅ 2. Controller: ArchiveVehicleDetails Action
+Update your controller action to accept the payload and call the stored procedure accordingly.
+
+csharp
+Copy
+Edit
+[HttpPost]
+public async Task<IActionResult> ArchiveVehicleDetails([FromBody] ArchiveVehicleRequest payload)
+{
+    try
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("@VehSeriesCode", payload.VehSeriesCode);
+        parameters.Add("@Username", payload.Username);
+        parameters.Add("@LinkNumber", payload.VehicleListId);
+        parameters.Add("@TypeId", payload.TypeId);
+        parameters.Add("@LabourCost", payload.LabourCost);
+        parameters.Add("@LabourOverheadAmount", payload.LabourOverheadAmount);
+        parameters.Add("@LabourTotal", payload.LabourTotal);
+        parameters.Add("@MaterialsTotal", payload.MaterialsTotal);
+        parameters.Add("@TotalBusEstimateCost", payload.TotalBusEstimateCost);
+        parameters.Add("@TaxTotal", payload.TaxTotal);
+        parameters.Add("@TotalCostTax", payload.TotalCostTax);
+        parameters.Add("@OemKitsTotal", payload.OemKitsTotal);
+        parameters.Add("@RetVal", dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+        await _dbConnection.ExecuteAsync(
+            "[SBCES].[ArchiveVehicle]",
+            parameters,
+            commandType: CommandType.StoredProcedure
+        );
+
+        var retVal = parameters.Get<int>("@RetVal");
+
+        return Json(new
+        {
+            success = retVal == 0,
+            message = retVal == 0
+                ? $"Archived Vehicle List Id: {payload.VehicleListId}"
+                : $"Archive failed with return value: {retVal}"
+        });
+    }
+    catch (Exception ex)
+    {
+        // Log the exception as needed
+        return Json(new
+        {
+            success = false,
+            message = $"Archive failed: {ex.Message}"
+        });
+    }
+}
+✅ 3. Model: ArchiveVehicleRequest
+Define a model to represent the payload received from the client.
+
+csharp
+Copy
+Edit
+public class ArchiveVehicleRequest
+{
+    public int VehicleListId { get; set; }
+    public string VehSeriesCode { get; set; }
+    public string TypeId { get; set; }
+    public string Username { get; set; }
+    public decimal LabourCost { get; set; }
+    public decimal LabourOverheadAmount { get; set; }
+    public decimal LabourTotal { get; set; }
+    public decimal MaterialsTotal { get; set; }
+    public decimal TotalBusEstimateCost { get; set; }
+    public decimal TaxTotal { get; set; }
+    public decimal TotalCostTax { get; set; }
+    public decimal OemKitsTotal { get; set; }
+}
