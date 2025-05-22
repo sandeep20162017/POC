@@ -1,0 +1,138 @@
+    grid.bind("detailInit", function (e) {
+        console.error("Inside detailInit");
+        const vehicleListId = e.data.VehicleListId;
+        parentGridId = vehicleListId;
+        console.error("vehicleListId : ", vehicleListId);
+
+        console.log("Detail initialization started for VehicleListId: " + e.data.VehicleListId);
+        var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
+        var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
+        var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
+        var tabScPartDetail = '@Url.Action("ScPartsUsedInEstimates", "Vehicles")' + '?id=' + e.data.VehicleListId;
+        var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
+        var tabUrlRbPartDetail = '@Url.Action("RbDetailsPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
+        var tabUrlTotalCost = '@Url.Action("TotalCostPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
+
+        // Get the container for the detail template
+        var container = e.detailCell.find("#detail-template-" + e.data.VehicleListId);
+
+        // Load the TabStrip structure
+        container.html(`
+                                                <div id="tabstrip-container-${e.data.VehicleListId}">
+                                            <ul>
+                                                 <li>Labour Details</li>
+                                                <li>Labour Hour</li>
+                                                <li>Material Cost</li>
+                                                <li>Stock Coded Parts</li>
+                                                <li>Non Stock Coded Parts</li>
+                                                <li>Rebuilt Parts</li>
+
+                                                <li>Total Cost</li>
+                                            </ul>
+
+                                                    <div id="labour-details-content-${vehicleListId}"></div>
+                                                    <div id="labour-hour-summary-content-${vehicleListId}"></div>
+                                                    <div id="material-cost-summary-content-${vehicleListId}"></div>
+                                                    <div id="material-details-content-${vehicleListId}"></div>
+                                                    <div id="nsc-details-content-${vehicleListId}"></div>
+                                                    <div id="rb-part-details-content-${vehicleListId}"></div>
+
+                                                    <div id="total-cost-content-${vehicleListId}">"></div>
+                                        </div>
+                                    `);
+
+        // Initialize the Kendo TabStrip
+        console.log("Initialize tabScript ");
+
+        var tabStrip = $("#tabstrip-container-" + e.data.VehicleListId).kendoTabStrip({
+            animation: { open: { effects: "fadeIn" } },
+            select: function (e) {
+                tabIndex = $(e.item).index(); // Get the index of the selected tab
+                tabStripName = e.sender.element.attr("id"); //ssk tabStripName
+
+                // Check for unsaved changes in the current tab
+                var currentTabContent = tabStrip.contentElement(tabStrip.select().index());
+                var currentGrid = $(currentTabContent).find(".k-grid").data("kendoGrid");
+                console.log("*******currentGrid :", currentGrid);
+
+                console.log("*******currentTabContent :", currentTabContent);
+                //    var gridName = currentGrid.element.attr("id");
+                //  console.log("*******currentGridName :", gridName);
+                //  notification.show("currentGridName :" + gridName, "warning");
+
+
+
+                tabIndex = $(e.item).index(); // Get the index of the selected tab
+
+                if (currentGrid && (currentGrid.dataSource.hasChanges())) { //kendoNotification show waring for reaonly
+                    console.log("hasChanges :", currentGrid.dataSource.hasChanges());
+
+                    // Show a warning notification
+                    if (notification) {
+                        notification.show("You have unsaved changes. Click on Update or Cancel changes before clicking next tab.", "warning");
+                        // notification.show(currentGrid);
+                        //  notification.show(currentGrid.dataSource.hasChanges());
+                    } else {
+                        console.error("****** Notification is not initialized.");
+                    }
+                    e.preventDefault(); // Prevent the tab switch
+                    return;
+                }
+                console.log("Load the partial view content for the selected tab");
+                // Load the partial view content for the selected tab
+                var tabUrl = tabIndex == 0 ? tabUrlLabourDetail :
+                    tabIndex == 1 ? tabUrlLabourHourSummary :
+                        tabIndex == 2 ? tabUrlMaterialCostSummary :
+                            tabIndex == 3 ? tabScPartDetail :
+                                tabIndex == 4 ? tabUrlNscDetail :
+                                    tabIndex == 5 ? tabUrlRbPartDetail :
+                                        tabUrlTotalCost;
+
+                $.get(tabUrl)
+                    .done(function (data) {
+
+                        $(e.contentElement).html(data);
+                        kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
+                        if (tabIndex == 0) {
+                            var gridName = 'LabourDetailsGrid_' + vehicleListId; //ssk2
+                            console.log('########  :gridName ', gridName);
+                        }
+
+                        console.log('########  :tabIndex ', tabIndex);
+                        // Reset the hasChanges() state for read-only tabs
+                        if (tabIndex == '6' || tabIndex == '1' || tabIndex == '2') { //read-only tab
+                            var grid = $(e.contentElement).find(".k-grid").data("kendoGrid");
+                            // console.log("*******currentGrid2 :", currentGrid);
+                            var gridName = grid.element.attr("id");
+                            console.log("*******currentGridName2 :", gridName);
+                            // console.log("*******currentTabContent :", currentTabContent);
+                            grid.dataSource.read(); // Refresh the data source
+                        }
+                    })
+                    .fail(function (xhr, status, error) {
+                        console.error("Error loading tab content: ", error);
+                        if (notification) {
+                            notification.show("An error occurred while loading the tab content. Please try again.", "error");
+                        } else {
+                            console.error("Notification is not initialized.");
+                        }
+                    });
+            }
+        }).data("kendoTabStrip");
+
+        // Load the first tab's content
+        $.get(tabUrlLabourDetail)
+            .done(function (data) {
+                $("#labour-details-content").html(data);
+                kendo.init($("#labour-details-content")); // Reinitialize Kendo widgets
+            })
+            .fail(function (xhr, status, error) {
+                console.error("Error loading initial tab content: ", error);
+                if (notification) {
+                    notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
+                } else {
+                    console.error("Notification is not initialized.");
+                }
+            });
+    });
+}
