@@ -1,0 +1,111 @@
+Application uses Telerik ASP.NET core grid. InCell edit.
+Application uses Kendoo tabs. In the main tab, Index.cshtml has VehicleGrid. On each row of this grid there's a button
+Archive. JS function (onArchiveClick) gets called when user clicks on the Archive button.
+When the row in the vehicle grid is expanded, various tabs are displayed. All the tabs uses Telerik grid. Each tab has its own model.
+One of the tab is (totalCostGrid). This totalCostGrid  will always have one row. I need to send the column values @LabourCost DECIMAL(18,2),
+    @LabourOverheadAmount DECIMAL(18,2),    @LabourTotal DECIMAL(18,2),    @MaterialsTotal DECIMAL(18,2),    @TotalBusEstimateCost DECIMAL(18,2),
+    @TaxTotal DECIMAL(18,2),    @TotalCostTax DECIMAL(18,2),    @OemKitsTotal DECIMAL(18,2),in the javascript function onArchiveClick.
+onArchiveClick function calls controller action ArchiveVehicleDetails, which calls stored proc ArchiveVehicleEstimate. Stored proc parameters
+must be passed from the col values in the gridname TotalCostInRbModelGrid_{ViewBag.PartNum}
+UserName is ViewBag.UserName. VehicleSeries if from the Vehiclegrid Column
+Pls assist me giving the full version (all the changes so I can cut and paste) of all the changes - model, contoller and JS. Add logging in JS for debugging.
+TotalCostGrid (shared view  ModelName - TotalCostInEstimates -only one row):
+Html.Kendo().Grid<BCES.Models.Parts.TotalCostInEstimates>()                
+                .Name($"TotalCostInRbModelGrid_{ViewBag.PartNum}")
+                columns.Bound(c => c.RebuiltPartNum).Title("Part/Vehicle Number");
+// columns.Bound(c => c.Tota).Title("Material Cost").Format("{0:C2}");
+ columns.Bound(c => c.CoreCost).Title("Core Cost").Format("{0:C2}");
+ columns.Bound(c => c.TotalMaterialCost).Title("Materials Cost").Format("{0:C2}");
+ columns.Bound(c => c.TotalLabourCost).Title("Labour Cost").Format("{0:C2}");
+ columns.Bound(c => c.TotalLabourOverheadCost).Title("Labour Overhead Cost").Format("{0:C2}");
+ columns.Bound(c => c.TotalLabourCost).Title("Labour Total").Format("{0:C2}");
+ columns.Bound(c => c.TaxTotal).Title("Tax Total").Format("{0:C2}");
+ columns.Bound(c => c.TotalRebuiltPartCostWithTax).Title("Total Cost").Format("{0:C2}");
+Index.cshtml :
+
+    @(Html.Kendo().Grid<VehicleViewModel>()
+    .Name($"VehicleGrid")
+    .Columns(columns =>
+    {
+    columns.Bound(c => c.VehicleListId).Title("Estimate #")
+Index.cshtml : JS :
+function onArchiveClick(e) {
+    e.preventDefault();
+    var grid = $("#VehicleGrid").data("kendoGrid");   
+    var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+    // Call the controller action with the entire dataItem as JSON
+    $.ajax({
+        url: '@Url.Action("ArchiveVehicleDetails", "Vehicles")',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(dataItem),
+        success: function (data) {
+            // Display a Kendo Notification
+            var notification = $("#notification").kendoNotification({
+                position: {
+                    pinned: true,
+                    top: 50,
+                    right: 50
+                },
+                autoHideAfter: 5000, // Hide after 5 seconds
+                stacking: "down"
+            }).data("kendoNotification");
+
+            notification.show("Archived successfully.", "info");
+        },
+        error: function (xhr, status, error) {
+            console.error("Error archiving: ", error);
+        }
+    });
+}
+VehiclesController.cs :
+ public async Task<IActionResult> ArchiveVehicleDetails([FromBody] VehicleViewModel vehicleViewModel)
+ {
+
+     try
+     {
+         var parameters = new
+         {
+
+             LinkNumber = vehicleViewModel.VehicleListId,
+             TypeId = "BUS", // Default value from stored proc
+             Username = ViewBag.UserName?.ToString().ToUpper() ?? "SYSTEM"
+         };
+
+         await _dbConnection.ExecuteAsync(
+             "[SBCES].[ArchiveVehicleEstimate]",
+             parameters,
+             commandType: CommandType.StoredProcedure
+         );
+
+         return Json(new
+         {
+             success = true,
+             message = $"Archived Vehicle List Id: {vehicleViewModel.VehicleListId}",
+             vehicleViewModel.VehicleListId
+         });
+     }
+     catch (Exception ex)
+     {
+         //log exception 
+         return Json(new
+         {
+             success = false,
+             message = $"Archive failed: {ex.Message}"
+         });
+     }
+ }
+StoredProc :
+CREATE PROCEDURE SBCES.ArchiveVehicle
+    @VehSeriesCode VARCHAR(50),
+    @Username VARCHAR(50),
+    @LinkNumber INT,
+    @TypeId VARCHAR(50),
+    @LabourCost DECIMAL(18,2),
+    @LabourOverheadAmount DECIMAL(18,2),
+    @LabourTotal DECIMAL(18,2),
+    @MaterialsTotal DECIMAL(18,2),
+    @TotalBusEstimateCost DECIMAL(18,2),
+    @TaxTotal DECIMAL(18,2),
+    @TotalCostTax DECIMAL(18,2),
+    @OemKitsTotal DECIMAL(18,2),
