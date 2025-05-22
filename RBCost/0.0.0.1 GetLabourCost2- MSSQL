@@ -1,0 +1,119 @@
+SQL error : Invalid use of side affecting operator INSERT in function
+USE [CES]
+GO
+
+/****** Object:  UserDefinedFunction [CES].[hhmm_to_decimal]    Script Date: 5/22/2025 2:04:56 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+Create FUNCTION  [SBCES].[GetLabourCost2]
+
+(
+    @ViIdNum VARCHAR(30),
+    @ViType VARCHAR(30)
+)
+RETURNS DECIMAL(20, 2)
+AS
+BEGIN
+    DECLARE @VFinalPrice DECIMAL(20, 2) = 0;
+    DECLARE @VPrice INT = 0;
+    DECLARE @LinkCode VARCHAR(30);
+    DECLARE @LabourType VARCHAR(100);
+    DECLARE @CC VARCHAR(30);
+    DECLARE @Task VARCHAR(100);
+    DECLARE @Usage DECIMAL(10, 4);
+    DECLARE @TimeAdd DECIMAL(10, 2);
+    DECLARE @RatePerHour DECIMAL(10, 2);
+    DECLARE @TotalCost DECIMAL(18, 2);
+    DECLARE @WrenchTime DECIMAL(10, 2);
+    DECLARE @Percent DECIMAL(10, 4);
+
+    -- Step 1: Clear temp table
+    TRUNCATE TABLE SBCES.TempLabourList;
+
+    -- Step 2: Cursor for Labour
+    DECLARE cur_Labour CURSOR FOR
+    SELECT
+        EL.LabourDefn,
+        EL.CostCentre,
+        EL.Task,
+        TRY_CAST(REPLACE(EL.Usage, ',', '.') AS DECIMAL(10, 4)),
+        SBCES.HHMMTOMINUTES(EL.TimeAddition),
+        ES.RatePerHour,
+        SBCES.HHMMTOMINUTES(SBCES.HHMMTODECIMAL(EL.AdjHrs))
+    FROM SBCES.EmployeeLabour EL
+    JOIN SBCES.EmplClass EC ON UPPER(EL.LabourDefn) = EC.LabourDefn
+    JOIN SBCES.EmployeeSalaries ES ON EC.WageGroup = ES.WageGroup
+    WHERE EL.LinkNumber = @ViIdNum
+      AND EL.TypeId = @ViType;
+
+    OPEN cur_Labour;
+    FETCH NEXT FROM cur_Labour INTO 
+        @LabourType, @CC, @Task, @Usage, @TimeAdd, @RatePerHour, @WrenchTime;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @TotalCost = ISNULL(@RatePerHour, 0) * ISNULL(@TimeAdd, 0) * ISNULL(@Usage, 0) / 6000;
+        SET @Percent = ROUND(ISNULL(@Usage, 0) * ISNULL(@TimeAdd, 0) / 100, 2);
+
+        INSERT INTO SBCES.TempLabourList (
+            LabourDefn, CostCentre, Task, Usage, ExtendedTime,
+            RatePerHour, TotalCost, UsedTime, LabourType, LinkNumber, WrenchTime
+        )
+        VALUES (
+            @LabourType, @CC, @Task, @Usage, @TimeAdd,
+            @RatePerHour, @TotalCost, @Percent, 'RB', UPPER(@ViIdNum), 
+            ROUND(@Usage * @WrenchTime / 100, 2)
+        );
+
+        FETCH NEXT FROM cur_Labour INTO 
+            @LabourType, @CC, @Task, @Usage, @TimeAdd, @RatePerHour, @WrenchTime;
+    END
+
+    CLOSE cur_Labour;
+    DEALLOCATE cur_Labour;
+
+    -- Step 3: Rebuilt part logic
+    SELECT @VPrice = COUNT(*) 
+    FROM SBCES.ScPartsUsed
+    WHERE RebuiltPart = 'Y'
+      AND LinkType = UPPER(@ViType)
+      AND UPPER(LinkCode) = UPPER(@ViIdNum);
+
+    IF @VPrice > 0
+    BEGIN
+        DECLARE cur_RB CURSOR FOR
+        SELECT DISTINCT 
+            UPPER(LinkCode), QtyReqd,
+            TRY_CAST(REPLACE(ISNULL(PercentUsage, '0'), ',', '.') AS DECIMAL(10, 4)),
+            MmsRebuiltCode
+        FROM SBCES.ScPartsUsed
+        WHERE RebuiltPart = 'Y'
+          AND LinkType = UPPER(@ViType)
+          AND UPPER(LinkCode) = UPPER(@ViIdNum);
+
+        DECLARE @Qty DECIMAL(10, 2), @PercentUsage DECIMAL(10, 4), @RebuiltCode VARCHAR(50);
+
+        OPEN cur_RB;
+        FETCH NEXT FROM cur_RB INTO @LinkCode, @Qty, @PercentUsage, @RebuiltCode;
+
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            EXEC SBCES.WriteLabour @RebuiltCode, @Qty * @PercentUsage;
+            FETCH NEXT FROM cur_RB INTO @LinkCode, @Qty, @PercentUsage, @RebuiltCode;
+        END
+
+        CLOSE cur_RB;
+        DEALLOCATE cur_RB;
+    END
+
+    -- Step 4: Sum up result
+    SELECT @VFinalPrice = ROUND(SUM(ISNULL(TotalCost, 0)), 2)
+    FROM SBCES.TempLabourList;
+
+    RETURN @VFinalPrice;
+END
+GO
