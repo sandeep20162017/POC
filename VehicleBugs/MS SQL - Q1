@@ -1,0 +1,48 @@
+You are MS SQL and Oracle SQL expert.
+In the following MS SQL stored proc, outpot parameter @p_result_key is not returned correctly.
+In my ASP.NET application value is always null. Do we need RETURN statement so out put parameter in MS SQL is set properly?
+MS SQL :
+ALTER   PROCEDURE [dbo].[TTC_MAX_SOLOCHAIN$ADDSOLO]
+    @p_result_key          INT OUTPUT,
+    @p_upload_userid       VARCHAR(50),
+    @p_update_userid       VARCHAR(50),
+    @p_status              VARCHAR(50),
+    @p_error_msg           VARCHAR(1000) OUTPUT
+AS
+BEGIN
+    DECLARE @result_key INT;
+ 
+    BEGIN TRY
+        -- Assuming there is a sequence or similar mechanism to generate the next value
+        SET @result_key = NEXT VALUE FOR TTC_MAX_RESULTKEY; // sp is not returning the result key (output parameter) we get null and app fails
+ 
+        INSERT INTO TTC_MAX_FILE (RESULT_KEY, UPLOAD_USERID, UPLOAD_TIME, LAST_UPDATE, LAST_UPDATE_USERID, STATUS)
+        VALUES (@result_key, @p_upload_userid, GETDATE(), GETDATE(), @p_update_userid, @p_status);
+ 
+        SET @p_result_key = @result_key;
+    END TRY
+    BEGIN CATCH
+        SET @p_error_msg = 'Error: ' + CAST(ERROR_NUMBER() AS VARCHAR) + ' - ' + ERROR_MESSAGE();
+    END CATCH
+END;
+GO
+ 
+--------------------
+Oracle :
+PROCEDURE AddSolo(p_result_key          OUT   NUMBER,            
+                  p_upload_userid       IN    VARCHAR2,
+                  p_update_userid       IN    VARCHAR2,
+                  p_status              IN    VARCHAR2,                 
+                  p_error_msg           OUT   VARCHAR2
+) IS
+    result_key   NUMBER;
+BEGIN
+    select TTC_MAX_RESULTKEY.NEXTVAL into result_key from dual;
+    INSERT INTO TTC_MAX_FILE(RESULT_KEY ,UPLOAD_USERID,UPLOAD_TIME,LAST_UPDATE,LAST_UPDATE_USERID, STATUS)
+            VALUES(result_key,p_upload_userid,sysdate,sysdate,p_update_userid,p_status);
+    p_result_key := result_key;
+    EXCEPTION
+        WHEN OTHERS THEN        
+        p_error_msg := 'Error: ' || SUBSTR(SQLCODE || ' - ' || SQLERRM, 1 , 990);     
+END AddSolo;
+ 
