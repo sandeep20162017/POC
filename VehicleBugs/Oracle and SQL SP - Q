@@ -1,0 +1,642 @@
+Oracle
+
+PROCEDURE UpdateDMAsset(p_result_key          IN    VARCHAR2,
+                        p_assetnum            IN    VARCHAR2 ,
+                        p_status              IN    VARCHAR2 ,
+                        p_notes               IN    VARCHAR2 ,
+                        p_error_msg           OUT   VARCHAR2) 
+IS
+BEGIN
+Update TTC_MAX_DM_ASSET set sflag = p_status,
+                             notes = p_notes
+          where resultkey= p_result_key
+          and assetnum=p_assetnum;
+  EXCEPTION
+        WHEN OTHERS THEN        
+        p_error_msg := 'Error: ' || SUBSTR(SQLCODE || ' - ' || SQLERRM, 1 , 990);           
+END  UpdateDMAsset;      
+
+SQL
+
+USE [MAXEXT]
+GO
+/****** Object:  StoredProcedure [dbo].[TTC_MAX_SOLOCHAIN$UPDATEDMASSET]    Script Date: 5/29/2025 12:10:47 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER   PROCEDURE [dbo].[TTC_MAX_SOLOCHAIN$UPDATEDMASSET]
+    @p_result_key VARCHAR(MAX),
+    @p_assetnum VARCHAR(MAX),
+    @p_status VARCHAR(MAX),
+    @p_notes VARCHAR(MAX),
+    @p_error_msg VARCHAR(MAX) OUTPUT
+AS
+BEGIN
+    BEGIN TRY
+        UPDATE TTC_MAX_DM_ASSET
+        SET sflag = @p_status,
+            notes = @p_notes
+        WHERE resultkey = @p_result_key
+          AND assetnum = @p_assetnum;
+    END TRY
+    BEGIN CATCH
+        SET @p_error_msg = 'Error: ' + CAST(ERROR_NUMBER() AS VARCHAR) + ' - ' + ERROR_MESSAGE();
+    END CATCH
+END;
+
+
+
+Oracle
+
+PROCEDURE ProcessSolo(p_result_key          IN    NUMBER,       
+                      p_car_no              IN    VARCHAR2,    
+                      p_userid              IN    VARCHAR2,
+                      p_status              IN    VARCHAR2,                  
+                      p_error_msg           OUT   VARCHAR2) 
+IS
+  
+BEGIN
+     delete from ttc_max_dm_asset where resultkey = p_result_key;     
+     Update ttc_max_file_line set c5= replace(c5,'/' ,'') where c5 like '%/%' and result_key=p_result_key;   
+     commit;
+     IF p_car_no is null THEN
+        MatchSHASoloNHA(p_result_key,                                                                    
+                        p_error_msg) ;  
+        insert into ttc_max_dm_asset(resultkey,assetnum,parent,serialnum,location,eq23,description,siteid,equip,pos, seq) 
+        select result_key,assetnum,parentasset,ser,'LB STOCK',assetfamily,c10,'STRCAR','#'||c15,c15, lineno 
+            from ttc_max_file_line where result_key=p_result_key and assetfamily is not null;                     
+                       
+     ELSE
+        MatchSoloNHA(p_result_key,       
+                     p_car_no,                                       
+                     p_error_msg) ;
+        insert into ttc_max_dm_asset(resultkey,assetnum,parent,serialnum,location,eq23,description,siteid,equip,pos, seq) 
+           select result_key,assetnum,parentasset,ser,p_car_no,assetfamily,c10,'STRCAR','#'||c15,c15, lineno 
+             from ttc_max_file_line where result_key=p_result_key and assetfamily is not null;
+        delete from ttc_max_dm_asset where (resultkey=p_result_key and seq>1 and (parent is null));     
+     END IF;    
+     update ttc_max_dm_asset set equip = null where equip = '#' and resultkey=p_result_key;
+     Update ttc_max_dm_asset set equip = replace(equip,'/' ,'') where equip like '%/%' and resultkey=p_result_key;   
+     update ttc_max_dm_asset set description = replace(description,',',' ') where resultkey=p_result_key;   
+     
+   EXCEPTION
+        WHEN OTHERS THEN        
+        p_error_msg := 'Error: ' || SUBSTR(SQLCODE || ' - ' || SQLERRM, 1 , 990); 
+END ProcessSolo;
+
+SQL
+
+USE [MAXEXT]
+GO
+/****** Object:  StoredProcedure [dbo].[TTC_MAX_SOLOCHAIN$PROCESSSOLO]    Script Date: 5/29/2025 12:12:10 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER   PROCEDURE [dbo].[TTC_MAX_SOLOCHAIN$PROCESSSOLO]
+    @p_result_key INT,
+    @p_car_no NVARCHAR(50),
+    @p_userid NVARCHAR(50),
+    @p_status NVARCHAR(50),
+    @p_error_msg NVARCHAR(1000) OUTPUT
+AS
+BEGIN
+    BEGIN TRY
+        DELETE FROM ttc_max_dm_asset WHERE resultkey = @p_result_key;
+
+        UPDATE ttc_max_file_line
+        SET c5 = REPLACE(c5, '/', '')
+        WHERE c5 LIKE '%/%' AND result_key = @p_result_key;
+
+        IF @p_car_no IS NULL
+        BEGIN
+            EXEC dbo.ttc_max_solochain$MatchSHASoloNHA @p_result_key, @p_error_msg;
+                                    
+            INSERT INTO ttc_max_dm_asset (resultkey, assetnum, parent, serialnum, location, eq23, description, siteid, equip, pos, seq)
+            SELECT result_key, assetnum, parentasset, ser, 'LB STOCK', assetfamily, c10, 'STRCAR', '#' + c15, c15, [lineno]
+            FROM ttc_max_file_line
+            WHERE result_key = @p_result_key AND assetfamily IS NOT NULL;
+        END
+        ELSE
+        BEGIN
+            EXEC dbo.ttc_max_solochain$MatchSoloNHA @p_result_key, @p_car_no, @p_error_msg;
+
+            INSERT INTO ttc_max_dm_asset (resultkey, assetnum, parent, serialnum, location, eq23, description, siteid, equip, pos, seq)
+            SELECT result_key, assetnum, parentasset, ser, @p_car_no, assetfamily, c10, 'STRCAR', '#' + c15, c15, [LINENO]
+            FROM ttc_max_file_line
+            WHERE result_key = @p_result_key AND assetfamily IS NOT NULL;
+
+            DELETE FROM ttc_max_dm_asset
+            WHERE resultkey = @p_result_key AND seq > 1 AND parent IS NULL;
+        END
+
+        UPDATE ttc_max_dm_asset
+        SET equip = NULL
+        WHERE equip = '#' AND resultkey = @p_result_key;
+
+        UPDATE ttc_max_dm_asset
+        SET equip = REPLACE(equip, '/', '')
+        WHERE equip LIKE '%/%' AND resultkey = @p_result_key;
+
+        UPDATE ttc_max_dm_asset
+        SET description = REPLACE(description, ',', ' ')
+        WHERE resultkey = @p_result_key;
+
+    END TRY
+    BEGIN CATCH
+        SET @p_error_msg = 'Error: ' + CAST(ERROR_NUMBER() AS NVARCHAR(10)) + ' - ' + ERROR_MESSAGE();
+    END CATCH
+END;
+
+
+
+Oracle
+
+PROCEDURE UpdateSoloLine(p_result_key          IN    NUMBER,  
+                         p_lineno              IN    NUMBER,
+                         p_assetfamily         IN    VARCHAR2 ,
+                         p_parentfamily        IN    VARCHAR2 ,
+                         p_sernha              IN    VARCHAR2 ,
+                         p_ser                 IN    VARCHAR2 ,
+                         p_assetnum            IN    VARCHAR2 ,
+                         p_parentasset         IN    VARCHAR2 ,
+                         p_description         IN    VARCHAR2 ,
+                         p_error_msg           OUT   VARCHAR2)
+IS
+BEGIN
+       UPDATE TTC_MAX_FILE_LINE 
+                SET assetfamily = p_assetfamily,
+                    parentfamily = p_parentfamily,
+                    sernha   =    p_sernha,
+                    ser    =    p_ser,
+                    assetnum =  p_assetnum,
+                    parentasset = p_parentasset,
+                    c10 = p_description
+       WHERE result_key= p_result_key
+       AND lineno = p_lineno;
+       EXCEPTION
+        WHEN OTHERS THEN        
+        p_error_msg := 'Error: ' || SUBSTR(SQLCODE || ' - ' || SQLERRM, 1 , 990);  
+END   UpdateSoloLine;
+
+SQL
+
+USE [MAXEXT]
+GO
+/****** Object:  StoredProcedure [dbo].[TTC_MAX_SOLOCHAIN$UPDATESOLOLINE]    Script Date: 5/29/2025 12:13:24 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER   PROCEDURE [dbo].[TTC_MAX_SOLOCHAIN$UPDATESOLOLINE]
+(
+    @p_result_key INT,
+    @p_lineno INT,
+    @p_assetfamily VARCHAR(255),
+    @p_parentfamily VARCHAR(255),
+    @p_sernha VARCHAR(255),
+    @p_ser VARCHAR(255),
+    @p_assetnum VARCHAR(255),
+    @p_parentasset VARCHAR(255),
+    @p_description VARCHAR(255),
+    @p_error_msg NVARCHAR(1000) OUTPUT
+)
+AS
+BEGIN
+    BEGIN TRY
+        UPDATE TTC_MAX_FILE_LINE
+        SET assetfamily = @p_assetfamily,
+            parentfamily = @p_parentfamily,
+            sernha = @p_sernha,
+            ser = @p_ser,
+            assetnum = @p_assetnum,
+            parentasset = @p_parentasset,
+            c10 = @p_description
+        WHERE result_key = @p_result_key
+        AND [LINENO] = @p_lineno;
+    END TRY
+    BEGIN CATCH
+        SET @p_error_msg = 'Error: ' + CAST(ERROR_NUMBER() AS NVARCHAR(10)) + ' - ' + ERROR_MESSAGE();
+    END CATCH
+END;
+
+
+
+Oracle
+
+PROCEDURE AddSolo(p_result_key          OUT   NUMBER,            
+                  p_upload_userid       IN    VARCHAR2,
+                  p_update_userid       IN    VARCHAR2,
+                  p_status              IN    VARCHAR2,                 
+                  p_error_msg           OUT   VARCHAR2
+                  
+) IS
+    result_key   NUMBER;
+BEGIN
+    select TTC_MAX_RESULTKEY.NEXTVAL into result_key from dual;
+    INSERT INTO TTC_MAX_FILE(RESULT_KEY ,UPLOAD_USERID,UPLOAD_TIME,LAST_UPDATE,LAST_UPDATE_USERID, STATUS)
+            VALUES(result_key,p_upload_userid,sysdate,sysdate,p_update_userid,p_status);
+    p_result_key := result_key;
+    EXCEPTION
+        WHEN OTHERS THEN        
+        p_error_msg := 'Error: ' || SUBSTR(SQLCODE || ' - ' || SQLERRM, 1 , 990);     
+END AddSolo;
+
+SQL
+
+USE [MAXEXT]
+GO
+
+/****** Object:  StoredProcedure [dbo].[TTC_MAX_SOLOCHAIN$ADDSOLO]    Script Date: 5/26/2025 3:30:39 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+
+ALTER   PROCEDURE [dbo].[TTC_MAX_SOLOCHAIN$ADDSOLO]
+    @p_result_key          INT OUTPUT,
+    @p_upload_userid       VARCHAR(50),
+    @p_update_userid       VARCHAR(50),
+    @p_status              VARCHAR(50),
+    @p_error_msg           VARCHAR(1000) OUTPUT
+AS
+BEGIN
+    DECLARE @result_key INT;
+
+    BEGIN TRY
+        -- Assuming there is a sequence or similar mechanism to generate the next value
+        SET @result_key = NEXT VALUE FOR TTC_MAX_RESULTKEY;
+
+        INSERT INTO TTC_MAX_FILE (RESULT_KEY, UPLOAD_USERID, UPLOAD_TIME, LAST_UPDATE, LAST_UPDATE_USERID, STATUS)
+        VALUES (@result_key, @p_upload_userid, GETDATE(), GETDATE(), @p_update_userid, @p_status);
+
+        SET @p_result_key = @result_key;
+    END TRY
+    BEGIN CATCH
+        SET @p_error_msg = 'Error: ' + CAST(ERROR_NUMBER() AS VARCHAR) + ' - ' + ERROR_MESSAGE();
+    END CATCH
+END;
+GO
+
+
+
+Oracle
+
+PROCEDURE AddUserAssetsLines
+         (p_result_key      IN    NUMBER,
+          p_assetnum        IN    VARCHAR2,
+          p_parent          IN    VARCHAR2,       
+          p_serialnum       IN    VARCHAR2,      
+          p_location        IN    VARCHAR2,       
+          p_eq23            IN    VARCHAR2,       
+          p_description     IN    VARCHAR2,     
+          p_siteid          IN    VARCHAR2,      
+          p_equip           IN    VARCHAR2,       
+          p_seq             IN    NUMBER,       
+          p_error_msg       OUT   VARCHAR2        
+          ) IS
+BEGIN
+        insert into ttc_max_dm_asset
+            (resultkey,assetnum,parent,serialnum,location,eq23,description,siteid,equip, seq) 
+            values(p_result_key,p_assetnum,p_parent,p_serialnum,p_location,p_eq23,
+                    p_description,p_siteid,p_equip,p_seq);
+                    
+
+EXCEPTION
+        WHEN OTHERS THEN        
+        p_error_msg := 'Error: ' || SUBSTR(SQLCODE || ' - ' || SQLERRM, 1 , 990);    
+--  //insert into ttc_max_dm_asset(resultkey,assetnum,parent,serialnum,location,eq23,description,siteid,equip, seq) 
+
+END AddUserAssetsLines;
+
+SQL
+
+USE [MAXEXT]
+GO
+/****** Object:  StoredProcedure [dbo].[TTC_MAX_SOLOCHAIN$ADDUSERASSETSLINES]    Script Date: 5/29/2025 12:16:00 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER   PROCEDURE [dbo].[TTC_MAX_SOLOCHAIN$ADDUSERASSETSLINES]
+    @p_result_key      INT,
+    @p_assetnum        VARCHAR(50),
+    @p_parent          VARCHAR(50),
+    @p_serialnum       VARCHAR(50),
+    @p_location        VARCHAR(50),
+    @p_eq23            VARCHAR(50),
+    @p_description     VARCHAR(50),
+    @p_siteid          VARCHAR(50),
+    @p_equip           VARCHAR(50),
+    @p_seq             INT,
+    @p_error_msg       VARCHAR(1000) OUTPUT
+AS
+BEGIN
+    BEGIN TRY
+        INSERT INTO dbo.TTC_MAX_DM_ASSET
+            (resultkey, assetnum, parent, serialnum, location, eq23, description, siteid, equip, seq)
+        VALUES
+            (@p_result_key, @p_assetnum, @p_parent, @p_serialnum, @p_location, @p_eq23, @p_description, @p_siteid, @p_equip, @p_seq);
+    END TRY
+    BEGIN CATCH
+        SET @p_error_msg = 'Error: ' + CAST(ERROR_NUMBER() AS VARCHAR) + ' - ' + ERROR_MESSAGE();
+    END CATCH
+END;
+
+
+
+Oracle
+
+PROCEDURE AddHTTPLog(
+          p_result_key      IN    NUMBER,
+          p_assetnum        IN    VARCHAR2,
+          p_start_time      IN    VARCHAR2,       
+          p_end_time        IN    VARCHAR2,      
+          p_time_taken      IN    NUMBER,       
+          p_status          IN    VARCHAR2,       
+          p_response        IN    VARCHAR2,     
+          p_error_msg       OUT   VARCHAR2          
+          ) IS
+BEGIN
+        
+        insert into ttc_max_httppost_log
+            (logid,resultkey,assetnum,start_time,end_time,time_taken,status,response) 
+            values(HTTPLOG.NEXTVAL,p_result_key,p_assetnum,to_date(p_start_time,'yyyyMMdd HH24:MI:ss'),to_date(p_end_time,'yyyyMMdd HH24:MI:ss'),p_time_taken,p_status, p_response);
+                    
+
+EXCEPTION
+        WHEN OTHERS THEN        
+        p_error_msg := 'Error: ' || SUBSTR(SQLCODE || ' - ' || SQLERRM, 1 , 990);    
+--  //insert into ttc_max_dm_asset(resultkey,assetnum,parent,serialnum,location,eq23,description,siteid,equip, seq) 
+
+END AddHTTPLog;
+
+SQL
+
+USE [MAXEXT]
+GO
+/****** Object:  StoredProcedure [dbo].[TTC_MAX_SOLOCHAIN$ADDHTTPLOG]    Script Date: 5/29/2025 12:17:32 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROCEDURE [dbo].[TTC_MAX_SOLOCHAIN$ADDHTTPLOG]  
+   /*
+   *   SSMA warning messages:
+   *   O2SS0356: Conversion from NUMBER datatype can cause data loss.
+   */
+
+   @P_RESULT_KEY float(53),
+   @P_ASSETNUM varchar(max),
+   @P_START_TIME varchar(max),
+   @P_END_TIME varchar(max),
+   /*
+   *   SSMA warning messages:
+   *   O2SS0356: Conversion from NUMBER datatype can cause data loss.
+   */
+
+   @P_TIME_TAKEN float(53),
+   @P_STATUS varchar(max),
+   @P_RESPONSE varchar(max),
+   @P_ERROR_MSG varchar(max)  OUTPUT
+AS 
+   BEGIN
+
+      BEGIN TRY
+
+         SET @P_ERROR_MSG = NULL
+
+         EXECUTE ssma_oracle.db_check_init_package 'dbo', 'TTC_MAX_SOLOCHAIN'
+
+         INSERT dbo.TTC_MAX_HTTPPOST_LOG(
+            LOGID, 
+            RESULTKEY, 
+            ASSETNUM, 
+            START_TIME, 
+            END_TIME, 
+            TIME_TAKEN, 
+            STATUS, 
+            RESPONSE)
+            VALUES (
+               NEXT VALUE FOR dbo.HTTPLOG, 
+               @P_RESULT_KEY, 
+               @P_ASSETNUM, 
+               ssma_oracle.to_date2(@P_START_TIME, 'yyyyMMdd HH24:MI:ss'), 
+               ssma_oracle.to_date2(@P_END_TIME, 'yyyyMMdd HH24:MI:ss'), 
+               @P_TIME_TAKEN, 
+               @P_STATUS, 
+               @P_RESPONSE)
+
+      END TRY
+
+      BEGIN CATCH
+
+         DECLARE
+            @errornumber int
+
+         SET @errornumber = ERROR_NUMBER()
+
+         DECLARE
+            @errormessage nvarchar(4000)
+
+         SET @errormessage = ERROR_MESSAGE()
+
+         DECLARE
+            @exceptionidentifier nvarchar(4000)
+
+         SELECT @exceptionidentifier = ssma_oracle.db_error_get_oracle_exception_id(@errormessage, @errornumber)
+
+         BEGIN
+            SET @P_ERROR_MSG = 'Error: ' + ISNULL(substring(ISNULL(CAST(ssma_oracle.db_error_sqlcode(@exceptionidentifier, @errornumber) AS nvarchar(max)), '') + ' - ' + ISNULL(ssma_oracle.db_error_sqlerrm_0(@exceptionidentifier, @errornumber), ''), 1, 990), '')/*  //insert into ttc_max_dm_asset(resultkey,assetnum,parent,serialnum,location,eq23,description,siteid,equip, seq)*/
+         END
+
+      END CATCH
+
+   END
+
+
+Oracle
+
+PROCEDURE AddSoloLines
+         (p_result_key    IN    NUMBER,
+          p_lineno        IN    NUMBER,
+          p_level         IN    VARCHAR2,       -- Level/C1
+          p_sup           IN    VARCHAR2,       --Supplier Code/C2
+          p_part          IN    VARCHAR2,       --Part Number/C3
+          p_mod           IN    VARCHAR2,       --Modification Level/C4
+          p_serial        IN    VARCHAR2,       --Serial Number/C5
+          p_soft_ver      IN    VARCHAR2,       --Software Version/C6
+          p_doc_no        IN    VARCHAR2,       --DOCUMENT_NO/C7
+          p_level_doc     IN    VARCHAR2,       --LEVEL_REV_DOCUMENT/C8
+          p_eng_no        IN    VARCHAR2,       --ENG_CHG_ORDER_NO/C9
+          p_descrip       IN    VARCHAR2,       --Description/C10
+          p_mod_no        IN    VARCHAR2,       -- MOD_INSTRUCTION_NO/C11
+          p_vide1         IN    VARCHAR2,       --VIDE_1/C12
+          p_vide2         IN    VARCHAR2,       --VIDE_2/C13
+          p_vide3         IN    VARCHAR2,       --VIDE_3/C14
+          p_pos           IN    VARCHAR2,       --Position/C15
+          p_ipc           IN    VARCHAR2,       --IPC Code/C16
+          p_c_part_no     IN    VARCHAR2,       --Client Part Code/C17
+          p_c_part_type   IN    VARCHAR2,       --Client Part Type/C18
+          p_c_part_class  IN    VARCHAR2,       --Client Part Class/C19
+          p_comm          IN    VARCHAR2,       --Commodity Number/C20
+          p_su_mode       IN    VARCHAR2,       -- SUIVI_MODE/C21
+          p_ref_mode      IN    VARCHAR2,       --REF_MODELE_SMB/C22
+          p_file_type     IN    VARCHAR2,       --FILE_TYPE/C23
+          p_indict_in     IN    VARCHAR2,       --INDICT_INACTIVE/C24
+          p_bom_part_no   IN    VARCHAR2,       --BOMBARDIER_PART_NO/C25
+          p_indict        IN    VARCHAR2,       --INDICT_SOFTWARE/C26
+          p_track_mode    IN    VARCHAR2,        --TRACK_MODE/C27
+          p_error_msg     OUT   VARCHAR2         --CE
+          ) IS
+BEGIN
+        INSERT INTO TTC_MAX_FILE_LINE
+         (result_key,
+          lineno,
+          C1,
+          C2,
+          C3,
+          C4,
+          C5,
+          C6,
+          C7,
+          C8,
+          C9,
+          C10,
+          C11,
+          C12,
+          C13,
+          C14,
+          C15,
+          C16,
+          C17,
+          C18,
+          C19,
+          C20,
+          C21,
+          C22,
+          C23,
+          C24,
+          C25,
+          C26,
+          C27)
+        VALUES
+        (
+          p_result_key ,
+          p_lineno ,
+          p_level,       -- Level/C1
+          p_sup ,       --Supplier Code/C2
+          p_part ,       --Part Number/C3
+          p_mod,       --Modification Level/C4
+          p_serial ,       --Serial Number/C5
+          p_soft_ver,       --Software Version/C6
+          p_doc_no  ,       --DOCUMENT_NO/C7
+          p_level_doc ,       --LEVEL_REV_DOCUMENT/C8
+          p_eng_no,       --ENG_CHG_ORDER_NO/C9
+          p_descrip ,       --Description/C10
+          p_mod_no ,       -- MOD_INSTRUCTION_NO/C11
+          p_vide1,       --VIDE_1/C12
+          p_vide2   ,       --VIDE_2/C13
+          p_vide3     ,       --VIDE_3/C14
+          p_pos        ,       --Position/C15
+          p_ipc         ,       --IPC Code/C16
+          p_c_part_no    ,       --Client Part Code/C17
+          p_c_part_type   ,       --Client Part Type/C18
+          p_c_part_class ,       --Client Part Class/C19
+          p_comm          ,       --Commodity Number/C20
+          p_su_mode     ,       -- SUIVI_MODE/C21
+          p_ref_mode  ,       --REF_MODELE_SMB/C22
+          p_file_type  ,       --FILE_TYPE/C23
+          p_indict_in  ,       --INDICT_INACTIVE/C24
+          p_bom_part_no ,       --BOMBARDIER_PART_NO/C25
+          p_indict  ,       --INDICT_SOFTWARE/C26
+          p_track_mode        --TRACK_MODE/C27
+        );
+     EXCEPTION
+        WHEN OTHERS THEN        
+        p_error_msg := 'Error: ' || SUBSTR(SQLCODE || ' - ' || SQLERRM, 1 , 990);    
+END AddSoloLines;
+
+SQL
+
+USE [MAXEXT]
+GO
+/****** Object:  StoredProcedure [dbo].[TTC_MAX_SOLOCHAIN$ADDSOLOLINES]    Script Date: 5/29/2025 12:18:30 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER   PROCEDURE [dbo].[TTC_MAX_SOLOCHAIN$ADDSOLOLINES]
+    @p_result_key    INT,
+    @p_lineno        INT,
+    @p_level         VARCHAR(50),       -- Level/C1
+    @p_sup           VARCHAR(50),       -- Supplier Code/C2
+    @p_part          VARCHAR(50),       -- Part Number/C3
+    @p_mod           VARCHAR(50),       -- Modification Level/C4
+    @p_serial        VARCHAR(50),       -- Serial Number/C5
+    @p_soft_ver      VARCHAR(50),       -- Software Version/C6
+    @p_doc_no        VARCHAR(50),       -- DOCUMENT_NO/C7
+    @p_level_doc     VARCHAR(50),       -- LEVEL_REV_DOCUMENT/C8
+    @p_eng_no        VARCHAR(50),       -- ENG_CHG_ORDER_NO/C9
+    @p_descrip       VARCHAR(50),       -- Description/C10
+    @p_mod_no        VARCHAR(50),       -- MOD_INSTRUCTION_NO/C11
+    @p_vide1         VARCHAR(50),       -- VIDE_1/C12
+    @p_vide2         VARCHAR(50),       -- VIDE_2/C13
+    @p_vide3         VARCHAR(50),       -- VIDE_3/C14
+    @p_pos           VARCHAR(50),       -- Position/C15
+    @p_ipc           VARCHAR(50),       -- IPC Code/C16
+    @p_c_part_no     VARCHAR(50),       -- Client Part Code/C17
+    @p_c_part_type   VARCHAR(50),       -- Client Part Type/C18
+    @p_c_part_class  VARCHAR(50),       -- Client Part Class/C19
+    @p_comm          VARCHAR(50),       -- Commodity Number/C20
+    @p_su_mode       VARCHAR(50),       -- SUIVI_MODE/C21
+    @p_ref_mode      VARCHAR(50),       -- REF_MODELE_SMB/C22
+    @p_file_type     VARCHAR(50),       -- FILE_TYPE/C23
+    @p_indict_in     VARCHAR(50),       -- INDICT_INACTIVE/C24
+    @p_bom_part_no   VARCHAR(50),       -- BOMBARDIER_PART_NO/C25
+    @p_indict        VARCHAR(50),       -- INDICT_SOFTWARE/C26
+    @p_track_mode    VARCHAR(50),       -- TRACK_MODE/C27
+    @p_error_msg     VARCHAR(1000) OUTPUT
+AS
+BEGIN
+    BEGIN TRY
+        INSERT INTO dbo.TTC_MAX_FILE_LINE
+            (result_key, [LINENO], C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, C14, C15, C16, C17, C18, C19, C20, C21, C22, C23, C24, C25, C26, C27)
+        VALUES
+            (@p_result_key, @p_lineno, @p_level, @p_sup, @p_part, @p_mod, @p_serial, @p_soft_ver, @p_doc_no, @p_level_doc, @p_eng_no, @p_descrip, @p_mod_no, @p_vide1, @p_vide2, @p_vide3, @p_pos, @p_ipc, @p_c_part_no, @p_c_part_type, @p_c_part_class, @p_comm, @p_su_mode, @p_ref_mode, @p_file_type, @p_indict_in, @p_bom_part_no, @p_indict, @p_track_mode);
+    END TRY
+    BEGIN CATCH
+        SET @p_error_msg = 'Error: ' + CAST(ERROR_NUMBER() AS VARCHAR) + ' - ' + ERROR_MESSAGE();
+    END CATCH
+END;
+
+
+
+Thank you,
+
+Janki Jadeja
+Programmer Analyst
+Applications Portfolio EAM
+I.T. Services
+Corporate Services Group
+T: 416-988-3649 / via Teams
+ 
+Toronto Transit Commission
+3rd Floor, 1910 Yonge St.
+Toronto, ON M4S 3B2
+
+
