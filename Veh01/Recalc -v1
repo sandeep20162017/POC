@@ -1,0 +1,286 @@
+New questionn
+In the folliwing onGridCellSave, I need to dynamically recalculate TotalCost and populate the TotalCost field. Values must be from the user tyed values in the respective cells.
+Also after updating the TotalCost cell, update the model. How can I check the model values in the controller?
+Grid :
+ @model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+
+@{
+    ViewData["Title"] = "Non Stock Coded Parts Details";
+    var nscGridName = $"NScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}"; /* save gridname in hidden field for JS */
+}
+
+<h6>Non Stock Coded Parts Used</h6>
+<input type="hidden" id="nscGridNameField" value="@nscGridName" /> @* save gridname in hidden field for JS *@
+@(
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()
+                
+                @* .Name($"NscPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}") *@
+                .Name($"NscPartsMaterialDetailsRebuiltPartsGrid")
+                 .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "NscGrid" }) //lockcols
+                .Events(events => events
+                    .DataBound("onGridDataBound")
+                    .Save("onGridCellSave")
+                    
+                )
+                .Columns(columns =>
+                {
+                    columns.Bound(c => c.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("Contains")))
+                    .EditorTemplateName("ComboBoxEditor")
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell" })
+                    .Width(140);
+                   @*  columns.Command(command =>
+                   {
+                       command.Custom("Populate Details").Click("refreshNscPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+                   }).Width(60); *@
+                    columns.Bound(c => c.OrigSupplierName)
+                    .Title("Supplier Name")
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell" })
+                    .Filterable(ftb => ftb.Cell(cell => cell.Operator("Contains")
+                    .SuggestionOperator(FilterType.Contains)))
+                    .EditorTemplateName("ComboBoxEditor")
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:notNew" } //lockcols
+                    })
+                    .EditorTemplateName("NscSupplierComboBox").Width(120);
+                    columns.Bound(c => c.Description)
+                    .Title("Description")
+                    .EditorTemplateName("ComboBoxEditor")
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                    })
+                    .Width(140)
+                    ;
+                    columns.Bound(c => c.KeyWord)
+                    .Title("KeyWord")
+                    .EditorTemplateName("ComboBoxEditor")
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                    })
+                    .Width(100);
+                    //  columns.Bound(c => c.OemPartCost).Title("Unit Cost").Format("{0:N2}").Width(30);
+                    columns.Bound(c => c.CC).Title("Cost Centre").Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))).EditorTemplateName("ComboBoxEditor").Width(70); 
+                    columns.Bound(c => c.Qty).Title("Qty").Width(70)
+                    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" }); 
+                    columns.Bound(c => c.Percentage).Title("%").HtmlAttributes(new { data_field = "Percentage"}).Width(60);
+                    columns.Bound(c => c.UnitCost).Title("Part Cost").Width(80);
+                    columns.Bound(c => c.CoreCost).Title("Core Cost").Width(80);
+                    columns.Bound(c => c.TotalCost)
+                   .Title("Total Cost")
+                   .Width(90)
+                   .Format("{0:C2}")
+                   .Editable("false")
+                   .EditorTemplateName("ComboBoxEditor")
+                   .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                   })
+                   ;
+                    columns.Bound(c => c.LastModifiedBy).Title("Modified By").Width(170)
+                    .ClientTemplate("#= LastModifiedBy && LastModifiedBy !== 0 ? LastModifiedBy : '(System Generated)' #");
+                    columns.Bound(c => c.LastModifiedDate).Title("Modified Date").Width(170).Format("{0:MM-dd-yyyy HH:mm:ss}")
+                    .ClientTemplate("#= LastModifiedDate && LastModifiedDate !== 0 ? LastModifiedDate : '(System Generated)' #"); ; //  format dateTime;;
+                   
+                    @* columns.Command(command =>
+                    {
+                        command.Custom("Re-Calculate")
+                            .Click("recalculateTotalCost")
+                            .HtmlAttributes(new { @class = "k-grid-recalculate" });
+                    }).HtmlAttributes( new { data_field = "Commands" }).Width(80);
+
+                    columns.Bound(c => c.TotalCost).Title("Total Cost").Width(30); *@
+                    
+                    // columns.Bound(c => c.DateRevised).Title("Date Revised");
+                    // columns.Command(command => command.Edit()).Title("Actions");
+                    columns.Command(command =>
+        {
+            if (@ViewBag.RoleId == 1)
+            {
+                // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+            }
+            if (@ViewBag.RoleId == 1)
+            {
+
+                command.Custom("Delete")
+                 .Click("showDeleteConfirmation")
+                 .Text(" ")
+                 .IconClass("k-icon k-i-delete")
+                 .HtmlAttributes(new
+                 {
+                     @class = "text-danger",
+                     title = "Delete",
+                     data_grid = $"NscPartsMaterialDetailsRebuiltPartsGrid",
+                     data_url = Url.Action("DeleteNscPartsUsedInEstimates", "NscPartsUsedInEstimates"),
+                     data_id_field = "id",
+                     //  data_mmsstockcode_field = "parentPartId",
+                     data_grid_type = "NSCPartGrid"
+                 });
+            }
+        }).Width(100);
+                })
+
+                .Events (events => 
+                {
+                    //events.Edit("onEdit") ;
+                    //events.Save("onSave");
+                 //   events.CellClose("onCellClose");
+                    events.SaveChanges("onSaveChanges");
+
+                })
+
+     .ToolBar(toolbar =>
+    {
+        if (@ViewBag.RoleId == 1)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    .Resizable(r => r.Columns(true))
+   // .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(true)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.OrigSuppNum);
+            model.Field(c => c.OrigSupplierName);
+            model.Field(c => c.OrigSuppNum);
+            model.Field(c => c.KeyWord);
+            model.Field(c => c.Description);
+            model.Field(c => c.UnitCost);
+            model.Field(c => c.Percentage);
+            model.Field(c => c.TotalCost);
+            model.Field(c => c.LastModifiedBy).Editable(false);
+            model.Field(c => c.LastModifiedDate).Editable(false);
+           // model.Field(c => c.TotalCost).Editable(true);
+         
+          //  model.Field("needsRecalculation", typeof(bool)).DefaultValue(false);
+        })
+        .Events(events =>
+        {
+                      
+            events.RequestEnd("onRequestEnd");
+            events.Error("onDataSourceError");
+        })
+
+        .Read(read => read.Url(Url.Action("GetNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+       
+        .Create(create => create.Url(Url.Action("CreateNscPartsUsedInEstimatess", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsedInRbtParts", "NscPartsUsedInEstimates") + "?rebuiltPartNum=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+
+)
+
+
+JS :
+function onGridCellSave(e) {
+    notifyValidationError("onGridCellSave");
+    var column = e.column;
+    var field = e.container.find("input").attr("name");
+    var cell = e.container;
+    var value = e.values[field];
+    
+     /* start validation logic */
+    // Skip if this is a command column or field is not present
+    if (!field || !cell) return;
+
+    // Find the cell element inside the grid (it's wrapped in a <td>)
+    var cellElement = cell.closest("td");
+    if (!cellElement || !cellElement.length) return;
+
+    // Get the business rule attribute from the cell
+    var brData = cellElement.attr("data-br");
+    if (!brData) return; // no validation rules defined for this cell
+
+    var value = e.values[field];
+    if (value == null || value === "") return; // optional: allow empty
+
+    var rules = brData.split(',');
+    var errorMessage = validateCellInput(value, rules);
+
+    if (errorMessage) {
+        notifyValidationError(errorMessage);
+        // var notification = $("#gridNotification").data("kendoNotification");
+        // if (notification) {
+        //     notification.show(errorMessage, "error");
+        // } else {
+        //     alert(errorMessage); // fallback
+        // }
+
+        e.preventDefault(); // stop the save
+    }
+
+    /* end validation logic */
+
+    // Grid calculation logic
+    if (!isUpdating && ["CoreCost", "Qty", "Percentage", "UnitCost"].includes(field)) {
+        notifyValidationError("Grid calculation logic");
+        console.warn('********** Grid calculation logic ');
+        isUpdating = true;
+
+        if (field === "Qty" || field === "CoreCost" || field === "UnitCost" || field === "Percentage")
+            notifyValidationError("Total cost is re-calculated");
+            
+        const model = e.model;
+        //const coreCost = parseFloat(model.CoreCost) || 0;
+        //const unitCost = parseFloat(model.UnitCost) || 0;
+        //const qty = parseFloat(model.Qty) || 0;
+        //const percentage = parseFloat(model.Percentage) || 0;
+
+        const coreCost = e.values["CoreCost"] || 0;
+        const unitCost = e.values["UnitCost"] || 0;
+        const qty = e.values["Qty"] || 0;;
+        const percentage = e.values["Percentage"] || 0;;
+
+        const coreCharge = qty * coreCost * percentage;
+        var totalUnitCost = (unitCost * qty * (percentage/100))
+        var totalCost = totalUnitCost - coreCost;
+
+        notifyValidationError(unitCost);
+        notifyValidationError(qty);
+        notifyValidationError((percentage / 100));
+
+        notifyValidationError(totalUnitCost);
+        notifyValidationError(coreCost);
+        notifyValidationError(totalCost);
+        
+
+        setTimeout(() => {
+            model.set("CoreCharge", coreCharge);
+            model.set("TotalCost", totalCost);
+
+            // Dynamically detect the grid from the container
+            const gridElement = e.container.closest(".k-grid");
+            const grid = gridElement.data("kendoGrid");
+
+            if (grid) {
+                const uid = model.uid;
+                const row = grid.table.find("tr[data-uid='" + uid + "']");
+                const dataItem = grid.dataSource.getByUid(uid);
+
+                // Rebind only the "TotalCost" cell
+                const cells = row.find("td");
+                const columns = grid.columns;
+
+                for (let i = 0; i < columns.length; i++) {
+                    const column = columns[i];
+                    if (column.field === "TotalCost") {
+                        const cell = $(cells[i]);
+                        const formatted = kendo.toString(dataItem.TotalCost, "c2"); // Format as currency
+                        cell.html(kendo.htmlEncode(formatted));
+                        break;
+                    }
+                }
+            }
+
+            isUpdating = false;
+        }, 50);
+    }
+}
