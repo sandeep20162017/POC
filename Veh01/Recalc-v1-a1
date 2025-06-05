@@ -1,0 +1,59 @@
+function onGridCellSave(e) {
+    var field = e.container.find("input").attr("name");
+    if (!field) return;
+
+    const model = e.model;
+
+    // Use the current values or fallback to model if not changed in current cell
+    const qty = e.values["Qty"] ?? model.Qty ?? 0;
+    const unitCost = e.values["UnitCost"] ?? model.UnitCost ?? 0;
+    const coreCost = e.values["CoreCost"] ?? model.CoreCost ?? 0;
+    const percentage = e.values["Percentage"] ?? model.Percentage ?? 0;
+
+    if (["CoreCost", "Qty", "Percentage", "UnitCost"].includes(field)) {
+        const coreCharge = qty * coreCost * (percentage / 100);
+        const totalUnitCost = qty * unitCost * (percentage / 100);
+        const totalCost = totalUnitCost + coreCharge;
+
+        model.set("TotalCost", totalCost); // updates UI and model
+        model.set("CoreCharge", coreCharge);
+
+        const grid = e.container.closest(".k-grid").data("kendoGrid");
+        const row = grid.table.find(`tr[data-uid="${model.uid}"]`);
+        const totalCostCellIndex = grid.columns.findIndex(col => col.field === "TotalCost");
+
+        if (totalCostCellIndex >= 0) {
+            const totalCostCell = $(row).children("td").eq(totalCostCellIndex);
+            const formatted = kendo.toString(totalCost, "c2");
+            totalCostCell.html(kendo.htmlEncode(formatted));
+        }
+    }
+}
+✅ Explanation:
+Correctly reads values from either e.values (newly typed) or fallback model.
+
+Accurate formula using percentage and cost to get a meaningful TotalCost.
+
+Model is updated with .set() to trigger Kendo Grid data binding.
+
+Cell UI refresh happens manually by setting innerHTML with formatted value.
+
+✅ Server-side Controller Debugging
+To inspect the updated model in your controller:
+
+csharp
+Copy
+Edit
+[HttpPost]
+public IActionResult UpdateNscPartsUsedInEstimates([DataSourceRequest] DataSourceRequest request, [Bind(Prefix = "models")] IEnumerable<NscPartsUsedViewModel> parts)
+{
+    foreach (var part in parts)
+    {
+        // Debug info
+        Console.WriteLine($"TotalCost: {part.TotalCost}, Qty: {part.Qty}, CoreCost: {part.CoreCost}, UnitCost: {part.UnitCost}");
+        
+        // Add persistence logic here
+    }
+
+    return Json(parts.ToDataSourceResult(request, ModelState));
+}
