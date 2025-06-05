@@ -1,0 +1,58 @@
+function onGridCellSave(e) {
+    const field = e.container.find("input").attr("name");
+    const model = e.model;
+
+    console.log("===== [onGridCellSave] Event Start =====");
+    console.log("Edited Field:", field);
+    console.log("e.values:", e.values);
+    console.log("Model State BEFORE Calculation:", {
+        Qty: model.Qty,
+        UnitCost: model.UnitCost,
+        CoreCost: model.CoreCost,
+        Percentage: model.Percentage,
+        TotalCost: model.TotalCost
+    });
+
+    if (!["Qty", "UnitCost", "CoreCost", "Percentage"].includes(field)) {
+        console.log("Not a TotalCost-impacting field. Exit.");
+        return;
+    }
+
+    // Read current values — prioritize edited values, then fallback to model
+    const qty = e.values["Qty"] ?? model.Qty ?? 0;
+    const unitCost = e.values["UnitCost"] ?? model.UnitCost ?? 0;
+    const coreCost = e.values["CoreCost"] ?? model.CoreCost ?? 0;
+    const percentage = e.values["Percentage"] ?? model.Percentage ?? 0;
+
+    console.log("Resolved for calculation => Qty:", qty, "UnitCost:", unitCost, "CoreCost:", coreCost, "Percentage:", percentage);
+
+    const coreCharge = qty * coreCost * (percentage / 100);
+    const totalUnitCost = qty * unitCost * (percentage / 100);
+    const totalCost = totalUnitCost + coreCharge;
+
+    model.set("CoreCharge", coreCharge);
+    model.set("TotalCost", totalCost);
+
+    console.log("Calculated CoreCharge:", coreCharge, "TotalUnitCost:", totalUnitCost, "TotalCost:", totalCost);
+    console.log("Model State AFTER Calculation:", {
+        Qty: model.Qty,
+        UnitCost: model.UnitCost,
+        CoreCost: model.CoreCost,
+        Percentage: model.Percentage,
+        TotalCost: model.TotalCost
+    });
+
+    // Manual refresh of TotalCost cell content
+    const grid = e.container.closest(".k-grid").data("kendoGrid");
+    const row = grid.table.find(`tr[data-uid="${model.uid}"]`);
+    const totalCostIndex = grid.columns.findIndex(c => c.field === "TotalCost");
+
+    if (totalCostIndex !== -1) {
+        const cell = row.children().eq(totalCostIndex);
+        const formatted = kendo.toString(totalCost, "c2");
+        cell.html(kendo.htmlEncode(formatted));
+        console.log("Updated TotalCost cell visually:", formatted);
+    }
+
+    console.log("===== [onGridCellSave] Event End =====");
+}
