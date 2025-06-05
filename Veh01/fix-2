@@ -1,0 +1,102 @@
+_NscPartsUsed.cshtml
+Update the Qty column to add readable BR names via HtmlAttributes:
+
+csharp
+Copy
+Edit
+columns.Bound(c => c.Qty)
+    .Title("Qty")
+    .Width(70)
+    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" });
+Update your grid events to include the save handler:
+
+csharp
+Copy
+Edit
+.Events(events =>
+{
+    events.Save("onGridCellSave");
+    events.SaveChanges("onSaveChanges");
+})
+Add a placeholder for the notification control (place it outside the grid):
+
+html
+Copy
+Edit
+<div id="gridNotification"></div>
+Include the JS file and init script at the bottom of the file or in the layout:
+
+html
+Copy
+Edit
+<script src="~/js/gridValidation.js"></script>
+<script>
+    $(document).ready(function () {
+        $("#gridNotification").kendoNotification({
+            stacking: "down",
+            position: {
+                top: 10,
+                right: 10
+            },
+            autoHideAfter: 4000
+        });
+    });
+</script>
+📁 2. wwwroot/js/gridValidation.js
+Create or update this JavaScript file:
+
+javascript
+Copy
+Edit
+function validateCellInput(value, rules) {
+    for (let rule of rules) {
+        switch (rule.trim()) {
+            case 'MustBeNumeric':
+                if (!/^\d+(\.\d+)?$/.test(value)) {
+                    return "Value must be numeric.";
+                }
+                break;
+            case 'MustBeAlphaCharacters':
+                if (!/^[A-Za-z]+$/.test(value)) {
+                    return "Only alphabetic characters are allowed.";
+                }
+                break;
+            case 'NoSpecialCharacters':
+                if (/[^a-zA-Z0-9\s]/.test(value)) {
+                    return "Special characters are not allowed.";
+                }
+                break;
+            case 'MustBePositive':
+                if (parseFloat(value) <= 0) {
+                    return "Value must be positive.";
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    return null;
+}
+
+function onGridCellSave(e) {
+    var column = e.column;
+    var field = column.field;
+    var cell = e.container;
+    var value = e.values[field];
+
+    var brData = column.attributes && column.attributes['data-br'];
+    if (!brData) return;
+
+    var rules = brData.split(',');
+
+    var errorMessage = validateCellInput(value, rules);
+    if (errorMessage) {
+        var notification = $("#gridNotification").data("kendoNotification");
+        if (notification) {
+            notification.show(errorMessage, "error");
+        } else {
+            alert(errorMessage); // fallback
+        }
+        e.preventDefault(); // cancel the save
+    }
+}
