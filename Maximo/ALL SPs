@@ -1,0 +1,455 @@
+Additional data to verify why CE value is always NULL in MS SQL (table ttc_max_file_line). Do you see any logic differene in Oracle and MS SQL?
+delete where CE ='S' is failing as CE value is always NULL
+Oracle :
+AddSoloLines
+
+PROCEDURE AddSoloLines
+         (p_result_key    IN    NUMBER,
+          p_lineno        IN    NUMBER,
+          p_level         IN    VARCHAR2,       -- Level/C1
+          p_sup           IN    VARCHAR2,       --Supplier Code/C2
+          p_part          IN    VARCHAR2,       --Part Number/C3
+          p_mod           IN    VARCHAR2,       --Modification Level/C4
+          p_serial        IN    VARCHAR2,       --Serial Number/C5
+          p_soft_ver      IN    VARCHAR2,       --Software Version/C6
+          p_doc_no        IN    VARCHAR2,       --DOCUMENT_NO/C7
+          p_level_doc     IN    VARCHAR2,       --LEVEL_REV_DOCUMENT/C8
+          p_eng_no        IN    VARCHAR2,       --ENG_CHG_ORDER_NO/C9
+          p_descrip       IN    VARCHAR2,       --Description/C10
+          p_mod_no        IN    VARCHAR2,       -- MOD_INSTRUCTION_NO/C11
+          p_vide1         IN    VARCHAR2,       --VIDE_1/C12
+          p_vide2         IN    VARCHAR2,       --VIDE_2/C13
+          p_vide3         IN    VARCHAR2,       --VIDE_3/C14
+          p_pos           IN    VARCHAR2,       --Position/C15
+          p_ipc           IN    VARCHAR2,       --IPC Code/C16
+          p_c_part_no     IN    VARCHAR2,       --Client Part Code/C17
+          p_c_part_type   IN    VARCHAR2,       --Client Part Type/C18
+          p_c_part_class  IN    VARCHAR2,       --Client Part Class/C19
+          p_comm          IN    VARCHAR2,       --Commodity Number/C20
+          p_su_mode       IN    VARCHAR2,       -- SUIVI_MODE/C21
+          p_ref_mode      IN    VARCHAR2,       --REF_MODELE_SMB/C22
+          p_file_type     IN    VARCHAR2,       --FILE_TYPE/C23
+          p_indict_in     IN    VARCHAR2,       --INDICT_INACTIVE/C24
+          p_bom_part_no   IN    VARCHAR2,       --BOMBARDIER_PART_NO/C25
+          p_indict        IN    VARCHAR2,       --INDICT_SOFTWARE/C26
+          p_track_mode    IN    VARCHAR2,        --TRACK_MODE/C27
+          p_error_msg     OUT   VARCHAR2         --CE
+          ) IS
+BEGIN
+        INSERT INTO TTC_MAX_FILE_LINE
+         (result_key,
+          lineno,
+          C1,
+          C2,
+          C3,
+          C4,
+          C5,
+          C6,
+          C7,
+          C8,
+          C9,
+          C10,
+          C11,
+          C12,
+          C13,
+          C14,
+          C15,
+          C16,
+          C17,
+          C18,
+          C19,
+          C20,
+          C21,
+          C22,
+          C23,
+          C24,
+          C25,
+          C26,
+          C27)
+        VALUES
+        (
+          p_result_key ,
+          p_lineno ,
+          p_level,       -- Level/C1
+          p_sup ,       --Supplier Code/C2
+          p_part ,       --Part Number/C3
+          p_mod,       --Modification Level/C4
+          p_serial ,       --Serial Number/C5
+          p_soft_ver,       --Software Version/C6
+          p_doc_no  ,       --DOCUMENT_NO/C7
+          p_level_doc ,       --LEVEL_REV_DOCUMENT/C8
+          p_eng_no,       --ENG_CHG_ORDER_NO/C9
+          p_descrip ,       --Description/C10
+          p_mod_no ,       -- MOD_INSTRUCTION_NO/C11
+          p_vide1,       --VIDE_1/C12
+          p_vide2   ,       --VIDE_2/C13
+          p_vide3     ,       --VIDE_3/C14
+          p_pos        ,       --Position/C15
+          p_ipc         ,       --IPC Code/C16
+          p_c_part_no    ,       --Client Part Code/C17
+          p_c_part_type   ,       --Client Part Type/C18
+          p_c_part_class ,       --Client Part Class/C19
+          p_comm          ,       --Commodity Number/C20
+          p_su_mode     ,       -- SUIVI_MODE/C21
+          p_ref_mode  ,       --REF_MODELE_SMB/C22
+          p_file_type  ,       --FILE_TYPE/C23
+          p_indict_in  ,       --INDICT_INACTIVE/C24
+          p_bom_part_no ,       --BOMBARDIER_PART_NO/C25
+          p_indict  ,       --INDICT_SOFTWARE/C26
+          p_track_mode        --TRACK_MODE/C27
+        );
+     EXCEPTION
+        WHEN OTHERS THEN        
+        p_error_msg := 'Error: ' || SUBSTR(SQLCODE || ' - ' || SQLERRM, 1 , 990);    
+END AddSoloLines;
+
+
+MatchSoloNHA
+
+PROCEDURE MatchSoloNHA(p_result_key          IN    NUMBER,       
+                       p_car_no              IN    VARCHAR2,                                       
+                       p_error_msg           OUT   VARCHAR2) 
+IS     
+    temp_sno          number;
+    lineno_           number;
+    cur_level_        number;
+    lflrv_level_      number;
+    sernha_a_         varchar2(50); 
+    sernha_b_         varchar2(50); 
+    sernha_c_         varchar2(50); 
+    sernha_d_         varchar2(50); 
+    sernha_e_         varchar2(50); 
+    sernha_           varchar2(50); 
+    assetfamily_      varchar2(50); 
+    parentfamily_     varchar2(50); 
+    prefix_           varchar2(50); 
+    parentasset_      varchar2(50); 
+    description_      varchar2(100); 
+    error_msg_        varchar2(1000); 
+    position_         varchar2(10); 
+    cposition_        varchar2(10);
+    type array_nha is varray(10) of varchar2(500);
+    nhaarray array_nha := array_nha('', '', '','','','','','','','');
+    parentarray array_nha := array_nha('', '', '','','','','','','','');
+    cursor update_family is 
+     select  lineno
+     ,c1 --Slevel
+     ,c2   --"Supplier code"
+     ,c3   --"Part No"
+     ,c5   --"Serial Number"
+     ,c10  -- "Description"
+     ,c15   --"Position" 
+     from TTC_MAX_FILE_LINE where result_key=p_result_key and ce is null order by lineno;
+     duplicated_      VARCHAR2(1) := 'N'; 
+     cursor maxline is select max(lineno)
+        from TTC_MAX_FILE_LINE where result_key=p_result_key;
+     maxline_    NUMBER;
+      CURSOR getconfig(partnumber_ varchar2,
+                       assetfamily_ varchar2) IS
+        SELECT distinct assetfamily,parentfamily,prefix ,description,position
+        FROM strcarconfig
+        WHERE partnumber = partnumber_ and vehicletype='LFLRV' and assetfamily <> assetfamily_;     
+   
+BEGIN
+
+    temp_sno :=   DMSERIAL.nextval; 
+    sernha_a_ := to_char(temp_sno);
+    temp_sno :=   DMSERIAL.nextval; 
+    sernha_b_ := to_char(temp_sno);
+    temp_sno :=   DMSERIAL.nextval; 
+    sernha_c_ := to_char(temp_sno);
+    temp_sno :=   DMSERIAL.nextval; 
+    sernha_d_ := to_char(temp_sno);
+    temp_sno :=   DMSERIAL.nextval; 
+    sernha_e_ := to_char(temp_sno);
+
+    --c10  -- "Description"
+    --c15   --"Position" 
+    delete from TTC_MAX_FILE_LINE where result_key=p_result_key and ce = 'S';
+    commit;
+    --Insert level 0 
+    lineno_ := 1;
+
+    
+    Insert into ttc_max_file_line(result_key, lineno,       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(p_result_key, lineno_   ,  p_car_no,'',         p_car_no,'LFLRV', 'Low Floor Light Rail Vehicle','','S');       
+    --Insert Level 1
+    lineno_ := lineno_ + 1;                       
+    Insert into ttc_max_file_line(result_key, lineno,       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(p_result_key, lineno_   , 'MOD-A-'||sernha_a_ ,p_car_no, sernha_a_     ,'MODULELF', 'Module-A LF','A','S');  
+    lineno_ := lineno_ + 1;                       
+    Insert into ttc_max_file_line(result_key, lineno,       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(p_result_key, lineno_   , 'MOD-B-'||sernha_b_ ,p_car_no, sernha_b_     ,'MODULELF', 'Module-B LF','B','S');   
+    lineno_ := lineno_ + 1;                       
+    Insert into ttc_max_file_line(result_key, lineno,       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(p_result_key, lineno_   , 'MOD-C-'||sernha_c_ ,p_car_no, sernha_c_     ,'MODULELF', 'Module-C LF','C','S');  
+    lineno_ := lineno_ + 1;                       
+    Insert into ttc_max_file_line(result_key, lineno,       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(p_result_key, lineno_   , 'MOD-D-'||sernha_d_ ,p_car_no, sernha_d_     ,'MODULELF', 'Module-D LF','D','S');    
+    lineno_ := lineno_ + 1;                       
+    Insert into ttc_max_file_line(result_key, lineno,       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(p_result_key, lineno_   , 'MOD-E-'||sernha_e_ ,p_car_no, sernha_e_     ,'MODULELF', 'Module-E LF','E','S');   
+    commit;    
+    open maxline;
+    fetch maxline into maxline_;
+    close maxline;                     
+    FoR update_family_ IN update_family LOOP  
+        assetfamily_ := null;
+        parentfamily_ := null; 
+        prefix_       := null;   
+        description_    := null;  
+        sernha_         := null;  
+        cur_level_      := 0;  
+        parentasset_    := null;    
+        --dbms_output.put_line(' begin nhaarray(cur_level_ ) = '||rtrim(ltrim(update_family_.c3)));                                                                                                        
+        RetrieveConfig(rtrim(ltrim(update_family_.c3)),assetfamily_,parentfamily_,prefix_,description_,cposition_,error_msg_);    
+      
+        IF rtrim(ltrim(update_family_.c3)) in ('9918950','9952179') THEN
+            duplicated_ := 'Y';
+        ELSE
+            duplicated_ := 'N';
+        END IF;
+        
+        
+        cur_level_ := to_number(rtrim(ltrim(update_family_.c1)));  
+        
+        IF assetfamily_ is null THEN        
+             nhaarray(cur_level_ ) :=null;
+             parentarray(cur_level_) := null;       
+        END IF;
+         
+        IF assetfamily_ is not null THEN                    
+            IF parentfamily_ = 'LFLRV' THEN  --Level LFLRV
+                IF rtrim(ltrim(update_family_.c15)) is null THEN
+                    IF cposition_ is not null THEN
+                        position_ := cposition_;  
+                    ELSE
+                        position_ := 'A';
+                    END IF;  
+                ELSE
+                    position_ :=    rtrim(ltrim(update_family_.c15)) ;          
+                END IF;
+                --dbms_output.put_line('position_= '||position_);
+                position_ := GET_MOUDLE(position_) ;
+                IF  position_ = 'A' THEN
+                    sernha_ := sernha_a_;
+                    parentasset_ := 'MOD-A-'||sernha_a_;
+                ELSIF position_ = 'B' THEN
+                    sernha_ := sernha_b_;
+                    parentasset_ := 'MOD-B-'||sernha_b_;   
+                ELSIF position_ = 'C' THEN
+                    sernha_ := sernha_c_;
+                    parentasset_ := 'MOD-C-'||sernha_c_;                    
+                ELSIF position_ = 'D' THEN
+                    sernha_ := sernha_d_;
+                    parentasset_ := 'MOD-D-'||sernha_d_;                    
+                ELSIF position_ = 'E' THEN
+                    sernha_ := sernha_e_;
+                    parentasset_ := 'MOD-E-'||sernha_e_;  
+                END IF;                       
+                lflrv_level_ :=  cur_level_;
+                --nhaarray(cur_level_ ) :=sernha_;
+                --parentarray(cur_level_) := parentasset_;    
+            ELSE   --Level Below LFLRV  
+                             
+                sernha_ := nhaarray(cur_level_ - 1);
+                parentasset_ := parentarray(cur_level_ - 1);
+                  
+            END IF; 
+             nhaarray(cur_level_ ) :=substr(rtrim(ltrim(update_family_.c5)),1,10);
+             parentarray(cur_level_) := prefix_||substr(rtrim(ltrim(update_family_.c5)),1,10);   
+                          --dbms_output.put_line('nhaarray(cur_level_ ) = '||nhaarray(cur_level_ )); 
+                          --dbms_output.put_line('parentarray(cur_level_)  = '||parentarray(cur_level_) ); 
+                          --dbms_output.put_line('cur_level_ = '||to_char(cur_level_)); 
+             --dbms_output.put_line('update_family_.lineno = '||to_char(update_family_.lineno));
+             
+             UpdateSoloLine(p_result_key,update_family_.lineno,assetfamily_,parentfamily_,sernha_,substr(rtrim(ltrim(update_family_.c5)),1,10),prefix_||substr(rtrim(ltrim(update_family_.c5)),1,10),parentasset_,description_,error_msg_);                
+             --Process duplicated records
+             IF duplicated_ = 'Y' THEN
+                --INsert another records
+                FOR getconfig_ IN getconfig(rtrim(ltrim(update_family_.c3)),assetfamily_ )  LOOP
+                       
+                    --dbms_output.put_line('maxline_ = '||to_char(maxline_));
+                    --dbms_output.put_line('assetfamily_ = '||assetfamily_);
+                    --dbms_output.put_line('getconfig_.assetfamily = '||getconfig_.assetfamily);
+                    
+                    maxline_ := maxline_ + 1;
+                    
+                    Insert into ttc_max_file_line(result_key, lineno,       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(p_result_key, 
+                                  maxline_   , 
+                                  getconfig_.prefix||substr(rtrim(ltrim(update_family_.c5)),1,10) ,
+                                  parentasset_, 
+                                  substr(rtrim(ltrim(update_family_.c5)),1,10)     ,getconfig_.assetfamily, getconfig_.description,getconfig_.position,'S');  
+                   /* insert into ttc_max_dm_asset(resultkey,assetnum,
+                                parent,serialnum,location,eq23,
+                                description,siteid,equip,pos, seq)
+                        values(p_result_key,   getconfig_.prefix||substr(rtrim(ltrim(update_family_.c5)),1,10) ,
+                               parentasset_,   substr(rtrim(ltrim(update_family_.c5)),1,10),   p_car_no, getconfig_.assetfamily,
+                               getconfig_.description, 'STRCAR'  ,'#'||getconfig_.position,getconfig_.position, maxline_ );  */ 
+                                  
+                END LOOP;            
+             END IF;
+        END IF;
+    END LOOP;    
+    EXCEPTION
+        WHEN OTHERS THEN        
+        p_error_msg := 'Error: ' || SUBSTR(SQLCODE || ' - ' || SQLERRM, 1 , 990);     
+END MatchSoloNHA;
+
+
+ProcessSolo
+
+PROCEDURE ProcessSolo(p_result_key          IN    NUMBER,       
+                      p_car_no              IN    VARCHAR2,    
+                      p_userid              IN    VARCHAR2,
+                      p_status              IN    VARCHAR2,                  
+                      p_error_msg           OUT   VARCHAR2) 
+IS
+  
+BEGIN
+     delete from ttc_max_dm_asset where resultkey = p_result_key;     
+     Update ttc_max_file_line set c5= replace(c5,'/' ,'') where c5 like '%/%' and result_key=p_result_key;   
+     commit;
+     IF p_car_no is null THEN
+        MatchSHASoloNHA(p_result_key,                                                                    
+                        p_error_msg) ;  
+        insert into ttc_max_dm_asset(resultkey,assetnum,parent,serialnum,location,eq23,description,siteid,equip,pos, seq) 
+        select result_key,assetnum,parentasset,ser,'LB STOCK',assetfamily,c10,'STRCAR','#'||c15,c15, lineno 
+            from ttc_max_file_line where result_key=p_result_key and assetfamily is not null;                     
+                       
+     ELSE
+        MatchSoloNHA(p_result_key,       
+                     p_car_no,                                       
+                     p_error_msg) ;
+        insert into ttc_max_dm_asset(resultkey,assetnum,parent,serialnum,location,eq23,description,siteid,equip,pos, seq) 
+           select result_key,assetnum,parentasset,ser,p_car_no,assetfamily,c10,'STRCAR','#'||c15,c15, lineno 
+             from ttc_max_file_line where result_key=p_result_key and assetfamily is not null;
+        delete from ttc_max_dm_asset where (resultkey=p_result_key and seq>1 and (parent is null));     
+     END IF;    
+     update ttc_max_dm_asset set equip = null where equip = '#' and resultkey=p_result_key;
+     Update ttc_max_dm_asset set equip = replace(equip,'/' ,'') where equip like '%/%' and resultkey=p_result_key;   
+     update ttc_max_dm_asset set description = replace(description,',',' ') where resultkey=p_result_key;   
+     
+   EXCEPTION
+        WHEN OTHERS THEN        
+        p_error_msg := 'Error: ' || SUBSTR(SQLCODE || ' - ' || SQLERRM, 1 , 990); 
+END ProcessSolo;
+
+MS SQL :
+USE [MAXEXT]
+GO
+/****** Object:  StoredProcedure [dbo].[TTC_MAX_SOLOCHAIN$ADDSOLOLINES]    Script Date: 6/10/2025 1:44:44 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER   PROCEDURE [dbo].[TTC_MAX_SOLOCHAIN$ADDSOLOLINES]
+    @p_result_key    INT,
+    @p_lineno        INT,
+    @p_level         VARCHAR(50),       -- Level/C1
+    @p_sup           VARCHAR(50),       -- Supplier Code/C2
+    @p_part          VARCHAR(50),       -- Part Number/C3
+    @p_mod           VARCHAR(50),       -- Modification Level/C4
+    @p_serial        VARCHAR(50),       -- Serial Number/C5
+    @p_soft_ver      VARCHAR(50),       -- Software Version/C6
+    @p_doc_no        VARCHAR(50),       -- DOCUMENT_NO/C7
+    @p_level_doc     VARCHAR(50),       -- LEVEL_REV_DOCUMENT/C8
+    @p_eng_no        VARCHAR(50),       -- ENG_CHG_ORDER_NO/C9
+    @p_descrip       VARCHAR(50),       -- Description/C10
+    @p_mod_no        VARCHAR(50),       -- MOD_INSTRUCTION_NO/C11
+    @p_vide1         VARCHAR(50),       -- VIDE_1/C12
+    @p_vide2         VARCHAR(50),       -- VIDE_2/C13
+    @p_vide3         VARCHAR(50),       -- VIDE_3/C14
+    @p_pos           VARCHAR(50),       -- Position/C15
+    @p_ipc           VARCHAR(50),       -- IPC Code/C16
+    @p_c_part_no     VARCHAR(50),       -- Client Part Code/C17
+    @p_c_part_type   VARCHAR(50),       -- Client Part Type/C18
+    @p_c_part_class  VARCHAR(50),       -- Client Part Class/C19
+    @p_comm          VARCHAR(50),       -- Commodity Number/C20
+    @p_su_mode       VARCHAR(50),       -- SUIVI_MODE/C21
+    @p_ref_mode      VARCHAR(50),       -- REF_MODELE_SMB/C22
+    @p_file_type     VARCHAR(50),       -- FILE_TYPE/C23
+    @p_indict_in     VARCHAR(50),       -- INDICT_INACTIVE/C24
+    @p_bom_part_no   VARCHAR(50),       -- BOMBARDIER_PART_NO/C25
+    @p_indict        VARCHAR(50),       -- INDICT_SOFTWARE/C26
+    @p_track_mode    VARCHAR(50),       -- TRACK_MODE/C27
+    @p_error_msg     VARCHAR(1000) OUTPUT
+AS
+BEGIN
+    BEGIN TRY
+        INSERT INTO dbo.TTC_MAX_FILE_LINE
+            (result_key, [LINENO], C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, C14, C15, C16, C17, C18, C19, C20, C21, C22, C23, C24, C25, C26, C27)
+        VALUES
+            (@p_result_key, @p_lineno, @p_level, @p_sup, @p_part, @p_mod, @p_serial, @p_soft_ver, @p_doc_no, @p_level_doc, @p_eng_no, @p_descrip, @p_mod_no, @p_vide1, @p_vide2, @p_vide3, @p_pos, @p_ipc, @p_c_part_no, @p_c_part_type, @p_c_part_class, @p_comm, @p_su_mode, @p_ref_mode, @p_file_type, @p_indict_in, @p_bom_part_no, @p_indict, @p_track_mode);
+    END TRY
+    BEGIN CATCH
+        SET @p_error_msg = 'Error: ' + CAST(ERROR_NUMBER() AS VARCHAR) + ' - ' + ERROR_MESSAGE();
+    END CATCH
+END;
+USE [MAXEXT]
+GO
+/****** Object:  StoredProcedure [dbo].[TTC_MAX_SOLOCHAIN$PROCESSSOLO]    Script Date: 6/10/2025 1:46:58 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER   PROCEDURE [dbo].[TTC_MAX_SOLOCHAIN$PROCESSSOLO]
+    @p_result_key INT,
+    @p_car_no NVARCHAR(50),
+    @p_userid NVARCHAR(50),
+    @p_status NVARCHAR(50),
+    @p_error_msg NVARCHAR(1000) OUTPUT
+AS
+BEGIN
+    BEGIN TRY
+        DELETE FROM ttc_max_dm_asset WHERE resultkey = @p_result_key;
+
+        UPDATE ttc_max_file_line
+        SET c5 = REPLACE(c5, '/', '')
+        WHERE c5 LIKE '%/%' AND result_key = @p_result_key;
+
+        IF @p_car_no IS NULL
+        BEGIN
+            EXEC dbo.ttc_max_solochain$MatchSHASoloNHA @p_result_key, @p_error_msg;
+			
+            INSERT INTO ttc_max_dm_asset (resultkey, assetnum, parent, serialnum, location, eq23, description, siteid, equip, pos, seq)
+            SELECT result_key, assetnum, parentasset, ser, 'LB STOCK', assetfamily, c10, 'STRCAR', '#' + c15, c15, [lineno]
+            FROM ttc_max_file_line
+            WHERE result_key = @p_result_key AND assetfamily IS NOT NULL;
+        END
+        ELSE
+        BEGIN
+           --EXEC dbo.ttc_max_solochain$MatchSoloNHA @p_result_key, @p_car_no, @p_error_msg;
+
+            INSERT INTO ttc_max_dm_asset (resultkey, assetnum, parent, serialnum, location, eq23, description, siteid, equip, pos, seq)
+            SELECT result_key, assetnum, parentasset, ser, @p_car_no, assetfamily, c10, 'STRCAR', '#' + c15, c15, [LINENO]
+            FROM ttc_max_file_line
+            WHERE result_key = @p_result_key AND assetfamily IS NOT NULL;
+
+            DELETE FROM ttc_max_dm_asset
+            WHERE resultkey = @p_result_key AND seq > 1 AND parent IS NULL;
+        END
+
+        UPDATE ttc_max_dm_asset
+        SET equip = NULL
+        WHERE equip = '#' AND resultkey = @p_result_key;
+
+        UPDATE ttc_max_dm_asset
+        SET equip = REPLACE(equip, '/', '')
+        WHERE equip LIKE '%/%' AND resultkey = @p_result_key;
+
+        UPDATE ttc_max_dm_asset
+        SET description = REPLACE(description, ',', ' ')
+        WHERE resultkey = @p_result_key;
+
+    END TRY
+    BEGIN CATCH
+        SET @p_error_msg = 'Error: ' + CAST(ERROR_NUMBER() AS NVARCHAR(10)) + ' - ' + ERROR_MESSAGE();
+    END CATCH
+END;
+
