@@ -1,0 +1,51 @@
+Continuing our previous discussion, Based on above table schema, for the following :
+Error :
+(1 row affected)
+Msg 547, Level 16, State 0, Line 4
+The INSERT statement conflicted with the FOREIGN KEY constraint "FK_ArchVehScPartsUsed". The conflict occurred in database "CES", table "SBCES.ArchVehicleList", column 'ArchVehicleListId'.
+The statement has been terminated.
+Why it is failing? You have schema for all the tables (above)
+
+Completion time: 2025-06-11T16:48:58.5299134-04:00
+
+		  DECLARE  @ArchId INT = 4320 --(SELECT ISNULL(MAX(ArchVehicleListId), 0) + 1   FROM SBCES.ArchVehicleList)
+		SELECT  @ArchId
+		INSERT INTO [SBCES].[ArchVehScPartsUsed] (
+				[MmsStockCode], [DateEntered], [RebPartCost], [UserEntered], 
+				[MmsCost], [OemCost], [MmsRebuiltCode], [CostCentre], 
+				[QtyReqd], [PercentUsage], [LinkCode], [RebuiltPart], 
+				[LinkType], [Corecost], [ArchVehicleListId], 
+				[TotalCost], [ScKeyword], [ScDescription]
+			)
+			SELECT 
+				B.[MmsStockCode],
+				B.[DateEntered],
+				B.[RebPartCost],
+				B.[EnteredBy],
+				B.[MmsCost],
+				B.[OemCost],
+				B.[MmsRebuiltCode],
+				B.[CostCentre],
+				B.[QtyReqd],
+				B.[PercentUsage],
+				B.[LinkCode],
+				B.[RebuiltPart],
+				B.[LinkType],
+				B.[CoreCost],
+				@ArchId,
+				 -- Safe TotalCost calculation
+				 CAST((CAST(ISNULL(B.MmsCost, 0) AS DECIMAL(18, 2)) *
+				 CAST((CAST(NULLIF(LTRIM(RTRIM(B.qtyReqd)), '') AS DECIMAL(18, 2)) *
+				 CAST(REPLACE(NULLIF(LTRIM(RTRIM(B.percentUsage)), ''), ',', '.') AS DECIMAL(18, 2)) / 100) AS DECIMAL(18,2))) AS DECIMAL(18,2)) AS TotalCost,
+				S.[PartType],    -- Maps to ScKeyword
+				S.[DetailedDesc] -- Maps to ScDescription
+			FROM 
+				[SBCES].[ScPartsUsed] AS B
+			LEFT JOIN 
+				[SBCES].[StockCodedParts] AS S 
+				ON B.[MmsStockCode] = S.[MmsStockCode]
+			WHERE 
+				B.[LinkType] = 'BUS' --'@TypeId'
+				AND B.[LinkCode] =  '4320' --'@LinkNumber'
+				AND B.[MmsRebuiltCode] =  '4320' --'@LinkNumber'
+				AND B.RebuiltPart = 'N'
