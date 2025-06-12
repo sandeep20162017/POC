@@ -27,77 +27,75 @@ public static class VehicleListUpdater
             SELECT 
                 EL.Id,
                 EL.LinkNumber,
-                CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
-                (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60),
-                CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
-                (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
-                * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100),
-                CAST(
-                    (
-                        CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
-                        (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
-                        * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
-                    ) / 
-                    CAST(
-                        (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
-                         FROM [CES].[SBCES].[CesSettings]
-                         WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'
-                        ) AS DECIMAL(18,2)
-                    ) AS VARCHAR(10)
-                ),
+                
+                -- DecimalHrs
+                CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), '0') AS DECIMAL(18,2)) + 
+                CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), '0') AS DECIMAL(18,2)) / 60.0,
+
+                -- EffectiveHours
+                (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), '0') AS DECIMAL(18,2)) + 
+                CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), '0') AS DECIMAL(18,2)) / 60.0)
+                * ISNULL(CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)), 0) / 100.0,
+
+                -- AdjHrs
+                CAST((
+                    (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), '0') AS DECIMAL(18,2)) + 
+                    CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), '0') AS DECIMAL(18,2)) / 60.0)
+                    * ISNULL(CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)), 0) / 100.0
+                ) / 
+                ISNULL(
+                    (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                     FROM [CES].[SBCES].[CesSettings]
+                     WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), 1
+                ) AS VARCHAR(10)),
+
+                -- LabourRate
                 (SELECT TOP 1 ES.RatePerHour 
                  FROM [CES].[SBCES].[EmployeeSalaries] ES
                  WHERE ES.WageGroup = 
                     (SELECT TOP 1 EC.WageGroup
                      FROM [CES].[SBCES].[EmplClass] EC
-                     WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
-                ),
-                ISNULL(
-                    CAST(
-                        (
-                            CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
-                            (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
-                            * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) 
-                            / CAST(
-                                (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
-                                 FROM [CES].[SBCES].[CesSettings]
-                                 WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'
-                                ) AS DECIMAL(18,2)
-                            )
-                        ) * 
-                        ISNULL(
-                            (SELECT TOP 1 ES.RatePerHour 
-                             FROM [CES].[SBCES].[EmployeeSalaries] ES
-                             WHERE ES.WageGroup = 
-                                (SELECT TOP 1 EC.WageGroup
-                                 FROM [CES].[SBCES].[EmplClass] EC
-                                 WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
-                        ), 0)
-                    ), 
-                    0
-                ),
-                ISNULL(
-                    CAST(
-                        (
-                            CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
-                            (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
-                            * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) 
-                            / CAST(
-                                (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
-                                 FROM [CES].[SBCES].[CesSettings]
-                                 WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'
-                                ) AS DECIMAL(18,2)
-                            )
-                        ) *
-                        ISNULL(
-                            (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
-                             FROM [CES].[SBCES].[CesSettings]
-                             WHERE Parameter = 'OVERHEAD'
-                            ), 0
-                        )
-                    ), 
-                    0
-                )
+                     WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')),
+
+                -- LabourCost
+                ISNULL((
+                    (
+                        (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), '0') AS DECIMAL(18,2)) + 
+                        CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), '0') AS DECIMAL(18,2)) / 60.0)
+                        * ISNULL(CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)), 0) / 100.0
+                    ) / ISNULL(
+                        (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                         FROM [CES].[SBCES].[CesSettings]
+                         WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), 1
+                    )
+                    * ISNULL((
+                        SELECT TOP 1 ES.RatePerHour 
+                        FROM [CES].[SBCES].[EmployeeSalaries] ES
+                        WHERE ES.WageGroup = 
+                            (SELECT TOP 1 EC.WageGroup
+                             FROM [CES].[SBCES].[EmplClass] EC
+                             WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                    ), 0)
+                ), 0),
+
+                -- LabourOverheadTotal
+                ISNULL((
+                    (
+                        (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), '0') AS DECIMAL(18,2)) + 
+                        CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), '0') AS DECIMAL(18,2)) / 60.0)
+                        * ISNULL(CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)), 0) / 100.0
+                    ) / ISNULL(
+                        (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                         FROM [CES].[SBCES].[CesSettings]
+                         WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), 1
+                    )
+                    * ISNULL((
+                        SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                        FROM [CES].[SBCES].[CesSettings]
+                        WHERE Parameter = 'OVERHEAD'
+                    ), 0)
+                ), 0)
+
             FROM SBCES.EmployeeLabour EL
             WHERE EL.TypeId = 'BUS' AND EL.LinkNumber = @id;
 
@@ -130,7 +128,7 @@ public static class VehicleListUpdater
             DECLARE @TotalBusEstimateCost DECIMAL(18,2) = @LabourCost + @MaterialsTotal - @CoreCost;
             DECLARE @TotalCostTax DECIMAL(18,2) = @TotalBusEstimateCost + @TotalTax;
             DECLARE @LabourTotal DECIMAL(18,2) = @LabourCost + @LabourOverheadAmount + @LabourBenefits + @LabourFringe;
-            DECLARE @OemKitsTotal DECIMAL(18,2) = 0; -- TODO: Add real logic
+            DECLARE @OemKitsTotal DECIMAL(18,2) = 0; -- TODO
 
             UPDATE SBCES.VehicleList
             SET 
