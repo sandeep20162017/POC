@@ -1,0 +1,172 @@
+using System;
+using System.Data;
+using System.Threading.Tasks;
+using Dapper;
+
+public static class VehicleListUpdater
+{
+    public static async Task UpdateVehicleCostsAsync(IDbConnection db, string rebuiltPartNum)
+    {
+        const string sql = @"
+        DECLARE @id VARCHAR(30) = @RebuiltPartNum;
+
+        BEGIN TRY
+            CREATE TABLE #TempLabourDetails
+            (
+                Id INT,
+                RebuiltPartNum VARCHAR(30),
+                DecimalHrs DECIMAL(18, 2),
+                EffectiveHours DECIMAL(18, 2),
+                AdjHrs VARCHAR(10),
+                LabourRate DECIMAL(18, 2),
+                LabourCost DECIMAL(18, 2),
+                LabourOverheadTotal DECIMAL(18, 2)
+            );
+
+            INSERT INTO #TempLabourDetails
+            SELECT 
+                EL.Id,
+                EL.LinkNumber,
+                CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60),
+                CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100),
+                CAST(
+                    (
+                        CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                        (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                        * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
+                    ) / 
+                    CAST(
+                        (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                         FROM [CES].[SBCES].[CesSettings]
+                         WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'
+                        ) AS DECIMAL(18,2)
+                    ) AS VARCHAR(10)
+                ),
+                (SELECT TOP 1 ES.RatePerHour 
+                 FROM [CES].[SBCES].[EmployeeSalaries] ES
+                 WHERE ES.WageGroup = 
+                    (SELECT TOP 1 EC.WageGroup
+                     FROM [CES].[SBCES].[EmplClass] EC
+                     WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                ),
+                ISNULL( -- LabourCost
+                    CAST(
+                        (
+                            CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                            (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                            * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) 
+                            / CAST(
+                                (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                                 FROM [CES].[SBCES].[CesSettings]
+                                 WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'
+                                ) AS DECIMAL(18,2)
+                            )
+                        ) * 
+                        ISNULL(
+                            (SELECT TOP 1 ES.RatePerHour 
+                             FROM [CES].[SBCES].[EmployeeSalaries] ES
+                             WHERE ES.WageGroup = 
+                                (SELECT TOP 1 EC.WageGroup
+                                 FROM [CES].[SBCES].[EmplClass] EC
+                                 WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                        ), 0)
+                    ), 
+                    0
+                ),
+                ISNULL( -- LabourOverheadTotal
+                    CAST(
+                        (
+                            CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                            (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) 
+                            * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) 
+                            / CAST(
+                                (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                                 FROM [CES].[SBCES].[CesSettings]
+                                 WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'
+                                ) AS DECIMAL(18,2)
+                            )
+                        ) *
+                        ISNULL(
+                            (SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                             FROM [CES].[SBCES].[CesSettings]
+                             WHERE Parameter = 'OVERHEAD'
+                            ), 0
+                        )
+                    ), 
+                    0
+                )
+            FROM SBCES.EmployeeLabour EL
+            WHERE EL.TypeId = 'BUS' AND EL.LinkNumber = @id;
+
+            DECLARE @LabourCost DECIMAL(18,2) = (SELECT SUM(LabourCost) FROM #TempLabourDetails);
+            DECLARE @LabourOverheadAmount DECIMAL(18,2) = (SELECT SUM(LabourOverheadTotal) FROM #TempLabourDetails);
+
+            DECLARE @LabourBenefits DECIMAL(18,2) = (
+                SELECT CAST(Value AS DECIMAL(18,2)) 
+                FROM SBCES.CesSettings 
+                WHERE Parameter = 'Labour_Benefits'
+            );
+
+            DECLARE @LabourFringe DECIMAL(18,2) = (
+                SELECT CAST(Value AS DECIMAL(18,2)) 
+                FROM SBCES.CesSettings 
+                WHERE Parameter = 'Labour_Fringe'
+            );
+
+            DECLARE @CoreCost DECIMAL(18,2) = (SELECT SUM(CoreCost) FROM SBCES.SCPartsUsed WHERE LinkCode = @id);
+
+            DECLARE @MaterialsTotal DECIMAL(18,2) = (
+                SELECT ISNULL(SUM(RebPartCost + MMSCost - CoreCost), 0) 
+                FROM SBCES.SCPartsUsed 
+                WHERE LinkCode = @id
+            );
+
+            DECLARE @TaxRate DECIMAL(18,4) = (
+                SELECT CAST(Value AS DECIMAL(18,4)) 
+                FROM SBCES.CesSettings 
+                WHERE Parameter = 'TAX_RATE'
+            );
+
+            DECLARE @TotalTax DECIMAL(18,2) = @MaterialsTotal * @TaxRate;
+            DECLARE @TotalBusEstimateCost DECIMAL(18,2) = @LabourCost + @MaterialsTotal - @CoreCost;
+            DECLARE @TotalCostTax DECIMAL(18,2) = @TotalBusEstimateCost + @TotalTax;
+            DECLARE @LabourTotal DECIMAL(18,2) = @LabourCost + @LabourOverheadAmount + @LabourBenefits + @LabourFringe;
+
+            DECLARE @OemKitsTotal DECIMAL(18,2) = 0; -- TODO: Add logic if required
+
+            UPDATE SBCES.VehicleList
+            SET 
+                LabourCost = @LabourCost,
+                LabourOverheadAmount = @LabourOverheadAmount,
+                LabourBenefits = @LabourBenefits,
+                LabourFringe = @LabourFringe,
+                LabourTotal = @LabourTotal,
+                MaterialsTotal = @MaterialsTotal,
+                TotalBusEstimateCost = @TotalBusEstimateCost,
+                TotalTax = @TotalTax,
+                TotalCostTax = @TotalCostTax,
+                OemKitsTotal = @OemKitsTotal
+            WHERE Sopnumber = @id;
+
+            DROP TABLE #TempLabourDetails;
+        END TRY
+        BEGIN CATCH
+            THROW; -- Will be caught in the C# exception block
+        END CATCH;
+        ";
+
+        try
+        {
+            await db.ExecuteAsync(sql, new { RebuiltPartNum = rebuiltPartNum });
+        }
+        catch (Exception ex)
+        {
+            // You can log or handle it as needed
+            Console.WriteLine($"Error updating VehicleList for Sopnumber {rebuiltPartNum}: {ex.Message}");
+            throw;
+        }
+    }
+}
