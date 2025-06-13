@@ -1,0 +1,242 @@
+You are MS SQL and Oracle expert. Folloing is migrated from Oracle to SQL.
+Can you pls verify the following MS SQL? I suspect its relaated to cursor and getting nextval.
+Somehow it's not working as expected in MS SQL.
+Migrated MS SQL :
+USE [MAXEXT]
+GO
+/****** Object:  StoredProcedure [dbo].[TTC_MAX_SOLOCHAIN$MATCHSOLONHA]    Script Date: 6/12/2025 8:08:53 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER   PROCEDURE [dbo].[TTC_MAX_SOLOCHAIN$MATCHSOLONHA]
+    @P_RESULT_KEY INT,
+    @P_CAR_NO NVARCHAR(50),
+    @P_ERROR_MSG NVARCHAR(1000) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        DECLARE 
+            @temp_sno INT,
+            @lineno INT = 1,
+            @cur_level INT,
+            @lflrv_level INT,
+            @sernha_a NVARCHAR(50),
+            @sernha_b NVARCHAR(50),
+            @sernha_c NVARCHAR(50),
+            @sernha_d NVARCHAR(50),
+            @sernha_e NVARCHAR(50),
+            @sernha NVARCHAR(50),
+            @assetfamily NVARCHAR(50),
+            @parentfamily NVARCHAR(50),
+            @prefix NVARCHAR(50),
+            @parentasset NVARCHAR(50),
+            @description NVARCHAR(100),
+            @position NVARCHAR(10),
+            @duplicated CHAR(1) = 'N',
+            @maxline INT,
+            @current_linenum INT;
+
+        -- Simulate VARRAYs with table variables
+        DECLARE @nhaarray TABLE (level INT PRIMARY KEY, sernha NVARCHAR(500));
+        DECLARE @parentarray TABLE (level INT PRIMARY KEY, parentsernha NVARCHAR(500));
+
+        -- Cursors
+        DECLARE update_family CURSOR FOR
+            SELECT [lineno], c1 --AS slevel
+			, c2, c3, c5, c10, c15, c18, ce
+            FROM TTC_MAX_FILE_LINE
+            WHERE result_key = @p_result_key
+              AND ce IS NULL
+            ORDER BY [lineno];
+
+        DECLARE @update_lineno INT, @update_slevel NVARCHAR(10), @update_c2 NVARCHAR(50), @update_c3 NVARCHAR(50),
+                @update_c5 NVARCHAR(50), @update_c10 NVARCHAR(50), @update_c15 NVARCHAR(50), @update_c18 NVARCHAR(100), @update_ce NVARCHAR(10);
+
+        -- Simulate serials (assuming you have a table or sequence to generate them)
+        SELECT @temp_sno = NEXT VALUE FOR DMSERIAL;
+        SET @sernha_a = CAST(@temp_sno AS NVARCHAR(50));
+
+        SELECT @temp_sno = NEXT VALUE FOR DMSERIAL;
+        SET @sernha_b = CAST(@temp_sno AS NVARCHAR(50));
+
+        SELECT @temp_sno = NEXT VALUE FOR DMSERIAL;
+        SET @sernha_c = CAST(@temp_sno AS NVARCHAR(50));
+
+        SELECT @temp_sno = NEXT VALUE FOR DMSERIAL;
+        SET @sernha_d = CAST(@temp_sno AS NVARCHAR(50));
+
+        SELECT @temp_sno = NEXT VALUE FOR DMSERIAL;
+        SET @sernha_e = CAST(@temp_sno AS NVARCHAR(50));
+
+        -- Clean up
+        DELETE FROM TTC_MAX_FILE_LINE
+        WHERE result_key = @p_result_key
+        AND ce ='S' ;
+
+		set @lineno=1
+        
+		Insert into ttc_max_file_line(result_key, [lineno],       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(@p_result_key, @lineno   ,  @P_CAR_NO,'',         @P_CAR_NO,'LFLRV', 'Low Floor Light Rail Vehicle','','S');       
+    --Insert Level 1
+    SET @lineno += 1;                      
+    Insert into ttc_max_file_line(result_key, [lineno],       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(@p_result_key, @lineno   , CONCAT('MOD-A-', @sernha_a) ,@P_CAR_NO, @sernha_a     ,'MODULELF', 'Module-A LF','A','S');  
+    SET @lineno += 1;                       
+    Insert into ttc_max_file_line(result_key, [lineno],       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(@p_result_key, @lineno   , CONCAT('MOD-B-', @sernha_b) ,@P_CAR_NO, @sernha_b     ,'MODULELF', 'Module-B LF','B','S');   
+    SET @lineno += 1;                       
+    Insert into ttc_max_file_line(result_key, [lineno],       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(@p_result_key, @lineno   , CONCAT('MOD-C-', @sernha_c),@P_CAR_NO, @sernha_c     ,'MODULELF', 'Module-C LF','C','S');  
+    SET @lineno += 1;                       
+    Insert into ttc_max_file_line(result_key, [lineno],       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(@p_result_key, @lineno   , CONCAT('MOD-D-', @sernha_d),@P_CAR_NO, @sernha_d     ,'MODULELF', 'Module-D LF','D','S');    
+    SET @lineno += 1;                       
+    Insert into ttc_max_file_line(result_key, [lineno],       assetnum, parentasset,ser,      assetfamily,c10,c15,ce)
+                           values(@p_result_key, @lineno   , CONCAT('MOD-E-', @sernha_e) ,@P_CAR_NO, @sernha_e     ,'MODULELF', 'Module-E LF','E','S'); 
+       
+
+        -- Get max line
+        SELECT @maxline = ISNULL(MAX([lineno]), 0)
+        FROM TTC_MAX_FILE_LINE
+        WHERE result_key = @p_result_key;
+
+        -- Open the cursor
+        OPEN update_family;
+        FETCH NEXT FROM update_family INTO @update_lineno, @update_slevel, @update_c2, @update_c3, @update_c5, @update_c10, @update_c15, @update_c18, @update_ce;
+
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            SET @cur_level = TRY_CAST(@update_slevel AS INT);
+
+            IF @update_c3 IN ('9918958', '9952179') 
+                SET @duplicated = 'Y';
+            ELSE
+                SET @duplicated = 'N';
+				
+            -- Get the config
+            SELECT TOP 1
+                @assetfamily = assetfamily,
+                @parentfamily = parentfamily,
+                @prefix = prefix,
+                @description = description,
+                @position = position
+            FROM STRCARCONFIG
+            WHERE partnumber = LTRIM(RTRIM(@update_c3))
+              AND vehicletype = 'LFLRV'
+              AND assetfamily <> @assetfamily;
+
+            IF @assetfamily IS NOT NULL
+            BEGIN
+                IF @position IS NULL
+                    SET @position = 'A';
+
+                -- Assign parent serials based on position
+                IF @position = 'A'
+                BEGIN
+                    SET @sernha = @sernha_a;
+                    SET @parentasset = CONCAT('MOD-A-', @sernha_a);
+                END
+                ELSE IF @position = 'B'
+                BEGIN
+                    SET @sernha = @sernha_b;
+                    SET @parentasset = CONCAT('MOD-B-', @sernha_b);
+                END
+                ELSE IF @position = 'C'
+                BEGIN
+                    SET @sernha = @sernha_c;
+                    SET @parentasset = CONCAT('MOD-C-', @sernha_c);
+                END
+                ELSE IF @position = 'D'
+                BEGIN
+                    SET @sernha = @sernha_d;
+                    SET @parentasset = CONCAT('MOD-D-', @sernha_d);
+                END
+                ELSE IF @position = 'E'
+                BEGIN
+                    SET @sernha = @sernha_e;
+                    SET @parentasset = CONCAT('MOD-E-', @sernha_e);
+                END
+
+                -- Update arrays
+                INSERT INTO @nhaarray (level, sernha) VALUES (@cur_level, @sernha);
+                INSERT INTO @parentarray (level, parentsernha) VALUES (@cur_level, @parentasset);
+            END
+            ELSE
+            BEGIN
+                -- Not LFLRV family: fallback
+                SELECT @sernha = sernha FROM @nhaarray WHERE level = @cur_level - 1;
+                SELECT @parentasset = parentsernha FROM @parentarray WHERE level = @cur_level - 1;
+
+                INSERT INTO @nhaarray (level, sernha) VALUES (@cur_level, LEFT(LTRIM(RTRIM(@update_c5)), 18));
+                INSERT INTO @parentarray (level, parentsernha) VALUES (@cur_level, CONCAT(@prefix, LEFT(LTRIM(RTRIM(@update_c5)), 10)));
+            END
+			declare @ser varchar(max)= LEFT(LTRIM(RTRIM(@update_c5)), 18)
+			declare @p_assetnum varchar(max)= CONCAT(@prefix, LEFT(LTRIM(RTRIM(@update_c5)), 10))
+            -- Update the TTC_MAX_FILE_LINE using a procedure (assumed)
+            EXEC TTC_MAX_SOLOCHAIN$UPDATESOLOLINE
+                @p_result_key,
+                @update_lineno,
+                @assetfamily,
+                @parentfamily,
+                @sernha,
+				@ser,
+				@p_assetnum,
+               -- LEFT(LTRIM(RTRIM(@update_c5)), 18),
+               -- CONCAT(@prefix, LEFT(LTRIM(RTRIM(@update_c5)), 10)),
+                @parentasset,
+                @description,
+                @p_error_msg;
+
+            -- Handle duplicated records
+            IF @duplicated = 'Y'
+            BEGIN
+                DECLARE getconfig CURSOR FOR
+                    SELECT DISTINCT assetfamily, parentfamily, prefix, description, position
+                    FROM STRCARCONFIG
+                    WHERE partnumber = LTRIM(RTRIM(@update_c3))
+                      AND vehicletype = 'LFLRV'
+                      AND assetfamily <> @assetfamily;
+
+                DECLARE @gc_assetfamily NVARCHAR(50), @gc_parentfamily NVARCHAR(50), @gc_prefix NVARCHAR(50),
+                        @gc_description NVARCHAR(100), @gc_position NVARCHAR(10);
+
+                OPEN getconfig;
+                FETCH NEXT FROM getconfig INTO @gc_assetfamily, @gc_parentfamily, @gc_prefix, @gc_description, @gc_position;
+
+                WHILE @@FETCH_STATUS = 0
+                BEGIN
+                    SET @maxline += 1;
+
+                    INSERT INTO TTC_MAX_FILE_LINE (result_key, [lineno], assetnum, parentasset, ser, assetfamily, c10, c15, ce)
+                    VALUES (
+                        @p_result_key,
+                        @maxline,
+                        CONCAT(@gc_prefix, LEFT(LTRIM(RTRIM(@update_c5)), 10)),
+                        @parentasset,
+                        LEFT(LTRIM(RTRIM(@update_c5)), 10),
+                        @gc_assetfamily,
+                        @gc_description,
+                        @gc_position,
+                        'S'
+                    );
+
+                    FETCH NEXT FROM getconfig INTO @gc_assetfamily, @gc_parentfamily, @gc_prefix, @gc_description, @gc_position;
+                END
+
+                CLOSE getconfig;
+                DEALLOCATE getconfig;
+            END
+
+            FETCH NEXT FROM update_family INTO @update_lineno, @update_slevel, @update_c2, @update_c3, @update_c5, @update_c10, @update_c15, @update_c18, @update_ce;
+        END
+
+        CLOSE update_family;
+        DEALLOCATE update_family;
+    END TRY
+    BEGIN CATCH
+        SET @p_error_msg = CONCAT('Error: ', ERROR_MESSAGE());
+    END CATCH
+END
