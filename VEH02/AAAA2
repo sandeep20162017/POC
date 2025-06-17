@@ -1,414 +1,97 @@
-You are ASP.NET core, Javascript and JQuery expert. You are also Telerik ASp.NET core expert.
-I have telerik grid which has two tabs Vehicle and Archived vehicle.
-GetLabourDetails called by Vehicle but not by Archived Vehicle tab. Perhaps it has to something with the Ids, passed in Javascript?JS :
-<script>
-    var tabIndex = -1; //-1 when  Main grid is acive, if below tabs are active get the resp. tabIndex ssk
-    var tabStripName = "";
-    $(document).ready(function () {
+// ARCHIVED VEHICLE SECTION - FIXED VERSION
+var grid = $("#ArchivedVehicleGrid_" + $(vehicleListId).val()).data("kendoGrid");
+console.log("ArchivedVehicleGrid ID:", "ArchivedVehicleGrid_" + $(vehicleListId).val());
 
+// Initialize Notification PROPERLY
+var notificationElement = $("#archived-notification");
+var notification = notificationElement.length ? notificationElement.kendoNotification({
+    position: { pinned: true, top: 50, right: 50 },
+    autoHideAfter: 5000,
+    stacking: "down"
+}).data("kendoNotification") : null;
 
-        /////////
-        $("#email-estimate-container").hide();
-        $("#archived-email-estimate-container").hide();
+grid.bind("detailInit", function(e) {
+    const archivedvehicleListId = e.data.ArchVehicleListId;
+    console.log("Archived VehicleListId:", archivedvehicleListId);
 
-        //// start visual save changes
-        // Initialize main TabStrip with proper error handling
-        const mainTabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
-        if (mainTabStrip) {
-            mainTabStrip.select(0); // Select/expand the first tab (index 0) //ssk16
-            // Correct tab item access using native array methods
-            const tabs = mainTabStrip.items();
-            if (tabs && tabs.length > 0) {
-                // Access first tab using array index
-                const firstTab = tabs[0];
+    // ADD gridType PARAMETER TO ALL URLs
+    const params = `?id=${archivedvehicleListId}&gridType=ArchivedVehicleGrid`;
+    
+    const tabUrls = {
+        labour: '@Url.Action("LabourDetailsPartial", "Vehicles")' + params,
+        labourHour: '@Url.Action("LabourHourSummaryPartial", "Vehicles")' + params,
+        materialCost: '@Url.Action("MaterialCostSummaryPartial", "Vehicles")' + params,
+        scParts: '@Url.Action("ScPartsUsedInEstimates", "Vehicles")' + params,
+        nsc: '@Url.Action("NscDetailsPartial", "Vehicles")' + params,
+        rb: '@Url.Action("RbDetailsPartial", "Vehicles")' + params,
+        totalCost: '@Url.Action("TotalCostPartial", "Vehicles")' + params
+    };
 
-                $(firstTab.element).find(".k-link").addClass("has-unsaved");
+    // Use UNIQUE IDs with archivedvehicleListId
+    const container = e.detailCell.find("#archived-detail-template-" + archivedvehicleListId);
+    
+    container.html(`
+        <div id="archived-tabstrip-container-${archivedvehicleListId}">
+            <ul>
+                <li>Labour Details</li>
+                <li>Labour Hour</li>
+                <li>Material Cost</li>
+                <li>Stock Coded Parts</li>
+                <li>Non Stock Coded Parts</li>
+                <li>Rebuilt Parts</li>
+                <li>Total Cost</li>
+            </ul>
+            <div id="archived-labour-details-content-${archivedvehicleListId}"></div>
+            <div id="archived-labour-hour-summary-content-${archivedvehicleListId}"></div>
+            <div id="archived-material-cost-summary-content-${archivedvehicleListId}"></div>
+            <div id="archived-material-details-content-${archivedvehicleListId}"></div>
+            <div id="archived-nsc-details-content-${archivedvehicleListId}"></div>
+            <div id="archived-rb-part-details-content-${archivedvehicleListId}"></div>
+            <div id="archived-total-cost-content-${archivedvehicleListId}"></div>
+        </div>
+    `);
+
+    // Initialize TabStrip
+    $("#archived-tabstrip-container-" + archivedvehicleListId).kendoTabStrip({
+        animation: { open: { effects: "fadeIn" } },
+        select: function(e) {
+            const tabIndex = e.item.index();
+            let tabUrl;
+            
+            switch(tabIndex) {
+                case 0: tabUrl = tabUrls.labour; break;
+                case 1: tabUrl = tabUrls.labourHour; break;
+                case 2: tabUrl = tabUrls.materialCost; break;
+                case 3: tabUrl = tabUrls.scParts; break;
+                case 4: tabUrl = tabUrls.nsc; break;
+                case 5: tabUrl = tabUrls.rb; break;
+                default: tabUrl = tabUrls.totalCost;
             }
 
-            // Add tabstrip styling
-            mainTabStrip.wrapper.find(".k-tabstrip-items").append(`
-                                                    <style>
-                                                        .k-tabstrip-items .has-unsaved {
-                                                            position: relative;
-                                                            color: #d9534f !important;
-                                                        }
-                                                        .has-unsaved::after {
-                                                            content: "•";
-                                                            color: #d9534f;
-                                                            position: absolute;
-                                                            right: 8px;
-                                                            top: 6px;
-                                                            font-size: 1.5em;
-                                                        }
-                                                    </style>
-                                                `);
-        } else {
-            console.warn("Main TabStrip not found");
+            $.get(tabUrl)
+                .done(function(data) {
+                    e.contentElement.html(data);
+                    // FIX: Initialize Kendo on DOM element, not jQuery object
+                    kendo.init(e.contentElement[0]);
+                })
+                .fail(function(xhr) {
+                    console.error("Error loading tab content", xhr.statusText);
+                    if (notification) notification.show("Error loading content", "error");
+                });
         }
+    });
 
-        // console.warn("vehicleListId", vehicleListId.value())
-        // var rowId = vehicleListId.value();
-        // console.warn("rowId", rowId);
-
-       // // var textbox = e.data.VehicleListId;
-       //  var rowId = e.data.VehicleListId;
-       //  console.warn("rowId", rowId);
-
-       //  ////end visual save changes
-       //  var grid = $("#VehicleGrid_" + rowId);
-       //  var gridName = grid.element.attr("id");
-
-        console.warn("vehicleListId", vehicleListId);
-        var grid = $("#VehicleGrid_" + $(vehicleListId).val()).data("kendoGrid");
-        var gridName = grid.element.attr("id");
-     //   var grid = $("#" + gridName).data("kendoGrid");
-
-        console.warn("gridName", gridName);
-        // Initialize Kendo Notification for displaying messages
-        var notificationElement = $("#notification");
-        if (notificationElement.length === 0) {
-            console.error("Notification element not found in the DOM.");
-        } else {
-            var notification = notificationElement.kendoNotification({
-                position: {
-                    pinned: true,
-                    top: 50,
-                    right: 50
-                },
-                autoHideAfter: 5000, // Hide after 5 seconds
-                stacking: "down"
-            }).data("kendoNotification");
-
-            console.log("user clicks the Cancel button logic ");
-            console.log('grid :', grid);
-            // Bind the Cancel event for the grid
-            grid.bind("cancel", function (e) {
-                // This event is triggered when the user clicks the Cancel button
-                $.post('@Url.Action("CancelDetails", "Vehicles")', { vehicleListId: e.model.VehicleListId })
-                    .done(function (data) {
-                        if (notification) {
-                            notification.show("Changes discarded!", "info");
-                        } else {
-                            console.error("Notification is not initialized.");
-                        }
-                    })
-                    .fail(function (xhr, status, error) {
-                        console.error("Error discarding changes: ", error);
-                        if (notification) {
-                            notification.show("An error occurred while discarding changes. Please try again.", "error");
-                        } else {
-                            console.error("Notification is not initialized.");
-                        }
-                    });
-            });
-
-            console.log("calling detailInit");
-            grid.bind("detailInit", function (e) {
-                console.error("Inside detailInit");
-                const vehicleListId = e.data.VehicleListId;
-                parentGridId = vehicleListId;
-                console.error("vehicleListId : ", vehicleListId);
-
-                console.log("Detail initialization started for VehicleListId: " + e.data.VehicleListId);
-                var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
-                var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
-                var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
-                var tabScPartDetail = '@Url.Action("ScPartsUsedInEstimates", "Vehicles")' + '?id=' + e.data.VehicleListId;
-                var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
-                var tabUrlRbPartDetail = '@Url.Action("RbDetailsPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
-                var tabUrlTotalCost = '@Url.Action("TotalCostPartial", "Vehicles")' + '?id=' + e.data.VehicleListId;
-
-                // Get the container for the detail template
-                var container = e.detailCell.find("#detail-template-" + e.data.VehicleListId);
-
-                // Load the TabStrip structure
-                container.html(`
-                                                                <div id="tabstrip-container-${e.data.VehicleListId}">
-                                                            <ul>
-                                                                 <li>Labour Details</li>
-                                                                <li>Labour Hour</li>
-                                                                <li>Material Cost</li>
-                                                                <li>Stock Coded Parts</li>
-                                                                <li>Non Stock Coded Parts</li>
-                                                                <li>Rebuilt Parts</li>
-
-                                                                <li>Total Cost</li>
-                                                            </ul>
-
-                                                                    <div id="labour-details-content-${vehicleListId}"></div>
-                                                                    <div id="labour-hour-summary-content-${vehicleListId}"></div>
-                                                                    <div id="material-cost-summary-content-${vehicleListId}"></div>
-                                                                    <div id="material-details-content-${vehicleListId}"></div>
-                                                                    <div id="nsc-details-content-${vehicleListId}"></div>
-                                                                    <div id="rb-part-details-content-${vehicleListId}"></div>
-
-                                                                    <div id="total-cost-content-${vehicleListId}">"></div>
-                                                        </div>
-                                                    `);
-
-                // Initialize the Kendo TabStrip
-                console.log("Initialize tabScript ");
-
-                var tabStrip = $("#tabstrip-container-" + e.data.VehicleListId).kendoTabStrip({
-                    animation: { open: { effects: "fadeIn" } },
-                    select: function (e) {
-                        tabIndex = $(e.item).index(); // Get the index of the selected tab
-                        tabStripName = e.sender.element.attr("id"); //ssk tabStripName
-
-                        // Check for unsaved changes in the current tab
-                        var currentTabContent = tabStrip.contentElement(tabStrip.select().index());
-                        var currentGrid = $(currentTabContent).find(".k-grid").data("kendoGrid");
-                        console.log("*******currentGrid :", currentGrid);
-
-                        console.log("*******currentTabContent :", currentTabContent);
-                        //    var gridName = currentGrid.element.attr("id");
-                        //  console.log("*******currentGridName :", gridName);
-                        //  notification.show("currentGridName :" + gridName, "warning");
-
-
-
-                        tabIndex = $(e.item).index(); // Get the index of the selected tab
-
-                        if (currentGrid && (currentGrid.dataSource.hasChanges())) { //kendoNotification show waring for reaonly
-                            console.log("hasChanges :", currentGrid.dataSource.hasChanges());
-
-                            // Show a warning notification
-                            if (notification) {
-                                notification.show("You have unsaved changes. Click on Update or Cancel changes before clicking next tab.", "warning");
-                                // notification.show(currentGrid);
-                                //  notification.show(currentGrid.dataSource.hasChanges());
-                            } else {
-                                console.error("****** Notification is not initialized.");
-                            }
-                            e.preventDefault(); // Prevent the tab switch
-                            return;
-                        }
-                        console.log("Load the partial view content for the selected tab");
-                        // Load the partial view content for the selected tab
-                        var tabUrl = tabIndex == 0 ? tabUrlLabourDetail :
-                            tabIndex == 1 ? tabUrlLabourHourSummary :
-                                tabIndex == 2 ? tabUrlMaterialCostSummary :
-                                    tabIndex == 3 ? tabScPartDetail :
-                                        tabIndex == 4 ? tabUrlNscDetail :
-                                            tabIndex == 5 ? tabUrlRbPartDetail :
-                                                tabUrlTotalCost;
-
-                        $.get(tabUrl)
-                            .done(function (data) {
-
-                                $(e.contentElement).html(data);
-                                kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
-                                if (tabIndex == 0) {
-                                    var gridName = 'LabourDetailsGrid_' + vehicleListId; //ssk2
-                                    console.log('########  :gridName ', gridName);
-                                }
-
-                                console.log('########  :tabIndex ', tabIndex);
-                                // Reset the hasChanges() state for read-only tabs
-                                if (tabIndex == '6' || tabIndex == '1' || tabIndex == '2') { //read-only tab
-                                    var grid = $(e.contentElement).find(".k-grid").data("kendoGrid");
-                                    // console.log("*******currentGrid2 :", currentGrid);
-                                    var gridName = grid.element.attr("id");
-                                    console.log("*******currentGridName2 :", gridName);
-                                    // console.log("*******currentTabContent :", currentTabContent);
-                                    grid.dataSource.read(); // Refresh the data source
-                                }
-                            })
-                            .fail(function (xhr, status, error) {
-                                console.error("Error loading tab content: ", error);
-                                if (notification) {
-                                    notification.show("An error occurred while loading the tab content. Please try again.", "error");
-                                } else {
-                                    console.error("Notification is not initialized.");
-                                }
-                            });
-                    }
-                }).data("kendoTabStrip");
-
-                // Load the first tab's content
-                $.get(tabUrlLabourDetail)
-                    .done(function (data) {
-                        $("#labour-details-content-" + vehicleListId).html(data);
-                        kendo.init($("#labour-details-content")); // Reinitialize Kendo widgets
-                    })
-                    .fail(function (xhr, status, error) {
-                        console.error("Error loading initial tab content: ", error);
-                        if (notification) {
-                            notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
-                        } else {
-                            console.error("Notification is not initialized.");
-                        }
-                    });
-                $.get(tabUrlTotalCost)
-                    .done(function (data) {
-                        $("#total-cost-content-" + vehicleListId).html(data);
-                        kendo.init($("#total-cost-content-" + vehicleListId)); // init TotalCostGrid early
-                        console.log("Total Cost tab preloaded for VehicleListId:", vehicleListId);
-                    })
-                    .fail(function (xhr, status, error) {
-                        console.error("Error preloading Total Cost tab:", error);
-                    });
-            });
-        }
-        //archived --------------------------------------------
-        //var grid = $("#VehicleGrid_" + $(vehicleListId).val()).data("kendoGrid");
-        var grid = $("#ArchivedVehicleGrid" + $(vehicleListId).val()).data("kendoGrid");
-        // var grid = $("#ArchivedVehicleGrid" + @parentGridId).data("kendoGrid");
-        console.error("ArchivedVehicleGrid : archivedVehiclelistId:", "@parentGridId");
-        var gridName = grid.element.attr("id");
-        
-        console.warn("gridName", gridName);
-
-        // Initialize Kendo Notification for displaying messages
-        var notificationElement = $("#archived-notification");
-        if (notificationElement.length === 0) {
-            console.error("Notification element not found in the DOM.");
-        } else {
-            var notification = notificationElement.kendoNotification({
-                position: {
-                    pinned: true,
-                    top: 50,
-                    right: 50
-                },
-                autoHideAfter: 5000, // Hide after 5 seconds
-                stacking: "down"
-            }).data("kendoNotification");
-            //TODO : Revisit when View Archived Logic gets re-written. Need new controller
-            //VB Code CES_INQUIRY.RETRIVE_RBP_USED
-            //CES_ARCHICE.ARCHIVE_RB
-            //Uncomment ClientDetailTemplateId("archived-template") in ArchivedVehicleIndex.cshtml
-
-            // Bind the detailInit event for the grid
-            grid.bind("detailInit", function (e) {
-
-                const isArchived = e.data.gridType === "ArchivedVehicleGrid";
-                const archivedvehicleListId = e.data.ArchVehicleListId;
-                parentGridId = archivedvehicleListId;
-                console.warn("****** archivedvedicleListId: " + archivedvehicleListId);
-
-
-                console.warn("****** Detail initialization started for ArchVehicleList: " + e.data.ArchVehicleListId);
-                var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "Vehicles")' + '?id=' + e.data.ArchVehicleListId + "&gridType=ArchivedVehicleGrid";
-                var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "Vehicles")' + '?id=' + e.data.ArchVehicleListId + "&gridType=ArchivedVehicleGrid";
-                var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "Vehicles")' + '?id=' + e.data.ArchVehicleListId + "&gridType=ArchivedVehicleGrid";
-                var tabScPartDetail = '@Url.Action("ScPartsUsedInEstimates", "Vehicles")' + '?id=' + e.data.ArchVehicleListId + "&gridType=ArchivedVehicleGrid";
-                var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "Vehicles")' + '?id=' + e.data.ArchVehicleListId + "&gridType=ArchivedVehicleGrid";
-                var tabUrlRbPartDetail = '@Url.Action("RbDetailsPartial", "Vehicles")' + '?id=' + e.data.ArchVehicleListId + "&gridType=ArchivedVehicleGrid";
-                var tabUrlTotalCost = '@Url.Action("TotalCostPartial", "Vehicles")' + '?id=' + e.data.ArchVehicleListId + "&gridType=ArchivedVehicleGrid";
-
-                // if (isArchived) {
-                //     // Wait a bit to ensure tabs and grids render (safe fallback)
-                //     setTimeout(function () {
-                //         disableEditingButtonsInDetailRow(e.detailCell);
-                //     }, 500); // Adjust delay if needed
-                // }
-
-                // Get the container for the detail template
-                var container = e.detailCell.find("#archived-detail-template-" + e.data.ArchVehicleListId);
-
-                // Load the TabStrip structure
-                container.html(`
-                                                    <div id="archived-tabstrip-container-${e.data.ArchVehicleListId}">
-                                        <ul>
-                                            <li class="k-state-active">Labour Details</li>
-                                            <li>Labour Hour</li>
-                                            <li>Material: Cost</li>
-                                            <li>Stock Coded Parts</li>
-                                            <li>Non Stock Coded Parts</li>
-                                            <li>Rebuilt Built Parts</li>
-                                            <li>Total Cost</li>
-                                        </ul>
-                                        <div id="archived-labour-details-content"></div>
-                                        <div id="archived-labour-hour-summary-content"></div>
-                                        <div id="archived-material-cost-summary-content"></div>
-                                        <div id="archived-material-details-content"></div>
-                                        <div id="archived-nsc-details-content"></div>
-                                        <div id="archived-rb-part-details-content"></div>
-                                        <div id="archived-total-cost-content"></div>
-                                    </div>
-                                `);
-
-                // Initialize the Kendo TabStrip
-                var tabStrip = $("#archived-tabstrip-container-" + e.data.ArchVehicleListId).kendoTabStrip({
-                    animation: { open: { effects: "fadeIn" } },
-                    select: function (e) {
-                        tabIndex = $(e.item).index(); // Get the index of the selected tab
-                        tabStripName = e.sender.element.attr("id"); //ssk tabStripName
-
-                        // Load the partial view content for the selected tab
-                        tabUrl = tabIndex == 0 ? tabUrlLabourDetail :
-                            tabIndex == 1 ? tabUrlLabourHourSummary :
-                                tabIndex == 2 ? tabUrlMaterialCostSummary :
-                                    tabIndex == 3 ? tabScPartDetail :
-                                        tabIndex == 4 ? tabUrlNscDetail :
-                                            tabIndex == 5 ? tabUrlRbPartDetail :
-                                                tabUrlTotalCost;
-
-                        $.get(tabUrl)
-                            .done(function (data) {
-                                $(e.contentElement).html(data);
-                                kendo.init($(e.contentElement)); // Reinitialize Kendo widgets
-                            })
-                            .fail(function (xhr, status, error) {
-                                console.error("Error loading tab content: ", error);
-                                if (notification) {
-                                    notification.show("An error occurred while loading the tab content. Please try again.", "error");
-                                } else {
-                                    console.error("Notification is not initialized.");
-                                }
-                            });
-
-                    }
-                }).data("kendoTabStrip");//error ")" is expected
-
-                // Load the first tab's content
-                $.get(tabUrlLabourDetail)
-                    .done(function (data) {
-                        $("#archived-labour-details-content").html(data);
-                        kendo.init($("#archived-labour-details-content")); // Reinitialize Kendo widgets
-                    })
-                    .fail(function (xhr, status, error) {
-                        console.error("Error loading initial tab content: ", error);
-                        if (notification) {
-                            notification.show("An error occurred while loading the initial tab content. Please try again.", "error");
-                        } else {
-                            console.error("Notification is not initialized.");
-                        }
-                    });
-            });
-
-        }
-        //archived end  ----------------------------------------
-...
-
-Controller :
-public IActionResult LabourDetailsPartial([FromQuery] string id, [FromQuery] string gridType)
-{
-    //set 
-    ViewBag.PartNum = id;
-    if (gridType == null)
-    {
-        ViewBag.GridType = "VehicleGrid";
-    }
-    else 
-    {
-        ViewBag.GridType = gridType;
-
-    }
-    var model = new List<LabourDetailsRebuiltPartsViewModel> { };
-    return PartialView("_LabourDetails", model);
-}
-
-//Following is called by VehicleTab  and ArchivedVehicle tab:
-[HttpGet]
-[AllowAnonymous]
-public async Task<IEnumerable<LabourDetailsRebuiltPartsViewModel>> GetLabourDetails([DataSourceRequest] DataSourceRequest request, [FromQuery] string id, [FromQuery] string gridType)
-{
-    ViewBag.PartNum = id;
-    if (string.IsNullOrEmpty(id))
-    {
-...
-GetLabourDetails called by Vehicle but not by Archived Vehicle tab
-LabourDetails.cshtml :
-.Read(read => read.Url(Url.Action("GetLabourDetails", "LabourDetails") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
-...
+    // Load first tab
+    $.get(tabUrls.labour)
+        .done(function(data) {
+            // FIX: Use unique ID with vehicleListId
+            const tabContent = $("#archived-labour-details-content-" + archivedvehicleListId);
+            tabContent.html(data);
+            // FIX: Correct initialization target
+            kendo.init(tabContent[0]);
+        })
+        .fail(function(xhr) {
+            console.error("Error loading labour details", xhr.statusText);
+            if (notification) notification.show("Error loading labour details", "error");
+        });
+});
