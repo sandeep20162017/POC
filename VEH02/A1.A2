@@ -1,0 +1,120 @@
+$(document).ready(function () {
+
+    var grid = $("#ArchivedVehicleGrid").data("kendoGrid");
+
+    // 🔥 Add Single Row Expansion Logic
+    grid.bind("detailExpand", function (e) {
+        grid.tbody.children("tr.k-master-row").each(function () {
+            var masterRow = $(this);
+            if (masterRow[0] !== e.masterRow[0]) {
+                grid.collapseRow(masterRow);
+            }
+        });
+    });
+
+    // 🔥 detailInit with full tabs implementation
+    grid.bind("detailInit", function (e) {
+
+        console.warn("Detail initialization started for ArchVehicleList: " + e.data.ArchVehicleListId);
+        console.log("Detail initialization started for VehicleList: " + e.data.VehicleListId);
+
+        // Build all the tab URLs dynamically
+        var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "Vehicles")' + '?oldid=' + e.data.VehicleListId + "&gridType=ArchivedVehicleGrid" + "&id=" + e.data.ArchVehicleListId;
+        var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "Vehicles")' + '?id=' + e.data.ArchVehicleListId + "&gridType=ArchivedVehicleGrid";
+        var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "Vehicles")' + '?id=' + e.data.ArchVehicleListId + "&gridType=ArchivedVehicleGrid";
+        var tabScPartDetail = '@Url.Action("ScPartsUsedInEstimates", "Vehicles")' + '?id=' + e.data.ArchVehicleListId + "&gridType=ArchivedVehicleGrid";
+        var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "Vehicles")' + '?id=' + e.data.ArchVehicleListId + "&gridType=ArchivedVehicleGrid";
+        var tabUrlRbPartDetail = '@Url.Action("RbDetailsPartial", "Vehicles")' + '?id=' + e.data.ArchVehicleListId + "&gridType=ArchivedVehicleGrid";
+
+        var container = e.detailCell.find("#archived-detail-template-" + e.data.ArchVehicleListId);
+        console.warn("After Get the container for the detail template ArchVehicleList: " + e.data.ArchVehicleListId);
+
+        console.warn("Before Load the TabStrip structure ArchVehicleList: " + e.data.ArchVehicleListId);
+
+        // Build the TabStrip structure
+        container.html(`
+            <div id="archived-tabstrip-container-${e.data.ArchVehicleListId}">
+                <ul>
+                    <li class="k-state-active">Labour Details</li>
+                    <li>Labour Hour Summary</li>
+                    <li>Material Cost Summary</li>
+                    <li>Stock Coded Parts</li>
+                    <li>Non Stock Coded Parts</li>
+                    <li>Rebuilt Built Parts</li>
+                </ul>
+                <div id="archived-labour-details-content-${e.data.ArchVehicleListId}"></div>
+                <div id="archived-labour-hour-summary-content-${e.data.ArchVehicleListId}"></div>
+                <div id="archived-material-cost-summary-content-${e.data.ArchVehicleListId}"></div>
+                <div id="archived-sc-parts-content-${e.data.ArchVehicleListId}"></div>
+                <div id="archived-nsc-details-content-${e.data.ArchVehicleListId}"></div>
+                <div id="archived-rb-part-details-content-${e.data.ArchVehicleListId}"></div>
+            </div>
+        `);
+
+        console.warn("After Load the TabStrip structure ArchVehicleList: " + e.data.ArchVehicleListId);
+
+        var tabStrip = $("#archived-tabstrip-container-" + e.data.ArchVehicleListId).kendoTabStrip({
+            animation: { open: { effects: "fadeIn" } },
+            select: function (e) {
+
+                tabIndex = $(e.item).index();
+                tabStripName = e.sender.element.attr("id");
+                console.warn("tabStripName: " + tabStripName);
+
+                // Dynamically assign correct URL based on tab index
+                var tabUrl = "";
+                if (tabIndex == 0) {
+                    tabUrl = tabUrlLabourDetail;
+                    targetContentId = `#archived-labour-details-content-${e.data.ArchVehicleListId}`;
+                } else if (tabIndex == 1) {
+                    tabUrl = tabUrlLabourHourSummary;
+                    targetContentId = `#archived-labour-hour-summary-content-${e.data.ArchVehicleListId}`;
+                } else if (tabIndex == 2) {
+                    tabUrl = tabUrlMaterialCostSummary;
+                    targetContentId = `#archived-material-cost-summary-content-${e.data.ArchVehicleListId}`;
+                } else if (tabIndex == 3) {
+                    tabUrl = tabScPartDetail;
+                    targetContentId = `#archived-sc-parts-content-${e.data.ArchVehicleListId}`;
+                } else if (tabIndex == 4) {
+                    tabUrl = tabUrlNscDetail;
+                    targetContentId = `#archived-nsc-details-content-${e.data.ArchVehicleListId}`;
+                } else if (tabIndex == 5) {
+                    tabUrl = tabUrlRbPartDetail;
+                    targetContentId = `#archived-rb-part-details-content-${e.data.ArchVehicleListId}`;
+                }
+
+                // Load content for selected tab
+                $.get(tabUrl)
+                    .done(function (data) {
+                        $(targetContentId).html(data);
+                        kendo.destroy($(targetContentId));
+                        kendo.init($(targetContentId));
+                    })
+                    .fail(function (xhr, status, error) {
+                        console.error("Error loading tab content: ", error);
+                        if (notification) {
+                            notification.show("An error occurred while loading tab content.", "error");
+                        }
+                    });
+            }
+        }).data("kendoTabStrip");
+
+        console.warn("Load the first tab's content");
+
+        // Initial load for first tab (Labour Details)
+        var firstContentId = `#archived-labour-details-content-${e.data.ArchVehicleListId}`;
+        $.get(tabUrlLabourDetail)
+            .done(function (data) {
+                $(firstContentId).html(data);
+                kendo.destroy($(firstContentId));
+                kendo.init($(firstContentId));
+            })
+            .fail(function (xhr, status, error) {
+                console.error("Error loading initial tab content: ", error);
+                if (notification) {
+                    notification.show("An error occurred while loading initial tab content.", "error");
+                }
+            });
+    });
+
+});
