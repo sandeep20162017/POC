@@ -190,3 +190,69 @@ public IActionResult GetVehicles([DataSourceRequest] DataSourceRequest request)
 ✅ Same for ArchivedVehiclesController.
 
 ✅ All your partial controllers stay the same.
+==============================================
+
+🔑 BUT in your case:
+✅ Each partial view has its own dedicated model that matches the data for that tab.
+
+For example:
+
+Partial	Model
+_LabourDetails.cshtml	IEnumerable<LabourDetailsRebuiltPartsViewModel>
+_MaterialCostSummary.cshtml	IEnumerable<MaterialCostViewModel>
+_ScParts.cshtml	IEnumerable<ScPartsViewModel>
+_NscParts.cshtml	IEnumerable<NscPartsViewModel>
+_RbParts.cshtml	IEnumerable<RbPartsViewModel>
+_TotalCost.cshtml	IEnumerable<TotalCostViewModel>
+
+🔑 So in your real solution:
+✅ Each partial view continues to use its own full @model declaration:
+
+Example:
+
+csharp
+Copy
+Edit
+@model IEnumerable<LabourDetailsRebuiltPartsViewModel>
+
+@(Html.Kendo().Grid<LabourDetailsRebuiltPartsViewModel>()
+    .Name($"LabourDetailsGrid_{Model.VehicleListId}")
+    ...
+✅ The only reason I brought up VehicleTabsViewModel is if you wanted to pass just the ID to the partial view to generate unique IDs in Razor.
+
+🔑 But since you are already loading the full partial via AJAX, and each partial loads its own data via AJAX grid Read() calls, you don’t need to pass full model to partial.
+👉 You only need to pass ID (VehicleListId or ArchVehicleListId) into the partial view via query string in URL.
+
+The grid inside each partial will call its Read() action with that ID.
+
+🔧 🔑 ✅ THE REAL FINAL FORM FOR YOU:
+✅ Each partial stays like this:
+
+Example: _LabourDetails.cshtml
+csharp
+Copy
+Edit
+@model IEnumerable<LabourDetailsRebuiltPartsViewModel>
+
+@(Html.Kendo().Grid<LabourDetailsRebuiltPartsViewModel>()
+    .Name($"LabourDetailsGrid_{ViewBag.VehicleListId}")
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Read(read => read.Url(Url.Action("GetLabourDetails", "LabourDetails", new { id = ViewBag.VehicleListId })))
+        .Create(create => create.Url(Url.Action("CreateLabourDetail", "LabourDetails", new { id = ViewBag.VehicleListId })))
+        .Update(update => update.Url(Url.Action("UpdateLabourDetail", "LabourDetails", new { id = ViewBag.VehicleListId })))
+        .Destroy(delete => delete.Url(Url.Action("DeleteLabourDetail", "LabourDetails", new { id = ViewBag.VehicleListId })))
+    )
+)
+🔑 ✅ How do we pass VehicleListId into ViewBag for Razor inside the partial?
+👉 In your controller action that serves the partial:
+
+csharp
+Copy
+Edit
+public IActionResult LabourDetailsPartial(string id)
+{
+    ViewBag.VehicleListId = id;
+    return PartialView("_LabourDetails");
+}
+✅ Now Razor has the ID it needs to generate unique grid name: LabourDetailsGrid_{ViewBag.VehicleListId}
