@@ -1,4 +1,12 @@
-Vehicles View (Master Grid with DetailInit)
+You don't use .DetailTemplate() — instead, you configure detail templates entirely via:
+
+javascript
+Copy
+Edit
+grid.bind("detailInit", function(e) { ... })
+This is fully client-side.
+
+🔧 So your Grid should be declared in Razor like this (no DetailTemplate at all):
 csharp
 Copy
 Edit
@@ -11,9 +19,6 @@ Edit
         columns.Bound(c => c.VehicleName).Title("Vehicle Name");
         // Other columns...
     })
-    .DetailTemplate(@<text>
-        <div class="detail-container"></div>
-    </text>)
     .DataSource(dataSource => dataSource
         .Ajax()
         .Read(read => read.Url(Url.Action("GetArchivedVehicles", "Vehicles")))
@@ -21,7 +26,7 @@ Edit
     .Pageable()
     .Sortable()
 )
-2️⃣ DetailInit JavaScript (simple, clean)
+🔧 Then in your JavaScript:
 javascript
 Copy
 Edit
@@ -31,123 +36,14 @@ $(document).ready(function () {
     grid.bind("detailInit", function (e) {
         var detailRow = e.detailRow;
 
+        // Create a container for partial view
+        var containerId = "labour-container-" + e.data.ArchVehicleListId;
+        detailRow.append('<div id="' + containerId + '"></div>');
+
         var url = '@Url.Action("LabourDetailsPartial", "Vehicles")'
             + '?id=' + e.data.ArchVehicleListId
             + '&gridType=ArchivedVehicleGrid';
 
-        // Let Kendo load the partial directly
-        detailRow.find(".detail-container").load(url);
+        $("#" + containerId).load(url);
     });
 });
-✅ Simple. No need for jQuery $.get(). Kendo will load the partial directly into the detail row. This keeps Telerik's full server-side Razor pipeline intact.
-
-3️⃣ Controller Action for Partial View
-csharp
-Copy
-Edit
-public IActionResult LabourDetailsPartial(string id, string gridType)
-{
-    ViewBag.PartNum = id;
-    ViewBag.GridType = gridType ?? "VehicleGrid";
-
-    var model = new List<LabourDetailsRebuiltPartsViewModel>(); // or fetch real data if needed
-    return PartialView("_LabourDetails", model);
-}
-4️⃣ Partial View: _LabourDetails.cshtml
-Here is your nested Labour Grid Razor code:
-
-csharp
-Copy
-Edit
-@model IEnumerable<YourNamespace.LabourDetailsRebuiltPartsViewModel>
-
-@(Html.Kendo().Grid<YourNamespace.LabourDetailsRebuiltPartsViewModel>()
-    .Name($"LabourDetailsGrid_{ViewBag.PartNum}")  // ✅ Unique ID for each grid
-    .Columns(columns =>
-    {
-        columns.Bound(c => c.Id).Hidden(true);
-        columns.Bound(c => c.LabourDefn).Title("Labour Type");
-        columns.Bound(c => c.CostCentre).Title("Cost Centre");
-        columns.Bound(c => c.Task).Title("Task");
-        columns.Bound(c => c.Usage).Title("Usage (%)");
-        columns.Bound(c => c.LabourHrs).Title("Labour Hours");
-        columns.Bound(c => c.LabourMins).Title("Labour Mins");
-        columns.Bound(c => c.LastModifiedBy).Title("Modified By");
-        columns.Bound(c => c.DateRevised).Title("Modified Date");
-        columns.Command(command =>
-        {
-            command.Edit();
-            command.Destroy();
-        }).Title("Actions");
-    })
-    .ToolBar(toolbar => {
-        toolbar.Create();
-        toolbar.Save();
-    })
-    .Editable(editable => editable.Mode(GridEditMode.InCell))
-    .Pageable()
-    .Sortable()
-    .DataSource(dataSource => dataSource
-        .Ajax()
-        .Batch(false)  // ✅ No batch mode
-        .Model(model =>
-        {
-            model.Id(c => c.Id);
-            model.Field(c => c.Id);
-        })
-        .Read(read => read.Url(Url.Action("GetLabourDetails", "LabourDetails", new { id = ViewBag.PartNum, gridType = ViewBag.GridType })))
-        .Create(create => create.Url(Url.Action("CreateLabourDetail", "LabourDetails", new { id = ViewBag.PartNum, gridType = ViewBag.GridType })))
-        .Update(update => update.Url(Url.Action("UpdateLabourDetail", "LabourDetails", new { id = ViewBag.PartNum, gridType = ViewBag.GridType })))
-        .Destroy(delete => delete.Url(Url.Action("DeleteLabourDetail", "LabourDetails", new { id = ViewBag.PartNum, gridType = ViewBag.GridType })))
-    )
-)
-5️⃣ Controller: LabourDetailsController
-csharp
-Copy
-Edit
-public async Task<IActionResult> GetLabourDetails([DataSourceRequest] DataSourceRequest request, string id, string gridType)
-{
-    var data = await _labourService.GetLabourDetailsAsync(id);
-    return Json(data.ToDataSourceResult(request));
-}
-
-[HttpPost]
-public async Task<IActionResult> CreateLabourDetail([DataSourceRequest] DataSourceRequest request, LabourDetailsRebuiltPartsViewModel model, string id, string gridType)
-{
-    if (ModelState.IsValid)
-    {
-        await _labourService.CreateAsync(model, id);
-        return Json(new[] { model }.ToDataSourceResult(request, ModelState));
-    }
-    return Json(new[] { model }.ToDataSourceResult(request, ModelState));
-}
-
-[HttpPost]
-public async Task<IActionResult> UpdateLabourDetail([DataSourceRequest] DataSourceRequest request, LabourDetailsRebuiltPartsViewModel model, string id, string gridType)
-{
-    if (ModelState.IsValid)
-    {
-        await _labourService.UpdateAsync(model);
-    }
-    return Json(new[] { model }.ToDataSourceResult(request, ModelState));
-}
-
-[HttpPost]
-public async Task<IActionResult> DeleteLabourDetail([DataSourceRequest] DataSourceRequest request, LabourDetailsRebuiltPartsViewModel model, string id, string gridType)
-{
-    await _labourService.DeleteAsync(model.Id);
-    return Json(new[] { model }.ToDataSourceResult(request, ModelState));
-}
-✅ Why this solution works perfectly:
-✅ Each LabourGrid has a unique ID based on PartNum
-
-✅ Razor server-side rendering stays fully intact
-
-✅ No manual jQuery injection needed
-
-✅ detailRow.load(url) automatically works as intended
-
-✅ Telerik fully manages widget initialization
-
-✅ Fully works with nested grids and avoids ID collision
-
