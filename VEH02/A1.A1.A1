@@ -1,0 +1,192 @@
+
+🔧 PROJECT STRUCTURE
+bash
+Copy
+Edit
+/Views/Vehicles
+    Index.cshtml          # Main tabstrip page
+    VehiclesIndex.cshtml  # Active Vehicles grid
+    ArchivedVehiclesIndex.cshtml # Archived Vehicles grid
+
+/Views/Shared
+    _VehicleTabs.cshtml
+    _LabourDetails.cshtml
+    _LabourHourSummary.cshtml
+    _MaterialCostSummary.cshtml
+    _ScParts.cshtml
+    _NscParts.cshtml
+    _RbParts.cshtml
+    _TotalCost.cshtml
+
+/Models
+    VehicleViewModel.cs
+    ArchivedVehicleViewModel.cs
+    VehicleTabsViewModel.cs
+    LabourDetailsRebuiltPartsViewModel.cs
+🔧 1️⃣ Index.cshtml (main entry point)
+csharp
+Copy
+Edit
+@(Html.Kendo().TabStrip()
+    .Name("vehicleTabStrip")
+    .Animation(animation => animation.Open(effect => effect.Fade(FadeDirection.In)))
+    .Items(tabstrip =>
+    {
+        tabstrip.Add().Text("Vehicles").Selected(true).LoadContentFrom("VehiclesIndex", "Vehicles");
+        tabstrip.Add().Text("Archived Vehicles").LoadContentFrom("ArchivedVehiclesIndex", "Vehicles");
+    })
+)
+✅ This is your master tabstrip page. Both tabs load server-side views.
+
+🔧 2️⃣ VehiclesIndex.cshtml (Active Vehicles Grid)
+csharp
+Copy
+Edit
+@(Html.Kendo().Grid<VehicleViewModel>()
+    .Name("VehicleGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.VehicleListId).Title("Estimate #");
+        columns.Bound(c => c.VehicleName).Title("Vehicle");
+        columns.Bound(c => c.ModifiedLastBy).Title("Modified By");
+        columns.Bound(c => c.ModifiedLastDate).Title("Modified Date");
+    })
+    .ClientDetailTemplateId("template")
+    .DataSource(ds => ds.Ajax().Read(read => read.Url(Url.Action("GetVehicles", "Vehicles"))))
+    .Pageable()
+    .Sortable()
+)
+
+<script id="template" type="text/x-kendo-template">
+    <div id="detail-template-#=VehicleListId#"></div>
+</script>
+
+@section Scripts {
+<script>
+
+$(document).ready(function () {
+
+    var grid = $("#VehicleGrid").data("kendoGrid");
+
+    grid.bind("detailExpand", function (e) {
+        grid.tbody.children("tr.k-master-row").each(function () {
+            if (this !== e.masterRow[0]) {
+                grid.collapseRow($(this));
+            }
+        });
+    });
+
+    grid.bind("detailInit", function (e) {
+        console.error("Inside detailInit for VehicleListId:", e.data.VehicleListId);
+
+        const vehicleListId = e.data.VehicleListId;
+
+        var tabUrlLabourDetail = '@Url.Action("LabourDetailsPartial", "Vehicles")' + '?id=' + vehicleListId;
+        var tabUrlLabourHourSummary = '@Url.Action("LabourHourSummaryPartial", "Vehicles")' + '?id=' + vehicleListId;
+        var tabUrlMaterialCostSummary = '@Url.Action("MaterialCostSummaryPartial", "Vehicles")' + '?id=' + vehicleListId;
+        var tabScPartDetail = '@Url.Action("ScPartsUsedInEstimates", "Vehicles")' + '?id=' + vehicleListId;
+        var tabUrlNscDetail = '@Url.Action("NscDetailsPartial", "Vehicles")' + '?id=' + vehicleListId;
+        var tabUrlRbPartDetail = '@Url.Action("RbPartsPartial", "Vehicles")' + '?id=' + vehicleListId;
+        var tabUrlTotalCost = '@Url.Action("TotalCostPartial", "Vehicles")' + '?id=' + vehicleListId;
+
+        var container = e.detailCell.find("#detail-template-" + vehicleListId);
+        container.html(`
+            <div id="tabstrip-container-${vehicleListId}">
+                <ul>
+                    <li class="k-state-active">Labour Details</li>
+                    <li>Labour Hour</li>
+                    <li>Material Cost</li>
+                    <li>Stock Coded Parts</li>
+                    <li>Non Stock Coded Parts</li>
+                    <li>Rebuilt Parts</li>
+                    <li>Total Cost</li>
+                </ul>
+                <div id="labour-details-content-${vehicleListId}"></div>
+                <div id="labour-hour-summary-content-${vehicleListId}"></div>
+                <div id="material-cost-summary-content-${vehicleListId}"></div>
+                <div id="material-details-content-${vehicleListId}"></div>
+                <div id="nsc-details-content-${vehicleListId}"></div>
+                <div id="rb-part-details-content-${vehicleListId}"></div>
+                <div id="total-cost-content-${vehicleListId}"></div>
+            </div>
+        `);
+
+        var tabStrip = $("#tabstrip-container-" + vehicleListId).kendoTabStrip({
+            animation: { open: { effects: "fadeIn" } },
+            select: function (e) {
+
+                var index = $(e.item).index();
+                console.warn("Selected tab index:", index);
+                var tabMap = [
+                    { url: tabUrlLabourDetail, target: `#labour-details-content-${vehicleListId}` },
+                    { url: tabUrlLabourHourSummary, target: `#labour-hour-summary-content-${vehicleListId}` },
+                    { url: tabUrlMaterialCostSummary, target: `#material-cost-summary-content-${vehicleListId}` },
+                    { url: tabScPartDetail, target: `#material-details-content-${vehicleListId}` },
+                    { url: tabUrlNscDetail, target: `#nsc-details-content-${vehicleListId}` },
+                    { url: tabUrlRbPartDetail, target: `#rb-part-details-content-${vehicleListId}` },
+                    { url: tabUrlTotalCost, target: `#total-cost-content-${vehicleListId}` }
+                ];
+
+                var selected = tabMap[index];
+                if (selected) {
+                    console.log("Loading tab:", selected.url);
+                    $.get(selected.url)
+                        .done(function (data) {
+                            $(selected.target).html(data);
+                            kendo.destroy($(selected.target));
+                            kendo.init($(selected.target));
+                        });
+                }
+            }
+        }).data("kendoTabStrip");
+
+        // Load first tab
+        $.get(tabUrlLabourDetail)
+            .done(function (data) {
+                $(`#labour-details-content-${vehicleListId}`).html(data);
+                kendo.destroy($(`#labour-details-content-${vehicleListId}`));
+                kendo.init($(`#labour-details-content-${vehicleListId}`));
+            });
+    });
+
+});
+
+</script>
+}
+👉 The ArchivedVehiclesIndex.cshtml will be nearly identical, except:
+
+Use ArchivedVehicleGrid as name
+
+Use ArchVehicleListId instead of VehicleListId
+
+🔧 3️⃣ Partial Views
+✅ All partial views you already have (_LabourDetails, _LabourHourSummary, etc) remain unchanged, and continue to work.
+
+✅ Each partial view receives either:
+
+csharp
+Copy
+Edit
+@model VehicleTabsViewModel
+And inside controller you just pass:
+
+csharp
+Copy
+Edit
+return PartialView("_LabourDetails", new VehicleTabsViewModel { ArchVehicleListId = id });
+✅ This is exactly how we keep your shared partial views working for both tabs.
+
+🔧 4️⃣ Controllers
+✅ VehiclesController
+
+csharp
+Copy
+Edit
+public IActionResult GetVehicles([DataSourceRequest] DataSourceRequest request)
+{
+    var vehicles = _vehicleService.GetActiveVehicles();
+    return Json(vehicles.ToDataSourceResult(request));
+}
+✅ Same for ArchivedVehiclesController.
+
+✅ All your partial controllers stay the same.
