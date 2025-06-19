@@ -278,20 +278,197 @@ public IActionResult LabourDetailsPartial(string id)
     </script>
 }
 ======================================================
-$(document).ready(function () {
-    if ($("#VehicleGrid").length > 0) {
-        var vehicleGrid = $("#VehicleGrid").data("kendoGrid");
-        vehicleGrid.bind("detailInit", function (e) { 
-            console.log("VehicleGrid detailInit:", e.data.VehicleListId);
-            // Full detailInit logic here
-        });
-    }
+@section Scripts {
+  <script>
+    $(document).ready(function () {
+      console.log("Index.cshtml document ready — binding grids now.");
 
-    if ($("#ArchivedVehicleGrid").length > 0) {
-        var archivedGrid = $("#ArchivedVehicleGrid").data("kendoGrid");
-        archivedGrid.bind("detailInit", function (e) { 
-            console.log("ArchivedVehicleGrid detailInit:", e.data.ArchVehicleListId);
-            // Full detailInit logic here
+      // 🌟 VEHICLE GRID
+      if ($("#VehicleGrid").length) {
+        const vehicleGrid = $("#VehicleGrid").data("kendoGrid");
+        console.log("VehicleGrid found:", vehicleGrid);
+
+        // Ensure only one row expands
+        vehicleGrid.bind("detailExpand", function(e) {
+          console.warn("VehicleGrid detailExpand — collapsing others, VehicleListId:", e.data.VehicleListId);
+          vehicleGrid.tbody.children("tr.k-master-row").each(function() {
+            if (this !== e.masterRow[0]) {
+              vehicleGrid.collapseRow($(this));
+            }
+          });
         });
-    }
-});
+
+        // Detail initialization for VehicleGrid
+        vehicleGrid.bind("detailInit", function(e) {
+          console.error("VehicleGrid.detailInit fired! VehicleListId:", e.data.VehicleListId);
+          const id = e.data.VehicleListId;
+          
+          // Build tab URLs dynamically
+          const tabUrls = {
+            labour: '@Url.Action("LabourDetailsPartial", "Vehicles")?id=' + id,
+            labourHour: '@Url.Action("LabourHourSummaryPartial", "Vehicles")?id=' + id,
+            materialCost: '@Url.Action("MaterialCostSummaryPartial", "Vehicles")?id=' + id,
+            scParts: '@Url.Action("ScPartsUsedInEstimates", "Vehicles")?id=' + id,
+            nscParts: '@Url.Action("NscDetailsPartial", "Vehicles")?id=' + id,
+            rbParts: '@Url.Action("RbPartsPartial", "Vehicles")?id=' + id,
+            totalCost: '@Url.Action("TotalCostPartial", "Vehicles")?id=' + id
+          };
+
+          const container = e.detailCell.find("#detail-template-" + id);
+          console.log("Detail template container:", container);
+
+          // Render tabstrip markup
+          container.html(`
+            <div id="tabstrip-${id}">
+              <ul>
+                <li class="k-state-active">Labour Details</li>
+                <li>Labour Hour</li>
+                <li>Material Cost</li>
+                <li>Stock Coded Parts</li>
+                <li>Non Stock Coded Parts</li>
+                <li>Rebuilt Parts</li>
+                <li>Total Cost</li>
+              </ul>
+              <div id="labour-details-content-${id}"></div>
+              <div id="labour-hour-summary-content-${id}"></div>
+              <div id="material-cost-summary-content-${id}"></div>
+              <div id="material-details-content-${id}"></div>
+              <div id="nsc-details-content-${id}"></div>
+              <div id="rb-part-details-content-${id}"></div>
+              <div id="total-cost-content-${id}"></div>
+            </div>
+          `);
+
+          // Initialize Kendo TabStrip
+          const ts = $("#tabstrip-" + id).kendoTabStrip({
+            animation: { open: { effects: "fadeIn" }},
+            select: function(ev) {
+              const idx = $(ev.item).index();
+              console.warn("Vehicle tabstrip select() — idx:", idx, "VehicleListId:", id);
+              const targets = [
+                { url: tabUrls.labour, target: `#labour-details-content-${id}` },
+                { url: tabUrls.labourHour, target: `#labour-hour-summary-content-${id}` },
+                { url: tabUrls.materialCost, target: `#material-cost-summary-content-${id}` },
+                { url: tabUrls.scParts, target: `#material-details-content-${id}` },
+                { url: tabUrls.nscParts, target: `#nsc-details-content-${id}` },
+                { url: tabUrls.rbParts, target: `#rb-part-details-content-${id}` },
+                { url: tabUrls.totalCost, target: `#total-cost-content-${id}` }
+              ];
+              const sel = targets[idx];
+              if (sel) {
+                console.log("Loading Vehicle tab via AJAX:", sel.url);
+                $.get(sel.url)
+                  .done(function(html) {
+                    $(sel.target).html(html);
+                    kendo.destroy($(sel.target));
+                    kendo.init($(sel.target));
+                  })
+                  .fail(function(xhr, st, err) {
+                    console.error("Vehicle tab load error:", idx, err);
+                  });
+              }
+            }
+          }).data("kendoTabStrip");
+
+          // Load first tab by default
+          $.get(tabUrls.labour)
+            .done(function(html) {
+              $(`#labour-details-content-${id}`).html(html);
+              kendo.destroy($(`#labour-details-content-${id}`));
+              kendo.init($(`#labour-details-content-${id}`));
+            });
+        });
+      }
+
+      // 🌟 ARCHIVED VEHICLE GRID
+      if ($("#ArchivedVehicleGrid").length) {
+        const archGrid = $("#ArchivedVehicleGrid").data("kendoGrid");
+        console.log("ArchivedVehicleGrid found:", archGrid);
+
+        archGrid.bind("detailExpand", function(e) {
+          console.warn("ArchivedVehicleGrid detailExpand — collapsing others, ArchVehicleListId:", e.data.ArchVehicleListId);
+          archGrid.tbody.children("tr.k-master-row").each(function() {
+            if (this !== e.masterRow[0]) {
+              archGrid.collapseRow($(this));
+            }
+          });
+        });
+
+        archGrid.bind("detailInit", function(e) {
+          console.error("ArchivedVehicleGrid.detailInit fired! ArchVehicleListId:", e.data.ArchVehicleListId);
+          const id = e.data.ArchVehicleListId;
+
+          // Build tab URLs for archived
+          const tabUrls = {
+            labour: '@Url.Action("LabourDetailsPartial", "Vehicles")?oldid=' + e.data.VehicleListId + '&gridType=ArchivedVehicleGrid&id=' + id,
+            labourHour: '@Url.Action("LabourHourSummaryPartial", "Vehicles")?id=' + id + '&gridType=ArchivedVehicleGrid',
+            materialCost: '@Url.Action("MaterialCostSummaryPartial", "Vehicles")?id=' + id + '&gridType=ArchivedVehicleGrid',
+            scParts: '@Url.Action("ScPartsUsedInEstimates", "Vehicles")?id=' + id + '&gridType=ArchivedVehicleGrid',
+            nscParts: '@Url.Action("NscDetailsPartial", "Vehicles")?id=' + id + '&gridType=ArchivedVehicleGrid',
+            rbParts: '@Url.Action("RbPartsPartial", "Vehicles")?id=' + id + '&gridType=ArchivedVehicleGrid'
+          };
+
+          const container = e.detailCell.find("#archived-detail-template-" + id);
+          console.log("Archived detail container:", container);
+
+          container.html(`
+            <div id="archived-tabstrip-${id}">
+              <ul>
+                <li class="k-state-active">Labour Details</li>
+                <li>Labour Hour Summary</li>
+                <li>Material Cost Summary</li>
+                <li>Stock Coded Parts</li>
+                <li>Non Stock Coded Parts</li>
+                <li>Rebuilt Parts</li>
+              </ul>
+              <div id="archived-labour-details-content-${id}"></div>
+              <div id="archived-labour-hour-summary-content-${id}"></div>
+              <div id="archived-material-cost-summary-content-${id}"></div>
+              <div id="archived-sc-parts-content-${id}"></div>
+              <div id="archived-nsc-details-content-${id}"></div>
+              <div id="archived-rb-part-details-content-${id}"></div>
+            </div>
+          `);
+
+          const ts2 = $("#archived-tabstrip-" + id).kendoTabStrip({
+            animation: { open: { effects: "fadeIn" }},
+            select: function(ev) {
+              const idx = $(ev.item).index();
+              console.warn("Archived tabstrip select() — idx:", idx, "ArchVehicleListId:", id);
+              const targets = [
+                { url: tabUrls.labour, target: `#archived-labour-details-content-${id}` },
+                { url: tabUrls.labourHour, target: `#archived-labour-hour-summary-content-${id}` },
+                { url: tabUrls.materialCost, target: `#archived-material-cost-summary-content-${id}` },
+                { url: tabUrls.scParts, target: `#archived-sc-parts-content-${id}` },
+                { url: tabUrls.nscParts, target: `#archived-nsc-details-content-${id}` },
+                { url: tabUrls.rbParts, target: `#archived-rb-part-details-content-${id}` }
+              ];
+              const sel = targets[idx];
+              if (sel) {
+                console.log("Loading Archived tab via AJAX:", sel.url);
+                $.get(sel.url)
+                  .done(function(html) {
+                    $(sel.target).html(html);
+                    kendo.destroy($(sel.target));
+                    kendo.init($(sel.target));
+                  })
+                  .fail(function(xhr, st, err) {
+                    console.error("Archived tab load error:", idx, err);
+                  });
+              }
+            }
+          }).data("kendoTabStrip");
+
+          // Load archived Labour tab initially
+          $.get(tabUrls.l aboutur)
+            .done(function(html) {
+              $(`#archived-labour-details-content-${id}`).html(html);
+              kendo.destroy($(`#archived-labour-details-content-${id}`));
+              kendo.init($(`#archived-labour-details-content-${id}`));
+            });
+        });
+      }
+    });
+  </script>
+}
+
