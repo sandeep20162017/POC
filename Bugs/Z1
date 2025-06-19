@@ -1,0 +1,129 @@
+You are ASp.NET core and MS SQL expert
+In the following code, insert must fail and throw error if MMSStockCode exists for the id in the database (avoid duplcate)
+Pls assist modify the function. Pls give me full function 
+
+ [HttpPost]
+ [AllowAnonymous]
+ public async Task<IActionResult> CreateScPartsUsedInEstimates(
+      [DataSourceRequest] DataSourceRequest request,
+      [Bind(Prefix = "models")] IEnumerable<StockCodedPartsViewModel> models,
+      [FromQuery] string id,
+      [FromQuery] string gridType)
+ {
+     //if (!ModelState.IsValid)
+     //{
+     //    return Json(models.ToDataSourceResult(request, ModelState));
+     //}
+
+     _dbConnection.Open();
+
+     using var transaction = _dbConnection.BeginTransaction();
+     try
+     {
+         // Get values from ViewBag and system
+         var enteredBy = ViewBag.UserName?.ToString().ToUpper() ?? "SYSTEM";
+         var dateEntered = DateTime.Now;
+         var linkCode = id;// ViewBag.MMsCode?.ToString().ToUpper() ?? "DEFAULT_CODE";
+         string linkType = "";
+         var isRebuiltPart = 'N';
+         if (gridType == "RbGrid")
+         {
+             linkType = "RB";
+         }
+         if (gridType == "VehicleGrid")
+         {
+             linkType = "BUS";
+             
+         }
+
+         foreach (var model in models)
+         {
+             var parameters = new DynamicParameters();
+
+             // Convert all string values to uppercase
+             parameters.Add("MMSStockCode", model.MMSStockCode?.ToUpperInvariant());
+             parameters.Add("CC", model.CC?.ToUpperInvariant() ?? " ");
+             parameters.Add("CorePartNumber", model.CorePartNumber?.ToUpperInvariant() ?? " ");
+             parameters.Add("EnteredBy", enteredBy);
+             parameters.Add("DateEntered", dateEntered);
+             parameters.Add("LinkCode", linkCode);
+             parameters.Add("LinkType", linkType);
+             parameters.Add("RebuiltPartNum", id);
+             parameters.Add("IsRebuiltPart", isRebuiltPart);
+
+             // Decimal values with defaults
+             parameters.Add("UnitCost", model.UnitCost ?? 0m);
+             parameters.Add("MmsNewCost", model.MmsNewCost ?? 0m);
+             parameters.Add("CoreCost", model.CoreCost ?? 0m);
+             parameters.Add("RebPartCost", model.PartCost ?? 0m);
+             parameters.Add("LastModifiedBy", ViewBag.UserName);
+             parameters.Add("LastModifiedDate", DateTime.Now);
+
+
+             // String values with uppercase conversion and defaults
+             parameters.Add("Qty", (model.Qty ?? "0").ToUpperInvariant());
+             parameters.Add("Percentage", (model.Percentage ?? "0").ToUpperInvariant());
+
+             parameters.Add("OrigSupplierNum", (model.OrigSupplierNum ?? "0").ToUpperInvariant());
+             parameters.Add("OrigSupplierName", (model.OrigSupplierName ?? "").ToUpperInvariant());
+             parameters.Add("DetailedDesc", (model.DetailedDesc ?? "").ToUpperInvariant());
+             parameters.Add("PartType", (model.PartType ?? "").ToUpperInvariant());
+
+
+
+             var sql = @"
+                     INSERT INTO SBCES.SCPartsUsed (
+                         MMSStockCode, DateEntered, EnteredBy, MMSCost, OEMCost,
+                         LastModifiedBy, LastModifiedDate, CostCentre, QtyReqd,
+                         PercentUsage, LinkCode, RebuiltPart, LinkType, MMSRebuiltCode,
+                         CoreCost, RebPartCost,OrigSupplierName, OrigSupNum
+                         
+                     ) VALUES (
+                         UPPER(@MMSStockCode), 
+                         @LastModifiedDate, 
+                         UPPER(@EnteredBy),
+                         @UnitCost, 
+                         @MmsNewCost,
+                         UPPER(@LastModifiedBy), 
+                         @LastModifiedDate, 
+                         UPPER(@CC),
+                         UPPER(@Qty), 
+                         UPPER(@Percentage),
+                         UPPER(@LinkCode), 
+                         UPPER(@IsRebuiltPart), 
+                         UPPER(@LinkType),
+                         UPPER(@RebuiltPartNum), 
+                         @CoreCost,
+                         @RebPartCost,
+                         UPPER(@OrigSupplierName),
+                         UPPER(@OrigSupplierNum)                               
+                        
+                     )";
+
+             await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+         }
+
+         
+         transaction.Commit();
+
+         if (gridType == "VehicleGrid")
+         {
+             //update estimates
+             await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, id);
+         }
+
+         return Json(models.ToDataSourceResult(request));
+     }
+     catch (SqlException sqlEx)
+     {
+         transaction.Rollback();
+         ModelState.AddModelError("", $"Database error: {sqlEx.Message}");
+         return Json(models.ToDataSourceResult(request, ModelState));
+     }
+     catch (Exception ex)
+     {
+         transaction.Rollback();
+         ModelState.AddModelError("", $"Unexpected error: {ex.Message}");
+         return Json(models.ToDataSourceResult(request, ModelState));
+     }
+ }
