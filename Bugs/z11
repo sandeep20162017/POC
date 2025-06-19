@@ -1,0 +1,122 @@
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> CreateScPartsUsedInEstimates(
+    [DataSourceRequest] DataSourceRequest request,
+    [Bind(Prefix = "models")] IEnumerable<StockCodedPartsViewModel> models,
+    [FromQuery] string id,
+    [FromQuery] string gridType)
+{
+    _dbConnection.Open();
+
+    using var transaction = _dbConnection.BeginTransaction();
+    try
+    {
+        // System values
+        var enteredBy = ViewBag.UserName?.ToString().ToUpper() ?? "SYSTEM";
+        var dateEntered = DateTime.Now;
+        var linkCode = id;
+        string linkType = gridType == "RbGrid" ? "RB" : "BUS";
+        var isRebuiltPart = 'N';
+
+        foreach (var model in models)
+        {
+            var mmsStockCode = model.MMSStockCode?.ToUpperInvariant();
+
+            // 🔑 Check for duplicates BEFORE insert
+            var duplicateCheckSql = @"
+                SELECT COUNT(*) 
+                FROM SBCES.SCPartsUsed 
+                WHERE UPPER(MMSStockCode) = @MMSStockCode
+                  AND UPPER(LinkCode) = @LinkCode
+                  AND UPPER(LinkType) = @LinkType";
+
+            var duplicateCount = await _dbConnection.ExecuteScalarAsync<int>(
+                duplicateCheckSql,
+                new { MMSStockCode = mmsStockCode, LinkCode = linkCode.ToUpper(), LinkType = linkType },
+                transaction
+            );
+
+            if (duplicateCount > 0)
+            {
+                // 🔥 Duplicate found — add model error and break out
+                ModelState.AddModelError("MMSStockCode", $"MMSStockCode '{mmsStockCode}' already exists for this estimate.");
+                transaction.Rollback();
+                return Json(models.ToDataSourceResult(request, ModelState));
+            }
+
+            // Prepare full insert parameters
+            var parameters = new DynamicParameters();
+            parameters.Add("MMSStockCode", mmsStockCode);
+            parameters.Add("CC", model.CC?.ToUpperInvariant() ?? " ");
+            parameters.Add("CorePartNumber", model.CorePartNumber?.ToUpperInvariant() ?? " ");
+            parameters.Add("EnteredBy", enteredBy);
+            parameters.Add("DateEntered", dateEntered);
+            parameters.Add("LinkCode", linkCode.ToUpper());
+            parameters.Add("LinkType", linkType);
+            parameters.Add("RebuiltPartNum", id);
+            parameters.Add("IsRebuiltPart", isRebuiltPart);
+            parameters.Add("UnitCost", model.UnitCost ?? 0m);
+            parameters.Add("MmsNewCost", model.MmsNewCost ?? 0m);
+            parameters.Add("CoreCost", model.CoreCost ?? 0m);
+            parameters.Add("RebPartCost", model.PartCost ?? 0m);
+            parameters.Add("LastModifiedBy", enteredBy);
+            parameters.Add("LastModifiedDate", dateEntered);
+            parameters.Add("Qty", (model.Qty ?? "0").ToUpperInvariant());
+            parameters.Add("Percentage", (model.Percentage ?? "0").ToUpperInvariant());
+            parameters.Add("OrigSupplierNum", (model.OrigSupplierNum ?? "0").ToUpperInvariant());
+            parameters.Add("OrigSupplierName", (model.OrigSupplierName ?? "").ToUpperInvariant());
+            parameters.Add("DetailedDesc", (model.DetailedDesc ?? "").ToUpperInvariant());
+            parameters.Add("PartType", (model.PartType ?? "").ToUpperInvariant());
+
+            var sql = @"
+                INSERT INTO SBCES.SCPartsUsed (
+                    MMSStockCode, DateEntered, EnteredBy, MMSCost, OEMCost,
+                    LastModifiedBy, LastModifiedDate, CostCentre, QtyReqd,
+                    PercentUsage, LinkCode, RebuiltPart, LinkType, MMSRebuiltCode,
+                    CoreCost, RebPartCost, OrigSupplierName, OrigSupNum
+                ) VALUES (
+                    UPPER(@MMSStockCode), 
+                    @LastModifiedDate, 
+                    UPPER(@EnteredBy),
+                    @UnitCost, 
+                    @MmsNewCost,
+                    UPPER(@LastModifiedBy), 
+                    @LastModifiedDate, 
+                    UPPER(@CC),
+                    UPPER(@Qty), 
+                    UPPER(@Percentage),
+                    UPPER(@LinkCode), 
+                    UPPER(@IsRebuiltPart), 
+                    UPPER(@LinkType),
+                    UPPER(@RebuiltPartNum), 
+                    @CoreCost,
+                    @RebPartCost,
+                    UPPER(@OrigSupplierName),
+                    UPPER(@OrigSupplierNum)                               
+                )";
+
+            await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+        }
+
+        transaction.Commit();
+
+        if (gridType == "VehicleGrid")
+        {
+            await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, id);
+        }
+
+        return Json(models.ToDataSourceResult(request));
+    }
+    catch (SqlException sqlEx)
+    {
+        transaction.Rollback();
+        ModelState.AddModelError("", $"Database error: {sqlEx.Message}");
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+    catch (Exception ex)
+    {
+        transaction.Rollback();
+        ModelState.AddModelError("", $"Unexpected error: {ex.Message}");
+        return Json(models.ToDataSourceResult(request, ModelState));
+    }
+}
