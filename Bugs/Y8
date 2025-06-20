@@ -1,0 +1,51 @@
+Thank you. Now controller action did get called, but getting following error
+: BeginExecuteNonQuery requires the command to have a transaction when the connection assigned to the command is in a pending local transaction.  The Transaction property of the command has not been initialized.
+Controller :
+ [HttpPost]
+ [AllowAnonymous]
+ public async Task<IActionResult> DeleteRbPartsUsedInEstimates(
+                                                  [DataSourceRequest] DataSourceRequest request,
+                                                  RebuiltPartsViewModel model,
+                                                  string id,
+                                                  string parentPartId,
+                                                   string gridType)
+ { 
+ 
+    
+     if (!ModelState.IsValid)
+     {
+        // return Json(model.ToDataSourceResult(request, ModelState));
+     }
+
+     _dbConnection.Open();
+     using var transaction = _dbConnection.BeginTransaction();
+     try
+     {
+        
+             var sql = @"
+                         DELETE FROM SBCES.SCPartsUsed 
+                         WHERE 
+                             MmsRebuiltCode = '" + model.RebuiltStockNum + "'" +                                     
+                             " AND  id = '" + id + "'" + " AND RebuiltPart = 'Y'";
+
+             await _dbConnection.ExecuteAsync(sql, transaction);
+
+             transaction.Commit();
+
+             if (gridType == "VehicleGrid")
+             {
+                 //update estimates
+                 await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, id);
+             }
+
+         return Json(new[] { model}.ToDataSourceResult(request, ModelState) );
+
+
+     }
+     catch (Exception ex)
+     {
+         transaction.Rollback();
+         ModelState.AddModelError("", $"Error deleting record: {ex.Message}");
+         return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+     }
+ }
