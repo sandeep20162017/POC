@@ -2,27 +2,26 @@ DECLARE
     @LinkCode VARCHAR(30) = 'YourLinkCodeHere',
     @TaxRateRaw VARCHAR(20);
 
--- Fetch TAX_RATE from SBCES.CES_SETTINGS
-SELECT @TaxRateRaw = TAX_RATE 
-FROM SBCES.CES_SETTINGS;
+-- Fetch TAX_RATE from CESSETTINGS table
+SELECT @TaxRateRaw = Value 
+FROM SBCES.CESSETTINGS 
+WHERE SBCES.CESSETTINGS.Parameter = 'TAX_RATE';
 
--- Debug: Uncomment to check what you fetched
+-- Debug TAX Rate: uncomment to verify fetched value
 -- SELECT 'TAX RATE RAW' AS Label, @TaxRateRaw AS TaxRateRaw;
 
--- Convert TAX_RATE (varchar) to decimal
-DECLARE @TaxRate DECIMAL(18,6) = CAST(REPLACE(ISNULL(@TaxRateRaw, '0'), ',', '.') AS DECIMAL(18,6));
+-- Convert TAX_RATE (varchar) to decimal safely
+DECLARE @TaxRate DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL(@TaxRateRaw, '0'), ',', '.') AS DECIMAL(18,6));
 
--- Start aggregation
 WITH CostData AS (
     SELECT 
-        -- CostCentre from SCPartsUsed
         ISNULL(SUS.CostCentre, '0') AS CostCentre,
 
-        -- SCPartsMaterialCost: RebuiltPart = 'N'
+        -- SCPartsMaterialCost (RebuiltPart = 'N')
         SUM(
             CASE 
                 WHEN SUS.RebuiltPart = 'N' AND SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode
-                THEN CAST(
+                THEN TRY_CAST(
                         SBCES.FINALCOST(
                             CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
                             CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
@@ -34,11 +33,11 @@ WITH CostData AS (
             END
         ) AS SCPartsMaterialCost,
 
-        -- RBPartsMaterialCost: RebuiltPart = 'Y'
+        -- RBPartsMaterialCost (RebuiltPart = 'Y')
         SUM(
             CASE 
                 WHEN SUS.RebuiltPart = 'Y' AND SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode
-                THEN CAST(
+                THEN TRY_CAST(
                         SBCES.FINALCOST(
                             CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
                             CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
@@ -50,11 +49,11 @@ WITH CostData AS (
             END
         ) AS RBPartsMaterialCost,
 
-        -- NSCSCPartsMaterialCost: from NscPartsUsed table
+        -- NSCSCPartsMaterialCost (from NscPartsUsed table)
         SUM(
             CASE 
                 WHEN NSUS.LinkType = 'BUS' AND NSUS.LinkCode = @LinkCode
-                THEN CAST(
+                THEN TRY_CAST(
                         SBCES.FINALCOST(
                             CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)),
                             CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)),
