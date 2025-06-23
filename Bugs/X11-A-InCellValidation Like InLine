@@ -1,18 +1,112 @@
-🔧 Solution: Show Inline Validation Messages in InCell Mode
-1️⃣ Still enable client-side validation like we already discussed:
-[Required] in your model ✅
+Full working Telerik ASP.NET Core InCell Grid solution for you:
+1️⃣ Add Required Scripts in Layout.cshtml
+In your _Layout.cshtml:
 
-.Validation(v => v.Required(true)) in the DataSource model ✅
+html
+Copy
+Edit
+<head>
+    <!-- Kendo default styles -->
+    <link rel="stylesheet" href="~/lib/kendo/css/kendo.default-v2.min.css" />
 
-Add HtmlAttributes(new { required = "required", @class = "required-cell" }) ✅
+    <!-- jQuery -->
+    <script src="~/lib/jquery/jquery.min.js"></script>
 
-2️⃣ Handle Save event instead of SaveChanges
-Telerik actually exposes individual cell Save event — fires after a cell edit.
+    <!-- Kendo UI scripts -->
+    <script src="~/lib/kendo/js/kendo.all.min.js"></script>
 
-We can hook into it to inject inline validation messages immediately.
+    <!-- jQuery Validation -->
+    <script src="~/lib/jquery-validation/jquery.validate.min.js"></script>
+    <script src="~/lib/jquery-validation-unobtrusive/jquery.validate.unobtrusive.min.js"></script>
 
-✅ Example:
-JS:
+</head>
+✅ Make sure you're loading jQuery, Kendo, and both jQuery Validation and Unobtrusive Validation.
+
+2️⃣ Setup _ViewImports.cshtml (VERY important for ASP.NET Core)
+Create or verify _ViewImports.cshtml like this:
+
+csharp
+Copy
+Edit
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+@addTagHelper *, Kendo.Mvc
+
+@using Kendo.Mvc.UI
+
+@inject Microsoft.AspNetCore.Mvc.ViewFeatures.IModelExpressionProvider ModelExpressionProvider
+
+@{
+    Html.EnableClientValidation();
+    Html.EnableUnobtrusiveJavaScript();
+}
+✅ This activates Razor Tag Helpers and client-side validation for Razor Pages & MVC Views.
+
+3️⃣ Your ViewModel
+csharp
+Copy
+Edit
+public class NscPartsUsedViewModel
+{
+    public int Oid { get; set; }
+
+    [Required(ErrorMessage = "Supplier Number is required")]
+    public string OrigSuppNum { get; set; }
+
+    [Required(ErrorMessage = "Supplier Name is required")]
+    public string OrigSupplierName { get; set; }
+}
+✅ DataAnnotations drive the validation.
+
+4️⃣ The Telerik ASP.NET Core Grid
+Here’s your full Grid definition using InCell editing:
+
+csharp
+Copy
+Edit
+@(Html.Kendo().Grid<NscPartsUsedViewModel>()
+    .Name("NscPartsMaterialDetailsRebuiltPartsGrid")
+    .Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Pageable()
+    .Sortable()
+    .Resizable(r => r.Columns(true))
+    .Events(events => 
+    {
+        events.Save("onGridCellSave");
+        events.SaveChanges("onSaveChanges");
+    })
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.Oid).Hidden();
+
+        columns.Bound(c => c.OrigSuppNum)
+            .Title("Supplier Number")
+            .EditorTemplateName("NscComboBox")
+            .HtmlAttributes(new { required = "required", @class = "required-cell" })
+            .HeaderHtmlAttributes(new { @class = "required-header" });
+
+        columns.Bound(c => c.OrigSupplierName)
+            .Title("Supplier Name")
+            .EditorTemplateName("NscSupplierComboBox")
+            .HtmlAttributes(new { required = "required", @class = "required-cell" })
+            .HeaderHtmlAttributes(new { @class = "required-header" });
+    })
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(false)
+        .Model(model =>
+        {
+            model.Id(c => c.Oid);
+            // NO .Validation() needed here in ASP.NET Core
+        })
+        .Read(read => read.Url(Url.Action("GetNscPartsUsedInEstimates", "NscPartsUsedInEstimates")))
+        .Create(create => create.Url(Url.Action("CreateNscPartsUsedInEstimates", "NscPartsUsedInEstimates")))
+        .Update(update => update.Url(Url.Action("UpdateNscPartsUsedInEstimates", "NscPartsUsedInEstimates")))
+        .Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsedInEstimates", "NscPartsUsedInEstimates")))
+    )
+)
+5️⃣ Add Client-side InCell Inline Validation
+We hook into the Save event and inject inline error messages into the cell like this:
+
 javascript
 Copy
 Edit
@@ -20,34 +114,22 @@ function onGridCellSave(e) {
     var cell = e.container;
     var validator = cell.kendoValidator().data("kendoValidator");
 
-    // remove existing custom validation message div (if any)
+    // Remove previous validation messages
     cell.find(".cell-validation-error").remove();
 
     if (!validator.validate()) {
-        e.preventDefault(); // cancel cell save
+        e.preventDefault(); // prevent saving
 
-        // get validation message from the first failed rule
         var errors = validator.errors();
         for (var field in errors) {
             var message = errors[field];
-
-            // inject inline error message under the cell
-            cell.append('<div class="cell-validation-error" style="color:red; font-size:12px;">' + message + '</div>');
-            break;
+            cell.append('<div class="cell-validation-error" style="color:red;font-size:12px;">' + message + '</div>');
+            break; // show only first error per field
         }
     }
 }
-Hook into Grid Events:
-csharp
-Copy
-Edit
-.Events(events =>
-{
-    events.Save("onGridCellSave");
-    events.SaveChanges("onSaveChanges"); // still keep full-grid validation here if needed
-})
-3️⃣ Optional: Style for better inline appearance
-You can improve how the inline message looks:
+6️⃣ Style for invalid fields (optional)
+Add a bit of CSS:
 
 css
 Copy
@@ -57,3 +139,4 @@ Edit
     color: #b94a48;
     font-size: 12px;
 }
+✅ ✅ ✅ Done!
