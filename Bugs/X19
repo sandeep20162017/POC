@@ -1,0 +1,86 @@
+You are MS SQL expert. Pls help me write SQL query. Add debugging. Keep simple. USE SQl schema names. Do proper casting based on the col type. Do IFNULL checks.
+Need to sum up COST, TAXCOST Group By COSTCENTRE. For eack of Below. Cast columns properly
+1. SCPartsMaterialCost (REBUILTPART = 'N', LINKTYPE='BUS', LINKCODE=@LinkCode from SCPartsUsed - USE MMSCOSt for base per unit cost)
+2. NSCSCPartsMaterialCost (RLINKTYPE='BUS', LINKCODE=@LinkCode from NSCPartsUsed - USE COSt for base per unit cost))
+3. RBPartsMaterialCost (REBUILTPART = 'Y', LINKTYPE='BUS', LINKCODE=@LinkCode from SCPartsUsed - USE MMSCOSt for base per unit cost)
+TotalCOST = SCPartsMaterialCost+NSCSCPartsMaterialCost + RBPartsMaterialCost
+GetTaxRate from SELCT TAX_RATE from SBCES.CES_SETIINGS.(TAX_RATE is VARCHAR
+Calculate TAX = TotalCOST * TAX_RATE
+Calculate TOTALWITHTAX =  TotalCOST + TAX
+Output should be :
+SELECT 
+         
+          ISNULL(A.COSTCENTRE, '0') AS [CostCentre],
+          ISNULL(SUM(A.COST), 0) AS [TOTALCOST], 
+          ISNULL(SUM(A.TAX), 0) AS [TAX],   
+          ISNULL(SUM(A.TOTALWITHTAX ), 0) AS [TOTALWITHTAX ]
+Group by COSTCENTRE
+Use following helper userdefined functions :
+CAST(SBCES.FINALCOST(
+    CAST(PERCENTUSAGE AS NUMERIC(18,2)), 
+    CAST(QTYREQD AS NUMERIC(18,2)), 
+    MMSCOST, 
+    0
+) AS DECIMAL(18,2))
+SQL details :
+CREATE TABLE [SBCES].[ScPartsUsed](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[MmsStockCode] [varchar](30) NULL,
+	[DateEntered] [datetime] NULL,
+	[RebPartCost] [numeric](18, 2) NULL,
+	[EnteredBy] [varchar](50) NULL,
+	[MmsCost] [numeric](18, 2) NULL,
+	[OemCost] [numeric](18, 2) NULL,
+	[LastModifiedBy] [varchar](25) NULL,
+	[LastModifiedDate] [datetime] NULL,
+	[MmsRebuiltCode] [varchar](30) NULL,
+	[CostCentre] [varchar](4) NULL,
+	[QtyReqd] [varchar](10) NULL,
+	[PercentUsage] [varchar](10) NULL,
+	[LinkCode] [varchar](30) NULL,
+	[RebuiltPart] [varchar](1) NULL,
+	[LinkType] [varchar](3) NULL,
+	[CoreCost] [numeric](18, 2) NULL,
+	[OrigSupNum] [varchar](50) NULL,
+	[OrigSupplierName] [varchar](50) NULL,
+ CONSTRAINT [PK_ScPartsUsed] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+CREATE TABLE [SBCES].[NscPartsUsed](
+	[Oid] [int] IDENTITY(1,1) NOT NULL,
+	[OrigSuppNum] [varchar](50) NULL,
+	[OrigSupplierName] [varchar](50) NULL,
+	[CostCentre] [varchar](4) NULL,
+	[QtyReqd] [varchar](10) NULL,
+	[PercentUsage] [varchar](10) NULL,
+	[DateEntered] [datetime] NULL,
+	[EnteredBy] [varchar](25) NULL,
+	[LastModifiedBy] [varchar](25) NULL,
+	[LastModifiedDate] [datetime] NULL,
+	[LinkCode] [varchar](30) NULL,
+	[Cost] [numeric](18, 2) NULL,
+	[LinkType] [varchar](3) NULL,
+	[CoreCost] [numeric](18, 2) NULL,
+	[Id] [int] NULL,
+ CONSTRAINT [PK_NscPartsUsed] PRIMARY KEY CLUSTERED 
+(
+	[Oid] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+CREATE FUNCTION [SBCES].[FinalCost]
+    (@ViPercent VARCHAR(20),
+     @ViQuantity VARCHAR(20),
+     @ViCost DECIMAL(10,2),
+     @ViCoreCost DECIMAL(10,2))
+RETURNS VARCHAR(4000) AS
+BEGIN
+    DECLARE @Total DECIMAL(38,4);
+ 
+    SET @Total = (CAST(REPLACE(ISNULL(@ViPercent,'0'),',','.') AS DECIMAL(10,4))/ 100) * CAST(@ViQuantity AS DECIMAL(10,4)) * @ViCost;
+    RETURN ROUND(@Total - @ViCoreCost, 2);
+END;
+GO
