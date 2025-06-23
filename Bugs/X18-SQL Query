@@ -1,120 +1,95 @@
-Here’s a clean and well‑structured T‑SQL that does exactly what you asked – with proper use of schema names, ISNULLs, casting, and debug output via commented checkpoints so you can trace values if needed:
-
-sql
-Copy
-Edit
 DECLARE 
-    @LinkCode VARCHAR(30) = -- your value here,
+    @LinkCode VARCHAR(30) = 'YourLinkCodeHere',
     @TaxRateRaw VARCHAR(20);
 
--- 📌 Fetch TAX_RATE from settings
-SELECT 
-    @TaxRateRaw = TAX_RATE 
+-- Fetch TAX_RATE from SBCES.CES_SETTINGS
+SELECT @TaxRateRaw = TAX_RATE 
 FROM SBCES.CES_SETTINGS;
--- Debug: SELECT 'TAX RATE RAW' = @TaxRateRaw;
 
--- Convert TAX_RATE varchar to decimal
-DECLARE @TaxRate DECIMAL(18,6) = 
-    CAST(REPLACE(ISNULL(@TaxRateRaw,'0'), ',', '.') AS DECIMAL(18,6));
+-- Debug: Uncomment to check what you fetched
+-- SELECT 'TAX RATE RAW' AS Label, @TaxRateRaw AS TaxRateRaw;
 
--- CTE computing each cost bucket per COSTCENTRE
-WITH CostBuckets AS (
+-- Convert TAX_RATE (varchar) to decimal
+DECLARE @TaxRate DECIMAL(18,6) = CAST(REPLACE(ISNULL(@TaxRateRaw, '0'), ',', '.') AS DECIMAL(18,6));
+
+-- Start aggregation
+WITH CostData AS (
     SELECT 
-        SUS.CostCentre,
-        -- 1. SCParts (Rebuilt = 'N')
-        SUM(
-            CAST(
-                SBCES.FinalCost(
-                    SUS.PercentUsage,
-                    SUS.QtyReqd,
-                    SUS.MmsCost,
-                    0
-                ) AS DECIMAL(18,2)
-            )
-        ) FILTER (WHERE SUS.RebuiltPart = 'N' AND SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode)
-        AS SCPartsMaterialCost,
+        -- CostCentre from SCPartsUsed
+        ISNULL(SUS.CostCentre, '0') AS CostCentre,
 
-        -- 2. NSCParts (uses NscPartsUsed.Cost)
+        -- SCPartsMaterialCost: RebuiltPart = 'N'
         SUM(
-            CAST(
-                SBCES.FinalCost(
-                    NSUS.PercentUsage,
-                    NSUS.QtyReqd,
-                    NSUS.Cost,
-                    0
-                ) AS DECIMAL(18,2)
-            )
-        ) FILTER (WHERE NSUS.LinkType = 'BUS' AND NSUS.LinkCode = @LinkCode)
-        AS NSCSCPartsMaterialCost,
+            CASE 
+                WHEN SUS.RebuiltPart = 'N' AND SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode
+                THEN CAST(
+                        SBCES.FINALCOST(
+                            CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                            CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                            ISNULL(SUS.MmsCost, 0),
+                            0
+                        ) AS DECIMAL(18,2)
+                    )
+                ELSE 0 
+            END
+        ) AS SCPartsMaterialCost,
 
-        -- 3. RBParts (Rebuilt = 'Y')
+        -- RBPartsMaterialCost: RebuiltPart = 'Y'
         SUM(
-            CAST(
-                SBCES.FinalCost(
-                    SUS.PercentUsage,
-                    SUS.QtyReqd,
-                    SUS.MmsCost,
-                    0
-                ) AS DECIMAL(18,2)
-            )
-        ) FILTER (WHERE SUS.RebuiltPart = 'Y' AND SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode)
-        AS RBPartsMaterialCost
-    FROM SBCES.ScPartsUsed AS SUS
-    LEFT JOIN SBCES.NscPartsUsed AS NSUS
-        ON NSUS.LinkCode = SUS.LinkCode
-        AND NSUS.LinkType = SUS.LinkType
-        AND NSUS.CostCentre = SUS.CostCentre
+            CASE 
+                WHEN SUS.RebuiltPart = 'Y' AND SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode
+                THEN CAST(
+                        SBCES.FINALCOST(
+                            CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                            CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                            ISNULL(SUS.MmsCost, 0),
+                            0
+                        ) AS DECIMAL(18,2)
+                    )
+                ELSE 0 
+            END
+        ) AS RBPartsMaterialCost,
+
+        -- NSCSCPartsMaterialCost: from NscPartsUsed table
+        SUM(
+            CASE 
+                WHEN NSUS.LinkType = 'BUS' AND NSUS.LinkCode = @LinkCode
+                THEN CAST(
+                        SBCES.FINALCOST(
+                            CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)),
+                            CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)),
+                            ISNULL(NSUS.Cost, 0),
+                            0
+                        ) AS DECIMAL(18,2)
+                    )
+                ELSE 0 
+            END
+        ) AS NSCSCPartsMaterialCost
+
+    FROM SBCES.ScPartsUsed SUS
+    FULL OUTER JOIN SBCES.NscPartsUsed NSUS 
+        ON ISNULL(SUS.CostCentre, '') = ISNULL(NSUS.CostCentre, '')
+       AND ISNULL(SUS.LinkCode, '') = ISNULL(NSUS.LinkCode, '')
+       AND ISNULL(SUS.LinkType, '') = ISNULL(NSUS.LinkType, '')
+
     WHERE 
         (SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode)
-     OR (NSUS.LinkType = 'BUS' AND NSUS.LinkCode = @LinkCode)
-    GROUP BY SUS.CostCentre
+        OR (NSUS.LinkType = 'BUS' AND NSUS.LinkCode = @LinkCode)
+    
+    GROUP BY ISNULL(SUS.CostCentre, '0')
 )
+
 SELECT 
-    ISNULL(COSTCENTRE, '0')        AS CostCentre,
-    ISNULL(TotalCost, 0)           AS TotalCost,
-    ISNULL(TaxAmount, 0)           AS Tax,
-    ISNULL(TotalWithTax, 0)        AS TotalWithTax
+    CostCentre,
+    ISNULL(TotalCost, 0) AS TotalCost,
+    ISNULL(TaxAmount, 0) AS Tax,
+    ISNULL(TotalWithTax, 0) AS TotalWithTax
 FROM (
-    SELECT
+    SELECT 
         CostCentre,
-        ISNULL(SCPartsMaterialCost, 0)
-      + ISNULL(NSCSCPartsMaterialCost, 0)
-      + ISNULL(RBPartsMaterialCost, 0)
-      AS TotalCost,
-      -- compute TAX and total
-      (ISNULL(SCPartsMaterialCost, 0)
-      + ISNULL(NSCSCPartsMaterialCost, 0)
-      + ISNULL(RBPartsMaterialCost, 0)) * @TaxRate AS TaxAmount,
-      (ISNULL(SCPartsMaterialCost, 0)
-      + ISNULL(NSCSCPartsMaterialCost, 0)
-      + ISNULL(RBPartsMaterialCost, 0)) * (1 + @TaxRate) AS TotalWithTax
-    FROM CostBuckets
-) AS A
-GROUP BY COSTCENTRE, TotalCost, TaxAmount, TotalWithTax
+        SCPartsMaterialCost + NSCSCPartsMaterialCost + RBPartsMaterialCost AS TotalCost,
+        (SCPartsMaterialCost + NSCSCPartsMaterialCost + RBPartsMaterialCost) * @TaxRate AS TaxAmount,
+        (SCPartsMaterialCost + NSCSCPartsMaterialCost + RBPartsMaterialCost) * (1 + @TaxRate) AS TotalWithTax
+    FROM CostData
+) AS Final
 ORDER BY CostCentre;
-🔍 Explanation & Debug Tips
-Tax Rate: We grab it from SBCES.CES_SETTINGS and sanitize the string using REPLACE, then cast it to decimal. This way “0.075” or “7,5” always works.
-
-FinalCost(): We wrap inside CAST(... AS DECIMAL(18,2)) to ensure uniform precision.
-
-Filters: I used SQL standard SUM(...) FILTER (WHERE ...), but if your SQL version doesn’t support it, you can replace each SUM with:
-
-sql
-Copy
-Edit
-SUM(CASE WHEN … THEN CAST(…AS DECIMAL(18,2)) ELSE 0 END)
-Debug:
-
-Uncomment SELECT 'TAX RATE RAW' = @TaxRateRaw; to verify what’s fetched.
-
-Add interim SELECT from the CTE to check bucket values before final aggregation.
-
-This query should give you, per CostCentre:
-
-TotalCost = sum of all three buckets
-
-Tax = TotalCost * TAX_RATE
-
-TotalWithTax = TotalCost + Tax
-
-Let me know if your environment doesn’t support FILTER, or if you need the debug stage expanded.
