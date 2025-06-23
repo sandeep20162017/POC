@@ -1,0 +1,197 @@
+DECLARE @LinkCode VARCHAR(30) = '4352';
+
+BEGIN TRY
+
+    -- Get TaxRate (varchar to decimal)
+    DECLARE @TaxRate DECIMAL(18,6) =
+        TRY_CAST(REPLACE(
+            ISNULL(
+                (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'TAX_RATE'), '0'
+            ), ',', '.') AS DECIMAL(18,6));
+
+    -- Get Fringe (varchar to decimal)
+    DECLARE @Fringe DECIMAL(18,6) =
+        TRY_CAST(REPLACE(
+            ISNULL(
+                (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'FRINGE'), '0'
+            ), ',', '.') AS DECIMAL(18,6));
+
+    -- Get Benefit (varchar to decimal)
+    DECLARE @Benefit DECIMAL(18,6) =
+        TRY_CAST(REPLACE(
+            ISNULL(
+                (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'BENEFIT'), '0'
+            ), ',', '.') AS DECIMAL(18,6));
+
+    -- Get Overhead (varchar to decimal)
+    DECLARE @Overhead DECIMAL(18,6) =
+        TRY_CAST(REPLACE(
+            ISNULL(
+                (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'OVERHEAD'), '0'
+            ), ',', '.') AS DECIMAL(18,6));
+
+    -- Get NonProductiveAdjustment (varchar to decimal)
+    DECLARE @NonProductiveAdj DECIMAL(18,6) =
+        TRY_CAST(REPLACE(
+            ISNULL(
+                (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'
+            ), ',', '.') AS DECIMAL(18,6));
+
+    -- MATERIAL COST CTE (unchanged as per your request)
+    WITH MaterialCost AS (
+        SELECT 
+            SUM(CASE WHEN SUS.RebuiltPart = 'N' AND SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode
+                     THEN TRY_CAST(SBCES.FINALCOST(
+                             CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                             CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                             ISNULL(SUS.MmsCost, 0), 0
+                         ) AS DECIMAL(18,2))
+                     ELSE 0 END) AS SCPartsMaterialCost,
+
+            SUM(CASE WHEN SUS.RebuiltPart = 'Y' AND SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode
+                     THEN TRY_CAST(SBCES.FINALCOST(
+                             CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                             CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                             ISNULL(SUS.MmsCost, 0), 0
+                         ) AS DECIMAL(18,2))
+                     ELSE 0 END) AS RBPartsMaterialCost,
+
+            SUM(CASE WHEN NSUS.LinkType = 'BUS' AND NSUS.LinkCode = @LinkCode
+                     THEN TRY_CAST(SBCES.FINALCOST(
+                             CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)),
+                             CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)),
+                             ISNULL(NSUS.Cost, 0), 0
+                         ) AS DECIMAL(18,2))
+                     ELSE 0 END) AS NSCSCPartsMaterialCost
+        FROM SBCES.ScPartsUsed SUS
+        FULL OUTER JOIN SBCES.NscPartsUsed NSUS 
+            ON ISNULL(SUS.CostCentre, '') = ISNULL(NSUS.CostCentre, '')
+           AND ISNULL(SUS.LinkCode, '') = ISNULL(NSUS.LinkCode, '')
+           AND ISNULL(SUS.LinkType, '') = ISNULL(NSUS.LinkType, '')
+        WHERE 
+            (SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode)
+            OR (NSUS.LinkType = 'BUS' AND NSUS.LinkCode = @LinkCode)
+    ),
+
+    -- Labour calculation broken into row level first
+    LabourRows AS (
+        SELECT
+            -- Calculated Decimal Hrs
+            (
+                CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60
+            ) AS DecimalHrs,
+
+            -- Effective Hours
+            (
+                (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                 CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100
+            ) AS EffectiveHours,
+
+            -- Labour Rate
+            ISNULL((
+                SELECT TOP 1 ES.RatePerHour 
+                FROM CES.SBCES.EmployeeSalaries ES
+                WHERE ES.WageGroup = (
+                    SELECT TOP 1 EC.WageGroup
+                    FROM CES.SBCES.EmplClass EC
+                    WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+            ), 0) AS LabourRate,
+
+            -- Labour Cost per row
+            (
+                (
+                    (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                     CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                    * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100
+                ) 
+                / @NonProductiveAdj
+                * ISNULL((
+                    SELECT TOP 1 ES.RatePerHour 
+                    FROM CES.SBCES.EmployeeSalaries ES
+                    WHERE ES.WageGroup = (
+                        SELECT TOP 1 EC.WageGroup
+                        FROM CES.SBCES.EmplClass EC
+                        WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                ), 0)
+            ) AS LabourCost
+
+        FROM SBCES.EmployeeLabour EL
+        WHERE EL.TypeId = 'BUS' AND EL.LinkNumber = @LinkCode
+    ),
+
+    LabourCost AS (
+        SELECT
+            SUM(LabourCost) AS TotalLabourCost
+        FROM LabourRows
+    ),
+
+    FinalCalc AS (
+        SELECT 
+            MC.*,
+            LC.TotalLabourCost,
+
+            -- Calculate LabourFringe
+            LC.TotalLabourCost * @Fringe AS LabourFringe,
+
+            -- Calculate LabourBenefits
+            (LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit AS LabourBenefits,
+
+            -- Blended Fringe and Benefits %
+            CASE WHEN LC.TotalLabourCost = 0 THEN 0 ELSE
+            ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) / LC.TotalLabourCost
+            END AS BlendedFringeBenefitPercent,
+
+            -- Blended Fringe and Benefits Cost ($)
+            ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) AS BlendedFringeBenefitCost,
+
+            -- LabourOverhead
+            LC.TotalLabourCost * @Overhead AS LabourOverhead,
+
+            -- FinalLabourCost
+            LC.TotalLabourCost 
+            + ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) 
+            + (LC.TotalLabourCost * @Overhead) AS FinalLabourCost
+
+        FROM MaterialCost MC
+        CROSS JOIN LabourCost LC
+    )
+
+    SELECT
+        @LinkCode AS LinkCode,
+
+        -- Materials:
+        CAST(MC.SCPartsMaterialCost + MC.RBPartsMaterialCost + MC.NSCSCPartsMaterialCost AS DECIMAL(18,2)) AS MaterialTotalCostNoTax,
+        CAST((MC.SCPartsMaterialCost + MC.RBPartsMaterialCost + MC.NSCSCPartsMaterialCost) * @TaxRate AS DECIMAL(18,2)) AS MaterialTotalTaxAmount,
+        CAST((MC.SCPartsMaterialCost + MC.RBPartsMaterialCost + MC.NSCSCPartsMaterialCost) * (1 + @TaxRate) AS DECIMAL(18,2)) AS MaterialTotalWithTax,
+
+        -- Labour:
+        CAST(FC.TotalLabourCost AS DECIMAL(18,2)) AS TotalLabourCost,
+        CAST(FC.LabourFringe AS DECIMAL(18,2)) AS LabourFringe,
+        CAST(FC.LabourBenefits AS DECIMAL(18,2)) AS LabourBenefits,
+        CAST(FC.BlendedFringeBenefitPercent * 100 AS DECIMAL(18,2)) AS BlendedFringeBenefitPercent, -- percent format
+        CAST(FC.BlendedFringeBenefitCost AS DECIMAL(18,2)) AS BlendedFringeBenefitCost,
+        CAST(FC.LabourOverhead AS DECIMAL(18,2)) AS LabourOverhead,
+        CAST(FC.FinalLabourCost AS DECIMAL(18,2)) AS FinalLabourCost,
+
+        -- Core Cost:
+        ISNULL((SELECT SUM(CoreCost) FROM SBCES.SCPartsUsed WHERE LinkCode = @LinkCode), 0) AS CoreCost,
+
+        -- Total without Tax
+        CAST(FC.FinalLabourCost + 
+             (MC.SCPartsMaterialCost + MC.RBPartsMaterialCost + MC.NSCSCPartsMaterialCost)
+        AS DECIMAL(18,2)) AS TotalWithoutTax,
+
+        -- Total with Tax
+        CAST(FC.FinalLabourCost + 
+             ((MC.SCPartsMaterialCost + MC.RBPartsMaterialCost + MC.NSCSCPartsMaterialCost) * (1 + @TaxRate))
+        AS DECIMAL(18,2)) AS TotalWithTax
+
+    FROM MaterialCost MC
+    CROSS JOIN FinalCalc FC;
+
+END TRY
+BEGIN CATCH
+    PRINT 'Error: ' + ERROR_MESSAGE();
+END CATCH;
