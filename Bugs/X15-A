@@ -45,50 +45,71 @@ BEGIN TRY
             OR (NSUS.LinkType = 'BUS' AND NSUS.LinkCode = @LinkCode)
     ),
 
-    -- LABOUR COST CTE
-    LabourCost AS (
-        SELECT 
-            SUM( 
-                CAST(
-                    (
-                        CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) +
-                        (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
-                    ) 
-                    * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
-                    / CAST((SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
-                            FROM CES.SBCES.CesSettings WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2))
-                    * ISNULL((
-                        SELECT TOP 1 ES.RatePerHour 
-                        FROM CES.SBCES.EmployeeSalaries ES
-                        WHERE ES.WageGroup = (
-                            SELECT TOP 1 EC.WageGroup
-                            FROM CES.SBCES.EmplClass EC
-                            WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
-                    ), 0)
-                ) AS DECIMAL(18,2))
-            ) AS TotalLabourCost,
+    LabourRows AS (
+        SELECT
+            EL.Id,
+            EL.LinkNumber,
 
-            SUM(
-                CAST(
-                    (
-                        CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) +
-                        (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
-                    ) 
-                    * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
-                    / CAST((SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
-                            FROM CES.SBCES.CesSettings WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2))
-                    * ISNULL((
-                        SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
-                        FROM CES.SBCES.CesSettings WHERE Parameter = 'OVERHEAD'
-                    ), 0)
-                ) AS DECIMAL(18,2)
-            ) AS TotalLabourOverheadCost
+            -- Decimal Hrs Conversion
+            CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+            (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+            AS DecimalHrs,
+
+            -- Effective Hours
+            (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+            (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60))
+            * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) AS EffectiveHours,
+
+            -- Labour Rate lookup
+            ISNULL((
+                SELECT TOP 1 ES.RatePerHour 
+                FROM CES.SBCES.EmployeeSalaries ES
+                WHERE ES.WageGroup = (
+                    SELECT TOP 1 EC.WageGroup
+                    FROM CES.SBCES.EmplClass EC
+                    WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+            ), 0) AS LabourRate,
+
+            -- Labour Cost calculation
+            (
+                (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60))
+                * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
+                / CAST((SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) FROM CES.SBCES.CesSettings WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2))
+                * ISNULL((
+                    SELECT TOP 1 ES.RatePerHour 
+                    FROM CES.SBCES.EmployeeSalaries ES
+                    WHERE ES.WageGroup = (
+                        SELECT TOP 1 EC.WageGroup
+                        FROM CES.SBCES.EmplClass EC
+                        WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                ), 0)
+            ) AS LabourCost,
+
+            -- Labour Overhead calculation
+            (
+                (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60))
+                * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
+                / CAST((SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) FROM CES.SBCES.CesSettings WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2))
+                * ISNULL((
+                    SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) 
+                    FROM CES.SBCES.CesSettings WHERE Parameter = 'OVERHEAD'
+                ), 0)
+            ) AS LabourOverheadCost
 
         FROM SBCES.EmployeeLabour EL
         WHERE EL.TypeId = 'BUS' AND EL.LinkNumber = @LinkCode
+    ),
+
+    LabourCost AS (
+        SELECT
+            SUM(LabourCost) AS TotalLabourCost,
+            SUM(LabourOverheadCost) AS TotalLabourOverheadCost
+        FROM LabourRows
     )
 
-    -- FINAL SELECT JOINING BOTH
+    -- FINAL SELECT
     SELECT 
         @LinkCode AS LinkCode,
 
