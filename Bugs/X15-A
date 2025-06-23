@@ -1,0 +1,100 @@
+DECLARE @LinkCode VARCHAR(30) = '4352';
+
+BEGIN TRY
+
+    -- Fetch Tax Rate once
+    DECLARE @TaxRate DECIMAL(18,6) =
+        TRY_CAST(REPLACE(
+            ISNULL(
+                (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'TAX_RATE'), '0'
+            ), ',', '.') AS DECIMAL(18,6));
+
+    -- Use CTE for Material calculation
+    WITH MaterialCost AS (
+        SELECT 
+            SUM(CASE WHEN SUS.RebuiltPart = 'N' AND SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode
+                     THEN TRY_CAST(SBCES.FINALCOST(
+                             CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                             CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                             ISNULL(SUS.MmsCost, 0), 0
+                         ) AS DECIMAL(18,2))
+                     ELSE 0 END) AS SCPartsMaterialCost,
+
+            SUM(CASE WHEN SUS.RebuiltPart = 'Y' AND SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode
+                     THEN TRY_CAST(SBCES.FINALCOST(
+                             CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                             CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                             ISNULL(SUS.MmsCost, 0), 0
+                         ) AS DECIMAL(18,2))
+                     ELSE 0 END) AS RBPartsMaterialCost,
+
+            SUM(CASE WHEN NSUS.LinkType = 'BUS' AND NSUS.LinkCode = @LinkCode
+                     THEN TRY_CAST(SBCES.FINALCOST(
+                             CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)),
+                             CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)),
+                             ISNULL(NSUS.Cost, 0), 0
+                         ) AS DECIMAL(18,2))
+                     ELSE 0 END) AS NSCSCPartsMaterialCost
+        FROM SBCES.ScPartsUsed SUS
+        FULL OUTER JOIN SBCES.NscPartsUsed NSUS 
+            ON ISNULL(SUS.CostCentre, '') = ISNULL(NSUS.CostCentre, '')
+           AND ISNULL(SUS.LinkCode, '') = ISNULL(NSUS.LinkCode, '')
+           AND ISNULL(SUS.LinkType, '') = ISNULL(NSUS.LinkType, '')
+        WHERE 
+            (SUS.LinkType = 'BUS' AND SUS.LinkCode = @LinkCode)
+            OR (NSUS.LinkType = 'BUS' AND NSUS.LinkCode = @LinkCode)
+    )
+
+    SELECT 
+        @LinkCode AS LinkCode,
+
+        -- Material Calculations
+        CAST(SUM(SCPartsMaterialCost + RBPartsMaterialCost + NSCSCPartsMaterialCost) AS DECIMAL(18,2)) AS MaterialTotalCostNoTax,
+        CAST(SUM((SCPartsMaterialCost + RBPartsMaterialCost + NSCSCPartsMaterialCost) * @TaxRate) AS DECIMAL(18,2)) AS MaterialTotalTaxAmount,
+        CAST(SUM((SCPartsMaterialCost + RBPartsMaterialCost + NSCSCPartsMaterialCost) * (1 + @TaxRate)) AS DECIMAL(18,2)) AS MaterialTotalWithTax,
+
+        -- Labour Cost Calculations (inline)
+        CAST(SUM( 
+            CAST(
+                (
+                    CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) +
+                    (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                ) 
+                * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
+                / CAST((SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) FROM CES.SBCES.CesSettings WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2))
+                * ISNULL((
+                    SELECT TOP 1 ES.RatePerHour 
+                    FROM CES.SBCES.EmployeeSalaries ES
+                    WHERE ES.WageGroup = (
+                        SELECT TOP 1 EC.WageGroup
+                        FROM CES.SBCES.EmplClass EC
+                        WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                ), 0)
+            ) AS DECIMAL(18,2))
+        ) AS TotalLabourCost,
+
+        CAST(SUM( 
+            CAST(
+                (
+                    CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) +
+                    (CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                ) 
+                * (CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)
+                / CAST((SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) FROM CES.SBCES.CesSettings WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT') AS DECIMAL(18,2))
+                * ISNULL((
+                    SELECT TOP 1 CAST(Value AS DECIMAL(18,2)) FROM CES.SBCES.CesSettings WHERE Parameter = 'OVERHEAD'
+                ), 0)
+            ) AS DECIMAL(18,2))
+        ) AS TotalLabourOverHeadCost,
+
+        -- Core Cost inline
+        ISNULL((SELECT SUM(CoreCost) FROM SBCES.SCPartsUsed WHERE LinkCode = @LinkCode), 0) AS CoreCost
+
+    FROM MaterialCost
+    CROSS JOIN SBCES.EmployeeLabour EL
+    WHERE EL.TypeId = 'BUS' AND EL.LinkNumber = @LinkCode;
+
+END TRY
+BEGIN CATCH
+    PRINT 'Error: ' + ERROR_MESSAGE();
+END CATCH;
