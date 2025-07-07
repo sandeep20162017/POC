@@ -1,0 +1,89 @@
+CREATE PROCEDURE [SBCES].[ArchiveVehicle]
+    @VehicleListId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Lock archive table to safely generate new ID
+        DECLARE @maxArchId INT;
+        SELECT @maxArchId = ISNULL(MAX(ArchVehicleListId), 0) 
+        FROM [SBCES].[ArchVehicleList] WITH (TABLOCKX);
+
+        DECLARE @newArchId INT = @maxArchId + 1;
+        DECLARE @VehicleListIdStr VARCHAR(30) = CAST(@VehicleListId AS VARCHAR(30));
+
+        -- Archive main vehicle record
+        INSERT INTO [SBCES].[ArchVehicleList] (
+            [ArchVehicleListId], [VehSeriesCode], [NumOfVehicles], [ProjDesc], [DateEntered], 
+            [EnteredBy], [Make], [Model], [Year], [Engine], [Transmission], [Differential], 
+            [LabourCost], [LabourOverheadAmount], [LabourTotal], [MaterialsTotal], 
+            [TotalBusEstimateCost], [TotalTax], [TotalCostTax], [OemKitsTotal], 
+            [Sopnumber], [OldId]
+        )
+        SELECT
+            @newArchId,
+            [VehSeriesCode], [NumOfVehicles], [ProjDesc], [DateEntered], [EnteredBy],
+            [Make], [Model], [Year], [Engine], [Transmission], [Differential],
+            ISNULL([LabourCost], 0.00), ISNULL([LabourOverheadAmount], 0.00),
+            ISNULL([LabourTotal], 0.00), ISNULL([MaterialsTotal], 0.00),
+            ISNULL([TotalBusEstimateCost], 0.00), [TotalTax], [TotalCostTax],
+            ISNULL([OemKitsTotal], 0.00), [Sopnumber], [VehicleListId]
+        FROM [SBCES].[VehicleList]
+        WHERE [VehicleListId] = @VehicleListId;
+
+        -- Archive employee labor records
+        INSERT INTO [SBCES].[ArchVehEmployeeLabour] (
+            [LabourDefn], [DateEntered], [LinkNumber], [TypeId], [Costcentre], [Task], 
+            [LabourType], [Usage], [HrsReqd], [AdjHrs], [TimeAddition], [ArchVehicleListId]
+        )
+        SELECT
+            el.[LabourDefn], el.[DateEntered], el.[LinkNumber], el.[TypeId], 
+            el.[CostCentre], el.[Task], CAST(el.[LabourType] AS VARCHAR(5)),
+            el.[Usage], el.[HrsReqd], el.[AdjHrs], el.[TimeAddition], @newArchId
+        FROM [SBCES].[EmployeeLabour] el
+        WHERE TRY_CAST(LTRIM(RTRIM(el.[LinkNumber])) AS INT) = @VehicleListId;
+
+        -- Archive non-SC parts records
+        INSERT INTO [SBCES].[ArchVehNscPartsUsed] (
+            [OrigSuppNum], [OrigSupplierName], [CostCentre], [QtyReqd], [PercentUsage], 
+            [DateEntered], [EnteredBy], [LinkCode], [Cost], [LinkType], [Corecost], 
+            [ArchVehicleListId], [TotalCost]
+        )
+        SELECT
+            np.[OrigSuppNum], np.[OrigSupplierName], np.[CostCentre], np.[QtyReqd], 
+            np.[PercentUsage], np.[DateEntered], np.[EnteredBy], np.[LinkCode], 
+            np.[Cost], np.[LinkType], np.[CoreCost], @newArchId, NULL
+        FROM [SBCES].[NscPartsUsed] np
+        WHERE TRY_CAST(LTRIM(RTRIM(np.[LinkCode])) AS INT) = @VehicleListId;
+
+        -- Archive SC parts records
+        INSERT INTO [SBCES].[ArchVehScPartsUsed] (
+            [MmsStockCode], [DateEntered], [RebPartCost], [UserEntered], [MmsCost], 
+            [OemCost], [MmsRebuiltCode], [CostCentre], [QtyReqd], [PercentUsage], 
+            [LinkCode], [RebuiltPart], [LinkType], [Corecost], [ArchVehicleListId], 
+            [TotalCost], [ScKeyword], [ScDescription]
+        )
+        SELECT
+            spu.[MmsStockCode], spu.[DateEntered], spu.[RebPartCost], 
+            spu.[EnteredBy], spu.[MmsCost], spu.[OemCost], spu.[MmsRebuiltCode], 
+            spu.[CostCentre], spu.[QtyReqd], spu.[PercentUsage], spu.[LinkCode], 
+            spu.[RebuiltPart], spu.[LinkType], spu.[CoreCost], @newArchId, 
+            NULL, NULL, NULL
+        FROM [SBCES].[ScPartsUsed] spu
+        WHERE TRY_CAST(LTRIM(RTRIM(spu.[LinkCode])) AS INT) = @VehicleListId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+        
+        DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
+        DECLARE @ErrorSeverity INT = ERROR_SEVERITY();
+        DECLARE @ErrorState INT = ERROR_STATE();
+        
+        RAISERROR (@ErrorMessage, @ErrorSeverity, @ErrorState);
+    END CATCH
+END;
