@@ -1,1 +1,187 @@
 You are MS SQL expert. Genenerate stored proc for the following. VehileListId will be passed. VehilecleListId and LinkCode are same.
+DECLARE @maxArchId INT;
+SELECT @maxArchId = ISNULL(MAX(ArchVehicleListId), 0) FROM [SBCES].[ArchVehicleList];
+
+INSERT INTO [SBCES].[ArchVehicleList] (
+    [ArchVehicleListId],
+    [VehSeriesCode],
+    [NumOfVehicles],
+    [ProjDesc],
+    [DateEntered],
+    [EnteredBy],
+    [Make],
+    [Model],
+    [Year],
+    [Engine],
+    [Transmission],
+    [Differential],
+    [LabourCost],
+    [LabourOverheadAmount],
+    [LabourTotal],
+    [MaterialsTotal],
+    [TotalBusEstimateCost],
+    [TotalTax],
+    [TotalCostTax],
+    [OemKitsTotal],
+    [Sopnumber],
+    [OldId]
+)
+SELECT
+    ROW_NUMBER() OVER (ORDER BY [VehicleListId]) + @maxArchId AS [ArchVehicleListId],
+    [VehSeriesCode],
+    [NumOfVehicles],
+    [ProjDesc],
+    [DateEntered],
+    [EnteredBy],
+    [Make],
+    [Model],
+    [Year],
+    [Engine],
+    [Transmission],
+    [Differential],
+    ISNULL([LabourCost], 0.00) AS [LabourCost],
+    ISNULL([LabourOverheadAmount], 0.00) AS [LabourOverheadAmount],
+    ISNULL([LabourTotal], 0.00) AS [LabourTotal],
+    ISNULL([MaterialsTotal], 0.00) AS [MaterialsTotal],
+    ISNULL([TotalBusEstimateCost], 0.00) AS [TotalBusEstimateCost],
+    [TotalTax],
+    [TotalCostTax],
+    ISNULL([OemKitsTotal], 0.00) AS [OemKitsTotal],
+    [Sopnumber],
+    [VehicleListId] AS [OldId]  -- Original ID stored here
+FROM [SBCES].[VehicleList]
+where [VehicleListId] = 4321 //change this, use parameter passed
+
+INSERT INTO [SBCES].[ArchVehEmployeeLabour] (
+    [LabourDefn],
+    [DateEntered],
+    [LinkNumber],
+    [TypeId],
+    [Costcentre],
+    [Task],
+    [LabourType],
+    [Usage],
+    [HrsReqd],
+    [AdjHrs],
+    [TimeAddition],
+    [ArchVehicleListId]
+)
+SELECT
+    el.[LabourDefn],
+    el.[DateEntered],
+    el.[LinkNumber],
+    el.[TypeId],
+    el.[CostCentre],
+    el.[Task],
+    CAST(el.[LabourType] AS VARCHAR(5)),
+    el.[Usage],
+    el.[HrsReqd],
+    el.[AdjHrs],
+    el.[TimeAddition],
+    (SELECT MAX(avl.[ArchVehicleListId]) 
+     FROM [SBCES].[ArchVehicleList] avl 
+     WHERE avl.OldId = TRY_CAST((el.LinkNumber) AS INT))
+FROM [SBCES].[EmployeeLabour] el
+WHERE
+    TRY_CAST((el.[LinkNumber]) AS INT) IS NOT NULL
+    AND el.LinkNumber = '4321'
+    AND EXISTS (
+        SELECT 1 
+        FROM [SBCES].[ArchVehicleList] avl 
+        WHERE avl.OldId = TRY_CAST((el.LinkNumber) AS INT)
+    )
+
+INSERT INTO [SBCES].[ArchVehNscPartsUsed] (
+    [OrigSuppNum],
+    [OrigSupplierName],
+    [CostCentre],
+    [QtyReqd],
+    [PercentUsage],
+    [DateEntered],
+    [EnteredBy],
+    [LinkCode],
+    [Cost],
+    [LinkType],
+    [Corecost],
+    [ArchVehicleListId],
+    [TotalCost]
+)
+SELECT
+    np.[OrigSuppNum],
+    np.[OrigSupplierName],
+    np.[CostCentre],
+    np.[QtyReqd],
+    np.[PercentUsage],
+    np.[DateEntered],
+    np.[EnteredBy],
+    np.[LinkCode],
+    np.[Cost],
+    np.[LinkType],
+    np.[CoreCost],
+    -- Get MAX archive ID for the vehicle --
+    (SELECT MAX(avl.[ArchVehicleListId])
+     FROM [SBCES].[ArchVehicleList] avl 
+     WHERE avl.OldId = TRY_CAST((np.[LinkCode]) AS INT)),
+    NULL AS [TotalCost]
+FROM [SBCES].[NscPartsUsed] np
+WHERE
+    TRY_CAST(LTRIM(RTRIM(np.[LinkCode])) AS INT) IS NOT NULL
+    -- Ensure vehicle exists in archive --
+    AND EXISTS (
+        SELECT 1 
+        FROM [SBCES].[ArchVehicleList] avl 
+        WHERE avl.OldId = TRY_CAST(LTRIM(RTRIM(np.[LinkCode])) AS INT)
+    )
+	AND LinkCode = '4319'
+INSERT INTO [SBCES].[ArchVehScPartsUsed] (
+    [MmsStockCode],
+    [DateEntered],
+    [RebPartCost],
+    [UserEntered],
+    [MmsCost],
+    [OemCost],
+    [MmsRebuiltCode],
+    [CostCentre],
+    [QtyReqd],
+    [PercentUsage],
+    [LinkCode],
+    [RebuiltPart],
+    [LinkType],
+    [Corecost],
+    [ArchVehicleListId],
+    [TotalCost],
+    [ScKeyword],
+    [ScDescription]
+)
+SELECT
+    spu.[MmsStockCode],
+    spu.[DateEntered],
+    spu.[RebPartCost],
+    spu.[EnteredBy] AS [UserEntered],
+    spu.[MmsCost],
+    spu.[OemCost],
+    spu.[MmsRebuiltCode],
+    spu.[CostCentre],
+    spu.[QtyReqd],
+    spu.[PercentUsage],
+    spu.[LinkCode],
+    spu.[RebuiltPart],
+    spu.[LinkType],
+    spu.[CoreCost],
+    -- Get MAX archive ID for the vehicle --
+    (SELECT MAX(avl.[ArchVehicleListId])
+     FROM [SBCES].[ArchVehicleList] avl 
+     WHERE avl.OldId = TRY_CAST(LTRIM(RTRIM(spu.[LinkCode])) AS INT)),
+    NULL AS [TotalCost],
+    NULL AS [ScKeyword],
+    NULL AS [ScDescription]
+FROM [SBCES].[ScPartsUsed] spu
+WHERE
+    TRY_CAST(LTRIM(RTRIM(spu.[LinkCode])) AS INT) IS NOT NULL
+    -- Ensure vehicle exists in archive --
+    AND EXISTS (
+        SELECT 1 
+        FROM [SBCES].[ArchVehicleList] avl 
+        WHERE avl.OldId = TRY_CAST(LTRIM(RTRIM(spu.[LinkCode])) AS INT)
+    )
+	and linkCode = '4321'
