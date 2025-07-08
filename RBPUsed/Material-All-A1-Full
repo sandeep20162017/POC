@@ -1,0 +1,117 @@
+DECLARE @LinkCode VARCHAR(30) = '4357', @TaxRateRaw VARCHAR(20);
+
+-- Fetch TAX_RATE from CESSETTINGS table
+SELECT @TaxRateRaw = Value 
+FROM SBCES.CESSETTINGS 
+WHERE Parameter = 'TAX_RATE';
+
+-- Convert TAX_RATE safely
+DECLARE @TaxRate DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL(@TaxRateRaw, '0'), ',', '.') AS DECIMAL(18,6));
+
+-- Temp table for Rebuilt Parts costs
+IF OBJECT_ID('tempdb..#RebuiltCosts') IS NOT NULL DROP TABLE #RebuiltCosts;
+CREATE TABLE #RebuiltCosts (
+    CostCentre VARCHAR(30),
+    TotalCost DECIMAL(18,2)
+);
+
+-- Process each Rebuilt Part
+DECLARE @RbPartsId VARCHAR(30);
+DECLARE cur CURSOR LOCAL STATIC FOR 
+    SELECT Id
+    FROM SBCES.ScPartsUsed
+    WHERE LinkCode = @LinkCode
+      AND LinkType = 'BUS'
+      AND RebuiltPart = 'Y';
+
+OPEN cur;
+FETCH NEXT FROM cur INTO @RbPartsId;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    -- Temporary table to capture SP results
+    CREATE TABLE #SPResults (
+        CostCentre VARCHAR(30),
+        TotalCost DECIMAL(18,2),
+        TaxableCost DECIMAL(18,2)
+    );
+    
+    -- Execute stored procedure and capture results
+    INSERT INTO #SPResults
+    EXEC SBCES.RetrieveRBPTotalCostV4 @vi_idnum = @RbPartsId, @vi_type = 'RB';
+    
+    -- Insert into main temp table
+    INSERT INTO #RebuiltCosts (CostCentre, TotalCost)
+    SELECT CostCentre, TotalCost
+    FROM #SPResults;
+    
+    DROP TABLE #SPResults;
+    
+    FETCH NEXT FROM cur INTO @RbPartsId;
+END
+
+CLOSE cur;
+DEALLOCATE cur;
+
+-- Aggregate CTEs
+WITH SUS_CTE AS (
+    SELECT 
+        CostCentre,
+        SUM(TRY_CAST(
+                SBCES.FINALCOST(
+                    CAST(ISNULL(PercentUsage,'0') AS VARCHAR(20)),
+                    CAST(ISNULL(QtyReqd,'0') AS VARCHAR(20)),
+                    ISNULL(MmsCost, 0),
+                    0
+                ) AS DECIMAL(18,2)
+            )) AS SCPartsMaterialCost
+    FROM SBCES.ScPartsUsed
+    WHERE 
+        RebuiltPart = 'N' 
+        AND LinkType = 'BUS' 
+        AND LinkCode = @LinkCode
+    GROUP BY CostCentre
+),
+NSUS_CTE AS (
+    SELECT 
+        CostCentre,
+        SUM(TRY_CAST(
+                SBCES.FINALCOST(
+                    CAST(ISNULL(PercentUsage,'0') AS VARCHAR(20)),
+                    CAST(ISNULL(QtyReqd,'0') AS VARCHAR(20)),
+                    ISNULL(Cost, 0),
+                    0
+                ) AS DECIMAL(18,2)
+            )) AS NSCSCPartsMaterialCost
+    FROM SBCES.NscPartsUsed
+    WHERE 
+        LinkType = 'BUS' 
+        AND LinkCode = @LinkCode
+    GROUP BY CostCentre
+),
+RebuiltAggregate AS (
+    SELECT 
+        CostCentre,
+        SUM(TotalCost) AS RBCost
+    FROM #RebuiltCosts
+    GROUP BY CostCentre
+),
+Combined AS (
+    SELECT 
+        COALESCE(S.CostCentre, N.CostCentre, R.CostCentre) AS CostCentre,
+        ISNULL(S.SCPartsMaterialCost, 0) AS SCPartsMaterialCost,
+        ISNULL(N.NSCSCPartsMaterialCost, 0) AS NSCSCPartsMaterialCost,
+        ISNULL(R.RBCost, 0) AS RBCost
+    FROM SUS_CTE S
+    FULL OUTER JOIN NSUS_CTE N ON S.CostCentre = N.CostCentre
+    FULL OUTER JOIN RebuiltAggregate R ON R.CostCentre = COALESCE(S.CostCentre, N.CostCentre)
+)
+
+SELECT 
+    CostCentre,
+    CAST(ROUND(SCPartsMaterialCost + NSCSCPartsMaterialCost + RBCost, 2) AS DECIMAL(18,2)) AS TotalCost
+FROM Combined
+ORDER BY CostCentre;
+
+-- Cleanup
+IF OBJECT_ID('tempdb..#RebuiltCosts') IS NOT NULL DROP TABLE #RebuiltCosts;
