@@ -1,0 +1,207 @@
+Below code calculates the sum grouped by SUS and NSUS. Similarly, Pls help me get the sum for RBPart. Update the code for RebuiltParts based on the logic below. Make sure to keep special attention on opening and closing brackets.
+Final result should CostCentre, TotalCost for  SUS, NSUS (as in the both qquries)and RBParts.
+Update below script :
+DECLARE @LinkCode VARCHAR(30) = '4357', @TaxRateRaw VARCHAR(20);
+
+-- Fetch TAX_RATE from CESSETTINGS table
+SELECT @TaxRateRaw = Value 
+FROM SBCES.CESSETTINGS 
+WHERE Parameter = 'TAX_RATE';
+
+-- Convert TAX_RATE safely
+DECLARE @TaxRate DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL(@TaxRateRaw, '0'), ',', '.') AS DECIMAL(18,6));
+
+WITH SUS_CTE AS (
+    SELECT 
+        CostCentre,
+        SUM(TRY_CAST(
+                SBCES.FINALCOST(
+                    CAST(ISNULL(PercentUsage,'0') AS VARCHAR(20)),
+                    CAST(ISNULL(QtyReqd,'0') AS VARCHAR(20)),
+                    ISNULL(MmsCost, 0),
+                    0
+                ) AS DECIMAL(18,2)
+            )) AS SCPartsMaterialCost
+    FROM SBCES.ScPartsUsed
+    WHERE 
+        RebuiltPart = 'N' 
+        AND LinkType = 'BUS' 
+        AND LinkCode = @LinkCode
+    GROUP BY CostCentre
+),
+NSUS_CTE AS (
+    SELECT 
+        CostCentre,
+        SUM(TRY_CAST(
+                SBCES.FINALCOST(
+                    CAST(ISNULL(PercentUsage,'0') AS VARCHAR(20)),
+                    CAST(ISNULL(QtyReqd,'0') AS VARCHAR(20)),
+                    ISNULL(Cost, 0),
+                    0
+                ) AS DECIMAL(18,2)
+            )) AS NSCSCPartsMaterialCost
+    FROM SBCES.NscPartsUsed
+    WHERE 
+        LinkType = 'BUS' 
+        AND LinkCode = @LinkCode
+    GROUP BY CostCentre
+),
+Combined AS (
+    SELECT 
+        ISNULL(S.CostCentre, N.CostCentre) AS CostCentre,
+        ISNULL(S.SCPartsMaterialCost, 0) AS SCPartsMaterialCost,
+        ISNULL(N.NSCSCPartsMaterialCost, 0) AS NSCSCPartsMaterialCost
+    FROM SUS_CTE S
+    FULL OUTER JOIN NSUS_CTE N ON S.CostCentre = N.CostCentre
+)
+
+SELECT 
+    CostCentre,
+    CAST(ROUND(SCPartsMaterialCost + NSCSCPartsMaterialCost, 2) AS DECIMAL(18,2)) AS TotalCost
+FROM Combined
+ORDER BY CostCentre;
+1. Get all RBParts Id's in Estimates: 
+SELECT  [Id] as RbPartsId     
+  FROM [CES].[SBCES].[ScPartsUsed]
+  where linkcode = '4357'
+  and LinkType = 'BUS'
+  and RebuiltPart = 'Y' 
+2. Call following stored proc (no need to change the logic. Currently it stores the values in the  temp table. #TempMaterials.
+Pass RbPartsId as parameter vi_idnum. Remember, LinkCode  can have multiple rebuilt parts.
+Full SP for your reference.
+USE [CES]
+GO
+/****** Object:  StoredProcedure [SBCES].[RetrieveRBPTotalCostV4]    Script Date: 7/8/2025 3:29:00 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER   PROCEDURE [SBCES].[RetrieveRBPTotalCostV4]
+    @vi_idnum VARCHAR(30),
+    @vi_type VARCHAR(30) = 'RB'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    -- Create temporary table for intermediate results
+    CREATE TABLE #TempMaterials (
+        AssemblyArea VARCHAR(100),
+        CostCentre VARCHAR(30),
+        AdjustedCost DECIMAL(20,2),
+        TaxableCost DECIMAL(20,2)
+    );
+    
+    -- Recursive CTE to calculate quantity multipliers
+    WITH RebuiltHierarchy AS (
+        SELECT 
+            MmsRebuiltCode AS RebuiltPart,
+            CAST(CAST(QtyReqd AS DECIMAL(20,10)) AS DECIMAL(20,10)) AS QtyReqd,
+            CAST(CAST(PercentUsage AS DECIMAL(20,10)) AS DECIMAL(20,10)) AS PercentUsage,
+            1 AS Level,
+            CAST(1.0 AS DECIMAL(20,10)) AS CumulativeMultiplier
+        FROM SBCES.ScPartsUsed
+        WHERE RebuiltPart = 'Y'
+          AND LinkType = 'RB'
+          AND UPPER(LinkCode) = UPPER(@vi_idnum)
+        
+        UNION ALL
+        
+        SELECT 
+            spu.MmsRebuiltCode,
+            CAST(CAST(spu.QtyReqd AS DECIMAL(20,10)) AS DECIMAL(20,10)),
+            CAST(CAST(spu.PercentUsage AS DECIMAL(20,10)) AS DECIMAL(20,10)),
+            rh.Level + 1,
+            CAST(rh.CumulativeMultiplier * 
+                (CAST(CAST(spu.QtyReqd AS DECIMAL(20,10)) AS DECIMAL(20,10) )* 
+                 CAST(CAST(spu.PercentUsage AS DECIMAL(20,10)) AS DECIMAL(20,10)) / 
+                 CAST(100.0 AS DECIMAL(20,10)))
+                AS DECIMAL(20,10))
+        FROM SBCES.ScPartsUsed spu
+        INNER JOIN RebuiltHierarchy rh 
+            ON UPPER(spu.LinkCode) = UPPER(rh.RebuiltPart)
+        WHERE spu.RebuiltPart = 'Y'
+          AND spu.LinkType = 'RB'
+          AND rh.Level < 100
+    ),
+    
+    PartMultipliers AS (
+        SELECT 
+            UPPER(RebuiltPart) AS PartCode,
+            SUM(CumulativeMultiplier) AS TotalMultiplier
+        FROM RebuiltHierarchy
+        GROUP BY RebuiltPart
+    )
+    
+    -- Calculate and insert costs with proper casting and rounding
+    INSERT INTO #TempMaterials
+    SELECT 
+        ISNULL(cc.Name, 'NONE') AS AssemblyArea,
+        ISNULL(pc.CostCentre, '0') AS CostCentre,
+        pc.AdjustedCost,
+        pc.TaxableCost
+    FROM (
+        -- Base parts
+        SELECT
+            spu.CostCentre,
+            ROUND(
+                (CAST(SBCES.FinalCost(CAST(spu.PercentUsage AS VARCHAR(20)), CAST(spu.QtyReqd AS VARCHAR(20)), CAST(spu.MmsCost AS DECIMAL(10,2)), 0) AS DECIMAL(20,10))
+                 - 
+                 CAST(SBCES.FinalCost(CAST(spu.PercentUsage AS VARCHAR(20)), CAST(spu.QtyReqd AS VARCHAR(20)), CAST(spu.CoreCost AS DECIMAL(10,2)), 0) AS DECIMAL(20,10))
+                ) * COALESCE(pm.TotalMultiplier, 1),
+                2
+            ) AS AdjustedCost,
+            ROUND(
+                CAST(SBCES.FinalCost(CAST(spu.PercentUsage AS VARCHAR(20)), CAST(spu.QtyReqd AS VARCHAR(20)), CAST(spu.MmsCost AS DECIMAL(10,2)), 0) AS DECIMAL(20,10))
+                * COALESCE(pm.TotalMultiplier, 1),
+                2
+            ) AS TaxableCost
+        FROM SBCES.ScPartsUsed spu
+        LEFT JOIN PartMultipliers pm 
+            ON UPPER(spu.LinkCode) = pm.PartCode
+        WHERE spu.RebuiltPart = 'N'
+          AND spu.LinkType = 'RB'
+          AND (
+                UPPER(spu.LinkCode) = UPPER(@vi_idnum)
+                OR pm.PartCode IS NOT NULL
+          )
+        
+        UNION ALL
+        
+        -- Non-stock parts
+        SELECT
+            nsp.CostCentre,
+            ROUND(
+                (CAST(SBCES.FinalCost(CAST(nsp.PercentUsage AS VARCHAR(20)), CAST(nsp.QtyReqd AS VARCHAR(20)), CAST(ncp.OemPartCost AS DECIMAL(10,2)), 0) AS DECIMAL(20,10))
+                 - 
+                 CAST(SBCES.FinalCost(CAST(nsp.PercentUsage AS VARCHAR(20)), CAST(nsp.QtyReqd AS VARCHAR(20)), CAST(nsp.CoreCost AS DECIMAL(10,2)), 0) AS DECIMAL(20,10))
+                ) * COALESCE(pm.TotalMultiplier, 1),
+                2
+            ) AS AdjustedCost,
+            ROUND(
+                CAST(SBCES.FinalCost(CAST(nsp.PercentUsage AS VARCHAR(20)), CAST(nsp.QtyReqd AS VARCHAR(20)), CAST(ncp.OemPartCost AS DECIMAL(10,2)), 0) AS DECIMAL(20,10))
+                * COALESCE(pm.TotalMultiplier, 1),
+                2
+            ) AS TaxableCost
+        FROM SBCES.NscPartsUsed nsp
+        LEFT JOIN SBCES.NonStockCodedParts ncp 
+            ON nsp.Id = ncp.Id
+        LEFT JOIN PartMultipliers pm 
+            ON UPPER(nsp.LinkCode) = pm.PartCode
+        WHERE nsp.LinkType = 'RB'
+          AND (
+                UPPER(nsp.LinkCode) = UPPER(@vi_idnum)
+                OR pm.PartCode IS NOT NULL
+          )
+    ) pc
+    LEFT JOIN SBCES.CostCentres cc 
+        ON pc.CostCentre = cc.CostCentre;
+
+    -- Return aggregated results
+    SELECT 
+        CostCentre AS [CC],
+        SUM(AdjustedCost) AS [TOTAL COST],
+        SUM(TaxableCost) AS [TAXABLE COST]
+    FROM #TempMaterials
+    GROUP BY CostCentre
+    ORDER BY CostCentre ASC;
+END;
