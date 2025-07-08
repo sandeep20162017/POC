@@ -1,4 +1,4 @@
-CREATE OR ALTER PROCEDURE SBCES.RetrieveRBPTotalCost2
+CREATE OR ALTER PROCEDURE SBCES.RetrieveRBPTotalCostV4
     @vi_idnum VARCHAR(30),
     @vi_type VARCHAR(30) = 'RB'
 AS
@@ -13,7 +13,7 @@ BEGIN
         TaxableCost DECIMAL(20,10)
     );
     
-    -- Recursive CTE with explicit casting
+    -- Recursive CTE to calculate quantity multipliers
     WITH RebuiltHierarchy AS (
         SELECT 
             MmsRebuiltCode AS RebuiltPart,
@@ -34,9 +34,7 @@ BEGIN
             CAST(spu.PercentUsage AS DECIMAL(20,10)),
             rh.Level + 1,
             CAST(rh.CumulativeMultiplier * 
-                (CAST(spu.QtyReqd AS DECIMAL(20,10)) * 
-                 CAST(spu.PercentUsage AS DECIMAL(20,10)) / 
-                 CAST(100.0 AS DECIMAL(20,10))
+                (spu.QtyReqd * spu.PercentUsage / 100.0) 
                 AS DECIMAL(20,10))
         FROM SBCES.ScPartsUsed spu
         INNER JOIN RebuiltHierarchy rh 
@@ -54,33 +52,35 @@ BEGIN
         GROUP BY RebuiltPart
     )
     
-    -- Calculate and insert costs with casting
+    -- Calculate and insert costs with proper casting
     INSERT INTO #TempMaterials
     SELECT 
         ISNULL(cc.Name, 'NONE') AS AssemblyArea,
         ISNULL(pc.CostCentre, '0') AS CostCentre,
-        CAST(pc.AdjustedCost AS DECIMAL(20,10)),
-        CAST(pc.TaxableCost AS DECIMAL(20,10))
+        pc.AdjustedCost,
+        pc.TaxableCost
     FROM (
         -- Base parts
         SELECT
             spu.CostCentre,
-            (SBCES.FinalCost(
-                CAST(spu.PercentUsage AS DECIMAL(20,10)), 
-                CAST(spu.QtyReqd AS DECIMAL(20,10)), 
-                CAST(spu.MmsCost AS DECIMAL(20,10)), 
-                0) - 
-             SBCES.FinalCost(
-                CAST(spu.PercentUsage AS DECIMAL(20,10)), 
-                CAST(spu.QtyReqd AS DECIMAL(20,10)), 
-                CAST(spu.CoreCost AS DECIMAL(20,10)), 
-                0)
-            ) * COALESCE(pm.TotalMultiplier, 1) AS AdjustedCost,
-            SBCES.FinalCost(
-                CAST(spu.PercentUsage AS DECIMAL(20,10)), 
-                CAST(spu.QtyReqd AS DECIMAL(20,10)), 
-                CAST(spu.MmsCost AS DECIMAL(20,10)), 
-                0) * COALESCE(pm.TotalMultiplier, 1) AS TaxableCost
+            CAST((
+                CAST(SBCES.FinalCost(
+                    CAST(spu.PercentUsage AS VARCHAR(20)), 
+                    CAST(spu.QtyReqd AS VARCHAR(20)), 
+                    CAST(spu.MmsCost AS DECIMAL(10,2)), 
+                    0) AS DECIMAL(20,10))
+                -
+                CAST(SBCES.FinalCost(
+                    CAST(spu.PercentUsage AS VARCHAR(20)), 
+                    CAST(spu.QtyReqd AS VARCHAR(20)), 
+                    CAST(spu.CoreCost AS DECIMAL(10,2)), 
+                    0) AS DECIMAL(20,10))
+            ) * COALESCE(pm.TotalMultiplier, 1) AS DECIMAL(20,10)) AS AdjustedCost,
+            CAST(SBCES.FinalCost(
+                CAST(spu.PercentUsage AS VARCHAR(20)), 
+                CAST(spu.QtyReqd AS VARCHAR(20)), 
+                CAST(spu.MmsCost AS DECIMAL(10,2)), 
+                0) AS DECIMAL(20,10)) * COALESCE(pm.TotalMultiplier, 1) AS TaxableCost
         FROM SBCES.ScPartsUsed spu
         LEFT JOIN PartMultipliers pm 
             ON UPPER(spu.LinkCode) = pm.PartCode
@@ -96,22 +96,24 @@ BEGIN
         -- Non-stock parts
         SELECT
             nsp.CostCentre,
-            (SBCES.FinalCost(
-                CAST(nsp.PercentUsage AS DECIMAL(20,10)), 
-                CAST(nsp.QtyReqd AS DECIMAL(20,10)), 
-                CAST(ncp.OemPartCost AS DECIMAL(20,10)), 
-                0) - 
-             SBCES.FinalCost(
-                CAST(nsp.PercentUsage AS DECIMAL(20,10)), 
-                CAST(nsp.QtyReqd AS DECIMAL(20,10)), 
-                CAST(nsp.CoreCost AS DECIMAL(20,10)), 
-                0)
-            ) * COALESCE(pm.TotalMultiplier, 1) AS AdjustedCost,
-            SBCES.FinalCost(
-                CAST(nsp.PercentUsage AS DECIMAL(20,10)), 
-                CAST(nsp.QtyReqd AS DECIMAL(20,10)), 
-                CAST(ncp.OemPartCost AS DECIMAL(20,10)), 
-                0) * COALESCE(pm.TotalMultiplier, 1) AS TaxableCost
+            CAST((
+                CAST(SBCES.FinalCost(
+                    CAST(nsp.PercentUsage AS VARCHAR(20)), 
+                    CAST(nsp.QtyReqd AS VARCHAR(20)), 
+                    CAST(ncp.OemPartCost AS DECIMAL(10,2)), 
+                    0) AS DECIMAL(20,10))
+                -
+                CAST(SBCES.FinalCost(
+                    CAST(nsp.PercentUsage AS VARCHAR(20)), 
+                    CAST(nsp.QtyReqd AS VARCHAR(20)), 
+                    CAST(nsp.CoreCost AS DECIMAL(10,2)), 
+                    0) AS DECIMAL(20,10))
+            ) * COALESCE(pm.TotalMultiplier, 1) AS DECIMAL(20,10)) AS AdjustedCost,
+            CAST(SBCES.FinalCost(
+                CAST(nsp.PercentUsage AS VARCHAR(20)), 
+                CAST(nsp.QtyReqd AS VARCHAR(20)), 
+                CAST(ncp.OemPartCost AS DECIMAL(10,2)), 
+                0) AS DECIMAL(20,10)) * COALESCE(pm.TotalMultiplier, 1) AS TaxableCost
         FROM SBCES.NscPartsUsed nsp
         LEFT JOIN SBCES.NonStockCodedParts ncp 
             ON nsp.Id = ncp.Id
