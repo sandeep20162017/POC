@@ -1,0 +1,97 @@
+ALTER PROCEDURE SBCES.RetrieveRBPTotalCost2
+    @vi_idnum VARCHAR(30),
+    @vi_type VARCHAR(30) = 'RB' -- Default to 'RB' per original logic
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    -- 1. Recursive CTE to get all rebuilt parts in hierarchy
+    WITH RebuiltHierarchy AS (
+        SELECT 
+            LinkCode AS BasePart,
+            MmsRebuiltCode AS RebuiltPart,
+            QtyReqd,
+            PercentUsage,
+            1 AS Level,
+            CAST(UPPER(LinkCode) AS VARCHAR(MAX)) AS HierarchyPath
+        FROM SBCES.ScPartsUsed
+        WHERE RebuiltPart = 'Y'
+          AND LinkType = 'RB'
+          AND UPPER(LinkCode) = UPPER(@vi_idnum)
+        
+        UNION ALL
+        
+        SELECT 
+            rh.BasePart,
+            spu.MmsRebuiltCode,
+            spu.QtyReqd,
+            spu.PercentUsage,
+            rh.Level + 1,
+            rh.HierarchyPath + '>' + UPPER(spu.LinkCode)
+        FROM SBCES.ScPartsUsed spu
+        INNER JOIN RebuiltHierarchy rh 
+            ON UPPER(spu.LinkCode) = UPPER(rh.RebuiltPart)
+        WHERE spu.RebuiltPart = 'Y'
+          AND spu.LinkType = 'RB'
+          AND rh.Level < 32 -- Prevent infinite recursion
+    )
+    
+    -- 2. Material cost calculation for all parts (base + rebuilt)
+    INSERT INTO #TempMaterials
+    SELECT 
+        ISNULL(cc.Name, 'NONE') AS AssemblyArea,
+        ISNULL(pc.CostCentre, '0') AS CostCentre,
+        pc.AdjustedCost,
+        pc.TaxableCost
+    FROM (
+        -- Base parts
+        SELECT
+            spu.CostCentre,
+            (SBCES.FinalCost(spu.PercentUsage, spu.QtyReqd, spu.MmsCost, 0) - 
+             SBCES.FinalCost(spu.PercentUsage, spu.QtyReqd, spu.CoreCost, 0)
+            ) * COALESCE(rh.QtyMultiplier, 1) AS AdjustedCost,
+            SBCES.FinalCost(spu.PercentUsage, spu.QtyReqd, spu.MmsCost, 0) * COALESCE(rh.QtyMultiplier, 1) AS TaxableCost
+        FROM SBCES.ScPartsUsed spu
+        LEFT JOIN (
+            SELECT 
+                RebuiltPart,
+                SUM(QtyReqd * PercentUsage / 100) AS QtyMultiplier
+            FROM RebuiltHierarchy
+            GROUP BY RebuiltPart
+        ) rh ON UPPER(spu.LinkCode) = UPPER(rh.RebuiltPart)
+        WHERE spu.LinkCode = UPPER(@vi_idnum)
+          AND spu.RebuiltPart = 'N'
+          AND spu.LinkType = 'RB'
+        
+        UNION ALL
+        
+        -- Non-stock parts
+        SELECT
+            nsp.CostCentre,
+            (SBCES.FinalCost(nsp.PercentUsage, nsp.QtyReqd, ncp.OemPartCost, 0) - 
+             SBCES.FinalCost(nsp.PercentUsage, nsp.QtyReqd, nsp.CoreCost, 0)
+            ) * COALESCE(rh.QtyMultiplier, 1) AS AdjustedCost,
+            SBCES.FinalCost(nsp.PercentUsage, nsp.QtyReqd, ncp.OemPartCost, 0) * COALESCE(rh.QtyMultiplier, 1) AS TaxableCost
+        FROM SBCES.NscPartsUsed nsp
+        LEFT JOIN SBCES.NonStockCodedParts ncp ON nsp.Id = ncp.Id
+        LEFT JOIN (
+            SELECT 
+                RebuiltPart,
+                SUM(QtyReqd * PercentUsage / 100) AS QtyMultiplier
+            FROM RebuiltHierarchy
+            GROUP BY RebuiltPart
+        ) rh ON UPPER(nsp.LinkCode) = UPPER(rh.RebuiltPart)
+        WHERE nsp.LinkCode = UPPER(@vi_idnum)
+          AND nsp.LinkType = 'RB'
+    ) pc
+    LEFT JOIN SBCES.CostCentres cc ON pc.CostCentre = cc.CostCentre;
+
+    -- 3. Return aggregated results
+    SELECT 
+        CostCentre AS [CC],
+        SUM(AdjustedCost) AS [TOTAL COST],
+        SUM(TaxableCost) AS [TAXABLE COST]
+    FROM #TempMaterials
+    GROUP BY CostCentre
+    ORDER BY CostCentre ASC;
+END;
