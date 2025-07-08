@@ -1,0 +1,120 @@
+create or replace PROCEDURE write_materials
+   (vi_idnum IN VARCHAR2,
+    vi_Adjustment IN number,
+    vi_RBReference IN varchar2,
+    vi_Adjustment2 IN number)
+IS
+
+-- Declare program variables as shown above
+V_LINK_CODE VARCHAR2(30);
+V_PRICE number (20,10);
+V_RET_VAL VARCHAR2(25);
+
+  CURSOR C_RB_LIST_To_Prop (vi_IDnum IN varchar2)
+IS
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS "link_code",
+                UPPER(SC_PARTS_USED.qty_reqd) AS "QTY",
+                SC_PARTS_USED.percent_usage AS "%",
+                UPPER(SC_PARTS_USED.mms_rebuilt_code) as "Rebuilt Code"
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_IDnum);
+
+cur_RBRec C_RB_LIST_To_Prop%ROWTYPE;
+
+
+  CURSOR cur_Material (vi_IDnum IN varchar)
+IS
+
+       SELECT
+            nvl(C.name,'NONE') AS "ASSEMBLY AREA",
+            nvl(A.cost_centre, '0') AS "CC",
+            nvl(sum(A.cost), '0') AS "TOTAL COST",
+            nvl(sum(A.taxcost), '0')AS "TAXABLE COST"
+        FROM
+            (SELECT
+                cost_centre,
+                (FINAL_COST(percent_usage, qty_reqd, mms_cost, 0) - FINAL_COST(percent_usage, qty_reqd, corecost, 0))AS cost,
+                FINAL_COST(percent_usage, qty_reqd, mms_cost, 0) AS taxcost
+             FROM
+                SC_PARTS_USED
+             WHERE
+                link_code = upper(vi_idnum) AND
+                rebuilt_part = 'N' AND
+                link_type = 'RB'
+             UNION ALL
+                    SELECT
+                        NSC_PARTS_USED.cost_centre,
+                        (FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0) - FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NSC_PARTS_USED.corecost, 0)) as cost,
+                        FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0) AS taxcost
+                    FROM
+                        NSC_PARTS_USED NSC_PARTS_USED,NON_STOCK_CODED_PARTS NON_STOCK_CODED_PARTS
+                    WHERE
+                        NSC_PARTS_USED.link_code = upper(vi_IDnum) AND
+                        NSC_PARTS_USED.link_type = 'RB' AND
+                        NON_STOCK_CODED_PARTS.ID (+)= NSC_PARTS_USED.ID) A,
+            cost_centres C
+        WHERE
+            C.cost_centre = A.cost_centre
+        GROUP BY
+            A.cost_centre,
+            C.name;
+
+cur_MaterialRec cur_Material%ROWTYPE;
+
+BEGIN
+
+open cur_Material(upper(vi_idnum));
+LOOP
+
+    FETCH cur_Material
+    INTO cur_MaterialRec;
+   EXIT WHEN cur_Material%NOTFOUND;
+
+    insert into TEMP_MATERIALS_LIST values (cur_MaterialRec."ASSEMBLY AREA",cur_MaterialRec."CC" ,round(cur_MaterialRec."TOTAL COST" * vi_adjustment,2) ,cur_MaterialRec."TAXABLE COST" * vi_adjustment ,vi_RBReference, vi_adjustment2 * cur_MaterialRec."TOTAL COST");
+
+END LOOP;
+CLOSE cur_Material;
+--***********************************************************
+
+--archive rb part#
+
+--checks to see how many rebuilt parts are attached to the rebuilt part number
+-- inputted(rb_num) into this procedure
+SELECT count(*) INTO V_PRICE FROM SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_idnum);
+--commit;
+
+--if this current rebuilt part (rb_num) in this procedure resides
+--in any other rebuilt parts update the prices of those rebuilt parts as well.
+if V_PRICE > 0 then
+
+open C_RB_LIST_To_Prop(upper(vi_idnum));
+LOOP
+
+    FETCH C_RB_LIST_To_Prop
+    INTO cur_RBRec;
+     EXIT WHEN C_RB_LIST_To_Prop%NOTFOUND;
+
+    WRITE_MATERIALS (cur_RBRec."Rebuilt Code",(cur_RBRec."QTY" * cur_RBRec."%"/100) * vi_adjustment , vi_RBReference, vi_adjustment2 * (cur_RBRec."QTY" * cur_RBRec."%"/100) );
+
+END LOOP;
+CLOSE C_RB_LIST_To_Prop;
+end if;
+
+--***************************************************************************
+--insert into TEMP_MATERIALS_LIST values (cur_MaterialRec."ASSEMBLY AREA",cur_MaterialRec."CC" ,round(cur_MaterialRec."TOTAL COST" * vi_adjustment,2) ,cur_MaterialRec."TAXABLE COST" * vi_adjustment ,vi_RBReference, vi_adjustment2 * cur_MaterialRec."TOTAL COST");
+
+RETURN;
+
+
+EXCEPTION
+   WHEN OTHERS THEN
+    raise_application_error('-20001', sqlerrm);
+    dbms_output.put_line(substr(TO_CHAR(SQLCODE) || ': '||SQLERRM,1,255));
+END;
