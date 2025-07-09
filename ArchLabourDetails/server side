@@ -1,0 +1,80 @@
+@model IEnumerable<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel>
+@{
+    // Determine if we're in archived mode
+    bool isArchived = ViewBag.GridType == "ArchivedVehicleGrid";
+    bool isAdmin = ViewBag.RoleId == 1;
+}
+
+@(Html.Kendo().Grid<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel>()
+    .Name($"LabourDetailsGrid")
+    .Events(events => events
+        .DataBound("onLabourGridDataBound")
+        // Conditionally bind edit events
+        .Edit(isArchived ? null : "onGridEdit")
+        .Save(isArchived ? null : "onGridCellSave")
+    )
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.Id).Title("Id").Hidden(true);
+
+        // ... other columns ...
+
+        // Conditionally show delete column
+        if (!isArchived && isAdmin)
+        {
+            columns.Command(command =>
+            {
+                command.Custom("Delete")
+                    .Click("showDeleteConfirmation")
+                    .Text(" ")
+                    .IconClass("k-icon k-i-delete")
+                    .HtmlAttributes(new
+                    {
+                        @class = "text-danger",
+                        title = "Delete",
+                        data_grid = $"LabourDetailsGrid",
+                        data_url = Url.Action("DeleteLabourDetail", "LabourDetails"),
+                        data_id_field = "Id",
+                        data_grid_type = ViewBag.GridType
+                    });
+            }).Width(100);
+        }
+    })
+    .ToolBar(toolbar =>
+    {
+        // Only show toolbar for non-archived grids
+        if (!isArchived && isAdmin)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable
+        .Mode(isArchived ? GridEditMode.InLine : GridEditMode.InCell)
+        .Enabled(!isArchived)
+    )
+    // ... other configurations ...
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(false)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.Id);
+            model.Field(c => c.Id);
+            model.Field(c => c.LastModifiedBy).Editable(false);
+            model.Field(c => c.DateRevised).Editable(false);
+        })
+        .Events(events => {
+            if (!isArchived) {
+                events.RequestEnd("onLabourRequestEnd");
+                events.Error("onDataSourceError");
+            }
+        })
+        .Read(read => read.Url(Url.Action("GetLabourDetails", "LabourDetails") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+        // Conditionally enable write operations
+        .Create(isArchived ? null : create => create.Url(Url.Action("CreateLabourDetail", "LabourDetails") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(isArchived ? null : update => update.Url(Url.Action("UpdateLabourDetail", "LabourDetails") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(isArchived ? null : delete => delete.Url(Url.Action("DeleteLabourDetail", "LabourDetails") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+)
