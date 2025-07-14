@@ -1,0 +1,107 @@
+
+# 🔧 Windows 11 VB6 App Crash Fix: sysmain.dll / SysMain Service Issue
+
+This document outlines multiple admin-level workarounds to resolve application crashes caused by `sysmain.dll` counter errors after upgrading to Windows 11.
+
+---
+
+## ✅ Option 1: Repair System Files and Performance Counters
+
+### Step 1: Run System File Checker (sfc)
+
+Check for corrupted or missing system files, including `sysmain.dll`:
+
+```cmd
+sfc /scannow
+```
+
+- This scans all protected system files and attempts to repair any issues using cached copies.
+- Generates a report in the CBS log (`C:\Windows\Logs\CBS\CBS.log`).
+- If corruption is found and fixed, **reboot** and check if the issue is resolved.
+
+---
+
+### Step 2: Use DISM (if sfc detects corruption)
+
+If `sfc` finds issues that it cannot repair, use the Deployment Imaging and Servicing Management tool:
+
+```cmd
+DISM /Online /Cleanup-Image /RestoreHealth
+```
+
+- This downloads clean system files from Windows Update and replaces corrupted system components.
+- Follow up with another `sfc /scannow` after running DISM to confirm full repair.
+
+---
+
+### Step 3: Rebuild Performance Counters
+
+```cmd
+cd %SystemRoot%\System32
+lodctr /R
+
+cd %SystemRoot%\SysWOW64
+lodctr /R
+```
+
+- These commands rebuild the performance counter registry settings from default `.ini` files.
+- The first block repairs 64-bit counters, the second handles 32-bit (needed for VB6 apps).
+
+---
+
+## 🔒 Option 2: Disable SysMain Performance Counters Only (Not the Service)
+
+Use this registry tweak to prevent loading of `sysmain.dll` into the counter system, without disabling the service:
+
+```reg
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\SysMain\Performance]
+"Disable Performance Counters"=dword:00000001
+```
+
+- Add this as a `.reg` file or set manually using `regedit`.
+- Prevents the OS from attempting to load `sysmain.dll` for performance metrics (avoiding the crash).
+- **SysMain service stays enabled and functional.**
+
+---
+
+## ⚠️ Option 3: Disable SysMain Service (Not Recommended by Admin)
+
+Use this only if other fixes fail and admin approves.
+
+### Disable and Stop SysMain:
+
+```powershell
+# Disable service from starting at boot
+Set-Service -Name "SysMain" -StartupType Disabled
+
+# Stop service immediately
+Stop-Service -Name "SysMain" -Force
+```
+
+### Re-Enable (Optional Rollback):
+
+```powershell
+Set-Service -Name "SysMain" -StartupType Automatic
+Start-Service -Name "SysMain"
+```
+
+- Fully stops the SysMain service (formerly Superfetch), which prevents `sysmain.dll` from loading at all.
+- May affect background optimization and system responsiveness.
+
+---
+
+## ✅ Recommendation Summary
+
+| Fix Type                         | Affects SysMain? | Safe? | Reboot Needed? | Notes                            |
+|----------------------------------|------------------|-------|----------------|----------------------------------|
+| sfc /scannow                     | No               | ✅    | Maybe          | Detects missing/corrupted files |
+| DISM /RestoreHealth              | No               | ✅    | Maybe          | Fixes image corruption          |
+| lodctr /R                        | No               | ✅    | Yes            | Rebuilds counter registry       |
+| Registry counter disable         | No (just counters) | ✅  | Yes            | Keeps SysMain running           |
+| Fully disabling SysMain service  | Yes              | ⚠️    | Yes            | Only if other methods fail      |
+
+---
+
+Created for internal troubleshooting. Safe to apply under admin supervision.
