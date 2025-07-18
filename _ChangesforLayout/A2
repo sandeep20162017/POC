@@ -14,7 +14,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@ViewData["Title"] – Cost Estimation System</title>
+    <title>@ViewData["Title"] - Cost Estimation System</title>
     @using Microsoft.AspNetCore.Hosting
     @inject IWebHostEnvironment HostEnvironment
 
@@ -27,7 +27,7 @@
               asp-fallback-test-class="sr-only" asp-fallback-test-property="position" asp-fallback-test-value="absolute" crossorigin="anonymous" />
     </environment>
 
-    <!-- Theme CSS (dynamically swapped via JS) -->
+    <!-- Kendo theme loader -->
     <link id="kendo-theme" rel="stylesheet" href="" />
 
     <link rel="stylesheet" href="~/css/header-footer.css" />
@@ -86,7 +86,6 @@
                 <span class="user-name ml-1">@ViewBag.UserName |</span>
                 <span class="user-name ml-2">Role:</span>
                 <span class="user-name ml-1">@ViewBag.RoleName</span>
-                <!-- THEME DROPDOWN -->
                 <label class="ml-4 mb-0" for="themeSelect">Theme:</label>
                 <select id="themeSelect" class="form-control form-control-sm ml-2">
                     <option value="default">Default</option>
@@ -98,10 +97,51 @@
         </div>
     </header>
 
-    <!-- Nav/menu omitted for brevity; keep as in original -->
+    <div id="responsive-panel" class="navbar navbar-dark bg-light mb-4">
+        <kendo-responsivepanel name="responsive-panel" auto-close="false" breakpoint="768" orientation="top">
+            @(Html.Kendo().Menu()
+                .Name("Menu")
+                .Items(items =>
+                {
+                    items.Add().Text("Home").Action("Index", "Home").ImageUrl(Url.Content("~/images/home.png"));
+                    items.Add().Text("Material Parts").ImageUrl(Url.Content("~/images/part.png")).Items(children =>
+                    {
+                        children.Add().Text("Stock Coded Parts").Action("Index", "StockCodedParts").ImageUrl(Url.Content("~/images/part.png"));
+                        children.Add().Text("Non Stock Coded Parts").Action("NscPartsUsedIndex", "NscPartsUsed").ImageUrl(Url.Content("~/images/part.png"));
+                        children.Add().Text("Rebuilt Parts").Action("Index", "Common").ImageUrl(Url.Content("~/images/part.png"));
+                    });
+                    items.Add().Text("Vehicle Estimate").Action("VehiclesIndex", "Vehicles").ImageUrl(Url.Content("~/images/vehicle.png"));
+                    items.Add().Text("Buy Or Make").Action("Index", "Common").ImageUrl(Url.Content("~/images/buy.png"));
+                    items.Add().Text("Reports").Action("Index", "Common").ImageUrl(Url.Content("~/images/home.png"));
 
-    <main class="container-fluid">
-        @RenderBody()
+                    items.Add().Text("Administration").ImageUrl(Url.Content("~/images/part.png")).Items(children =>
+                    {
+                        children.Add().Text("User Management").Action("Index", "UserManagementGrid").ImageUrl(Url.Content("~/images/part.png"));
+                        children.Add().Text("Labour Task Management").Action("Index", "Task").ImageUrl(Url.Content("~/images/part.png"));
+                        children.Add().Text("Differential Management").Action("DifferentialIndex", "Differential").ImageUrl(Url.Content("~/images/part.png"));
+                        children.Add().Text("Engine Management").Action("EngineIndex", "Engine").ImageUrl(Url.Content("~/images/part.png"));
+                        children.Add().Text("Make Model Year Management").Action("MakeModelYearIndex", "MakeModelYear").ImageUrl(Url.Content("~/images/part.png"));
+                        children.Add().Text("Transmission Management").Action("TransmissionIndex", "Transmission").ImageUrl(Url.Content("~/images/part.png"));
+                        children.Add().Text("Employee Salary Management").Action("EmpSalaryIndex", "EmpSalary").ImageUrl(Url.Content("~/images/part.png"));
+                        children.Add().Text("Labour Type Management").Action("LabourTypeIndex", "LabourType").ImageUrl(Url.Content("~/images/part.png"));
+                        children.Add().Text("List Of Vehicles").Action("Index", "Bus").ImageUrl(Url.Content("~/images/part.png"));
+                        children.Add().Text("Change Settings").Action("SettingIndex", "Setting").ImageUrl(Url.Content("~/images/part.png"));
+                        children.Add().Text("Announcement Settings").Action("Index", "Content").ImageUrl(Url.Content("~/images/part.png"));
+                    });
+
+                    items.Add().Text("Help").Action("Index", "Common").ImageUrl(Url.Content("~/images/part.png"));
+                })
+                .HighlightPath(true)
+                .Orientation(MenuOrientation.Horizontal)
+                .HtmlAttributes(new { @class = "rounded-menu" })
+            )
+        </kendo-responsivepanel>
+    </div>
+
+    <main>
+        <div class="container-fluid">
+            @RenderBody()
+        </div>
     </main>
 
     <footer class="border-top footer text-muted">
@@ -111,8 +151,97 @@
         </div>
     </footer>
 
-    <!-- Session timers and scripts omitted; keep unchanged -->
-
     @RenderSection("scripts", required: false)
+
+    <script>
+        $(document).ready(function () {
+            console.log("layout.cshtml docready called");
+            setTimeout(function () {
+                $(".k-menu .k-menu-expand-arrow.k-icon.k-i-arrow-60-down").remove();
+            }, 100);
+            startSessionTimer();
+            $(document).on("click keydown", ".k-grid", resetSession);
+        });
+
+        let idleTimer;
+        let countdownTimer;
+        const timeoutMinutes = @ViewBag.SessionTimeoutMinutes;
+        const warningMinutes = @ViewBag.SessionTimeoutWarningMinutes;
+        let warningActive = false;
+
+        function startSessionTimer() {
+            clearTimeout(idleTimer);
+            idleTimer = setTimeout(showTimeoutWarning, (timeoutMinutes - warningMinutes) * 60 * 1000);
+        }
+
+        function showTimeoutWarning() {
+            warningActive = true;
+            const dialog = $("#timeoutDialog").data("kendoDialog") ||
+                $("#timeoutDialog").kendoDialog({
+                    width: "400px",
+                    title: "This session will be closed due to inactivity. All the unsaved changes will be lost.",
+                    closable: false,
+                    modal: true,
+                    actions: []
+                }).data("kendoDialog");
+
+            let seconds = warningMinutes * 60;
+
+            function updateCountdown() {
+                const minutes = Math.floor(seconds / 60);
+                const remainingSeconds = seconds % 60;
+                $("#countdown").text(`${minutes}:${remainingSeconds.toString().padStart(2, '0')}`);
+                if (seconds <= 0) {
+                    clearInterval(countdownTimer);
+                    dialog.close();
+                    window.location.href = '/Home/SessionExpired';
+                }
+                seconds--;
+            }
+
+            countdownTimer = setInterval(updateCountdown, 1000);
+            updateCountdown();
+            dialog.open();
+
+            $("#continueSession").off("click").on("click", function () {
+                resetSession();
+                dialog.close();
+            });
+
+            $(document).one("mousemove keydown click", function () {
+                resetSession();
+                dialog.close();
+            });
+        }
+
+        function resetSession() {
+            warningActive = false;
+            clearTimeout(idleTimer);
+            clearInterval(countdownTimer);
+
+            fetch('/Account/KeepAlive', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+                },
+                credentials: 'same-origin'
+            })
+                .then(response => {
+                    if (!response.ok) throw new Error('Keep-alive failed');
+                    startSessionTimer();
+                })
+                .catch(() => window.location.reload());
+        }
+    </script>
+
+    <div id="timeoutDialog" style="display: none;">
+        <div style="padding: 20px;">
+            <h4>Session Expiration Warning</h4>
+            <p>Your session will expire in <span id="countdown">2:00</span>.</p>
+            <p>Any unsaved changes will be lost.</p>
+            <button class="k-button" id="continueSession">Continue Working</button>
+        </div>
+    </div>
 </body>
 </html>
