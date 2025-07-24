@@ -1,0 +1,222 @@
+@using BCES.Models.Vehicle
+@using BCES.Models.Common
+@model IEnumerable<BCES.Models.Vehicle.VehicleViewModel>
+
+@{
+    ViewData["Title"] = "Vehicle Estimate";
+    var parentGridId = $"{ViewBag.PartNum}";
+    var vehGridName = $"VehicleGrid";
+}
+
+<style>
+    /* Changed expanded row background to light grey */
+    .selected-row {
+        background-color: #f0f0f0 !important;
+    }
+
+    /* Read-only form styles */
+    .read-only-form .k-textbox,
+    .read-only-form .k-numerictextbox,
+    .read-only-form .k-dropdown,
+    .read-only-form .k-combobox {
+        background-color: #f8f8f8;
+        border-color: #e0e0e0;
+        color: #555;
+        cursor: default;
+    }
+
+    .read-only-form .k-widget {
+        opacity: 1 !important;
+    }
+
+    /* Existing required column styles */
+    .required-header::after {
+        content: " *";
+        color: #e32;
+        font-weight: bold;
+    }
+    
+    .required-cell {
+        background-color: rgba(255, 0, 0, 0.05);
+    }
+    
+    .k-edit-cell.required-cell input {
+        border-left: 3px solid #e32;
+        padding-left: 5px;
+    }
+    
+    .estimate-link {
+        color: #007bff;
+        cursor: pointer;
+        text-decoration: underline;
+    }
+</style>
+
+<h6>Vehicle Estimate</h6>
+
+@(Html.Kendo().TabStrip()
+    .Name("vehicleTabStrip")
+    .Animation(animation => animation.Open(effect => effect.Fade(FadeDirection.In)))
+    .Items(tabstrip =>
+    {
+        tabstrip.Add().Text("Vehicles")
+            .Selected(true)
+            .Content(@<text>
+    @try
+    {
+        @(Html.Kendo().Grid<VehicleViewModel>()
+            .Name(vehGridName)
+            .Columns(columns =>
+            {
+                columns.Bound(c => c.VehicleListId).Title("Estimate #")
+                    .ClientTemplate("<a class='estimate-link' onclick='openEstimateDetailWindow(#= VehicleListId #)'>#= VehicleListId && VehicleListId !== 0 ? VehicleListId : '(System Generated)' #</a>")
+                    .Filterable(ftb => ftb.Cell(cell => {
+                        cell.Operator("eq");
+                        cell.ShowOperators(true);
+                    }))
+                    .IncludeInMenu(false)
+                    .Width(190).Lockable(true);
+
+                columns.Bound(c => c.VehSeriesCode).Title("Vehicle Series Code")
+                    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+                    .EditorTemplateName("ComboBoxEditor")
+                    .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                    .Width(160);
+
+                columns.Bound(c => c.NumOfVehicles).Title("Number Of Vehicles")
+                    .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                    .Filterable(ftb => ftb.Cell(cell => cell.Operator("eq").SuggestionOperator(FilterType.Contains)))
+                    .Width(160).Hidden(false).MinScreenWidth(768);
+
+                columns.Bound(c => c.ProjDesc).Title("Project Description")
+                    .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+                    .EditorTemplateName("VehDescriptionComboBox")
+                    .Width(250).Hidden(false).MinScreenWidth(768);
+
+                columns.Command(command =>
+                {
+                    command.Custom("Archive").Text(" ").IconClass("k-icon k-i-folder").Click("onArchiveClick").HtmlAttributes(new { title = "Archive" });
+                    command.Custom("Copy").Text(" ").IconClass("k-icon k-i-copy").Click("onCopyEstimateClick").HtmlAttributes(new { title = "Copy Estimate" });
+                    command.Custom("Delete")
+                        .Click("showDeleteConfirmation")
+                        .Text(" ")
+                        .IconClass("k-icon k-i-delete")
+                        .HtmlAttributes(new {
+                            @class = "text-danger",
+                            data_grid = "VehicleGrid",
+                            data_url = Url.Action("DeleteVehicle", "Vehicles"),
+                            data_id_field = "VehicleListId",
+                            data_grid_type = "VehicleGrid"
+                        });
+                }).Title("Actions").IncludeInMenu(false).Width(300);
+            })
+            .ToolBar(toolbar => {
+                toolbar.Create().Text("Add new record").IconClass("k-icon k-i-plus").HtmlAttributes(new {
+                    title = "Add new record",
+                    @class = "k-primary"
+                });
+                toolbar.Save().SaveText("Save changes").CancelText("Cancel changes")
+                    .HtmlAttributes(new {
+                        title_save = "Save all changes",
+                        title_cancel = "Discard changes"
+                    });
+            })
+            .Editable(editable => editable.Mode(GridEditMode.PopUp)
+                .TemplateName("CustomVehiclePopUpTemplate")
+                .Window(w => w.Title("Vehicle Estimate").Width(820))
+            .Events(events => events
+                .ExcelExport("onExcelExport")
+                .DetailExpand("onDetailExpand")
+                .DetailCollapse("onDetailCollapse")
+                .DataBound("onVehGridDataBound")
+                .Save("onVehGridSave")
+            )
+            .Pageable(p => p
+                .PageSizes(new int[] { 1, 10, 20, 50 })
+                .Position(GridPagerPosition.Top)
+            )
+            .Sortable()
+            .ClientDetailTemplateId("template")
+            .Resizable(r => r.Columns(true))
+            .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+            .ColumnMenu(menu => menu.Enabled(true))
+            .Scrollable(s => s.Height("auto"))
+            .Reorderable(reorder => reorder.Columns(true))
+            .DataSource(dataSource => dataSource
+                .Ajax()
+                .PageSize(1)
+                .Model(model =>
+                {
+                    model.Id(c => c.VehicleListId);
+                    model.Field(c => c.VehicleListId).Editable(false);
+                    model.Field(c => c.ModifiedLastDate).Editable(false);
+                    model.Field(c => c.ModifiedLastBy).Editable(false);
+                })
+                .Events(events =>
+                {
+                    events.RequestEnd("onVehRequestEnd");
+                    events.Error("onDataSourceError");
+                })
+                .Read(read => read.Url(Url.Action("GetVehiclesView", "Vehicles") + "?id=" + ViewBag.PartNum + "&gridType=VehicleGrid").Type(HttpVerbs.Get))
+                .Create(create => create.Url(Url.Action("AddVehiclesView", "Vehicles") + "?id=" + ViewBag.PartNum + "&gridType=VehicleGrid").Type(HttpVerbs.Post))
+                .Update(update => update.Url(Url.Action("UpdateVehiclesView", "Vehicles") + "?id=" + ViewBag.PartNum + "&gridType=VehicleGrid").Type(HttpVerbs.Post))
+                .Destroy(delete => delete.Url(Url.Action("DeleteVehiclesView", "Vehicles") + "?id=" + ViewBag.PartNum + "&gridType=VehicleGrid").Type(HttpVerbs.Post))
+            )
+    }
+    catch (Exception ex)
+    {
+        <div class="alert alert-danger">Error loading Vehicle Estimate: @ex.Message</div>
+    }
+</text>);
+
+        tabstrip.Add().Text("Archived Vehicles")
+            .Content(@<text>
+    @try
+    {
+        @Html.Partial("_ArchivedVehicleIndex")
+    }
+    catch (Exception ex)
+    {
+        <div class="alert alert-danger">Error loading archived vehicles: @ex.Message</div>
+    }
+</text>);
+    })
+)
+
+<!-- Detail Window for Vehicle Estimate -->
+<div id="estimateDetailWindow" style="display: none;"></div>
+
+@section Scripts {
+    <script>
+        // Function to open detail window
+        function openEstimateDetailWindow(vehicleListId) {
+            var window = $("#estimateDetailWindow").data("kendoWindow");
+            
+            if (!window) {
+                window = $("#estimateDetailWindow").kendoWindow({
+                    title: "Estimate Details - " + vehicleListId,
+                    modal: true,
+                    visible: false,
+                    resizable: true,
+                    width: 850,
+                    actions: ["Close"],
+                    content: {
+                        url: '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId
+                    }
+                }).data("kendoWindow");
+            } else {
+                window.refresh({
+                    url: '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId
+                });
+            }
+            
+            window.center().open();
+        }
+    </script>
+    
+    <!-- Your existing scripts below... -->
+}
