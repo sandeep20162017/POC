@@ -1,4 +1,114 @@
- columns.Bound(c => c.VehicleListId).Title("Estimate #")
+shared/CustiomVehPopUpTemplate.cshtml still didn't get called. no JS errors.
+Controller :
+ public ActionResult GetVehicleById(int id, bool readOnly = false)
+ {
+     try
+     {
+         const string sql = @"
+     SELECT [VehicleListId], [VehSeriesCode], [NumOfVehicles], [ProjDesc],
+            [DateEntered], [EnteredBy], [ModifiedLastBy], [ModifiedLastDate],
+            [Make], [Model], [Year], [Engine], [Transmission], [Differential], [Sopnumber]
+     FROM [CES].[SBCES].[VehicleList]
+     WHERE VehicleListId = @Id";
+
+         var vehicle = _dbConnection.QueryFirstOrDefault<VehicleViewModel>(sql, new { Id = id });
+
+         if (vehicle == null)
+         {
+             return Content("Vehicle estimate not found");
+         }
+
+         if (vehicle.ModifiedLastDate == null)
+         {
+             ViewBag.FormattedDate = "System Generated";
+         }
+         else
+         {
+             try
+             {
+                 //  DateTimeOffset dateTimeOffset = DateTimeOffset.FromUnixTimeMilliseconds(vehicle.ModifiedLastDate);
+                 DateTime localDate = DateTime.Now;
+                 ViewBag.FormattedDate = localDate.ToString("MMM dd, yyyy hh:mm:ss tt");
+             }
+             catch
+             {
+                 ViewBag.FormattedDate = "Invalid Date";
+             }
+         }
+         ViewBag.ReadOnly = readOnly;
+         return PartialView("CustomVehPopUpTemplate", vehicle);
+     }
+     catch (Exception ex)
+     {
+         // Log error (consider adding proper logging here)
+         return Content($"Error loading vehicle estimate: {ex.Message}");
+     }
+ }
+View :
+ @(Html.Kendo().Grid<VehicleViewModel>()
+     .Name(vehGridName)
+     .Columns(columns =>
+     {
+         columns.Bound(c => c.VehicleListId).Title("Estimate #")
+             .ClientTemplate("<a class='estimate-link' onclick='openEstimateDetailWindow(#= VehicleListId #)'>#= VehicleListId && VehicleListId !== 0 ? VehicleListId : '(System Generated)' #</a>")
+             .Filterable(ftb => ftb.Cell(cell => {
+                 cell.Operator("eq");
+                 cell.ShowOperators(true);
+             }))
+...
+.Editable(editable => 
+{
+    editable.Mode(GridEditMode.PopUp);      
+//removed custom templte
+    editable.Window(w => w.Title("Vehicle Estimate").Width(820));
+})
+..
+.Model(model =>
+{
+    model.Id(c => c.VehicleListId);
+    model.Field(c => c.VehicleListId).Editable(false);
+    model.Field(c => c.VehSeriesCode);
+     model.Field(c => c.NumOfVehicles);
+      model.Field(c => c.ProjDesc);
+       model.Field(c => c.Make);
+     model.Field(c => c.Make);
+      model.Field(c => c.VehModel);
+       model.Field(c => c.Year);
+        model.Field(c => c.Engine);
+         model.Field(c => c.Transmission);
+         model.Field(c => c.Differential);
+          model.Field(c => c.Sopnumber);
+    model.Field(c => c.ModifiedLastDate).Editable(false);
+    model.Field(c => c.ModifiedLastBy).Editable(false);
+})
+...
+<!-- Detail Window for Vehicle Estimate -->
+<div id="estimateDetailWindow" style="display: none;"></div>
+function openEstimateDetailWindow(vehicleListId) {
+    var window = $("#estimateDetailWindow").data("kendoWindow");
+    if (!window) {
+        window = $("#estimateDetailWindow").kendoWindow({
+            title: "Estimate Details - " + vehicleListId,
+            modal: true,
+            visible: false,
+            resizable: true,
+            width: 850,
+            actions: ["Close"],
+            content: {
+                url: '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId + '&readOnly=true'
+            }
+        }).data("kendoWindow");
+    } else {
+        window.refresh({
+            url: '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId + '&readOnly=true'
+        });
+    }
+    window.center().open();
+}
+
+==============================================================
+
+columns.Bound(c => c.VehicleListId).Title("Estimate #")
      .ClientTemplate("<a class='estimate-link' onclick='openEstimateDetailWindow(#= VehicleListId #)'>#= VehicleListId && VehicleListId !== 0 ? VehicleListId : '(System Generated)' #</a>")
      .Filterable(ftb => ftb.Cell(cell => {
 ...
