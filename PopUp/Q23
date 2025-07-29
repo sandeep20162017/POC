@@ -1,0 +1,318 @@
+You are ASP.NET core and Telerik ASP.NET core expert. PopUp editor.
+In Index.cshtml,
+1. I need toshow Telerik update and delete buttons, in the vehile grid row (Index.cshtml). Delete shouldcall custm delete javascript
+2. When Edit button is clicked, CustomVehiclePop shouldbe opend. All the controls (other than estimate #, UpdateDate, Updated by) shouldbe editable.
+   This form should have Telerik Save/update and cancel button. Thse buttons shouldeventually call grid function (from CRUD)
+3. when User clicks on Estimate#, CustomVehiclePopUp should be shown all the fields in the popupshould be readonly, it should have
+   Telerik button Cancel. Cancel should close the window.
+4. When user is adding a new vehicle, and clicks on POPUp's cancel button, Inform user, changes are pending, all the changes willmbe lost.
+
+
+
+Controller :
+public ActionResult GetVehicleById(int id)
+{
+    try
+    {
+        const string sql = @"
+    SELECT [VehicleListId], [VehSeriesCode], [NumOfVehicles], [ProjDesc],
+           [DateEntered], [EnteredBy], [ModifiedLastBy], [ModifiedLastDate],
+           [Make], [Model], [Year], [Engine], [Transmission], [Differential], [Sopnumber]
+    FROM [CES].[SBCES].[VehicleList]
+    WHERE VehicleListId = @Id";
+
+        var vehicle = _dbConnection.QueryFirstOrDefault<VehicleViewModel>(sql, new { Id = id });
+
+        if (vehicle == null)
+        {
+            return Content("Vehicle estimate not found");
+        }
+
+        if (vehicle.ModifiedLastDate == null)
+        {
+            ViewBag.FormattedDate = "System Generated";
+        }
+        else
+        {
+            try
+            {
+              //  DateTimeOffset dateTimeOffset = DateTimeOffset.FromUnixTimeMilliseconds(vehicle.ModifiedLastDate);
+                DateTime localDate = DateTime.Now;
+                ViewBag.FormattedDate = localDate.ToString("MMM dd, yyyy hh:mm:ss tt");
+            }
+            catch
+            {
+                ViewBag.FormattedDate = "Invalid Date";
+            }
+        }
+
+        return PartialView("CustomVehiclePopUpTemplate", vehicle);
+    }
+    catch (Exception ex)
+    {
+        // Log error (consider adding proper logging here)
+        return Content($"Error loading vehicle estimate: {ex.Message}");
+    }
+}
+shared/EditorTemplate/CustomVehiclePopUp.cshtml
+public ActionResult GetVehicleById(int id)
+{
+    try
+    {
+        const string sql = @"
+    SELECT [VehicleListId], [VehSeriesCode], [NumOfVehicles], [ProjDesc],
+           [DateEntered], [EnteredBy], [ModifiedLastBy], [ModifiedLastDate],
+           [Make], [Model], [Year], [Engine], [Transmission], [Differential], [Sopnumber]
+    FROM [CES].[SBCES].[VehicleList]
+    WHERE VehicleListId = @Id";
+
+        var vehicle = _dbConnection.QueryFirstOrDefault<VehicleViewModel>(sql, new { Id = id });
+
+        if (vehicle == null)
+        {
+            return Content("Vehicle estimate not found");
+        }
+
+        if (vehicle.ModifiedLastDate == null)
+        {
+            ViewBag.FormattedDate = "System Generated";
+        }
+        else
+        {
+            try
+            {
+              //  DateTimeOffset dateTimeOffset = DateTimeOffset.FromUnixTimeMilliseconds(vehicle.ModifiedLastDate);
+                DateTime localDate = DateTime.Now;
+                ViewBag.FormattedDate = localDate.ToString("MMM dd, yyyy hh:mm:ss tt");
+            }
+            catch
+            {
+                ViewBag.FormattedDate = "Invalid Date";
+            }
+        }
+
+        return PartialView("CustomVehiclePopUpTemplate", vehicle);
+    }
+    catch (Exception ex)
+    {
+        // Log error (consider adding proper logging here)
+        return Content($"Error loading vehicle estimate: {ex.Message}");
+    }
+}
+Index.cshtml :
+<h6>Vehicle Estimate</h6>
+
+@(Html.Kendo().TabStrip()
+    .Name("vehicleTabStrip")
+    .Animation(animation => animation.Open(effect => effect.Fade(FadeDirection.In)))
+    .Items(tabstrip =>
+    {
+        tabstrip.Add().Text("Vehicles")
+            .Selected(true)
+            .Content(@<text>
+                @try
+                {
+                    @(Html.Kendo().Grid<VehicleViewModel>()
+                        .Name(vehGridName)
+                        .Columns(columns =>
+                        {
+                            columns.Bound(c => c.VehicleListId).Title("Estimate #")
+                                .ClientTemplate("<a class='estimate-link' onclick='openEstimateDetailWindow(#= VehicleListId #)'>#= VehicleListId && VehicleListId !== 0 ? VehicleListId : '(System Generated)' #</a>")
+                                .Filterable(ftb => ftb.Cell(cell => {
+                                    cell.Operator("eq");
+                                    cell.ShowOperators(true);
+                                }))
+                                .IncludeInMenu(false)
+                                .Width(190).Lockable(true);
+
+                            columns.Bound(c => c.VehSeriesCode).Title("Vehicle Series Code")
+                                .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+                                .EditorTemplateName("ComboBoxEditor")
+                                .HeaderHtmlAttributes(new { @class = "required-header" })
+                                .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                                .Width(160);
+
+                            columns.Bound(c => c.NumOfVehicles).Title("Number Of Vehicles")
+                                .HeaderHtmlAttributes(new { @class = "required-header" })
+                                .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                                .Filterable(ftb => ftb.Cell(cell => cell.Operator("eq").SuggestionOperator(FilterType.Contains)))
+                                .Width(160).Hidden(false).MinScreenWidth(768);
+
+                            columns.Bound(c => c.ProjDesc).Title("Project Description")
+                                .HeaderHtmlAttributes(new { @class = "required-header" })
+                                .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                                .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+                                .EditorTemplateName("VehDescriptionComboBox")
+                                .Width(250).Hidden(false).MinScreenWidth(768);
+
+                            columns.Command(command =>
+                            {
+                                command.Custom("Archive").Text(" ").IconClass("k-icon k-i-folder").Click("onArchiveClick").HtmlAttributes(new { title = "Archive" });
+                                command.Custom("Copy").Text(" ").IconClass("k-icon k-i-copy").Click("onCopyEstimateClick").HtmlAttributes(new { title = "Copy Estimate" });
+                                command.Custom("Delete")
+                                    .Click("showDeleteConfirmation")
+                                    .Text(" ")
+                                    .IconClass("k-icon k-i-delete")
+                                    .HtmlAttributes(new {
+                                        @class = "text-danger",
+                                        data_grid = "VehicleGrid",
+                                        data_url = Url.Action("DeleteVehicle", "Vehicles"),
+                                        data_id_field = "VehicleListId",
+                                        data_grid_type = "VehicleGrid"
+                                    });
+                            }).Title("Actions").IncludeInMenu(false).Width(300);
+                        })
+                        .ToolBar(toolbar => {
+                            toolbar.Create().Text("Add new record").IconClass("k-icon k-i-plus").HtmlAttributes(new {
+                                title = "Add new record",
+                                @class = "k-primary"
+                            });
+                            toolbar.Save().SaveText("Save changes").CancelText("Cancel changes")
+                                .HtmlAttributes(new {
+                                    title_save = "Save all changes",
+                                    title_cancel = "Discard changes"
+                                });
+                        })
+                        .Editable(editable => 
+                        {
+                            editable.Mode(GridEditMode.PopUp);
+                            editable.TemplateName("CustomVehiclePopUpTemplate");
+                            editable.Window(w => w.Title("Vehicle Estimate").Width(820));
+                        })
+                        .Events(events => events
+                            .ExcelExport("onExcelExport")
+                            .DetailExpand("onDetailExpand")
+                            .DetailCollapse("onDetailCollapse")
+                            .DataBound("onVehGridDataBound")
+                            .Save("onVehGridSave")
+                        )
+                        .Pageable(p => p
+                            .PageSizes(new int[] { 1, 10, 20, 50 })
+                            .Position(GridPagerPosition.Top)
+                        )
+                        .Sortable()
+                        .ClientDetailTemplateId("template")
+                        .Resizable(r => r.Columns(true))
+                        .Filterable(ftb => ftb.Mode(GridFilterMode.Row))
+                        .ColumnMenu(menu => menu.Enabled(true))
+                        .Scrollable(s => s.Height("auto"))
+                        .Reorderable(reorder => reorder.Columns(true))
+                        .DataSource(dataSource => dataSource
+                            .Ajax()
+                            .PageSize(1)
+                            .Model(model =>
+                            {
+                                model.Id(c => c.VehicleListId);
+                                model.Field(c => c.VehicleListId).Editable(false);
+                                model.Field(c => c.ModifiedLastDate).Editable(false);
+                                model.Field(c => c.ModifiedLastBy).Editable(false);
+                            })
+                            .Events(events =>
+                            {
+                                events.RequestEnd("onVehRequestEnd");
+                                events.Error("onDataSourceError");
+                            })
+                            .Read(read => read.Url(Url.Action("GetVehiclesView", "Vehicles") + "?id=" + ViewBag.PartNum + "&gridType=VehicleGrid").Type(HttpVerbs.Get))
+                            .Create(create => create.Url(Url.Action("AddVehiclesView", "Vehicles") + "?id=" + ViewBag.PartNum + "&gridType=VehicleGrid").Type(HttpVerbs.Post))
+                            .Update(update => update.Url(Url.Action("UpdateVehiclesView", "Vehicles") + "?id=" + ViewBag.PartNum + "&gridType=VehicleGrid").Type(HttpVerbs.Post))
+                            .Destroy(delete => delete.Url(Url.Action("DeleteVehiclesView", "Vehicles") + "?id=" + ViewBag.PartNum + "&gridType=VehicleGrid").Type(HttpVerbs.Post))
+                        )
+                    )
+                }
+                catch (Exception ex)
+                {
+                    <div class="alert alert-danger">Error loading Vehicle Estimate: @ex.Message</div>
+                }
+            </text>);
+
+        tabstrip.Add().Text("Archived Vehicles")
+            .Content(@<text>
+                @try
+                {
+                    @Html.Partial("_ArchivedVehicleIndex")
+                }
+                catch (Exception ex)
+                {
+                    <div class="alert alert-danger">Error loading archived vehicles: @ex.Message</div>
+                }
+            </text>);
+    })
+)
+
+<!-- Detail Window for Vehicle Estimate -->
+<div id="estimateDetailWindow" style="display: none;"></div>
+
+<!-- Custom Delete Confirmation Dialog -->
+<div id="deleteConfirmationDialog" style="display: none;">
+    <div class="confirmation-message">
+        <span class="k-icon k-i-warning confirmation-icon"></span>
+        <span>Are you sure you want to delete this item?</span>
+    </div>
+    <div class="confirmation-buttons">
+        @* <button type="button" class="k-button cancel-btn">Cancel</button> *@
+        <button type="button" class="k-button confirm-btn">Delete</button>
+    </div>
+</div>
+
+<div id="notification"></div>
+<!--Copy estimate san17-->
+<div id="copyEstimateDialog" style="display:none;">
+    <div class="k-form">
+        <div class="k-form-field">
+            <label>Estimate #</label>
+            <input id="vehicleListId" name="vehicleListId" class="k-textbox" readonly />
+        </div>
+        <div class="k-form-field">
+            <label>Vehicle Series</label>
+            <input id="oldVehSeriesCode" name="oldVehSeriesCode" class="k-textbox" readonly />
+        </div>
+        <div class="k-form-field">
+            <label>Description</label>
+            <input id="oldprojDesc" name="oldprojDesc" class="k-textbox" readonly />
+        </div>
+        <div class="k-form-field">
+            <label>New Vehicle Series<span style="color:red">*</span></label>
+            <input id="newVehSeriesCode" name="newVehSeriesCode" class="k-textbox" required />
+        </div>
+        <div class="k-form-field">
+            <label>New Description<span style="color:red">*</span></label>
+            <input id="newprojDesc" name="newprojDesc" class="k-textbox" required />
+        </div>
+        <div class="k-form-buttons">
+            <button type="button" class="k-button k-primary" id="copyEstimateBtn">Copy</button>
+            <button type="button" class="k-button" id="cancelCopyBtn">Cancel</button>
+        </div>
+    </div>
+</div>
+<!-- Placeholder for dynamically loaded email estimate popup and notification -->
+<div id="email-estimate-container" style="display: none;">
+    @Html.Partial("_EmailEstimatePopup")
+    <div id="estimates-container"></div>
+
+</div>
+     <script>
+        // Function to open detail window
+        function openEstimateDetailWindow(vehicleListId) {
+            var window = $("#estimateDetailWindow").data("kendoWindow");
+            
+            if (!window) {
+                window = $("#estimateDetailWindow").kendoWindow({
+                    title: "Estimate Details - " + vehicleListId,
+                    modal: true,
+                    visible: false,
+                    resizable: true,
+                    width: 850,
+                    actions: ["Close"],
+                    content: {
+                        url: '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId
+                    }
+                }).data("kendoWindow");
+            } else {
+                window.refresh({
+                    url: '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId
+                });
+            }
+            
+            window.center().open();
+        }
+    </script>
