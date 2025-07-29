@@ -116,3 +116,94 @@ Added Edit command button
 Maintained existing Delete button with custom JavaScript handler
 
 Preserved Archive/Copy functionality
+===========================================================================
+function onVehGridSave(e) {
+    // Prevent default grid save behavior to handle manually
+    e.preventDefault();
+    
+    // Get reference to the grid and popup window
+    var grid = e.sender;
+    var popup = e.container.data("kendoWindow");
+    
+    // Validate form before saving
+    var validator = e.container.find("form").kendoValidator().data("kendoValidator");
+    if (!validator.validate()) {
+        // Show validation errors if any
+        showNotification("error", "Please fill all required fields");
+        return;
+    }
+
+    try {
+        // Get the model and determine if it's new or existing
+        var model = e.model;
+        var isNew = model.isNew();
+        
+        // Prepare data for AJAX call
+        var data = {
+            VehicleListId: model.VehicleListId,
+            VehSeriesCode: model.VehSeriesCode,
+            NumOfVehicles: model.NumOfVehicles,
+            ProjDesc: model.ProjDesc,
+            Make: model.Make,
+            Model: model.Model,
+            Year: model.Year,
+            Engine: model.Engine,
+            Transmission: model.Transmission,
+            Differential: model.Differential,
+            Sopnumber: model.Sopnumber
+        };
+
+        // Determine appropriate API endpoint
+        var url = isNew 
+            ? '@Url.Action("AddVehiclesView", "Vehicles")' + '?id=' + '@ViewBag.PartNum' + '&gridType=VehicleGrid'
+            : '@Url.Action("UpdateVehiclesView", "Vehicles")' + '?id=' + '@ViewBag.PartNum' + '&gridType=VehicleGrid';
+
+        var method = isNew ? "POST" : "PUT";
+
+        // Execute AJAX request
+        $.ajax({
+            url: url,
+            type: method,
+            contentType: "application/json",
+            data: JSON.stringify(data),
+            success: function (response) {
+                if (response.success) {
+                    // Show success notification
+                    showNotification("success", isNew 
+                        ? "New vehicle created successfully" 
+                        : "Vehicle updated successfully");
+                    
+                    // Refresh grid data
+                    grid.dataSource.read();
+                    
+                    // Close popup
+                    popup.close();
+                } else {
+                    // Handle server-side validation errors
+                    showNotification("error", response.message || "Operation failed");
+                }
+            },
+            error: function (xhr) {
+                // Handle AJAX errors
+                showNotification("error", "Error: " + xhr.statusText);
+            }
+        });
+    } catch (ex) {
+        // Handle unexpected errors
+        console.error("Save error:", ex);
+        showNotification("error", "Unexpected error occurred");
+    }
+}
+
+// Helper function for notifications
+function showNotification(type, message) {
+    var notification = $("#notification").data("kendoNotification");
+    if (!notification) {
+        notification = $("#notification").kendoNotification({
+            position: { pinned: true, top: 20, right: 20 },
+            autoHideAfter: 3000,
+            stacking: "down"
+        }).data("kendoNotification");
+    }
+    notification.show(message, type);
+}
