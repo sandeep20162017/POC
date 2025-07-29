@@ -1,0 +1,118 @@
+Based on your requirements, I'll provide a solution that addresses all four points. Here are the necessary modifications:
+
+1. Update Grid Command Column (Index.cshtml)
+razor
+columns.Command(command =>
+{
+    command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" });
+    command.Custom("Delete")
+        .Click("showDeleteConfirmation")
+        .Text(" ")
+        .IconClass("k-icon k-i-delete")
+        .HtmlAttributes(new {
+            @class = "text-danger",
+            data_grid = "VehicleGrid",
+            data_url = Url.Action("DeleteVehicle", "Vehicles"),
+            data_id_field = "VehicleListId",
+            data_grid_type = "VehicleGrid"
+        });
+    command.Custom("Archive").Text(" ").IconClass("k-icon k-i-folder").Click("onArchiveClick").HtmlAttributes(new { title = "Archive" });
+    command.Custom("Copy").Text(" ").IconClass("k-icon k-i-copy").Click("onCopyEstimateClick").HtmlAttributes(new { title = "Copy Estimate" });
+}).Title("Actions").IncludeInMenu(false).Width(300);
+2. Modify Popup Template (CustomVehiclePopUpTemplate.cshtml)
+Add this at the top:
+
+razor
+@{
+    bool isReadOnly = ViewBag.ReadOnly ?? false;
+}
+Modify form fields (example for one field):
+
+razor
+<div class="form-group">
+    <label for="VehSeriesCode">Vehicle Series Code</label>
+    @if (isReadOnly)
+    {
+        @Html.Kendo().TextBox().Name("VehSeriesCode").Value(Model.VehSeriesCode).HtmlAttributes(new { @readonly = "readonly" })
+    }
+    else
+    {
+        @Html.Kendo().ComboBoxFor(m => m.VehSeriesCode)
+            .Enable(!isReadOnly)
+            //... other combobox configuration
+    }
+</div>
+Update buttons section:
+
+razor
+<div class="k-edit-buttons k-actions-end">
+    @if (!isReadOnly)
+    {
+        <button type="submit" class="k-button k-button-md k-rounded-md k-button-solid k-button-solid-base k-grid-update">
+            <span class="k-icon k-i-check"></span>Update
+        </button>
+    }
+    <button type="button" class="k-button k-button-md k-rounded-md k-button-solid k-button-solid-base k-grid-cancel">
+        <span class="k-icon k-i-cancel"></span>@(isReadOnly ? "Close" : "Cancel")
+    </button>
+</div>
+3. Update Controller Action
+csharp
+public ActionResult GetVehicleById(int id, bool readOnly = false)
+{
+    // ... existing code ...
+    ViewBag.ReadOnly = readOnly;
+    return PartialView("CustomVehiclePopUpTemplate", vehicle);
+}
+4. Update JavaScript Functions
+javascript
+// In Index.cshtml script section
+function openEstimateDetailWindow(vehicleListId) {
+    var window = $("#estimateDetailWindow").data("kendoWindow");
+    if (!window) {
+        window = $("#estimateDetailWindow").kendoWindow({
+            title: "Estimate Details - " + vehicleListId,
+            modal: true,
+            visible: false,
+            resizable: true,
+            width: 850,
+            actions: ["Close"],
+            content: {
+                url: '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId + '&readOnly=true'
+            }
+        }).data("kendoWindow");
+    } else {
+        window.refresh({
+            url: '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId + '&readOnly=true'
+        });
+    }
+    window.center().open();
+}
+
+function onVehGridEdit(e) {
+    if (e.model.isNew()) {
+        var window = e.container.data("kendoWindow");
+        window.bind("close", function (closeEvent) {
+            if (confirm("Changes are pending. All changes will be lost. Are you sure you want to cancel?")) {
+                e.sender.cancelRow();
+            } else {
+                closeEvent.preventDefault();
+            }
+        });
+    }
+}
+5. Update Grid Events Configuration
+razor
+.Events(events => events
+    .Edit("onVehGridEdit")
+    .Save("onVehGridSave")
+    // ... other events ...
+)
+Key Changes Explained:
+Grid Command Buttons:
+
+Added Edit command button
+
+Maintained existing Delete button with custom JavaScript handler
+
+Preserved Archive/Copy functionality
