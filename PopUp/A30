@@ -1,0 +1,151 @@
+Add this CSS if needed:
+
+css
+Copy
+Edit
+.k-edit-form-container .form-group {
+    margin-bottom: 1rem;
+}
+.k-edit-form-container .control-label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+.k-edit-form-container input,
+.k-edit-form-container .k-widget {
+    width: 100% !important;
+}
+✅ 3. Set the Popup Window Width
+You already have:
+
+csharp
+Copy
+Edit
+editable.Window(w => w.Title("Vehicle Estimate").Width(820));
+That’s perfect — Telerik will use this as the base size for the popup. If the popup still feels cramped, increase it to 900 or 960.
+
+✅ Pro tip: Make sure your controls aren't wrapping inside narrow <div class="col-md-6"> if the window is wide.
+
+✅ 4. Control Popup Transparency (Overlay Background)
+Telerik’s modal uses a semi-opaque backdrop. You can customize it with CSS.
+
+Add this to your view or a site-wide stylesheet:
+
+css
+Copy
+Edit
+.k-overlay {
+    background-color: rgba(0, 0, 0, 0.5); /* darker, less transparent */
+}
+/* or make it lighter: */
+.k-overlay {
+    background-color: rgba(0, 0, 0, 0.2);
+}
+🧠 0.0 = fully transparent, 1.0 = fully opaque.
+
+✅ Summary
+Task	Fix
+Add New not working	Use grid.addRow() or check your editor template/model config
+Popup alignment	Use .form-group, .control-label, and layout CSS
+Popup size	Use .Window(w => w.Width(...)), check column widths
+Popup transparency	Tweak .k-overlay { background-color: rgba(...) }
+
+Let me know if you want a complete working CSS and layout sample for the popup — happy to supply.
+
+
+
+
+
+
+You said:
+Add new should also use the same template (partil view), don't we need js for this agian? Call the same JS which we used for edit?
+
+
+ChatGPT said:
+Yes — you're absolutely right. If you're using a custom kendoWindow popup (not the Grid's built-in popup) to show the editor partial view, then:
+
+✅ You must handle both Edit and Add New manually using JavaScript — including calling the same JS function and passing the proper ID.
+
+✅ Solution: Modify Your Existing openEstimateDetailWindow(vehicleId) Function
+To support "Add New", we’ll:
+
+Reuse the same popup
+
+Pass vehicleId = 0 to trigger the “create mode”
+
+Let your controller detect id == 0 and return an empty model
+
+✅ Step 1: Update Your Toolbar to Use JS
+Replace your existing Create() toolbar button with a custom one:
+
+csharp
+Copy
+Edit
+.ToolBar(toolbar =>
+{
+    toolbar.Custom().Text("Add New Vehicle")
+        .HtmlAttributes(new {
+            onclick = "openEstimateDetailWindow(0)", // ← key change
+            @class = "k-button k-primary",
+            title = "Add New Vehicle Estimate"
+        });
+})
+✅ Step 2: Reuse the Same JS Function
+js
+Copy
+Edit
+function openEstimateDetailWindow(vehicleId) {
+    var window = $("#estimateDetailWindow").data("kendoWindow");
+
+    var title = vehicleId === 0 ? "Add New Vehicle Estimate" : "Estimate Details - " + vehicleId;
+    var url = '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleId + '&readOnly=false';
+
+    if (!window) {
+        window = $("#estimateDetailWindow").kendoWindow({
+            title: title,
+            modal: true,
+            visible: false,
+            resizable: true,
+            width: 850,
+            actions: ["Close"],
+            content: { url: url }
+        }).data("kendoWindow");
+    } else {
+        window.title(title);
+        window.refresh({ url: url });
+    }
+
+    window.center().open();
+}
+✅ Step 3: Update Your Controller
+Ensure your controller detects a vehicleId == 0 and returns a new model:
+
+csharp
+Copy
+Edit
+public ActionResult GetVehicleById(int id, bool readOnly = false)
+{
+    VehicleViewModel vehicle;
+
+    if (id == 0)
+    {
+        vehicle = new VehicleViewModel(); // new blank record
+        ViewBag.FormattedDate = "System Generated";
+    }
+    else
+    {
+        const string sql = @"SELECT ... WHERE VehicleListId = @Id";
+        vehicle = _dbConnection.QueryFirstOrDefault<VehicleViewModel>(sql, new { Id = id });
+
+        if (vehicle == null)
+        {
+            return Content("Vehicle estimate not found");
+        }
+
+        ViewBag.FormattedDate = vehicle.ModifiedLastDate?.ToString("MMM dd, yyyy hh:mm:ss tt") ?? "System Generated";
+    }
+
+    ViewBag.ReadOnly = readOnly;
+    return PartialView("_VehicleEstimateDetails", vehicle);
+}
+✅ Final Setup Recap
