@@ -1,0 +1,133 @@
+✅ 1. Grid Config – Index.cshtml
+Replace the default .Create() and .Editable() logic:
+
+csharp
+Copy
+Edit
+@(Html.Kendo().Grid<VehicleViewModel>()
+    .Name("vehGrid")
+    .ToolBar(toolbar =>
+    {
+        toolbar.Custom().Text("Add New Record")
+            .HtmlAttributes(new
+            {
+                title = "Add new vehicle",
+                @class = "k-button k-primary",
+                onclick = "openEstimateDetailWindow(0)" // Add new = ID 0
+            });
+    })
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.VehicleListId).Title("Estimate #")
+            .ClientTemplate("<a href='javascript:void(0)' onclick='openEstimateDetailWindow(#= VehicleListId #)'>#= VehicleListId #</a>");
+
+        columns.Command(command =>
+        {
+            command.Custom("Edit")
+                   .Text(" ")
+                   .IconClass("k-icon k-i-edit")
+                   .Click("onEditEstimate")
+                   .HtmlAttributes(new { title = "Edit" });
+        }).Title("Actions").Width(100);
+    })
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Read(r => r.Action("ReadVehicles", "Vehicles"))
+    )
+)
+✅ 2. JS Functions – Index.cshtml
+Add to bottom of page:
+
+html
+Copy
+Edit
+<script>
+    function openEstimateDetailWindow(vehicleListId) {
+        const url = '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId + '&readOnly=false';
+        const title = vehicleListId === 0 ? "Add New Vehicle Estimate" : "Edit Vehicle Estimate – " + vehicleListId;
+
+        var window = $("#estimateDetailWindow").data("kendoWindow");
+
+        if (!window) {
+            window = $("#estimateDetailWindow").kendoWindow({
+                title: title,
+                modal: true,
+                visible: false,
+                resizable: true,
+                width: 840,
+                actions: ["Close"],
+                content: { url: url }
+            }).data("kendoWindow");
+        } else {
+            window.title(title);
+            window.refresh({ url: url });
+        }
+
+        window.center().open();
+    }
+
+    function onEditEstimate(e) {
+        e.preventDefault();
+        const dataItem = this.dataItem($(e.currentTarget).closest("tr"));
+        const vehicleId = dataItem.VehicleListId;
+        openEstimateDetailWindow(vehicleId);
+    }
+</script>
+
+<!-- Kendo Window container -->
+<div id="estimateDetailWindow" style="display:none;"></div>
+✅ 3. Controller – VehiclesController.cs
+csharp
+Copy
+Edit
+public ActionResult GetVehicleById(int id, bool readOnly = false)
+{
+    var vehicle = id == 0
+        ? new VehicleViewModel() // Add mode
+        : _dbConnection.QueryFirstOrDefault<VehicleViewModel>(@"
+            SELECT * FROM [CES].[SBCES].[VehicleList] WHERE VehicleListId = @Id", new { Id = id });
+
+    if (vehicle == null)
+        return Content("Vehicle not found");
+
+    ViewBag.ReadOnly = readOnly;
+    ViewBag.FormattedDate = vehicle.ModifiedLastDate == default
+        ? "System Generated"
+        : vehicle.ModifiedLastDate.ToString("MMM dd, yyyy hh:mm:ss tt");
+
+    return PartialView("_VehPopUp", vehicle);
+}
+✅ 4. Partial View – _VehPopUp.cshtml
+You're already using a strong layout with good alignment. Just make sure:
+
+isReadOnly is from ViewBag
+
+Estimate #, Modified By/Date are always readonly
+
+Other controls are readonly only if isReadOnly == true
+
+You're covered here already. ✅
+
+✅ 5. Styling – Optional Fix
+Ensure transparency is off:
+
+css
+Copy
+Edit
+<style>
+    .k-overlay {
+        background-color: #000 !important;
+        opacity: 1 !important;
+    }
+
+    .vehicle-popup-content {
+        background-color: #fff;
+        border-radius: 6px;
+        padding: 20px;
+    }
+
+    .k-animation-container .k-list-container {
+        background-color: #fff !important;
+        opacity: 1 !important;
+    }
+</style>
