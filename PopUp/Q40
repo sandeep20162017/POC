@@ -1,0 +1,403 @@
+
+PopUp should be editable (readOnly = false) for Add and edit.
+For Add :
+Estimate No should display SYstem Generated (read only)
+Updatedby and updateddate Should display System Generated (read only)
+For edit
+Estimate No should display VehicleId (read only)
+Updatedby and updateddate Should be read only
+
+JS :
+     <script>
+        // // Function to open detail window
+        function openEstimateDetailWindow(vehicleListId) {
+            var window = $("#estimateDetailWindow").data("kendoWindow");
+            if (!window) {
+                window = $("#estimateDetailWindow").kendoWindow({
+                    title: "Estimate Details - " + vehicleListId,
+                    modal: true,
+                    visible: false,
+                    resizable: true,
+                    width: 700,
+                    actions: ["Close"],
+                    content: {
+                        url: '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId + '&readOnly=true'
+                    }
+                }).data("kendoWindow");
+            } else {
+                window.refresh({
+                    url: '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId + '&readOnly=false'
+                });
+            }
+            window.center().open();
+        }
+
+        function onVehGridEdit(e) {
+            if (e.model.isNew()) {
+                var window = e.container.data("kendoWindow");
+                window.bind("close", function (closeEvent) {
+                    if (confirm("Changes are pending. All changes will be lost. Are you sure you want to cancel?")) {
+                        e.sender.cancelRow();
+                    } else {
+                        closeEvent.preventDefault();
+                    }
+                });
+            }
+        }
+
+        function onVehGridSave(e) {
+    // Prevent default grid save behavior to handle manually
+    e.preventDefault();
+    
+    // Get reference to the grid and popup window
+    var grid = e.sender;
+    var popup = e.container.data("kendoWindow");
+    
+    // Validate form before saving
+    var validator = e.container.find("form").kendoValidator().data("kendoValidator");
+    if (!validator.validate()) {
+        // Show validation errors if any
+        showNotification("error", "Please fill all required fields");
+        return;
+    }
+
+    try {
+        // Get the model and determine if it's new or existing
+        var model = e.model;
+        var isNew = model.isNew();
+        
+        // Prepare data for AJAX call
+        var data = {
+            VehicleListId: model.VehicleListId,
+            VehSeriesCode: model.VehSeriesCode,
+            NumOfVehicles: model.NumOfVehicles,
+            ProjDesc: model.ProjDesc,
+            Make: model.Make,
+            Model: model.Model,
+            Year: model.Year,
+            Engine: model.Engine,
+            Transmission: model.Transmission,
+            Differential: model.Differential,
+            Sopnumber: model.Sopnumber
+        };
+
+        // Determine appropriate API endpoint
+        var url = isNew 
+            ? '@Url.Action("AddVehiclesView", "Vehicles")' + '?id=' + '@ViewBag.PartNum' + '&gridType=VehicleGrid'
+            : '@Url.Action("UpdateVehiclesView", "Vehicles")' + '?id=' + '@ViewBag.PartNum' + '&gridType=VehicleGrid';
+
+        var method = isNew ? "POST" : "PUT";
+
+        // Execute AJAX request
+        $.ajax({
+            url: url,
+            type: method,
+            contentType: "application/json",
+            data: JSON.stringify(data),
+            success: function (response) {
+                if (response.success) {
+                    // Show success notification
+                    showNotification("success", isNew 
+                        ? "New vehicle created successfully" 
+                        : "Vehicle updated successfully");
+                    
+                    // Refresh grid data
+                    grid.dataSource.read();
+                    
+                    // Close popup
+                    popup.close();
+                } else {
+                    // Handle server-side validation errors
+                    showNotification("error", response.message || "Operation failed");
+                }
+            },
+            error: function (xhr) {
+                // Handle AJAX errors
+                showNotification("error", "Error: " + xhr.statusText);
+            }
+        });
+    } catch (ex) {
+        // Handle unexpected errors
+        console.error("Save error:", ex);
+        showNotification("error", "Unexpected error occurred");
+    }
+}
+
+    function onEditEstimate(e) {
+        e.preventDefault(); // prevent default grid behavior
+
+        const dataItem = this.dataItem($(e.currentTarget).closest("tr"));
+        const vehicleId = dataItem.VehicleListId;
+
+        openEstimateDetailWindow(vehicleId);
+    }
+    </script>
+_VehPopUp.cshtml
+@model BCES.Models.Vehicle.VehicleViewModel
+@using Kendo.Mvc.UI
+@{
+    bool isReadOnly = ViewBag.ReadOnly ?? false;
+    bool isNew = Model?.VehicleListId == 0;
+    string windowTitle = isReadOnly ? "Estimate Details"
+                    : (isNew ? "Add New Vehicle Estimate" : "Edit Vehicle Estimate");
+}
+
+<div class="k-edit-form-container vehicle-popup-content" style="padding-top: 2px;">
+    <h3 style="margin-bottom: 2px;">@windowTitle</h3>
+
+    @using (Html.BeginForm("UpdateVehicle", "Vehicles", FormMethod.Post, new { id = "vehicleDetailForm" }))
+    {
+        @Html.HiddenFor(m => m.VehicleListId)
+
+        <!-- Row 1 -->
+        <div class="row">
+            <div class="col-md-2 form-group">
+                <label>Estimate #</label>
+                @(Html.Kendo().TextBox()
+                    .Name("VehicleListId")
+                    .Value(Model?.VehicleListId == 0 ? "(System Generated)" : Model.VehicleListId.ToString())
+                    .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
+            </div>
+            <div class="col-md-2 form-group">
+                <label>Vehicle Series Code</label>
+                @if (isReadOnly)
+                {
+                    @(Html.Kendo().TextBox()
+                        .Name("VehSeriesCode")
+                        .Value(Model?.VehSeriesCode ?? "")
+                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
+                }
+                else
+                {
+                    @Html.Editor("VehSeriesCode", "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new { style = "width:100%" }
+                        })
+                }
+            </div>
+            <div class="col-md-2 form-group">
+                <label>Number of Vehicles</label>
+                @if (isReadOnly)
+                {
+                    @(Html.Kendo().TextBox()
+                        .Name("NumOfVehicles")
+                        .Value(Model?.NumOfVehicles.ToString() ?? "")
+                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
+                }
+                else
+                {
+                    @(Html.Kendo().IntegerTextBox()
+                        .Name("NumOfVehicles")
+                        .Value(Model?.NumOfVehicles ?? 0)
+                        .Min(1)
+                        .HtmlAttributes(new { style = "width:100%" }))
+                }
+            </div>
+        </div>
+
+        <!-- Row 2 -->
+        <div class="row">
+            <div class="col-md-6 form-group">
+                <label>Project Description</label>
+                @if (isReadOnly)
+                {
+                    @(Html.Kendo().ComboBox()
+                        .Name("ProjDesc")
+                        .Value(Model?.ProjDesc ?? "")
+                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
+                }
+                else
+                {
+                    @Html.Editor("ProjDesc", "VehDescriptionComboBox", new
+                        {
+                            htmlAttributes = new { style = "width:100%" }
+                        })
+                }
+            </div>
+        </div>
+
+        <!-- Row 3 -->
+        <div class="row">
+            <div class="col-md-2 form-group">
+                <label>Make</label>
+                @if (isReadOnly)
+                {
+                    @(Html.Kendo().TextBox()
+                        .Name("Make")
+                        .Value(Model?.Make ?? "")
+                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
+                }
+                else
+                {
+                    @Html.Editor("Make", "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new { style = "width:100%" }
+                        })
+                }
+            </div>
+            <div class="col-md-2 form-group">
+                <label>Model</label>
+                @if (isReadOnly)
+                {
+                    @(Html.Kendo().TextBox()
+                        .Name("VehModel")
+                        .Value(Model?.VehModel ?? "")
+                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
+                }
+                else
+                {
+                    @Html.Editor("VehModel", "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new { style = "width:100%" }
+                        })
+                }
+            </div>
+            <div class="col-md-2 form-group">
+                <label>Year</label>
+                @(Html.Kendo().TextBox()
+                    .Name("Year")
+                    .Value(Model?.Year ?? "")
+                    .HtmlAttributes(new
+                    {
+                        @readonly = isReadOnly ? "readonly" : null,
+                        style = "width:100%"
+                    }))
+            </div>
+        </div>
+
+        <!-- Row 4 -->
+        <div class="row">
+            <div class="col-md-2 form-group">
+                <label>Engine</label>
+                @if (isReadOnly)
+                {
+                    @(Html.Kendo().TextBox()
+                        .Name("Engine")
+                        .Value(Model?.Engine ?? "")
+                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
+                }
+                else
+                {
+                    @Html.Editor("Engine", "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new { style = "width:100%" }
+                        })
+                }
+            </div>
+            <div class="col-md-2 form-group">
+                <label>Transmission</label>
+                @if (isReadOnly)
+                {
+                    @(Html.Kendo().TextBox()
+                        .Name("Transmission")
+                        .Value(Model?.Transmission ?? "")
+                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
+                }
+                else
+                {
+                    @Html.Editor("Transmission", "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new { style = "width:100%" }
+                        })
+                }
+            </div>
+            <div class="col-md-2 form-group">
+                <label>SOP Number</label>
+                @(Html.Kendo().TextBox()
+                    .Name("Sopnumber")
+                    .Value(Model?.Sopnumber ?? "")
+                    .HtmlAttributes(new
+                    {
+                        @readonly = isReadOnly ? "readonly" : null,
+                        style = "width:100%"
+                    }))
+            </div>
+        </div>
+
+        <!-- Row 5 -->
+        <div class="row">
+            <div class="col-md-2 form-group">
+                <label>Modified By</label>
+                @(Html.Kendo().TextBox()
+                    .Name("ModifiedLastBy")
+                    .Value(Model?.ModifiedLastBy ?? "System Generated")
+                    .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
+            </div>
+            <div class="col-md-2 form-group">
+                <label>Modified Date</label>
+                @(Html.Kendo().TextBox()
+                    .Name("ModifiedLastDate")
+                    .Value(ViewBag.FormattedDate ?? "System Generated")
+                    .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
+            </div>
+        </div>
+
+        <!-- Buttons Row -->
+        <div class="row" style="margin-top: 10px;">
+            @if (!isReadOnly)
+            {
+                <div class="col-md-2 text-right">
+                    <button type="submit" class="k-button k-primary" style="width:100%">
+                        @(isNew ? "Create" : "Update")
+                    </button>
+                </div>
+                <div class="col-md-2 text-left">
+                    <button type="button" class="k-button" style="width:100%"
+                            onclick="$('#estimateDetailWindow').data('kendoWindow').close();">
+                        Cancel
+                    </button>
+                </div>
+            }
+            else
+            {
+                <div class="col-md-2 text-left">
+                    <button type="button" class="k-button" style="width:100%"
+                            onclick="$('#estimateDetailWindow').data('kendoWindow').close();">
+                        Close
+                    </button>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<style>
+    /* Remove modal transparency */
+    .k-overlay {
+        background-color: #000000; /* Black opaque */
+        opacity: 1 !important;
+    }
+
+    /* No transparency in popup */
+    .vehicle-popup-content {
+        background-color: #ffffff;
+        border-radius: 6px;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .k-edit-form-container label {
+        font-weight: 600;
+        display: block;
+        margin-bottom: 3px;
+    }
+
+    .form-group {
+        margin-bottom: 15px;
+    }
+
+    .text-right {
+        text-align: right;
+    }
+
+    h3 {
+        margin-top: 0;
+    }
+
+    .k-animation-container .k-list-container,
+    .k-list-container {
+        background-color: #fff !important;
+        opacity: 1 !important;
+    }
+</style>
+
