@@ -1,0 +1,72 @@
+1. TypeError: Cannot read properties of undefined (reading 'bind')
+That happens because you're still using .Create() on the toolbar, which triggers Telerik’s default grid logic (and onVehGridEdit), but bypasses your JS function setup.
+
+🔧 Fix:
+Replace .Create() with a custom toolbar item, so it only invokes your JS function:
+
+csharp
+Copy
+Edit
+.ToolBar(toolbar =>
+{
+    toolbar.Custom().Text("Add new record")
+        .HtmlAttributes(new
+        {
+            title = "Add new record",
+            onclick = "openEstimateDetailWindow(0)",
+            @class = "k-button k-primary"
+        });
+})
+This ensures only your openEstimateDetailWindow(0) executes—no internal grid edit logic gets triggered.
+
+2. Pop-up should open at the center of the screen
+Ensure your JS does this:
+
+js
+Copy
+Edit
+function openEstimateDetailWindow(vehicleId) {
+    const url = '@Url.Action("GetVehicleById","Vehicles")?id=' + vehicleId;
+    const title = vehicleId === 0 ? "Add New Vehicle Estimate" : "Edit Vehicle Details – " + vehicleId;
+
+    let win = $("#estimateDetailWindow").data("kendoWindow");
+    if (!win) {
+        win = $("#estimateDetailWindow").kendoWindow({
+            width: 840,
+            modal: true,
+            visible: false,
+            title: title,
+            actions: ["Close"],
+            content: { url: url }
+        }).data("kendoWindow");
+    } else {
+        win.title(title);
+        win.refresh({ url: url });
+    }
+
+    win.center().open();
+}
+.center() ensures your popup is centered when opened.
+
+3. Edit should call openEstimateDetailWindow(vehicleId)
+Pass the VehicleListId from your grid link:
+
+csharp
+Copy
+Edit
+columns.Bound(c => c.VehicleListId).Title("Estimate #")
+    .ClientTemplate("<a href='javascript:void(0)' onclick='openEstimateDetailWindow(#= VehicleListId #)'>#= VehicleListId #</a>")
+Telerik will evaluate #= VehicleListId # for each row and call your JS with that ID.
+
+4. Make the ComboBox dropdown opaque (no semi-transparent overlay)
+The default Kendo ComboBoxes show a transparent overlay behind the list. To force full opacity, use this CSS:
+
+css
+Copy
+Edit
+.k-animation-container .k-list-container, 
+.k-list-container {
+    background-color: #fff !important;
+    opacity: 1 !important;
+}
+Ensure this is loaded after your existing styles. You may put it in the head of the layout or at the bottom of your _VehicleEstimateDetails.cshtml.
