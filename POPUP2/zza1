@@ -1,56 +1,67 @@
-You ar ASP.NET core expert and Telerik ASP.NET core expert.
-Edit/Add calls JS function openEstimateDetailWindow.
-1. When user  clicks on estimate number, POPUp is shown but non of the ComboBoxes are prepopulated with values. Example Vehicle Series, Project DEscription, Make, Model, Engine, transmision are not prepopulated Text boxes are populated.
-2. When user clicks on edit -  POPUp is shown but non of the ComboBoxes are prepopulated with values. Example Vehicle Series, Project DEscription, Make, Model, Engine, transmision are not prepopulated Text boxes are populated.
-3. When user  clicks on estimate number readOnly should be true
-4. Must use the below ComboBoxEditor.cshtml below
-Index.cshtml :
-@(Html.Kendo().Grid<VehicleViewModel>()
-    .Name(vehGridName)
-    .Columns(columns =>
+🔧 RECOMMENDED FIX
+Update ComboBoxEditor.cshtml to allow .Value() injection from model binding using ViewData.ModelMetadata.
+
+Modify the top of ComboBoxEditor.cshtml:
+
+cshtml
+Copy
+Edit
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+    var value = ViewData.ModelMetadata.Model?.ToString() ?? "";
+}
+Now inject .Value(value) like this inside the ComboBox:
+
+cshtml
+Copy
+Edit
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .Value(value)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .Placeholder("Search...")
+    .AutoBind(false)
+    .EnforceMinLength(true)
+    .NoDataTemplate("<div style='color: red; font-weight: bold;'>Invalid Selection</div>")
+    .HtmlAttributes(new Dictionary<string, object>
     {
-        columns.Bound(c => c.VehicleListId).Title("Estimate #")
-            .ClientTemplate("<a class='estimate-link' onclick='openEstimateDetailWindow(#= VehicleListId #)'>#= VehicleListId && VehicleListId !== 0 ? VehicleListId : '(System Generated)' #</a>")
-            .Filterable(ftb => ftb.Cell(cell => {
-                cell.Operator("eq");
-                cell.ShowOperators(true);
-            }))
- ....
- .Editable(editable => 
- {                                                     
-     editable.Window(w => w.Title("Vehicle Estimate").Width(320));
- })
-..
-    columns.Command(command =>
+        { "name", fieldName },
+        { "data-column", fieldName },
+        { "data-role", "combobox" },
+        { "class", "auto-lock-column required-cell" },
+        {"required", "required"}
+    })
+    .Events(e =>
     {
-        command.Custom("Archive").Text(" ").IconClass("k-icon k-i-folder").Click("onArchiveClick").HtmlAttributes(new { title = "Archive" });
-        command.Custom("Copy").Text(" ").IconClass("k-icon k-i-copy").Click("onCopyEstimateClick").HtmlAttributes(new { title = "Copy Estimate" });
-        command.Custom("Edit").Text(" ").IconClass("k-icon k-i-edit").Click("onEditEstimate").HtmlAttributes(new { title = "Edit" });
-        command.Custom("Delete")
-            .Click("showDeleteConfirmation")
-            .Text(" ")
-            .IconClass("k-icon k-i-delete")
-            .HtmlAttributes(new {
-                @class = "text-danger",
-                data_grid = "VehicleGrid",
-                data_url = Url.Action("DeleteVehicle", "Vehicles"),
-                data_id_field = "VehicleListId",
-                data_grid_type = "VehicleGrid"
-            });
-    }).Title("Actions").IncludeInMenu(false).Width(300);
-})
-..
-.Model(model =>
-{
-    model.Id(c => c.VehicleListId);
-..
-<!-- Detail Window for Vehicle Estimate -->
-<div id="estimateDetailWindow" style="display: none;"></div>
-...
-JS
-    function openEstimateDetailWindow(vehicleListId) {
-    const url = '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId + '&readOnly=false';
-    const title = vehicleListId === 0 ? "Add New Vehicle Estimate" : "Edit Vehicle Estimate – " + vehicleListId;
+        e.DataBound("onComboBoxDataBound");
+        e.Change("onComboBoxChange");
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #")
+)
+🔄 This ensures any bound value (e.g., Make, Model, etc.) appears as selected even if it's not in the first page of the datasource.
+
+✅ ISSUE 3: Read-only behavior when clicking estimate number
+Update your openEstimateDetailWindow() JS function to pass readOnly=true when user clicks the estimate number:
+
+js
+Copy
+Edit
+function openEstimateDetailWindow(vehicleListId) {
+    const isReadOnly = true;
+    const url = '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + vehicleListId + '&readOnly=' + isReadOnly;
+    const title = "Estimate Details – " + vehicleListId;
 
     var window = $("#estimateDetailWindow").data("kendoWindow");
 
@@ -71,360 +82,34 @@ JS
 
     window.center().open();
 }
- function onVehGridEdit(e) {
-     if (e.model.isNew()) {
-         var window = e.container.data("kendoWindow");
-         window.bind("close", function (closeEvent) {
-             if (confirm("Changes are pending. All changes will be lost. Are you sure you want to cancel?")) {
-                 e.sender.cancelRow();
-             } else {
-                 closeEvent.preventDefault();
-             }
-         });
-     }
- }
-_VehPopUp.cshtml
-@model BCES.Models.Vehicle.VehicleViewModel
-@using Kendo.Mvc.UI
-@{
-    bool isReadOnly = ViewBag.ReadOnly ?? false;
-    bool isNew = Model?.VehicleListId == 0;
-    string windowTitle = isReadOnly ? "Estimate Details"
-                    : (isNew ? "Add New Vehicle Estimate" : "Edit Vehicle Estimate");
+And your Edit button should invoke a different function like editEstimateDetailWindow(vehicleListId):
+
+js
+Copy
+Edit
+function onEditEstimate(e) {
+    e.preventDefault();
+    const dataItem = this.dataItem($(e.currentTarget).closest("tr"));
+    const url = '@Url.Action("GetVehicleById", "Vehicles")' + '?id=' + dataItem.VehicleListId + '&readOnly=false';
+    const title = "Edit Vehicle Estimate – " + dataItem.VehicleListId;
+
+    var window = $("#estimateDetailWindow").data("kendoWindow");
+
+    if (!window) {
+        window = $("#estimateDetailWindow").kendoWindow({
+            title: title,
+            modal: true,
+            visible: false,
+            resizable: true,
+            width: 840,
+            actions: ["Close"],
+            content: { url: url }
+        }).data("kendoWindow");
+    } else {
+        window.title(title);
+        window.refresh({ url: url });
+    }
+
+    window.center().open();
 }
-
-<div class="k-edit-form-container vehicle-popup-content" style="padding-top: 2px;">
-    <h3 style="margin-bottom: 2px;">@windowTitle</h3>
-
-    @using (Html.BeginForm("UpdateVehicle", "Vehicles", FormMethod.Post, new { id = "vehicleDetailForm" }))
-    {
-        @Html.HiddenFor(m => m.VehicleListId)
-
-        <!-- Row 1 -->
-        <div class="row">
-            <div class="col-md-2 form-group">
-                <label>Estimate #</label>
-                @(Html.Kendo().TextBox()
-                    .Name("VehicleListId")
-                    .Value(Model?.VehicleListId == 0 ? "(System Generated)" : Model.VehicleListId.ToString())
-                    .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
-            </div>
-            <div class="col-md-2 form-group">
-                <label>Vehicle Series Code</label>
-                @if (isReadOnly)
-                {
-                    @(Html.Kendo().TextBox()
-                        .Name("VehSeriesCode")
-                        .Value(Model?.VehSeriesCode ?? "")
-                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
-                }
-                else
-                {
-                    @Html.Editor("VehSeriesCode", "ComboBoxEditor", new
-                        {
-                            htmlAttributes = new { style = "width:100%" }
-                        })
-                }
-            </div>
-            <div class="col-md-2 form-group">
-                <label>Number of Vehicles</label>
-                @if (isReadOnly)
-                {
-                    @(Html.Kendo().TextBox()
-                        .Name("NumOfVehicles")
-                        .Value(Model?.NumOfVehicles.ToString() ?? "")
-                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
-                }
-                else
-                {
-                    @(Html.Kendo().IntegerTextBox()
-                        .Name("NumOfVehicles")
-                        .Value(Model?.NumOfVehicles ?? 0)
-                        .Min(1)
-                        .HtmlAttributes(new { style = "width:100%" }))
-                }
-            </div>
-        </div>
-
-        <!-- Row 2 -->
-        <div class="row">
-            <div class="col-md-6 form-group">
-                <label>Project Description</label>
-                @if (isReadOnly)
-                {
-                    @(Html.Kendo().ComboBox()
-                        .Name("ProjDesc")                        
-                        .Value(Model?.ProjDesc ?? "")
-                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
-                }
-                else
-                {
-                    @Html.Editor("ProjDesc", "VehDescriptionComboBox", new
-                        {
-                            htmlAttributes = new { style = "width:100%" }
-                        })
-                }
-            </div>
-        </div>
-
-        <!-- Row 3 -->
-        <div class="row">
-            <div class="col-md-2 form-group">
-                <label>Make</label>
-                @if (isReadOnly)
-                {
-                    @(Html.Kendo().TextBox()
-                        .Name("Make")
-                        .Value(Model?.Make ?? "")
-                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
-                }
-                else
-                {
-                    @Html.Editor("Make", "ComboBoxEditor", new
-                        {
-                            htmlAttributes = new { style = "width:100%" }
-                        })
-                   
-                }
-            </div>
-            <div class="col-md-2 form-group">
-                <label>Model</label>
-                @if (isReadOnly)
-                {
-                    @(Html.Kendo().TextBox()
-                        .Name("VehModel")
-                        .Value(Model?.VehModel ?? "")
-                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
-                }
-                else
-                {
-                    @Html.Editor("VehModel", "ComboBoxEditor", new
-                        {
-                            htmlAttributes = new { style = "width:100%" }
-                        })
-                }
-            </div>
-            <div class="col-md-2 form-group">
-                <label>Year</label>
-                @(Html.Kendo().TextBox()
-                    .Name("Year")
-                    .Value(Model?.Year ?? "")
-                    .HtmlAttributes(new
-                    {
-                        @readonly = isReadOnly ? "readonly" : null,
-                        style = "width:100%"
-                    }))
-            </div>
-        </div>
-
-        <!-- Row 4 -->
-        <div class="row">
-            <div class="col-md-2 form-group">
-                <label>Engine</label>
-                @if (isReadOnly)
-                {
-                    @(Html.Kendo().TextBox()
-                        .Name("Engine")
-                        .Value(Model?.Engine ?? "")
-                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
-                }
-                else
-                {
-                    @Html.Editor("Engine", "ComboBoxEditor", new
-                        {
-                            htmlAttributes = new { style = "width:100%" }
-                        })
-                }
-            </div>
-            <div class="col-md-2 form-group">
-                <label>Transmission</label>
-                @if (isReadOnly)
-                {
-                    @(Html.Kendo().TextBox()
-                        .Name("Transmission")
-                        .Value(Model?.Transmission ?? "")
-                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
-                }
-                else
-                {
-                    @Html.Editor("Transmission", "ComboBoxEditor", new
-                        {
-                            htmlAttributes = new { style = "width:100%" }
-                        })
-                }
-            </div>
-            <div class="col-md-2 form-group">
-                <label>SOP Number</label>
-                @(Html.Kendo().TextBox()
-                    .Name("Sopnumber")
-                    .Value(Model?.Sopnumber ?? "")
-                    .HtmlAttributes(new
-                    {
-                        @readonly = isReadOnly ? "readonly" : null,
-                        style = "width:100%"
-                    }))
-            </div>
-        </div>
-
-        <!-- Row 5 -->
-        <div class="row">
-            <div class="col-md-2 form-group">
-                <label>Modified By</label>
-                @(Html.Kendo().TextBox()
-                    .Name("ModifiedLastBy")
-                    .Value(Model?.ModifiedLastBy ?? "System Generated")
-                    .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
-            </div>
-            <div class="col-md-2 form-group">
-                <label>Modified Date</label>
-                @(Html.Kendo().TextBox()
-                    .Name("ModifiedLastDate")
-                    .Value(ViewBag.FormattedDate ?? "System Generated")
-                    .HtmlAttributes(new { @readonly = "readonly", style = "width:100%" }))
-            </div>
-        </div>
-
-        <!-- Buttons Row -->
-        <div class="row" style="margin-top: 10px;">
-            @if (!isReadOnly)
-            {
-                <div class="col-md-2 text-right">
-                    <button type="submit" class="k-button k-primary" style="width:100%">
-                        @(isNew ? "Create" : "Update")
-                    </button>
-                </div>
-                <div class="col-md-2 text-left">
-                    <button type="button" class="k-button" style="width:100%"
-                            onclick="$('#estimateDetailWindow').data('kendoWindow').close();">
-                        Cancel
-                    </button>
-                </div>
-            }
-            else
-            {
-                <div class="col-md-2 text-left">
-                    <button type="button" class="k-button" style="width:100%"
-                            onclick="$('#estimateDetailWindow').data('kendoWindow').close();">
-                        Close
-                    </button>
-                </div>
-            }
-        </div>
-    }
-</div>
-
-<style>
-    /* Remove modal transparency */
-    .k-overlay {
-        background-color: #000000; /* Black opaque */
-        opacity: 1 !important;
-    }
-
-    /* No transparency in popup */
-    .vehicle-popup-content {
-        background-color: #fff;
-        border-radius: 6px;
-        padding: 20px;
-    }
-
-    .k-edit-form-container label {
-        font-weight: 600;
-        display: block;
-        margin-bottom: 3px;
-    }
-
-    .form-group {
-        margin-bottom: 15px;
-    }
-
-    .text-right {
-        text-align: right;
-    }
-
-    h3 {
-        margin-top: 0;
-    }
-
-    .k-animation-container .k-list-container,
-    .k-list-container {
-        background-color: #fff !important;
-        opacity: 1 !important;
-    }
-</style>
-Controller :
-  public ActionResult GetVehicleById(int id, bool readOnly = false)
-  {
-      var vehicle = id == 0
-          ? new VehicleViewModel() // Add mode
-          : _dbConnection.QueryFirstOrDefault<VehicleViewModel>(@"
-      SELECT  [VehicleListId]
-                                        ,[VehSeriesCode]
-                                        ,[NumOfVehicles]
-                                        ,[ProjDesc]
-                                        ,[DateEntered]
-                                        ,[EnteredBy]
-                                        ,[ModifiedLastBy]
-                                        ,[ModifiedLastDate]
-                                        ,[Make]
-                                        ,[Model]
-                                        ,[Year]
-                                        ,[Engine]
-                                        ,[Transmission]
-                                        ,[Differential]
-                                        ,[Sopnumber]
-                                    FROM [CES].[SBCES].[VehicleList] WHERE VehicleListId = @Id", new { Id = id });
-
-      if (vehicle == null)
-          return Content("Vehicle not found");
-
-      ViewBag.ReadOnly = readOnly;
-      ViewBag.FormattedDate = vehicle.ModifiedLastDate == default
-          ? "System Generated"
-          : vehicle.ModifiedLastDate.ToString("MMM dd, yyyy hh:mm:ss tt");
-
-      return PartialView("_VehPopUp", vehicle);
-  }
-ComboBoxEditor.cshtml:
-@model object
-
-@{
-    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
-    var columnLockMap = ViewData["LockMap"]?.ToString() ?? "";
-}
-
-@(Html.Kendo().ComboBox()
-    .Name(fieldName)
-    .DataTextField("Text")
-    .DataValueField("Value")
-    .Filter(FilterType.Contains)
-    .Placeholder("Search...")
-    .AutoBind(false)
-    @* .MinLength(2) *@
-    .EnforceMinLength(true)
-    .NoDataTemplate("<div style='color: red; font-weight: bold;'>Invalid Selection</div>")
-    .HtmlAttributes(new Dictionary<string, object>
-    {
-        { "name", fieldName },
-        { "data-column", fieldName },
-        { "data-role", "combobox" },
-        { "data-lock-map", columnLockMap },
-        { "class", "auto-lock-column"  + " required-cell"},
-        {"required", "required"}
-    })
-    .Events(e =>
-    {
-        e.DataBound("onComboBoxDataBound");
-        e.Change("onComboBoxChange");
-    })
-    .DataSource(source =>
-    {
-        source.Read(read =>
-        {
-            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
-                .Type(HttpVerbs.Get)
-                .Data("getComboBoxParams");
-        })
-        .ServerFiltering(true);
-    })
-    .Template("#= Text #")
-)
+👆 This keeps behavior clean between read-only details and editable popup.
