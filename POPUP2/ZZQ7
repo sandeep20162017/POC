@@ -1,0 +1,767 @@
+Update Index.cshtml use proper functions for below controller. Refer the original code if required
+Keep onCancelEmailClick, onArchivedSaveToExcelClick from the orginal code. /GetVehiclesView returns json.
+Pls donot make any changes in controller. This for your reference only to make changes in Index.cshtml.
+Pls give me full Index.cshtml with all the JS changes. Line by line, so I cn cut and paste it. Include all the JS and style as well.
+Controller :
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
+using DataSourceRequest = Kendo.Mvc.UI.DataSourceRequest;
+using BCES.Data;
+using Telerik.SvgIcons;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using BCES.Controllers.Base;
+using BCES.Models.Parts;
+using  BCES.Models.Vehicle;
+using BCES.Models.Common;
+using BCES.Models.Parts;
+using System.Data;
+using OfficeOpenXml;
+using System.IO;
+using MailKit.Net.Smtp;
+using MimeKit;
+using MailKit.Security;
+
+
+
+using Newtonsoft.Json.Linq;
+using static System.Net.Mime.MediaTypeNames;
+using Azure.Core;
+using BCES.Controllers.Admin;
+using System.Net.Mail;
+using Multipart = MimeKit.Multipart;
+using SmtpClient = MailKit.Net.Smtp.SmtpClient;
+using System.Data.SqlClient;
+using Microsoft.AspNetCore.Authorization;
+using System.Text.Encodings.Web;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
+using System.Reflection;
+using CommandType = System.Data.CommandType;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using Microsoft.VisualStudio.Web.CodeGenerators.Mvc.Templates.Blazor;
+
+//using System.Net.Mime;
+//using CES.Views.Shared;
+namespace BCES.Controllers.Parts
+{
+    // [Route("api/[controller]")]
+    public class VehiclesController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IServiceProvider _serviceProvider;
+        private readonly BusesController _busesController;
+        private readonly LabourDetailsController _labourDetailsController;
+        private static List<string> _selectedBuses = new List<string>();
+
+
+        public VehiclesController(DapperContext dapper, IHttpContextAccessor httpContextAccessor,
+                                      IServiceProvider serviceProvider, BusesController busesController,
+                                      LabourDetailsController labourDetailsController
+                                    ) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+            _httpContextAccessor = httpContextAccessor;
+            _serviceProvider = serviceProvider;
+            _busesController = busesController;
+            _labourDetailsController = labourDetailsController;
+        }
+
+        [HttpGet("VehiclesIndex")]
+        [AllowAnonymous]
+        public IActionResult VehiclesIndex()
+        {
+            // return View();
+            //GetRebuiltPartsData();
+            return View("~/Views/Vehicles/Index.cshtml");
+        }
+
+        [AllowAnonymous]
+        public IActionResult ArchivedIndex()
+        {
+            // return View();
+            return View("~/Views/Vehicles/ArchivedIndex.cshtml");
+        }
+
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetVehiclesView([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid 
+            var model = await GetVehiclesData();
+            return Json(model.ToDataSourceResult(request));
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<JsonResult> GetArchivedVehiclesView([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid 
+            try
+            {
+                var model = await GetArchivedVehiclesData();
+
+                return Json(model.ToDataSourceResult(request));
+            }
+            catch (Exception ex)
+            {
+                return Json(ex);
+            }
+        }
+
+        public ActionResult GetVehicleById(int id, bool readOnly = false)
+        {
+            var vehicle = id == 0
+                ? new VehicleViewModel() // Add mode
+                : _dbConnection.QueryFirstOrDefault<VehicleViewModel>(@"
+            SELECT  [VehicleListId]
+                                              ,[VehSeriesCode]
+                                              ,[NumOfVehicles]
+                                              ,[ProjDesc]
+                                              ,[DateEntered]
+                                              ,[EnteredBy]
+                                              ,[ModifiedLastBy]
+                                              ,[ModifiedLastDate]
+                                              ,[Make]
+                                              ,[Model]
+                                              ,[Year]
+                                              ,[Engine]
+                                              ,[Transmission]
+                                              ,[Differential]
+                                              ,[Sopnumber]
+                                          FROM [CES].[SBCES].[VehicleList] WHERE VehicleListId = @Id", new { Id = id });
+
+            if (vehicle == null)
+                return Content("Vehicle not found");
+
+            ViewBag.ReadOnly = readOnly;
+            ViewBag.FormattedDate = vehicle.ModifiedLastDate == default
+                ? "System Generated"
+                : vehicle.ModifiedLastDate.ToString("MMM dd, yyyy hh:mm:ss tt");
+
+            return PartialView("_VehPopUp", vehicle);
+        }
+        [AllowAnonymous]
+        private async Task<IEnumerable<VehicleViewModel>> GetVehiclesData()
+        {
+            try
+            {
+                var vehiclesQuery = @"
+                                         SELECT  [VehicleListId]
+                                              ,[VehSeriesCode]
+                                              ,[NumOfVehicles]
+                                              ,[ProjDesc]
+                                              ,[DateEntered]
+                                              ,[EnteredBy]
+                                              ,[ModifiedLastBy]
+                                              ,[ModifiedLastDate]
+                                              ,[Make]
+                                              ,[Model]
+                                              ,[Year]
+                                              ,[Engine]
+                                              ,[Transmission]
+                                              ,[Differential]
+                                              ,[Sopnumber]
+                                          FROM [CES].[SBCES].[VehicleList]
+                                         
+                                          ORDER BY VehicleListId DESC   
+                                                                    ";
+
+
+                var vehicles = _dbConnection.Query<VehicleViewModel>(vehiclesQuery).ToList();
+
+
+                return vehicles.Distinct().ToList();
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error fetching vehicles data: {ex.Message}");
+                return Enumerable.Empty<VehicleViewModel>();
+            }
+        }
+
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        //[Consumes("application/x-www-form-urlencoded")]
+        public async Task<IActionResult> UpdateVehiclesView([DataSourceRequest] DataSourceRequest request, VehicleViewModel vehiclesViewModel)
+        {
+            vehiclesViewModel.ModifiedLastBy = ViewBag.UserName;
+            vehiclesViewModel.ModifiedLastDate = DateTime.Now;
+            ModelState.Clear();
+            try
+            {
+
+                await UpdateVehiclesAsync(vehiclesViewModel);
+
+                return Json(new[] { vehiclesViewModel }.ToDataSourceResult(request));
+
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while updating the vehicle estimate.");
+            }
+        }
+
+        [AllowAnonymous]
+        private async Task UpdateVehiclesAsync(VehicleViewModel vehicleViewModel)
+        {
+            var userName = ViewBag.UserName;
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Update the [VehicleListId] table
+                    var updateVehiclelistQuery = @"
+                                                    UPDATE SBCES.[VehicleList]
+                                                    SET 
+                                                        Sopnumber = @Sopnumber,
+                                                        ProjDesc =@ProjDesc,
+                                                        Differential = @Differential,
+                                                        Engine = @Engine,
+                                                        NumOfVehicles = @NumOfVehicles,
+                                                        
+                                                        Make = @Make,
+                                                        Model = @VehModel,
+                                                        Transmission = @Transmission,
+                                                        VehSeriesCode = @VehSeriesCode,
+                                                        Year = @Year,
+                                                        
+
+                                                        ModifiedLastBy = @LastModifiedBy,
+                                                        ModifiedLastDate = @ModifiedLastDate
+                    
+                                                    WHERE VehicleListId = @VehicleListId;
+                                                ";
+
+                    await _dbConnection.ExecuteAsync(updateVehiclelistQuery, new
+                    {
+                        vehicleViewModel.Sopnumber,
+                        vehicleViewModel.ProjDesc,
+                        vehicleViewModel.Differential,
+                        vehicleViewModel.Engine,
+                        vehicleViewModel.NumOfVehicles,
+
+
+                        vehicleViewModel.Make,
+                        vehicleViewModel.VehModel,
+                        vehicleViewModel.Transmission,
+                        vehicleViewModel.VehSeriesCode,
+                        vehicleViewModel.Year,
+
+                        LastModifiedBy = userName,
+                        ModifiedLastDate = DateTime.Now,
+                        vehicleViewModel.VehicleListId
+
+                    }, transaction);
+
+
+                    // Commit the transaction
+                    transaction.Commit();
+
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of an error
+                    transaction.Rollback();
+                    Console.WriteLine($"Error updating vehicle estimate: {ex.Message}");
+                    throw; // Re-throw the exception to propagate it
+                }
+            }
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> DeleteVehicle(string VehicleListId)
+        {
+
+            try
+            {
+                if (string.IsNullOrEmpty(VehicleListId))
+                {
+                    return BadRequest("Invalid data.");
+                }
+
+                var deletePartSql = "DELETE FROM SBCES.[VehicleList] WHERE VehicleListId = '" + VehicleListId + "'";
+
+                await _dbConnection.ExecuteAsync(deletePartSql, new { VehicleListId });
+
+                //Delete Labour
+                string deleteLabourQuery = @"
+                    DELETE FROM SBCES.EmployeeLabour 
+                    WHERE LINKNUMBER = '" + VehicleListId + "' AND TypeId = 'BUS'";
+
+                await _dbConnection.ExecuteAsync(deleteLabourQuery, new { VehicleListId });
+
+                //Delete SC Parts
+                string deleteScPartsQuery = @"DELETE FROM SBCES.SCPartsUsed
+                                            WHERE
+                                                LINKTYPE = 'BUS'
+                                                AND RebuiltPart = 'N'
+                                                AND LinkCode = '" + VehicleListId + "'";
+                await _dbConnection.ExecuteAsync(deleteScPartsQuery, new { VehicleListId });
+
+                //Delete NSC Parts
+                string deleteNscPartsQuery = @"
+                              DELETE FROM SBCES.NSCPartsUsed 
+                              WHERE  LINKTYPE = 'BUS'                                                
+                             AND LinkCode = '" + VehicleListId + "'";
+                await _dbConnection.ExecuteAsync(deleteNscPartsQuery, new { VehicleListId });
+
+                //Delete SC Parts
+                string deleteRbPartsQuery = @"DELETE FROM SBCES.SCPartsUsed
+                                            WHERE
+                                                LINKTYPE = 'BUS'
+                                                AND RebuiltPart = 'Y'
+                                                AND LinkCode = '" + VehicleListId + "'";
+                await _dbConnection.ExecuteAsync(deleteRbPartsQuery, new { VehicleListId });
+
+
+                //return Json(new { success = true });
+                return RedirectToAction("VehiclesIndex");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+
+        [AllowAnonymous]
+        private async Task<IEnumerable<VehicleViewModel>> GetArchivedVehiclesData()
+        {
+            try
+            {
+                // Base query for rebuilt parts data
+                var vehQuery = @"            
+                                        SELECT         
+                                               [OldId] 
+                                               ,[ArchVehicleListId] 
+                                              
+                                              ,[VehSeriesCode]
+                                              ,[NumOfVehicles]
+                                              ,[ProjDesc]
+                                              ,[DateEntered]
+                                              ,[EnteredBy]
+                                              ,[Make]
+                                              ,[Model]
+                                              ,[Year]
+                                              ,[Engine]
+                                              ,[Transmission]
+                                              ,[Differential]
+                                              ,[LabourCost]
+                                              ,[LabourOverheadAmount]
+                                              ,[LabourTotal]
+                                              ,[MaterialsTotal]
+                                              ,[TotalBusEstimateCost]
+                                              ,[TotalTax]
+                                              ,[TotalCostTax]
+                                              ,[OemKitsTotal]
+                                              ,[Sopnumber]
+                                              
+                                          FROM [CES].[SBCES].[ArchVehicleList]
+                                           order by OldId desc
+                                            ";
+
+                var vehArchived = (await _dbConnection.QueryAsync<VehicleViewModel>(vehQuery)).ToList();
+
+
+                return vehArchived;
+            }
+            catch (Exception ex)
+            {
+                // Handle errors gracefully
+                return null;
+            }
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> AddVehiclesView([DataSourceRequest] DataSourceRequest request, VehicleViewModel vehicleViewModel)
+        {
+            try
+            {
+                var maxVehicleListId = await AddVehicleAsync(vehicleViewModel);
+                vehicleViewModel.VehicleListId = maxVehicleListId; //pass back to the grid & notification
+
+                ModelState.Clear();
+                return Json(new[] { vehicleViewModel }.ToDataSourceResult(request, ModelState));
+
+            }
+            catch (Exception ex)
+            {
+                ModelState.AddModelError("", "Error occurred: " + ex.Message);
+                return Json(new[] { vehicleViewModel }.ToDataSourceResult(request, ModelState));
+            }
+        }
+
+        private async Task<int> AddVehicleAsync(VehicleViewModel vehicleViewModel)
+        {
+            var userName = ViewBag.UserName;
+            var maxVehicleListId =
+                        _dbConnection.QueryFirstOrDefault<int>(@"SELECT MAX(VehicleListId) + 1  FROM SBCES.VehicleList");
+
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Insert into the main RbMasterlist table
+                    var insertVehlistQuery = @"
+                                                        INSERT INTO SBCES.VehicleList ( VehicleListId,NumOfVehicles,
+                                                            Sopnumber, ProjDesc, Differential, Engine, 
+                                                             Make, Model, VehSeriesCode, Year, Transmission,  EnteredBy,
+                                                            DateEntered, ModifiedLastBy, ModifiedLastDate
+                                                        )
+                                                        VALUES (
+                                                            @VehicleListId,@NumOfVehicles, @Sopnumber, @ProjDesc, @Differential, @Engine, 
+                                                             @Make, @VehModel, @VehSeriesCode, @Year, @Transmission, @EnteredBy,
+                                                            @DateEntered, @ModifiedLastBy, @ModifiedLastDate
+                                                        );
+                                                        
+                                                    ";
+
+                    await _dbConnection.ExecuteAsync(insertVehlistQuery, new
+                    {
+                        VehicleListId = maxVehicleListId,
+                        vehicleViewModel.NumOfVehicles,
+                        vehicleViewModel.Sopnumber,
+                        vehicleViewModel.ProjDesc,
+                        vehicleViewModel.Differential,
+                        vehicleViewModel.Engine,
+
+                        vehicleViewModel.Make,
+                        vehicleViewModel.VehModel,
+                        vehicleViewModel.Transmission,
+                        vehicleViewModel.VehSeriesCode,
+                        vehicleViewModel.Year,
+
+
+                        EnteredBy = userName,
+                        DateEntered = DateTime.Now,
+                        ModifiedLastBy = userName,
+                        ModifiedLastDate = DateTime.Now
+
+                    }, transaction);
+
+
+
+                    // Commit the transaction
+                    transaction.Commit();
+
+                    return maxVehicleListId;
+
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of an error
+                    // transaction.Rollback();
+                    Console.WriteLine($"Error creating Vehicle data: {ex.Message}");
+                    throw; // Re-throw the exception to propagate it
+                }
+            }
+
+        }
+
+
+        [AllowAnonymous]
+        public IActionResult LabourDetailsPartial([FromQuery] string id, [FromQuery] string gridType)
+        {
+            //set 
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else 
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<LabourDetailsRebuiltPartsViewModel> { };
+            return PartialView("_LabourDetails", model);
+        }
+        [AllowAnonymous]
+        public IActionResult ScPartsUsedInEstimates( string id,  string gridType)
+        {
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+
+            var model = new List<BCES.Models.Parts.StockCodedPartsViewModel> { };
+
+            return PartialView("_ScPartsUsed", model);
+
+        }
+
+        [AllowAnonymous]
+        public IActionResult LabourHourSummaryPartial( string id,   string gridType)
+        {
+            // Pass the PartNum to the partial view
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel> { };
+            return PartialView("_LabourHourSummary", model);
+        }
+
+        [AllowAnonymous]
+        public IActionResult MaterialCostSummaryPartial( string id,  string gridType)
+        {
+            // Pass the PartNum to the partial view
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<BCES.Models.Parts.MaterialCostSummaryInRbViewModel> { };
+            return PartialView("_MaterialCostSummary", model);
+        }
+        [AllowAnonymous]
+        public IActionResult NscDetailsPartial( string id,  string gridType)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<BCES.Models.Parts.NscPartsUsedViewModel> { };
+
+            return PartialView("_NscPartsUsed", model);
+
+        }
+        [AllowAnonymous]
+        public IActionResult RbDetailsPartial( string id,   string gridType)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<BCES.Models.Parts.RebuiltPartsViewModel> { };
+            return PartialView("_RbPartsUsed", model);
+        }
+
+        [AllowAnonymous]
+        public IActionResult TotalCostPartial( string id,  string gridType)
+        {
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<BCES.Models.Parts.TotalCostInEstimates> { };
+            return PartialView("_TotalCost", model);
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public IActionResult SaveDetails()
+        {
+            // Save logic here
+            return Json(new { success = true, message = "Saved Details successfully." });
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public IActionResult CancelDetails(int vehicleListId)
+        {
+            try
+            {
+                // Return a success response
+                return Json(new { success = true, message = "Changes discarded successfully." });
+            }
+            catch (Exception ex)
+            {
+
+                return Json(new { success = false, message = "An error occurred while discarding changes. Please try again." });
+            }
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> ArchiveVehicleDetails([FromBody] ArchiveVehicleRequestModel payload)
+        {
+            try
+            {
+                var parameters = new DynamicParameters();
+                parameters.Add("@VehicleListId", payload.VehicleListId);
+                parameters.Add("@ReturnValue", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
+
+                await _dbConnection.ExecuteAsync(
+                    "[SBCES].[ArchiveVehicleV1]",
+                    parameters,
+                    commandType: CommandType.StoredProcedure
+                );
+
+                var retVal = parameters.Get<int>("@ReturnValue");
+
+                return Json(new
+                {
+                    success = retVal == 0,
+                    message = retVal == 0
+                        ? $"Archived Vehicle List Id: {payload.VehicleListId}"
+                        : $"Archive failed with return value: {retVal}"
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new
+                {
+                    success = false,
+                    message = $"Archive failed: {ex.Message}"
+                });
+            }
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> SendEmail(string to, string subject, string body, string rebuiltPartNum)
+        {
+            try
+            {
+                // Resolve the ExportController from the service provider
+                var exportController = _serviceProvider.GetRequiredService<ExportController>();
+
+                // Generate the Excel file in memory by calling SaveToExcel
+                var memoryStream = await exportController.SaveToExcel(rebuiltPartNum);
+
+
+                // Send the email with the attached Excel file
+                var message = new MimeMessage();
+                message.From.Add(new MailboxAddress("Sandeep Kanao", "sandeep.kanao@ttc.ca"));
+                message.To.Add(new MailboxAddress("Sandeep.Kanao@ttc.ca", to));
+                message.Subject = subject;
+                message.Body = new TextPart("plain") { Text = body };
+
+                var attachment = new MimePart("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                {
+                    Content = new MimeContent((Stream)memoryStream),
+                    ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+                    ContentTransferEncoding = ContentEncoding.Base64,
+                    FileName = $"{rebuiltPartNum}_Vehicle_Estimate.xlsx"
+                };
+
+                var multipart = new Multipart("mixed");
+                multipart.Add(message.Body);
+                multipart.Add(attachment);
+                message.Body = multipart;
+
+                using (var client = new SmtpClient())
+                {
+                    await client.ConnectAsync("smtp.freesmtpservers.com", 25, SecureSocketOptions.StartTls);
+                    // await client.AuthenticateAsync("sandeep.kanao@gmail.com", "Perf4you@");
+                    await client.SendAsync(message);
+                    await client.DisconnectAsync(true);
+                }
+
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                // Log the exception 
+                Console.WriteLine($"Error sending email: {ex.Message}");
+
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        [AllowAnonymous]
+        public IActionResult DownloadExcel(string filePath)
+        {
+            var fileBytes = System.IO.File.ReadAllBytes(filePath);
+            return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Path.GetFileName(filePath));
+        }
+
+
+        [HttpPost]
+        public IActionResult CopyEstimate(string vehicleListId, string oldVehSeriesCode, string newVehSeriesCode, string oldprojDesc, string newprojDesc) //san17 copy estimate
+        {
+            if (string.IsNullOrWhiteSpace(newVehSeriesCode))
+                return BadRequest("Work in progress.");
+
+            try
+            {
+                var parameters = new DynamicParameters();
+                parameters.Add("@VehicleListId", vehicleListId, DbType.Int32);
+                parameters.Add("@BusSeriesCode", newVehSeriesCode, DbType.String);
+                parameters.Add("@ProjDesc", newprojDesc, DbType.String);
+                parameters.Add("@EnteredBy", ViewBag.UserName.ToString(), DbType.String);
+                parameters.Add("@EstimateType", "BUS", DbType.String);
+                parameters.Add("@NewVehicleListId", dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+                _dbConnection.Execute("SBCES.CopyEstimate", parameters, commandType: CommandType.StoredProcedure);
+
+                int newVehicleListId = parameters.Get<int>("@NewVehicleListId");
+
+                // 
+                return Json(new { success = true, newVehicleListId });
+            }
+            catch (Exception ex)
+            {
+                // Log the exception (implement logging as needed)
+               
+
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+    }
+}
