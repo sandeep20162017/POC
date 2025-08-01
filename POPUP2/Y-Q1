@@ -1,0 +1,308 @@
+You are Asp.net core and Telerik ASP,net core expert
+.Read(r => r.Action("GetVehiclesView","Vehicles").Type(HttpVerbs.Get))
+
+GetVehiclesView did not get called.
+Controller :
+ [HttpGet]
+ [AllowAnonymous]
+ public async Task<JsonResult> GetArchivedVehiclesView([DataSourceRequest] DataSourceRequest request)
+ {
+     // Fetch data for the grid 
+     try
+     {
+         var model = await GetArchivedVehiclesData();
+
+         return Json(model.ToDataSourceResult(request));
+     }
+     catch (Exception ex)
+     {
+         return Json(ex);
+     }
+ }
+
+Index.cshtml :
+@using BCES.Models.Vehicle
+@model IEnumerable<VehicleViewModel>
+
+@{
+    ViewData["Title"] = "Vehicle Estimate";
+}
+
+<h6>Vehicle Estimate</h6>
+
+@section Scripts {
+<script>
+// ── Global state for tab and form tracking
+window.pendingChanges = false;
+window.currentVehicleId = 0;
+window.tabContentLoaded = [false, false, false, false, false, false, false];
+
+// ── Load partial tabs
+window.loadTabContent = function(index, id) {
+    var urls = [
+        "",
+        '@Url.Action("LabourDetailsPartial","Vehicles")',
+        '@Url.Action("LabourHourSummaryPartial","Vehicles")',
+        '@Url.Action("MaterialCostSummaryPartial","Vehicles")',
+        '@Url.Action("ScPartsUsedInEstimates","Vehicles")',
+        '@Url.Action("NscDetailsPartial","Vehicles")',
+        '@Url.Action("TotalCostPartial","Vehicles")'
+    ];
+    var pane = $("#estimateTabs-" + index);
+    pane.html("<div class='k-loading-mask'><span class='k-loading-text'>Loading…</span></div>");
+    if (urls[index]) {
+        $.get(urls[index], { id: id }, data => {
+            pane.html(data);
+            window.tabContentLoaded[index] = true;
+        });
+    }
+};
+
+// ── Tab selection handler
+window.onTabSelect = function(e) {
+    var idx = e.item.index();
+    if (pendingChanges && idx > 0) {
+        e.preventDefault();
+        return kendo.alert("Please save or cancel before switching tabs.");
+    }
+    if (!window.tabContentLoaded[idx] && window.currentVehicleId > 0) {
+        loadTabContent(idx, window.currentVehicleId);
+    }
+};
+
+// ── Open vehicle popup and load form partial
+window.openEstimatePopup = function(vehicleId) {
+    pendingChanges = false;
+    currentVehicleId = vehicleId;
+    window.tabContentLoaded = [false, false, false, false, false, false, false];
+
+    var win = $("#estimatePopup").data("kendoWindow") ||
+        $("#estimatePopup").kendoWindow({
+            modal: true,
+            width: 1000,
+            height: 650,
+            title: vehicleId === 0 ? "Add New Estimate" : "Estimate #" + vehicleId,
+            visible: false,
+            actions: ["Close"],
+            deactivate: function() {
+                if (pendingChanges && !confirm("Unsaved changes. Close anyway?")) return false;
+            }
+        }).data("kendoWindow");
+
+    win.title(vehicleId === 0 ? "Add New Estimate" : "Estimate #" + vehicleId);
+    win.center().open();
+    loadVehicleForm(vehicleId);
+};
+
+// ── Load the form into the first tab
+window.loadVehicleForm = function(vehicleId) {
+    var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+    tabStrip.select(0);
+    $.get('@Url.Action("GetVehicleById","Vehicles")', { id: vehicleId }, function(html) {
+        $("#vehicleTabContent").html(html);
+        window.tabContentLoaded[0] = true;
+        wireVehicleForm();
+    });
+};
+
+// ── Wire up form submit and cancel actions inside popup
+function wireVehicleForm() {
+    $("#btnCancelVehicle").off("click").on("click", function(){
+        if (!pendingChanges || confirm("Discard changes?")) {
+            $("#estimatePopup").data("kendoWindow").close();
+        }
+    });
+    $("#vehicleForm").off("submit").on("submit", function(e) {
+        e.preventDefault();
+        if (!pendingChanges) return;
+        var vm = {
+            VehicleListId: $("#VehicleListId").val(),
+            VehSeriesCode: $("#VehSeriesCode").val(),
+            NumOfVehicles: $("#NumOfVehicles").val(),
+            ProjDesc: $("#ProjDesc").val(),
+            Make: $("#Make").val(),
+            VehModel: $("#VehModel").val(),
+            Year: $("#Year").val(),
+            Engine: $("#Engine").val(),
+            Transmission: $("#Transmission").val(),
+            Differential: $("#Differential").val(),
+            Sopnumber: $("#Sopnumber").val()
+        };
+        if (!vm.VehSeriesCode || !vm.NumOfVehicles || !vm.ProjDesc) {
+            return kendo.alert("Please fill required fields.");
+        }
+        var url = vehicleId === 0
+            ? '@Url.Action("AddVehiclesView","Vehicles")'
+            : '@Url.Action("UpdateVehiclesView","Vehicles")';
+        $.ajax({
+            url: url,
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify(vm),
+            success: function(response) {
+                pendingChanges = false;
+                $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                kendo.alert("Saved successfully!");
+            },
+            error: function() {
+                kendo.alert("Error saving data.");
+            }
+        });
+    });
+    $("#vehicleForm input, #vehicleForm select").off("change input").on("input change", function(){
+        pendingChanges = true;
+    });
+}
+
+// ── Copy estimate handler
+window.onCopyEstimate = function(e) {
+    e.preventDefault();
+    var grid = $("#VehicleGrid").data("kendoGrid");
+    var item = grid.dataItem($(e.currentTarget).closest("tr"));
+    var win = $("#copyEstimateDialog").kendoWindow({ title:"Copy Estimate", modal:true, width:400, visible:false }).data("kendoWindow");
+    $("#vehicleListId").val(item.VehicleListId);
+    $("#oldVehSeriesCode").val(item.VehSeriesCode);
+    $("#oldprojDesc").val(item.ProjDesc);
+    $("#newVehSeriesCode, #newprojDesc").val("");
+    win.center().open();
+};
+
+// ── Archive handler
+window.onArchiveClick = function(e) {
+    e.preventDefault();
+    var grid = $("#VehicleGrid").data("kendoGrid");
+    var item = grid.dataItem($(e.currentTarget).closest("tr"));
+    kendo.confirm("Archive estimate #" + item.VehicleListId + "?").then(function(){
+        $.ajax({
+            url: '@Url.Action("ArchiveVehicleDetails","Vehicles")',
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify({ VehicleListId: item.VehicleListId, VehSeriesCode: item.VehSeriesCode, TypeId:"BUS", Username:"@ViewBag.UserName".ToUpperInvariant() }),
+            success: function(r) {
+                if (r.success) { grid.dataSource.read(); kendo.alert(r.message); }
+                else { kendo.alert("Archive failed: " + r.message); }
+            }
+        });
+    });
+};
+
+// ── Delete handler
+window.showDeleteConfirmation = function(e) {
+    e.preventDefault();
+    var grid = $("#VehicleGrid").data("kendoGrid");
+    var item = grid.dataItem($(e.currentTarget).closest("tr"));
+    var dlg = $("#deleteConfirmationDialog").kendoWindow({ title:"Confirm Delete", modal:true, width:400, visible:false, resizable:false }).data("kendoWindow");
+    dlg.center().open();
+    $("#confirmDeleteBtn").off("click").click(function(){
+        $.post('@Url.Action("DeleteVehicle","Vehicles")', { VehicleListId: item.VehicleListId }, function(){
+            grid.dataSource.read();
+            dlg.close();
+        });
+    });
+    $("#cancelDeleteBtn").off("click").click(function(){ dlg.close(); });
+};
+</script>
+}
+
+<style>
+/* Full CSS styles pasted exactly as in your previous file */
+/* Main Grid Styles */
+.k-grid { border-radius:4px; box-shadow:0 2px 4px rgba(0,0,0,0.1); font-family:'Segoe UI',Tahoma,Verdana,sans-serif; background:white; }
+.k-grid-header th { background:#f8f9fa; font-weight:600; color:#495057; padding:10px 12px; }
+.k-grid-content { overflow-y:auto; max-height:65vh; background:white; }
+/* Tab Styles */
+.k-tabstrip-items .k-item { padding:10px 20px; border-bottom:3px solid transparent; transition:all 0.3s ease; background:white; }
+.k-tabstrip-items .k-item.k-state-active { border-bottom-color:#3f51b5; color:#3f51b5; background:white; }
+/* Links and Buttons */
+.estimate-link { color:#3f51b5; cursor:pointer; font-weight:500; text-decoration:none; }
+.estimate-link:hover { text-decoration:underline; }
+.k-button { border-radius:4px; font-weight:500; text-transform:uppercase; letter-spacing:0.5px; font-size:0.875rem; background:white; }
+.k-button.k-primary { background:#3f51b5; border-color:#3f51b5; color:white; }
+/* Window Styles */
+.k-window-titlebar { background:#3f51b5; color:white; font-weight:500; }
+.k-window-content { padding:0; background:white; }
+/* Required Fields */
+.required-header::after { content:" *"; color:#e32; }
+/* Form Layout */
+.form-row { display:flex; flex-wrap:wrap; margin:0 -10px; }
+.form-group { padding:0 10px; margin-bottom:15px; }
+.popup-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding-bottom:10px; border-bottom:1px solid #eee; background:white; }
+.tab-actions { display:flex; gap:10px; }
+/* Delete Confirmation */
+.confirmation-message { padding:20px; display:flex; align-items:center; background:white; }
+.confirmation-buttons { padding:10px; text-align:right; border-top:1px solid #ddd; background:white; }
+/* Readonly Fields */
+.k-textbox[readonly], .k-numerictextbox[readonly] .k-numeric-wrap, .k-combobox[readonly] .k-dropdown-wrap { background:#f8f9fa; cursor:not-allowed; }
+</style>
+
+<!-- Kendo main grid in Vehicles tab -->
+@(Html.Kendo().TabStrip()
+  .Name("mainTabStrip")
+  .Items(ts => {
+    ts.Add().Text("Vehicles").Selected(true)
+      .Content(@<text>
+        @(Html.Kendo().Grid<VehicleViewModel>()
+          .Name("VehicleGrid")
+          .Columns(c => {
+              c.Bound(v => v.VehicleListId).Title("Estimate #")
+               .ClientTemplate("<a class='estimate-link' onclick='window.openEstimatePopup(#=VehicleListId#)'>#=VehicleListId#</a>").Width(120);
+              c.Bound(v => v.VehSeriesCode).Title("Vehicle Series").HeaderHtmlAttributes(new { @class="required-header" }).EditorTemplateName("ComboBoxEditor").Width(150);
+              c.Bound(v => v.NumOfVehicles).Title("Qty").HeaderHtmlAttributes(new { @class="required-header"}).Width(80);
+              c.Bound(v => v.ProjDesc).Title("Description").HeaderHtmlAttributes(new { @class="required-header"}).Width(250);
+              c.Command(cmd => {
+                  cmd.Custom("Copy").IconClass("k-icon k-i-copy").Click("onCopyEstimate");
+                  cmd.Custom("Archive").IconClass("k-icon k-i-folder").Click("onArchiveClick");
+                  cmd.Custom("Delete").IconClass("k-icon k-i-delete").Click("showDeleteConfirmation");
+              }).Width(180);
+          })
+          .ToolBar(tb => tb.ClientTemplate("<button class='k-button k-button-icontext' onclick='window.openEstimatePopup(0)'><span class='k-icon k-i-plus'></span>Add New Record</button>"))
+          .Pageable(p => p.PageSizes(new[] {10,20,50}))
+          .Sortable().Filterable().Scrollable().HtmlAttributes(new { style="height:550px;" })
+          .DataSource(ds => ds.Ajax()
+              .PageSize(10)
+              .Model(m => m.Id(v => v.VehicleListId))
+              .Read(r => r.Action("GetVehiclesView","Vehicles").Type(HttpVerbs.Get))
+              .Create(c => c.Action("AddVehiclesView","Vehicles").Type(HttpVerbs.Post))
+              .Update(u => u.Action("UpdateVehiclesView","Vehicles").Type(HttpVerbs.Post))
+              .Destroy(d => d.Action("DeleteVehicle","Vehicles").Type(HttpVerbs.Post))
+          )
+        )
+      </text>);
+  })
+)
+
+<!-- Popup tabs for vehicle details -->
+<div id="estimatePopup" style="display:none;">
+  @(Html.Kendo().TabStrip()
+      .Name("estimateTabs")
+      .SelectedIndex(0)
+      .Events(e => e.Select("onTabSelect"))
+      .Items(tb => {
+          tb.Add().Text("Vehicle").Content(@<text><div id="vehicleTabContent"></div></text>);
+          tb.Add().Text("Labour Details").Content("Loading...").Enabled(false);
+          tb.Add().Text("Labour Hours").Content("Loading...").Enabled(false);
+          tb.Add().Text("Material Parts").Content("Loading...").Enabled(false);
+          tb.Add().Text("StockCoded Parts").Content("Loading...").Enabled(false);
+          tb.Add().Text("NonStock Parts").Content("Loading...").Enabled(false);
+          tb.Add().Text("Total Estimate").Content("Loading...").Enabled(false);
+      })
+  )
+</div>
+
+<!-- Delete confirmation dialog -->
+<div id="deleteConfirmationDialog" style="display:none;">
+  <div class="confirmation-message"><span class="k-icon k-i-warning" style="font-size:24px;color:#f0ad4e;"></span><span style="margin-left:10px;">Are you sure you'd like to delete?</span></div>
+  <div class="confirmation-buttons"><button class="k-button" id="cancelDeleteBtn">Cancel</button><button class="k-button k-primary" id="confirmDeleteBtn" style="margin-left:10px;">Delete</button></div>
+</div>
+
+<!-- Copy estimate dialog -->
+<div id="copyEstimateDialog" style="display:none;">
+  <div class="k-form">
+    <div class="k-form-field"><label>Estimate #</label><input id="vehicleListId" class="k-textbox" readonly /></div>
+    <div class="k-form-field"><label>Old Series</label><input id="oldVehSeriesCode" class="k-textbox" readonly /></div>
+    <div class="k-form-field"><label>Old Description</label><input id="oldprojDesc" class="k-textbox" readonly /></div>
+    <div class="k-form-field"><label>New Vehicle Series<span style="color:red">*</span></label><input id="newVehSeriesCode" class="k-textbox" required /></div>
+    <div class="k-form-field"><label>New Description<span style="color:red">*</span></label><input id="newprojDesc" class="k-textbox" required /></div>
+    <div class="k-form-buttons"><button type="button" class="k-button k-primary" id="copyEstimateBtn">Copy</button><button type="button" class="k-button" id="cancelCopyBtn">Cancel</button></div>
+  </div>
+</div>
