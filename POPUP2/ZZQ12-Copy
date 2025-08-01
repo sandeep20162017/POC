@@ -1,0 +1,671 @@
+OnCopyEstimate and onTabSelect are not defined. I see those functions in the script.
+Index.cshtml :
+@using BCES.Models.Vehicle
+@model IEnumerable<BCES.Models.Vehicle.VehicleViewModel>
+
+@{
+    ViewData["Title"] = "Vehicle Estimate";
+    var gridName = "VehicleGrid";
+}
+
+<style>
+    /* Main Grid Styles */
+    .k-grid {
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: white;
+    }
+    
+    .k-grid-header th {
+        background-color: #f8f9fa;
+        font-weight: 600;
+        color: #495057;
+        padding: 10px 12px;
+    }
+    
+    .k-grid-content {
+        overflow-y: auto;
+        max-height: 65vh;
+        background-color: white;
+    }
+    
+    /* Tab Styles */
+    .k-tabstrip-items .k-item {
+        padding: 10px 20px;
+        border-bottom: 3px solid transparent;
+        transition: all 0.3s ease;
+        background-color: white;
+    }
+    
+    .k-tabstrip-items .k-item.k-state-active {
+        border-bottom-color: #3f51b5;
+        color: #3f51b5;
+        background-color: white;
+    }
+    
+    /* Links and Buttons */
+    .estimate-link {
+        color: #3f51b5;
+        cursor: pointer;
+        font-weight: 500;
+        text-decoration: none;
+    }
+    
+    .estimate-link:hover {
+        text-decoration: underline;
+    }
+    
+    .k-button {
+        border-radius: 4px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-size: 0.875rem;
+        background-color: white;
+    }
+    
+    .k-button.k-primary {
+        background-color: #3f51b5;
+        border-color: #3f51b5;
+        color: white;
+    }
+    
+    /* Window Styles */
+    .k-window-titlebar {
+        background-color: #3f51b5;
+        color: white;
+        font-weight: 500;
+    }
+    
+    .k-window-content {
+        padding: 0;
+        background-color: white;
+    }
+    
+    /* Required Fields */
+    .required-header::after {
+        content: " *";
+        color: #e32;
+    }
+    
+    /* Archived Rows */
+    .archived-row {
+        background-color: #f8f8f8;
+        color: #777;
+    }
+    
+    /* Disabled Tabs */
+    .disabled-tab {
+        opacity: 0.5;
+        pointer-events: none;
+        background-color: white;
+    }
+    
+    /* Form Layout */
+    .form-row {
+        display: flex;
+        flex-wrap: wrap;
+        margin: 0 -10px;
+    }
+    
+    .form-group {
+        padding: 0 10px;
+        margin-bottom: 15px;
+    }
+    
+    .popup-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eee;
+        background-color: white;
+    }
+    
+    .tab-actions {
+        display: flex;
+        gap: 10px;
+    }
+    
+    /* Delete Confirmation */
+    .confirmation-message {
+        padding: 20px;
+        display: flex;
+        align-items: center;
+        background-color: white;
+    }
+    
+    .confirmation-buttons {
+        padding: 10px;
+        text-align: right;
+        border-top: 1px solid #ddd;
+        background-color: white;
+    }
+    
+    /* Readonly Fields */
+    .k-textbox[readonly],
+    .k-numerictextbox[readonly] .k-numeric-wrap,
+    .k-combobox[readonly] .k-dropdown-wrap {
+        background-color: #f8f9fa;
+        cursor: not-allowed;
+    }
+</style>
+
+<h6>Vehicle Estimate</h6>
+
+@(Html.Kendo().TabStrip()
+    .Name("mainTabStrip")
+    .Items(tabstrip =>
+    {
+        tabstrip.Add().Text("Vehicles")
+            .Selected(true)
+            .Content(@<text>
+                @(Html.Kendo().Grid<VehicleViewModel>()
+                    .Name(gridName)
+                    .Columns(columns =>
+                    {
+                        columns.Bound(c => c.VehicleListId).Title("Estimate #")
+                            .ClientTemplate("<a class='estimate-link' onclick='openEstimatePopup(#= VehicleListId #)'>#= VehicleListId #</a>")
+                            .Width(120);
+                        columns.Bound(c => c.VehSeriesCode).Title("Vehicle Series")
+                            .HeaderHtmlAttributes(new { @class = "required-header" })
+                            .EditorTemplateName("ComboBoxEditor")
+                            .Width(150);
+                        columns.Bound(c => c.NumOfVehicles).Title("Qty")
+                            .HeaderHtmlAttributes(new { @class = "required-header" })
+                            .Width(80);
+                        columns.Bound(c => c.ProjDesc).Title("Description")
+                            .HeaderHtmlAttributes(new { @class = "required-header" })
+                            .Width(250);
+                        columns.Command(command =>
+                        {
+                            command.Custom("Copy").Text(" ").IconClass("k-icon k-i-copy").Click("onCopyEstimate");
+                            command.Custom("Archive").Text(" ").IconClass("k-icon k-i-folder").Click("onArchiveClick");
+                            command.Custom("Delete").Text(" ").IconClass("k-icon k-i-delete").Click("showDeleteConfirmation");
+                        }).Width(180);
+                    })
+                    .ToolBar(toolbar =>
+                        toolbar.ClientTemplate("<button class='k-button k-button-icontext' onclick='openEstimatePopup(0)'><span class='k-icon k-i-plus'></span>Add New Record</button>")
+                    )
+                    .Pageable(p => p.PageSizes(new int[] { 10, 20, 50 }))
+                    .Sortable()
+                    .Filterable()
+                    .Scrollable()
+                    .HtmlAttributes(new { style = "height:550px;" })
+                    .DataSource(dataSource => dataSource
+                        .Ajax()
+                        .PageSize(10)
+                        .Model(model => model.Id(p => p.VehicleListId))
+                        .Read(read => read.Action("GetVehiclesView", "Vehicles").Type(HttpVerbs.Post))
+                    )
+                )
+            </text>);
+    })
+)
+
+<!-- Popup Window -->
+<div id="estimatePopup" style="display:none;">
+    @(Html.Kendo().TabStrip()
+        .Name("estimateTabs")
+        .SelectedIndex(0)
+        .Animation(animation => animation.Open(open => open.Fade(FadeDirection.In)))
+        .Items(tabs =>
+        {
+            tabs.Add().Text("Vehicle").Content(@<text>
+                <div id="vehicleTabContent"></div>
+            </text>);
+            tabs.Add().Text("Labour Details").Content("Loading...").Enabled(false);
+            tabs.Add().Text("Labour Hours").Content("Loading...").Enabled(false);
+            tabs.Add().Text("Material Parts").Content("Loading...").Enabled(false);
+            tabs.Add().Text("StockCoded Parts").Content("Loading...").Enabled(false);
+            tabs.Add().Text("NonStock Parts").Content("Loading...").Enabled(false);
+            tabs.Add().Text("Total Estimate").Content("Loading...").Enabled(false);
+        })
+        .Events(events => events.Select("onTabSelect"))
+    )
+</div>
+
+<!-- Delete Confirmation Dialog -->
+<div id="deleteConfirmationDialog" style="display:none;">
+    <div class="confirmation-message">
+        <span class="k-icon k-i-warning" style="color: #f0ad4e; font-size: 24px; vertical-align: middle;"></span>
+        <span style="vertical-align: middle; margin-left: 10px;">Are you sure you want to delete this estimate?</span>
+    </div>
+    <div class="confirmation-buttons">
+        <button class="k-button" id="cancelDeleteBtn">Cancel</button>
+        <button class="k-button k-primary" id="confirmDeleteBtn" style="margin-left: 10px;">Delete</button>
+    </div>
+</div>
+
+<div id="email-estimate-container" style="display: none;">
+    @Html.Partial("_EmailEstimatePopup")
+    <div id="estimates-container"></div>
+</div>
+
+
+<div id="copyEstimateDialog" style="display:none;">
+    <div class="k-form">
+        <div class="k-form-field">
+            <label>Estimate #</label>
+            <input id="vehicleListId" name="vehicleListId" class="k-textbox" readonly />
+        </div>
+        <div class="k-form-field">
+            <label>Vehicle Series</label>
+            <input id="oldVehSeriesCode" name="oldVehSeriesCode" class="k-textbox" readonly />
+        </div>
+        <div class="k-form-field">
+            <label>Description</label>
+            <input id="oldprojDesc" name="oldprojDesc" class="k-textbox" readonly />
+        </div>
+        <div class="k-form-field">
+            <label>New Vehicle Series<span style="color:red">*</span></label>
+            <input id="newVehSeriesCode" name="newVehSeriesCode" class="k-textbox" required />
+        </div>
+        <div class="k-form-field">
+            <label>New Description<span style="color:red">*</span></label>
+            <input id="newprojDesc" name="newprojDesc" class="k-textbox" required />
+        </div>
+        <div class="k-form-buttons">
+            <button type="button" class="k-button k-primary" id="copyEstimateBtn">Copy</button>
+            <button type="button" class="k-button" id="cancelCopyBtn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+
+@section Scripts {
+<script>
+    // Global variables
+    var popupWindow, isNewEstimate = false, pendingChanges = false;
+    var currentVehicleId = 0;
+    var tabContentLoaded = [false, false, false, false, false, false, false];
+
+    // Open estimate popup
+    function openEstimatePopup(vehicleId) {
+        isNewEstimate = vehicleId === 0;
+        currentVehicleId = vehicleId;
+        pendingChanges = false;
+        
+        // Initialize popup window
+        if (!popupWindow) {
+            popupWindow = $("#estimatePopup").kendoWindow({
+                title: isNewEstimate ? "Add New Estimate" : "Estimate #" + vehicleId,
+                width: 1000,
+                height: 650,
+                modal: true,
+                visible: false,
+                actions: ["Close"],
+                deactivate: function() {
+                    if (pendingChanges) {
+                        if (!confirm("You have unsaved changes. Close anyway?")) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+            }).data("kendoWindow");
+        } else {
+            popupWindow.title(isNewEstimate ? "Add New Estimate" : "Estimate #" + vehicleId);
+        }
+        
+        // Reset tabs and load states
+        var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+        tabStrip.select(0);
+        
+        // Enable/disable tabs
+        tabStrip.enable(tabStrip.items().eq(0), true); // Always enable Vehicle tab
+        for (var i = 1; i < tabStrip.items().length; i++) {
+            tabStrip.enable(tabStrip.items().eq(i), !isNewEstimate);
+            tabContentLoaded[i] = false; // Reset loaded status
+        }
+        
+        // Load Vehicle tab content
+        loadVehicleTab(vehicleId);
+        
+        popupWindow.center().open();
+    }
+
+    // Load vehicle tab content
+    function loadVehicleTab(vehicleId) {
+        $.get('@Url.Action("GetVehicleById", "Vehicles")', { id: vehicleId }, function(data) {
+            $("#vehicleTabContent").html(data);
+            tabContentLoaded[0] = true;
+        });
+    }
+
+    // Tab selection handler
+    function onTabSelect(e) {
+        var tabIndex = e.item.index();
+        
+        if (pendingChanges && tabIndex > 0) {
+            e.preventDefault();
+            kendo.alert("You have unsaved changes. Please save or cancel before switching tabs.");
+            return;
+        }
+        
+        // Load tab content if not already loaded
+        if (!tabContentLoaded[tabIndex] && currentVehicleId > 0) {
+            loadTabContent(tabIndex, currentVehicleId);
+        }
+    }
+    
+    // Load specific tab content
+    function loadTabContent(tabIndex, vehicleId) {
+        var url = "";
+        var tabContentId = "#estimateTabs-" + tabIndex;
+        
+        switch(tabIndex) {
+            case 1: url = '@Url.Action("LabourDetailsPartial", "Vehicles")'; break;
+            case 2: url = '@Url.Action("LabourHourSummaryPartial", "Vehicles")'; break;
+            case 3: url = '@Url.Action("MaterialCostSummaryPartial", "Vehicles")'; break;
+            case 4: url = '@Url.Action("ScPartsUsedInEstimates", "Vehicles")'; break;
+            case 5: url = '@Url.Action("NscDetailsPartial", "Vehicles")'; break;
+            case 6: url = '@Url.Action("TotalCostPartial", "Vehicles")'; break;
+        }
+        
+        if (url) {
+            $(tabContentId).html("<div class='k-loading-mask'><span class='k-loading-text'>Loading...</span><div class='k-loading-image'></div></div>");
+            
+            $.get(url, { id: vehicleId }, function(data) {
+                $(tabContentId).html(data);
+                tabContentLoaded[tabIndex] = true;
+            });
+        }
+    }
+    
+    // Vehicle saved handler
+    function onVehicleSaved(response) {
+        if (response.success) {
+            pendingChanges = false;
+            isNewEstimate = false;
+            
+            // Update vehicle ID if new
+            if (response.newVehicleId) {
+                currentVehicleId = response.newVehicleId;
+                popupWindow.title("Estimate #" + currentVehicleId);
+            }
+            
+            // Enable all tabs
+            var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+            for (var i = 1; i < tabStrip.items().length; i++) {
+                tabStrip.enable(tabStrip.items().eq(i), true);
+            }
+            
+            // Refresh main grid
+            $("#VehicleGrid").data("kendoGrid").dataSource.read();
+            
+            kendo.alert("Vehicle saved successfully!");
+        } else {
+            kendo.alert("Save failed: " + (response.message || "Unknown error"));
+        }
+    }
+
+    // Edit button handler (called from within popup)
+    function onEditClick() {
+        // Enable form fields
+        $(".k-edit-form-container :input").each(function() {
+            if ($(this).hasClass("k-textbox")) {
+                $(this).prop("readonly", false);
+            } else if ($(this).hasClass("k-combobox")) {
+                $(this).data("kendoComboBox").enable(true);
+            } else if ($(this).hasClass("k-numerictextbox")) {
+                $(this).data("kendoNumericTextBox").enable(true);
+            }
+        });
+        
+        pendingChanges = true;
+    }
+
+    // Save button handler (called from within popup)
+    function onSaveClick() {
+        // Collect form data
+        var formData = {
+            VehicleListId: $("#VehicleListId").val(),
+            VehSeriesCode: $("#VehSeriesCode").val(),
+            NumOfVehicles: $("#NumOfVehicles").val(),
+            ProjDesc: $("#ProjDesc").val(),
+            Make: $("#Make").val(),
+            VehModel: $("#VehModel").val(),
+            Year: $("#Year").val(),
+            Engine: $("#Engine").val(),
+            Transmission: $("#Transmission").val(),
+            Differential: $("#Differential").val(),
+            Sopnumber: $("#Sopnumber").val()
+        };
+        
+        // Validate required fields
+        if (!formData.VehSeriesCode || !formData.NumOfVehicles || !formData.ProjDesc) {
+            kendo.alert("Please fill all required fields");
+            return;
+        }
+        
+        var url = '@Url.Action("SaveVehicle", "Vehicles")';
+        var method = formData.VehicleListId == "0" ? "POST" : "PUT";
+        
+        $.ajax({
+            url: url,
+            type: method,
+            contentType: "application/json",
+            data: JSON.stringify(formData),
+            success: function(response) {
+                onVehicleSaved(response);
+            },
+            error: function(xhr) {
+                kendo.alert("Error saving vehicle: " + xhr.statusText);
+            }
+        });
+    }
+    
+    // Copy estimate
+    function onCopyEstimate(e) {
+        e.preventDefault();
+        var grid = $("#VehicleGrid").data("kendoGrid");
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        
+        var copyWindow = $("#copyEstimateDialog").data("kendoWindow");
+        if (!copyWindow) {
+            copyWindow = $("#copyEstimateDialog").kendoWindow({
+                title: "Copy Estimate",
+                modal: true,
+                visible: false,
+                resizable: false,
+                width: 400
+            }).data("kendoWindow");
+        }
+        
+        $("#vehicleListId").val(dataItem.VehicleListId);
+        $("#oldVehSeriesCode").val(dataItem.VehSeriesCode);
+        $("#oldprojDesc").val(dataItem.ProjDesc);
+        $("#newVehSeriesCode").val("");
+        $("#newprojDesc").val("");
+        
+        copyWindow.center().open();
+    }
+    
+    // Archive estimate
+    function onArchiveClick(e) {
+        e.preventDefault();
+        var grid = $("#VehicleGrid").data("kendoGrid");
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        
+        kendo.confirm("Archive estimate #" + dataItem.VehicleListId + "?").then(function() {
+            $.ajax({
+                url: '@Url.Action("ArchiveVehicleDetails", "Vehicles")',
+                type: 'POST',
+                contentType: "application/json",
+                data: JSON.stringify({ 
+                    VehicleListId: dataItem.VehicleListId,
+                    VehSeriesCode: dataItem.VehSeriesCode,
+                    TypeId: "BUS",
+                    Username: "@ViewBag.UserName?.ToString().ToUpper()",
+                    // Other parameters as required by your controller
+                }),
+                success: function(response) {
+                    if (response.success) {
+                        grid.dataSource.read();
+                        kendo.alert("Estimate archived successfully!");
+                    } else {
+                        kendo.alert("Archive failed: " + response.message);
+                    }
+                }
+            });
+        });
+    }
+    
+    // Delete confirmation
+    function showDeleteConfirmation(e) {
+        e.preventDefault();
+        var grid = $("#VehicleGrid").data("kendoGrid");
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        var dialog = $("#deleteConfirmationDialog").data("kendoWindow");
+        
+        dialog.open();
+        
+        // Handle delete confirmation
+        $("#confirmDeleteBtn").off("click").on("click", function() {
+            $.post('@Url.Action("DeleteVehicle", "Vehicles")', {
+                VehicleListId: dataItem.VehicleListId
+            }, function() {
+                grid.dataSource.read();
+                dialog.close();
+            });
+        });
+        
+        // Handle cancel
+        $("#cancelDeleteBtn").off("click").on("click", function() {
+            dialog.close();
+        });
+    }
+
+    // Email functions from original
+    function onCancelEmailClick() {
+        var window = $("#emailEstimateWindow").data("kendoWindow");
+        window.close();
+        
+        var notification = $("#notification").data("kendoNotification");
+        notification.show("Email Request Cancelled", "info");
+    }
+
+    function onArchivedSaveToExcelClick(e) {
+        e.preventDefault();
+        var grid = $("#ArchivedVehicleGrid").data("kendoGrid");
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        var vehicleListId = dataItem.ArchVehicleListId || dataItem.VehicleListId;
+        
+        window.location.href = '@Url.Action("SaveToExcel", "Export")' + '?vehicleListId=' + vehicleListId;
+    }
+
+    // Initialize on document ready
+    $(function() {
+        // Initialize delete dialog
+        $("#deleteConfirmationDialog").kendoWindow({
+            title: "Confirm Delete",
+            modal: true,
+            visible: false,
+            width: 400,
+            resizable: false
+        }).data("kendoWindow");
+        
+        // Initialize notification
+        $("#notification").kendoNotification({
+            position: { pinned: true, top: 50, right: 50 },
+            stacking: "down",
+            autoHideAfter: 5000
+        });
+        
+        // Initialize copy dialog buttons
+        $("#copyEstimateBtn").click(function() {
+            var vehicleListId = $("#vehicleListId").val();
+            var newVehSeriesCode = $("#newVehSeriesCode").val().trim();
+            var newprojDesc = $("#newprojDesc").val().trim();
+            
+            if (!newVehSeriesCode || !newprojDesc) {
+                kendo.alert("Both fields are required");
+                return;
+            }
+            
+            $.post('@Url.Action("CopyEstimate", "Vehicles")', {
+                vehicleListId: vehicleListId,
+                newVehSeriesCode: newVehSeriesCode,
+                newprojDesc: newprojDesc
+            }, function(response) {
+                if (response.success) {
+                    $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                    kendo.alert("Estimate copied successfully! New ID: " + response.newVehicleListId);
+                    $("#copyEstimateDialog").data("kendoWindow").close();
+                } else {
+                    kendo.alert("Copy failed: " + response.message);
+                }
+            });
+        });
+        
+        // Cancel copy
+        $("#cancelCopyBtn").click(function() {
+            $("#copyEstimateDialog").data("kendoWindow").close();
+        });
+    });
+
+    function onArchivedEmailEstimateClick(e) {
+            e.preventDefault();
+            var grid = $("#ArchivedVehicleGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var vehicleListId = dataItem.VehicleListId;
+
+            // Show the email estimate container
+            $("#archived-email-estimate-container").show();
+
+            // Generate the Excel file by calling SaveToExcel via AJAX
+            $.ajax({
+                url: '@Url.Action("SaveToExcel", "Export")',
+                type: 'GET',
+                data: { vehicleListId: vehicleListId },
+                xhrFields: {
+                    responseType: 'blob' // Ensure the response is treated as a binary file
+                },
+                success: function (data) {
+                    // Create a link element to trigger the file download
+                    var link = document.createElement('a');
+                    link.href = window.URL.createObjectURL(data);
+                    link.download = `${vehicleListId}_Vehicles_Estimate.xlsx`;
+                    link.click();
+
+                    // Set the subject with the rebuilt number and today's date
+                    var today = new Date();
+                    var subject = `Vehiles  Estimates for ${vehicleListId} - Date ${today.toLocaleDateString()} ${today.toLocaleTimeString()}`;
+
+                    // Set the form values
+                    $("#to").val("");
+                    $("#subject").val(subject);
+                    $("#body").val(`Dear Sir/Madam,\nPlease find attached here with Vehicles Estimate for ${vehicleListId}.\n\nThank you`);
+
+                    // Open the Kendo Window
+                    var kendoWindow = $("#emailEstimateWindow").data("kendoWindow");
+                    if (kendoWindow) {
+                        kendoWindow.center().open();
+                    } else {
+                        console.error("Kendo Window not found.");
+                    }
+                },
+                error: function (xhr, status, error) {
+                    console.error("Error downloading Excel file:", error);
+                }
+            });
+        }
+        
+    function onTabSelect(e) {
+        var tabIndex = e.item.index();
+
+        if (pendingChanges && tabIndex > 0) {
+            e.preventDefault();
+            kendo.alert("You have unsaved changes. Please save or cancel before switching tabs.");
+            return;
+        }
+
+        if (!tabContentLoaded[tabIndex] && currentVehicleId > 0) {
+            loadTabContent(tabIndex, currentVehicleId);
+        }
+    }
+</script>
+}
