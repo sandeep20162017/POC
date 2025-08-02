@@ -1,0 +1,126 @@
+✅ Step 1: Make sure controller returns full updated model
+In VehiclesController.cs, update both AddVehiclesView and UpdateVehiclesView to re-fetch the saved data and return it:
+
+AddVehiclesView:
+csharp
+Copy
+Edit
+[HttpPost]
+public async Task<IActionResult> AddVehiclesView([FromBody] VehicleViewModel vehicleViewModel)
+{
+    if (vehicleViewModel == null)
+        return BadRequest("Model binding failed.");
+
+    try
+    {
+        var newId = await AddVehicleAsync(vehicleViewModel);
+
+        // Re-fetch full model from DB
+        var updated = await _vehicleService.GetVehicleByIdAsync(newId);
+
+        return Ok(updated);
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, "Add failed: " + ex.Message);
+    }
+}
+UpdateVehiclesView:
+Same logic — re-fetch updated object:
+
+csharp
+Copy
+Edit
+[HttpPost]
+public async Task<IActionResult> UpdateVehiclesView([FromBody] VehicleViewModel vehicleViewModel)
+{
+    if (vehicleViewModel == null)
+        return BadRequest("Model binding failed.");
+
+    try
+    {
+        await UpdateVehiclesAsync(vehicleViewModel);
+
+        var updated = await _vehicleService.GetVehicleByIdAsync(vehicleViewModel.VehicleListId);
+
+        return Ok(updated);
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, "Update failed: " + ex.Message);
+    }
+}
+✅ Step 2: Replace success callback in your JS (wireVehicleForm)
+In your JavaScript, update the $.ajax({ ... }) block inside #vehicleForm submit handler:
+
+🔁 OLD success: section:
+js
+Copy
+Edit
+success: function(response) {
+    pendingChanges = false;
+    $("#VehicleGrid").data("kendoGrid").dataSource.read();
+    kendo.alert("Saved successfully! New Estimate ID: " + response.VehicleListId);
+    if (response && response.VehicleListId) {
+        $("#VehicleListId").val(response.VehicleListId); // update readonly textbox
+    }
+}
+✅ REPLACE WITH THIS:
+js
+Copy
+Edit
+success: function(response) {
+    if (response && response.VehicleListId) {
+        // ✅ Store globally
+        window.currentVehicleId = response.VehicleListId;
+
+        // ✅ Refresh grid
+        $("#VehicleGrid").data("kendoGrid").dataSource.read();
+
+        // ✅ Reload form with fresh data from DB
+        loadVehicleForm(response.VehicleListId);
+
+        // ✅ Enable all tabs
+        var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+        for (var i = 1; i <= 6; i++) {
+            tabStrip.enable(tabStrip.tabGroup.children().eq(i), true);
+        }
+
+        // ✅ Update window title to reflect new ID
+        var win = $("#estimatePopup").data("kendoWindow");
+        if (win) {
+            win.title("Vehicle Estimate #" + response.VehicleListId);
+        }
+
+        // ✅ Notify
+        kendo.alert("Saved successfully! Estimate #: " + response.VehicleListId);
+    } else {
+        kendo.alert("Save succeeded but no Estimate ID was returned.");
+    }
+
+    pendingChanges = false;
+}
+✅ Step 3: Confirm loadVehicleForm already works
+This should already exist in your code:
+
+js
+Copy
+Edit
+window.loadVehicleForm = function(vehicleId) {
+    var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+    tabStrip.select(0); // force focus back to Vehicle tab
+    $.get('@Url.Action("GetVehicleById","Vehicles")', { id: vehicleId }, function(html) {
+        $("#vehicleTabContent").html(html);
+        window.tabContentLoaded[0] = true;
+        window.wireVehicleForm(); // rebind save/cancel/edit/etc
+    });
+};
+This handles rendering the latest DB values — including UpdatedBy, UpdatedDate, and anything else — no need to patch fields manually anymore.
+
+Let me know if you want:
+
+to auto-open a specific tab after save (like Labour tab),
+
+to scroll to the audit fields inside the popup, or
+
+to prevent VehicleListId = (System Generated) from appearing during Add.
