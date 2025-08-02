@@ -1,0 +1,113 @@
+1. New Shared Function: GetVehicleJsonByIdAsync
+Add this private method in your controller:
+
+csharp
+Copy
+Edit
+private async Task<VehicleViewModel> GetVehicleJsonByIdAsync(int id)
+{
+    return await _dbConnection.QueryFirstOrDefaultAsync<VehicleViewModel>(@"
+        SELECT 
+            VehicleListId,
+            ArchVehicleListId,
+            OldId,
+            VehSeriesCode,
+            NumOfVehicles,
+            ProjDesc,
+            DateEntered,
+            EnteredBy,
+            ModifiedLastBy,
+            ModifiedLastDate,
+            Make,
+            Model AS VehModel,
+            Year,
+            Engine,
+            Transmission,
+            Differential,
+            Sopnumber,
+            LabourCost,
+            LabourOverheadAmount,
+            LabourTotal,
+            MaterialsTotal,
+            TotalBusEstimateCost
+        FROM SBCES.VehicleList
+        WHERE VehicleListId = @id", new { id });
+}
+🔹 Notes:
+
+Returns VehicleViewModel
+
+Uses async Dapper call
+
+Maps Model AS VehModel to match your view model
+
+✅ 2. Update AddVehiclesView (minimal change)
+Replace:
+
+csharp
+Copy
+Edit
+var updated = GetVehicleById(newId);
+With:
+
+csharp
+Copy
+Edit
+var updated = await GetVehicleJsonByIdAsync(newId);
+✅ Final version:
+
+csharp
+Copy
+Edit
+[HttpPost]
+public async Task<IActionResult> AddVehiclesView([FromBody] VehicleViewModel vehicleViewModel)
+{
+    if (vehicleViewModel == null)
+        return BadRequest("Model binding failed.");
+
+    try
+    {
+        var newId = await AddVehicleAsync(vehicleViewModel);
+        var updated = await GetVehicleJsonByIdAsync(newId);
+        return Ok(updated);
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, "Add failed: " + ex.Message);
+    }
+}
+✅ 3. Update UpdateVehiclesView (same change)
+Replace:
+
+csharp
+Copy
+Edit
+var updated = GetVehicleById(vehicleViewModel.VehicleListId);
+With:
+
+csharp
+Copy
+Edit
+var updated = await GetVehicleJsonByIdAsync(vehicleViewModel.VehicleListId);
+✅ Final version:
+
+csharp
+Copy
+Edit
+[HttpPost]
+public async Task<IActionResult> UpdateVehiclesView([FromBody] VehicleViewModel vehicleViewModel)
+{
+    if (vehicleViewModel == null)
+        return BadRequest("Model binding failed.");
+
+    try
+    {
+        await UpdateVehiclesAsync(vehicleViewModel);
+        var updated = await GetVehicleJsonByIdAsync(vehicleViewModel.VehicleListId);
+        return Ok(updated);
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, "Update failed: " + ex.Message);
+    }
+}
