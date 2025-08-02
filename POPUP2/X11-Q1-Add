@@ -1,0 +1,144 @@
+Error when Add a new Vehile. Update is fine. 
+System.NullReferenceException: 'Object reference not set to an instance of an object.'
+
+vehicleViewModel was null.
+
+Controller :
+Interestingly, Break point does not get at Try below
+[HttpPost]
+ [AllowAnonymous]
+ public async Task<IActionResult> AddVehiclesView( [FromBody]VehicleViewModel vehicleViewModel)
+ {
+     try
+     {
+         var maxVehicleListId = await AddVehicleAsync(vehicleViewModel);
+         vehicleViewModel.VehicleListId = maxVehicleListId; //pass back to the grid & notification
+
+         ModelState.Clear();
+         return Ok();
+
+     }
+...
+Stragnly : Breakpoint did get in to this, but  VehicleViewModel vehicleViewModel is null
+private async Task<int> AddVehicleAsync([FromBody] VehicleViewModel vehicleViewModel)
+{
+    var userName = ViewBag.UserName;
+    var maxVehicleListId =
+                _dbConnection.QueryFirstOrDefault<int>(@"SELECT MAX(VehicleListId) + 1  FROM SBCES.VehicleList");
+
+    _dbConnection.Open();
+....
+     catch (Exception ex)
+     {
+...
+Payload :
+Differential
+: 
+"5.13:1"
+Engine
+: 
+"CUMMINS ISL 8.9 ISL 10"
+Make
+: 
+"NOVA"
+NumOfVehicles
+: 
+"100"
+ProjDesc
+: 
+"15 YEAR REBUILD AFTER 9 YR REBUILD"
+Sopnumber
+: 
+""
+Transmission
+: 
+"B401111"
+VehModel
+: 
+"CLRV"
+VehSeriesCode
+: 
+"ELF  MODEL 122"
+VehicleListId
+: 
+"(System Generated)"
+Year
+: 
+"2010"
+JS :
+// ── Wire up form submit and cancel actions inside popup
+window.wireVehicleForm = function() {
+    $("#btnCancelVehicle").off("click").on("click", function(){
+        if (!pendingChanges || confirm("Discard changes?")) {
+            $("#estimatePopup").data("kendoWindow").close();
+        }
+    });
+    
+     $("#btnSave").off("click").on("click", function(e){
+          console.log('click save called');
+        e.preventDefault();
+        $("#vehicleForm").submit();
+    });
+    $("#vehicleForm").off("submit").on("submit", function(e) {
+        console.log('submit called');
+
+        e.preventDefault();
+        if (!pendingChanges) { console.log (' no pending changes...returning'); return;}
+        
+        // Helper function to safely get ComboBox values
+        function getComboValue(selector) {
+            const combo = $(selector).data("kendoComboBox");
+            return combo ? combo.value() : $(selector).val();
+        }
+
+        var vm = {
+            VehicleListId: $("#VehicleListId").val(),
+            VehSeriesCode: getComboValue("#VehSeriesCode"),
+            NumOfVehicles: $("#NumOfVehicles").val(),
+            ProjDesc: getComboValue("#ProjDesc"),
+            Make: getComboValue("#Make"),
+            VehModel: getComboValue("#VehModel"),
+            Year: $("#Year").val(),
+            Engine: getComboValue("#Engine"),
+            Transmission: getComboValue("#Transmission"),
+            Differential: getComboValue("#Differential"),
+            Sopnumber: $("#Sopnumber").val()
+        };
+    
+        console.log('VehSeriesCode :', vm.VehSeriesCode);
+        console.log('NumOfVehicles :', vm.NumOfVehicles);
+        console.log('ProjDesc :', vm.ProjDesc);
+        
+         // Initialize readonly state (true for existing records)
+        var isReadOnly = window.currentVehicleId !== 0;
+        setFormReadOnly(isReadOnly);
+
+        // Handle Edit button click
+        $("#btnEdit").off("click").on("click", function() {
+            setFormReadOnly(false);
+            pendingChanges = true;
+        });
+        var url = window.currentVehicleId === 0
+            ? '@Url.Action("AddVehiclesView","Vehicles")'
+            : '@Url.Action("UpdateVehiclesView","Vehicles")';
+            
+        $.ajax({
+            url: url,
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify(vm),
+            success: function(response) {
+                pendingChanges = false;
+                $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                kendo.alert("Saved successfully!");
+            },
+            error: function() {
+                kendo.alert("Error saving data.");
+            }
+        });
+    });
+    
+    $("#vehicleForm input, #vehicleForm select").off("change input").on("input change", function(){
+        pendingChanges = true;
+    });
+}
