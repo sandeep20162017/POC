@@ -1,0 +1,100 @@
+Contoller didn't called for update
+Js :
+// ── Wire up form submit and cancel actions inside popup
+window.wireVehicleForm = function() {
+    $("#btnCancelVehicle").off("click").on("click", function(){
+        if (!pendingChanges || confirm("Discard changes?")) {
+            $("#estimatePopup").data("kendoWindow").close();
+        }
+    });
+    
+     $("#btnSave").off("click").on("click", function(e){
+          console.log('click save called');
+        e.preventDefault();
+        $("#vehicleForm").submit();
+    });
+    $("#vehicleForm").off("submit").on("submit", function(e) {
+        console.log('submit called');
+
+        e.preventDefault();
+        if (!pendingChanges) { console.log (' no pending changes...returning'); return;}
+        
+        // Helper function to safely get ComboBox values
+        function getComboValue(selector) {
+            const combo = $(selector).data("kendoComboBox");
+            return combo ? combo.value() : $(selector).val();
+        }
+
+        var vm = {
+            VehicleListId: $("#VehicleListId").val(),
+            VehSeriesCode: getComboValue("#VehSeriesCode"),
+            NumOfVehicles: $("#NumOfVehicles").val(),
+            ProjDesc: getComboValue("#ProjDesc"),
+            Make: getComboValue("#Make"),
+            VehModel: getComboValue("#VehModel"),
+            Year: $("#Year").val(),
+            Engine: getComboValue("#Engine"),
+            Transmission: getComboValue("#Transmission"),
+            Differential: getComboValue("#Differential"),
+            Sopnumber: $("#Sopnumber").val()
+        };
+    
+        console.log('VehSeriesCode :', vm.VehSeriesCode);
+        console.log('NumOfVehicles :', vm.NumOfVehicles);
+        console.log('ProjDesc :', vm.ProjDesc);
+        
+         // Initialize readonly state (true for existing records)
+        var isReadOnly = window.currentVehicleId !== 0;
+        setFormReadOnly(isReadOnly);
+
+        // Handle Edit button click
+        $("#btnEdit").off("click").on("click", function() {
+            setFormReadOnly(false);
+            pendingChanges = true;
+        });
+        var url = window.currentVehicleId === 0
+            ? '@Url.Action("AddVehiclesView","Vehicles")'
+            : '@Url.Action("UpdateVehiclesView","Vehicles")';
+            
+        $.ajax({
+            url: url,
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify(vm),
+            success: function(response) {
+                pendingChanges = false;
+                $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                kendo.alert("Saved successfully!");
+            },
+            error: function() {
+                kendo.alert("Error saving data.");
+            }
+        });
+    });
+    
+    $("#vehicleForm input, #vehicleForm select").off("change input").on("input change", function(){
+        pendingChanges = true;
+    });
+}
+Controller:
+  [HttpPost]
+  [AllowAnonymous]
+  //[Consumes("application/x-www-form-urlencoded")]
+  public async Task<IActionResult> UpdateVehiclesView([DataSourceRequest] DataSourceRequest request, [FromBody] VehicleViewModel vehiclesViewModel)
+  {
+      vehiclesViewModel.ModifiedLastBy = ViewBag.UserName;
+      vehiclesViewModel.ModifiedLastDate = DateTime.Now;
+      ModelState.Clear();
+      try
+      {
+
+          await UpdateVehiclesAsync(vehiclesViewModel);
+
+          return Json(new[] { vehiclesViewModel }.ToDataSourceResult(request));
+
+      }
+      catch (Exception ex)
+      {
+          return StatusCode(500, "An error occurred while updating the vehicle estimate.");
+      }
+  }
