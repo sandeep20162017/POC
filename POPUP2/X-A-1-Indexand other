@@ -1,0 +1,264 @@
+1. Make Vehicle Tab Editable Initially (Other Tabs Disabled)
+In Index.cshtml (popup initialization):
+
+javascript
+window.openEstimatePopup = function(vehicleId) {
+    pendingChanges = false;
+    currentVehicleId = vehicleId;
+    window.tabContentLoaded = [false, false, false, false, false, false, false];
+
+    var win = $("#estimatePopup").data("kendoWindow") || 
+        $("#estimatePopup").kendoWindow({
+            modal: true,
+            width: 1150,
+            height: 600,
+            title: vehicleId === 0 ? "Add New Estimate" : "Estimate #" + vehicleId,
+            visible: false,
+            actions: ["Close"],
+            deactivate: function() {
+                if (pendingChanges && !confirm("Unsaved changes. Close anyway?")) return false;
+            }
+        }).data("kendoWindow");
+
+    win.title(vehicleId === 0 ? "Add New Estimate" : "Vehicle Estimate #" + vehicleId);
+    win.center().open();
+    loadVehicleForm(vehicleId);
+    
+    // NEW: Disable all non-vehicle tabs initially
+    if (vehicleId === 0) {
+        var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+        for (var i = 1; i <= 6; i++) {
+            tabStrip.enable(tabStrip.tabGroup.children().eq(i), false);
+        }
+    }
+};
+2. Save Button Controller Action
+In Index.cshtml (wireVehicleForm):
+
+javascript
+function wireVehicleForm() {
+    // ... existing code ...
+
+    $("#btnSave").off("click").on("click", function() {
+        if (!pendingChanges) return;
+        
+        var vm = {
+            VehicleListId: $("#VehicleListId").val(),
+            // Add all other form fields here
+            VehSeriesCode: $("#VehSeriesCode").val(),
+            NumOfVehicles: $("#NumOfVehicles").val(),
+            ProjDesc: $("#ProjDesc").val(),
+            Sopnumber: $("#Sopnumber").val(),
+            Make: $("#Make").val(),
+            VehModel: $("#VehModel").val(),
+            Year: $("#Year").val(),
+            Engine: $("#Engine").val(),
+            Transmission: $("#Transmission").val(),
+            Differential: $("#Differential").val()
+        };
+        
+        if (!vm.VehSeriesCode || !vm.NumOfVehicles || !vm.ProjDesc) {
+            return kendo.alert("Please fill required fields.");
+        }
+        
+        var url = window.currentVehicleId === 0
+            ? '@Url.Action("AddVehiclesView","Vehicles")'
+            : '@Url.Action("UpdateVehiclesView","Vehicles")';
+            
+        $.ajax({
+            url: url,
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify(vm),
+            success: function(response) {
+                if (response.success) {
+                    pendingChanges = false;
+                    $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                    
+                    // NEW: Enable other tabs after successful save
+                    if (window.currentVehicleId === 0) {
+                        window.currentVehicleId = response.newId;
+                        var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+                        for (var i = 1; i <= 6; i++) {
+                            tabStrip.enable(tabStrip.tabGroup.children().eq(i), true);
+                        }
+                    }
+                    
+                    kendo.alert("Saved successfully!");
+                } else {
+                    kendo.alert("Error saving data: " + response.message);
+                }
+            }
+        });
+    });
+    
+    // ... existing code ...
+}
+3. Confirm Delete Controller Action
+In VehiclesController.cs:
+
+csharp
+[HttpPost]
+public IActionResult DeleteVehicle(int VehicleListId)
+{
+    try
+    {
+        // Your delete logic here
+        return Json(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        return Json(new { success = false, message = ex.Message });
+    }
+}
+4. Copy and Archive Controller Actions
+For Copy (VehiclesController.cs):
+
+csharp
+[HttpPost]
+public IActionResult CopyEstimate([FromBody] CopyRequest request)
+{
+    try
+    {
+        // Your copy logic here
+        return Json(new { 
+            success = true, 
+            newVehicleListId = newId 
+        });
+    }
+    catch (Exception ex)
+    {
+        return Json(new { success = false, message = ex.Message });
+    }
+}
+
+public class CopyRequest
+{
+    public int vehicleListId { get; set; }
+    public string oldVehSeriesCode { get; set; }
+    public string newVehSeriesCode { get; set; }
+    public string oldprojDesc { get; set; }
+    public string newprojDesc { get; set; }
+}
+For Archive (VehiclesController.cs):
+
+csharp
+[HttpPost]
+public IActionResult ArchiveVehicleDetails([FromBody] ArchiveRequest request)
+{
+    try
+    {
+        // Your archive logic here
+        return Json(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        return Json(new { success = false, message = ex.Message });
+    }
+}
+
+public class ArchiveRequest
+{
+    public int VehicleListId { get; set; }
+    public string VehSeriesCode { get; set; }
+    public string TypeId { get; set; }
+    public string Username { get; set; }
+}
+Additional Changes Needed:
+Update Vehicle Form Readonly Logic (_VehPopUp.cshtml):
+
+javascript
+// Initialize form state based on mode (add vs edit)
+$(document).ready(function () {
+    const isAddMode = @Model.VehicleListId === 0;
+
+    // NEW: For existing records, make all non-audit fields readonly
+    if (!isAddMode) {
+        $(".vehicle-field").each(function() {
+            $(this).prop("readonly", true);
+        });
+    }
+
+    // Handle Edit button click
+    $("#btnEdit").click(function () {
+        $(".vehicle-field").prop("readonly", false);
+        $(this).hide();
+    });
+});
+Add CSS for Disabled Tabs (Index.cshtml):
+
+css
+.k-tabstrip-items .k-item.k-state-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+Update ViewModel (VehicleViewModel.cs):
+
+csharp
+public class VehicleViewModel
+{
+    public int VehicleListId { get; set; }
+    
+    [Required]
+    public string VehSeriesCode { get; set; }
+    
+    [Required]
+    [Range(1, int.MaxValue)]
+    public int NumOfVehicles { get; set; }
+    
+    [Required]
+    public string ProjDesc { get; set; }
+    
+    // Add other properties
+    public string Sopnumber { get; set; }
+    public string Make { get; set; }
+    public string VehModel { get; set; }
+    public int? Year { get; set; }
+    public string Engine { get; set; }
+    public string Transmission { get; set; }
+    public string Differential { get; set; }
+    public string ModifiedLastBy { get; set; }
+    public DateTime? ModifiedLastDate { get; set; }
+}
+Key Implementation Notes:
+Initial Tab State:
+
+For new records (VehicleListId=0), all non-vehicle tabs are disabled
+
+Vehicle tab fields are editable by default for new records
+
+Existing records show all fields as readonly initially
+
+Save Workflow:
+
+After successful save of new record:
+
+Enable all other tabs
+
+Update currentVehicleId with new ID
+
+For existing records, keep current behavior
+
+Controller Actions:
+
+All actions return JSON with success status
+
+Include proper error handling and validation
+
+Use DTO classes for complex parameters
+
+UI/UX Enhancements:
+
+Visual indication for disabled tabs (reduced opacity)
+
+Required field indicators
+
+Consistent readonly styling
+
+Security Considerations:
+
+Validate all inputs on server-side
+
+Implement proper authorization checks
+
+Use anti-forgery tokens for POST requests
