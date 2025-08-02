@@ -1,0 +1,1413 @@
+You are telerik Kendoo ASP.NET core and ASP.NET core expert.
+1. When user clicks on estimat number, example 4359, pop up is shown. Estimate#, Quantity, Year are displayed but none of the 
+combo box values are shown (Textboxes are fine, issue with comboboxeditor). example - description, make, model, year, engine, transmission values are not shown for id 4359.
+Must use ComboBoxEditor.cshtml in the popup. PopUpList is populated when user clicks on popup. autocomplete is working fine.
+2. When user clicks on Vehicle tab, Add/EDit template should use full width of popup -  1200. 
+3. When user clicks on 4359, all the fields inthe popup _VehPopUp shouldbe readonly. When user clicks on edit button in _VehPopUp
+all the fields should be editable
+4. Pls give me fullchanges line by line, avoid making any changes in the controller
+Index.cshtml :
+@using BCES.Models.Vehicle
+@model IEnumerable<VehicleViewModel>
+
+@{
+    ViewData["Title"] = "Vehicle Estimate";
+}
+
+<h6>Vehicle Estimate</h6>
+
+@section Scripts {
+<script>
+// ── Global state for tab and form tracking
+window.pendingChanges = false;
+window.currentVehicleId = 0;
+window.tabContentLoaded = [false, false, false, false, false, false, false];
+
+// ── Load partial tabs
+window.loadTabContent = function(index, id) {
+    var urls = [
+        "",
+        '@Url.Action("LabourDetailsPartial","Vehicles")',
+        '@Url.Action("LabourHourSummaryPartial","Vehicles")',
+        '@Url.Action("MaterialCostSummaryPartial","Vehicles")',
+        '@Url.Action("ScPartsUsedInEstimates","Vehicles")',
+        '@Url.Action("NscDetailsPartial","Vehicles")',
+        '@Url.Action("TotalCostPartial","Vehicles")'
+    ];
+    var pane = $("#estimateTabs-" + index);
+    pane.html("<div class='k-loading-mask'><span class='k-loading-text'>Loading…</span></div>");
+    if (urls[index]) {
+        $.get(urls[index], { id: id }, data => {
+            pane.html(data);
+            window.tabContentLoaded[index] = true;
+            
+            // Enable the tab after loading
+            var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+            tabStrip.enable(tabStrip.tabGroup.children().eq(index), true);
+        });
+    }
+};
+window.onComboBoxChange = function(e) {
+            var combo = e.sender;
+            if (combo.selectedIndex === -1) {
+                combo.value(null);
+                combo.input.val("");
+                combo.trigger("change");
+                // Optional: Show error message
+                $("#validationMessage").text("Invalid selection!").css("color", "red");
+            } else {
+                $("#validationMessage").text("");
+            }
+        }
+
+    //-- getComboBoxParams
+    window.getComboBoxParams = function() {
+            var input = $(".k-combobox input.k-input:focus");
+            return {
+                columnName: input.attr("name")?.replace("_input", "").split('.').pop(),
+                searchText: input.val() || ""
+            };
+        }
+
+//-- onComboBoxDataBound
+    window.onComboBoxDataBound = function(e) {
+            // Check if no data is available after filtering
+            var notification = $("#notification").data("kendoNotification");
+
+            if (e.sender.dataSource.total() === 0) {
+                e.sender.value(null); // Clear the input
+                e.sender.input.val(""); // Clear the text
+                setTimeout(function () {
+                    notification.show("Invalid Selection! Please choose from the list.", "error");
+                    //alert("Invalid Selection! Please choose from the list.");
+                }, 100);
+            }
+        }
+
+// ── Tab selection handler
+window.onTabSelect = function(e) {
+    //var idx = e.item.index();
+    var idx = $(e.item).index();
+    if (pendingChanges && idx > 0) {
+        e.preventDefault();
+        return kendo.alert("Please save or cancel before switching tabs.");
+    }
+    if (!window.tabContentLoaded[idx] && window.currentVehicleId > 0) {
+        loadTabContent(idx, window.currentVehicleId);
+    }
+};
+
+// ── Open vehicle popup and load form partial
+window.openEstimatePopup = function(vehicleId) {
+    pendingChanges = false;
+    currentVehicleId = vehicleId;
+    window.tabContentLoaded = [false, false, false, false, false, false, false];
+
+    var win = $("#estimatePopup").data("kendoWindow") ||
+        $("#estimatePopup").kendoWindow({
+            modal: true,
+            width: 1200,
+            height: 650,
+            title: vehicleId === 0 ? "Add New Estimate" : "Estimate #" + vehicleId,
+            visible: false,
+            actions: ["Close"],
+            deactivate: function() {
+                if (pendingChanges && !confirm("Unsaved changes. Close anyway?")) return false;
+            }
+        }).data("kendoWindow");
+
+    win.title(vehicleId === 0 ? "Add New Estimate" : "Estimate #" + vehicleId);
+    win.center().open();
+    loadVehicleForm(vehicleId);
+};
+
+// ── Load the form into the first tab
+window.loadVehicleForm = function(vehicleId) {
+    var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+    tabStrip.select(0);
+    $.get('@Url.Action("GetVehicleById","Vehicles")', { id: vehicleId }, function(html) {
+        $("#vehicleTabContent").html(html);
+        window.tabContentLoaded[0] = true;
+        wireVehicleForm();
+    });
+};
+
+// ── Wire up form submit and cancel actions inside popup
+function wireVehicleForm() {
+    $("#btnCancelVehicle").off("click").on("click", function(){
+        if (!pendingChanges || confirm("Discard changes?")) {
+            $("#estimatePopup").data("kendoWindow").close();
+        }
+    });
+    
+    $("#vehicleForm").off("submit").on("submit", function(e) {
+        e.preventDefault();
+        if (!pendingChanges) return;
+        
+        var vm = {
+            VehicleListId: $("#VehicleListId").val(),
+            VehSeriesCode: $("#VehSeriesCode").val(),
+            NumOfVehicles: $("#NumOfVehicles").val(),
+            ProjDesc: $("#ProjDesc").val(),
+            Make: $("#Make").val(),
+            VehModel: $("#VehModel").val(),
+            Year: $("#Year").val(),
+            Engine: $("#Engine").val(),
+            Transmission: $("#Transmission").val(),
+            Differential: $("#Differential").val(),
+            Sopnumber: $("#Sopnumber").val()
+        };
+        
+        if (!vm.VehSeriesCode || !vm.NumOfVehicles || !vm.ProjDesc) {
+            return kendo.alert("Please fill required fields.");
+        }
+        
+        var url = window.currentVehicleId === 0
+            ? '@Url.Action("AddVehiclesView","Vehicles")'
+            : '@Url.Action("UpdateVehiclesView","Vehicles")';
+            
+        $.ajax({
+            url: url,
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify(vm),
+            success: function(response) {
+                pendingChanges = false;
+                $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                kendo.alert("Saved successfully!");
+            },
+            error: function() {
+                kendo.alert("Error saving data.");
+            }
+        });
+    });
+    
+    $("#vehicleForm input, #vehicleForm select").off("change input").on("input change", function(){
+        pendingChanges = true;
+    });
+}
+
+// ── Copy estimate handler
+window.onCopyEstimate = function(e) {
+    e.preventDefault();
+    var grid = $("#VehicleGrid").data("kendoGrid");
+    var item = grid.dataItem($(e.currentTarget).closest("tr"));
+    var win = $("#copyEstimateDialog").kendoWindow({ 
+        title: "Copy Estimate", 
+        modal: true, 
+        width: 400, 
+        visible: false 
+    }).data("kendoWindow");
+    
+    $("#vehicleListId").val(item.VehicleListId);
+    $("#oldVehSeriesCode").val(item.VehSeriesCode);
+    $("#oldprojDesc").val(item.ProjDesc);
+    $("#newVehSeriesCode, #newprojDesc").val("");
+    
+    win.center().open();
+    
+    // Wire up copy button
+    $("#copyEstimateBtn").off("click").on("click", function() {
+        var payload = {
+            vehicleListId: $("#vehicleListId").val(),
+            oldVehSeriesCode: $("#oldVehSeriesCode").val(),
+            newVehSeriesCode: $("#newVehSeriesCode").val(),
+            oldprojDesc: $("#oldprojDesc").val(),
+            newprojDesc: $("#newprojDesc").val()
+        };
+        
+        if (!payload.newVehSeriesCode || !payload.newprojDesc) {
+            return kendo.alert("Please fill required fields.");
+        }
+        
+        $.ajax({
+            url: '@Url.Action("CopyEstimate", "Vehicles")',
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify(payload),
+            success: function(response) {
+                if (response.success) {
+                    kendo.alert("Estimate copied successfully! New ID: " + response.newVehicleListId);
+                    $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                    win.close();
+                } else {
+                    kendo.alert("Copy failed: " + response.message);
+                }
+            }
+        });
+    });
+    
+    $("#cancelCopyBtn").off("click").on("click", function() {
+        win.close();
+    });
+};
+
+// ── Archive handler
+window.onArchiveClick = function(e) {
+    e.preventDefault();
+    var grid = $("#VehicleGrid").data("kendoGrid");
+    var item = grid.dataItem($(e.currentTarget).closest("tr"));
+    
+    kendo.confirm("Archive estimate #" + item.VehicleListId + "?").then(function(){
+        $.ajax({
+            url: '@Url.Action("ArchiveVehicleDetails","Vehicles")',
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify({ 
+                VehicleListId: item.VehicleListId, 
+                VehSeriesCode: item.VehSeriesCode, 
+                TypeId: "BUS", 
+                Username: "@ViewBag.UserName".toUpperCase() 
+            }),
+            success: function(r) {
+                if (r.success) { 
+                    grid.dataSource.read(); 
+                    kendo.alert(r.message); 
+                } else { 
+                    kendo.alert("Archive failed: " + r.message); 
+                }
+            }
+        });
+    });
+};
+
+// ── Delete handler
+window.showDeleteConfirmation = function(e) {
+    e.preventDefault();
+    var grid = $("#VehicleGrid").data("kendoGrid");
+    var item = grid.dataItem($(e.currentTarget).closest("tr"));
+    var dlg = $("#deleteConfirmationDialog").kendoWindow({ 
+        title: "Confirm Delete", 
+        modal: true, 
+        width: 400, 
+        visible: false, 
+        resizable: false 
+    }).data("kendoWindow");
+    
+    dlg.center().open();
+    
+    $("#confirmDeleteBtn").off("click").on("click", function(){
+        $.post('@Url.Action("DeleteVehicle","Vehicles")', { VehicleListId: item.VehicleListId }, function(){
+            grid.dataSource.read();
+            dlg.close();
+        });
+    });
+    
+    $("#cancelDeleteBtn").off("click").on("click", function(){ 
+        dlg.close(); 
+    });
+};
+</script>
+}
+
+<style>
+/* Full CSS styles pasted exactly as in your previous file */
+/* Main Grid Styles */
+.k-grid { border-radius:4px; box-shadow:0 2px 4px rgba(0,0,0,0.1); font-family:'Segoe UI',Tahoma,Verdana,sans-serif; background:white; }
+.k-grid-header th { background:#f8f9fa; font-weight:600; color:#495057; padding:10px 12px; }
+.k-grid-content { overflow-y:auto; max-height:65vh; background:white; }
+/* Tab Styles */
+.k-tabstrip-items .k-item { padding:10px 20px; border-bottom:3px solid transparent; transition:all 0.3s ease; background:white; }
+.k-tabstrip-items .k-item.k-state-active { border-bottom-color:#3f51b5; color:#3f51b5; background:white; }
+/* Links and Buttons */
+.estimate-link { color:#3f51b5; cursor:pointer; font-weight:500; text-decoration:none; }
+.estimate-link:hover { text-decoration:underline; }
+.k-button { border-radius:4px; font-weight:500; text-transform:uppercase; letter-spacing:0.5px; font-size:0.875rem; background:white; }
+.k-button.k-primary { background:#3f51b5; border-color:#3f51b5; color:white; }
+/* Window Styles */
+.k-window-titlebar { background:#3f51b5; color:white; font-weight:500; }
+.k-window-content { padding:0; background:white; }
+/* Required Fields */
+.required-header::after { content:" *"; color:#e32; }
+/* Form Layout */
+.form-row { display:flex; flex-wrap:wrap; margin:0 -10px; }
+.form-group { padding:0 10px; margin-bottom:15px; }
+.popup-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding-bottom:10px; border-bottom:1px solid #eee; background:white; }
+.tab-actions { display:flex; gap:10px; }
+/* Delete Confirmation */
+.confirmation-message { padding:20px; display:flex; align-items:center; background:white; }
+.confirmation-buttons { padding:10px; text-align:right; border-top:1px solid #ddd; background:white; }
+/* Readonly Fields */
+.k-textbox[readonly], .k-numerictextbox[readonly] .k-numeric-wrap, .k-combobox[readonly] .k-dropdown-wrap { background:#f8f9fa; cursor:not-allowed; }
+</style>
+
+<!-- Kendo main grid in Vehicles tab -->
+@(Html.Kendo().TabStrip()
+  .Name("mainTabStrip")
+  .Items(ts => {
+    ts.Add().Text("Vehicles").Selected(true)
+      .Content(@<text>
+        @(Html.Kendo().Grid<VehicleViewModel>()
+          .Name("VehicleGrid")
+          .Columns(c => {
+              c.Bound(v => v.VehicleListId).Title("Estimate #")
+               .ClientTemplate("<a class='estimate-link' onclick='window.openEstimatePopup(#=VehicleListId#)'>#=VehicleListId#</a>").Width(120);
+              c.Bound(v => v.VehSeriesCode).Title("Vehicle Series").HeaderHtmlAttributes(new { @class="required-header" }).EditorTemplateName("ComboBoxEditor").Width(150);
+              c.Bound(v => v.NumOfVehicles).Title("Qty").HeaderHtmlAttributes(new { @class="required-header"}).Width(80);
+              c.Bound(v => v.ProjDesc).Title("Description").HeaderHtmlAttributes(new { @class="required-header"}).Width(250);
+              c.Command(cmd => {
+                  cmd.Custom("Copy").IconClass("k-icon k-i-copy").Click("onCopyEstimate");
+                  cmd.Custom("Archive").IconClass("k-icon k-i-folder").Click("onArchiveClick");
+                  cmd.Custom("Delete").IconClass("k-icon k-i-delete").Click("showDeleteConfirmation");
+              }).Width(180);
+          })
+          .ToolBar(tb => tb.ClientTemplate("<button class='k-button k-button-icontext' onclick='window.openEstimatePopup(0)'><span class='k-icon k-i-plus'></span>Add New Record</button>"))
+          .Pageable(p => p.PageSizes(new[] {10,20,50}))
+          .Sortable().Filterable().Scrollable().HtmlAttributes(new { style="height:550px;" })
+          .DataSource(ds => ds.Ajax()
+              .PageSize(10)
+              .Model(m => m.Id(v => v.VehicleListId))
+              .Read(r => r.Action("GetVehiclesView","Vehicles").Type(HttpVerbs.Get))
+              .Create(c => c.Action("AddVehiclesView","Vehicles").Type(HttpVerbs.Post))
+              .Update(u => u.Action("UpdateVehiclesView","Vehicles").Type(HttpVerbs.Post))
+              .Destroy(d => d.Action("DeleteVehicle","Vehicles").Type(HttpVerbs.Post))
+          )
+        )
+      </text>);
+  })
+)
+
+<!-- Popup tabs for vehicle details -->
+<div id="estimatePopup" style="display:none;">
+  @(Html.Kendo().TabStrip()
+      .Name("estimateTabs")
+      .SelectedIndex(0)
+      .Events(e => e.Select("onTabSelect"))
+      .Items(tb => {
+          tb.Add().Text("Vehicle").Content(@<text><div id="vehicleTabContent"></div></text>);
+          tb.Add().Text("Labour Details").Content("<div id='estimateTabs-1'></div>").Enabled(false);
+          tb.Add().Text("Labour Hours").Content("<div id='estimateTabs-2'></div>").Enabled(false);
+          tb.Add().Text("Material Parts").Content("<div id='estimateTabs-3'></div>").Enabled(false);
+          tb.Add().Text("StockCoded Parts").Content("<div id='estimateTabs-4'></div>").Enabled(false);
+          tb.Add().Text("NonStock Parts").Content("<div id='estimateTabs-5'></div>").Enabled(false);
+          tb.Add().Text("Total Estimate").Content("<div id='estimateTabs-6'></div>").Enabled(false);
+      })
+  )
+</div>
+
+<!-- Delete confirmation dialog -->
+<div id="deleteConfirmationDialog" style="display:none;">
+  <div class="confirmation-message"><span class="k-icon k-i-warning" style="font-size:24px;color:#f0ad4e;"></span><span style="margin-left:10px;">Are you sure you'd like to delete?</span></div>
+  <div class="confirmation-buttons"><button class="k-button" id="cancelDeleteBtn">Cancel</button><button class="k-button k-primary" id="confirmDeleteBtn" style="margin-left:10px;">Delete</button></div>
+</div>
+
+<!-- Copy estimate dialog -->
+<div id="copyEstimateDialog" style="display:none;">
+  <div class="k-form">
+    <div class="k-form-field"><label>Estimate #</label><input id="vehicleListId" class="k-textbox" readonly /></div>
+    <div class="k-form-field"><label>Old Series</label><input id="oldVehSeriesCode" class="k-textbox" readonly /></div>
+    <div class="k-form-field"><label>Old Description</label><input id="oldprojDesc" class="k-textbox" readonly /></div>
+    <div class="k-form-field"><label>New Vehicle Series<span style="color:red">*</span></label><input id="newVehSeriesCode" class="k-textbox" required /></div>
+    <div class="k-form-field"><label>New Description<span style="color:red">*</span></label><input id="newprojDesc" class="k-textbox" required /></div>
+    <div class="k-form-buttons">
+        <button type="button" class="k-button k-primary" id="copyEstimateBtn">Copy</button>
+        <button type="button" class="k-button" id="cancelCopyBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+_VehPopup.cshtml :
+@model BCES.Models.Vehicle.VehicleViewModel
+
+<div class="k-edit-form-container" style="padding:20px; background-color:white;">
+    <div class="popup-header">
+        <h3 style="margin:0; font-weight:600;">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate" : "Edit Vehicle Estimate")</h3>
+        <div class="tab-actions">
+            <button class="k-button" onclick="onEditClick()">
+                <span class="k-icon k-i-edit"></span> Edit
+            </button>
+            <button class="k-button k-primary" onclick="onSaveClick()">
+                <span class="k-icon k-i-save"></span> Save
+            </button>
+        </div>
+    </div>
+
+    <form id="vehicleDetailForm" style="background-color:white;">
+        @Html.HiddenFor(m => m.VehicleListId)
+
+        <div class="form-row">
+            <div class="form-group col-md-4">
+                @Html.LabelFor(m => m.VehicleListId, "Estimate #")
+                @(Html.Kendo().TextBoxFor(m => m.VehicleListId)
+                    .Value(Model.VehicleListId == 0 ? "(System Generated)" : Model.VehicleListId.ToString())
+                    .HtmlAttributes(new { @readonly = "readonly", style = "width:100%; background-color:#f8f9fa;" }))
+            </div>
+
+            <div class="form-group col-md-4">
+                @Html.LabelFor(m => m.VehSeriesCode, "Vehicle Series*")
+                @Html.EditorFor(m => m.VehSeriesCode, "ComboBoxEditor", new
+                    {
+                        htmlAttributes = new
+                        {
+                            required = "required",
+                            style = "width:100%;",
+                            @class = "vehicle-field"
+                        }
+                    })
+            </div>
+
+            <div class="form-group col-md-4">
+                @Html.LabelFor(m => m.NumOfVehicles, "Quantity*")
+                @(Html.Kendo().NumericTextBoxFor(m => m.NumOfVehicles)
+                    .Format("0")
+                    .Min(1)
+                    .HtmlAttributes(new
+                    {
+                        required = "required",
+                        style = "width:100%;",
+                        @class = "vehicle-field"
+                    }))
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group col-md-8">
+                @Html.LabelFor(m => m.ProjDesc, "Description*")
+                @Html.EditorFor(m => m.ProjDesc, "ComboBoxEditor", new
+                    {
+                        htmlAttributes = new
+                        {
+                            required = "required",
+                            style = "width:100%;",
+                            @class = "vehicle-field"
+                        }
+                    })
+            </div>
+
+            <div class="form-group col-md-4">
+                @Html.LabelFor(m => m.Sopnumber, "SOP Number")
+                @(Html.Kendo().TextBoxFor(m => m.Sopnumber)
+                    .HtmlAttributes(new
+                    {
+                        style = "width:100%;",
+                        @class = "vehicle-field"
+                    }))
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group col-md-4">
+                @Html.LabelFor(m => m.Make, "Make")
+                @Html.EditorFor(m => m.Make, "ComboBoxEditor", new
+                    {
+                        htmlAttributes = new
+                        {
+                            style = "width:100%;",
+                            @class = "vehicle-field"
+                        }
+                    })
+            </div>
+
+            <div class="form-group col-md-4">
+                @Html.LabelFor(m => m.VehModel, "Model")
+                @Html.EditorFor(m => m.VehModel, "ComboBoxEditor", new
+                    {
+                        htmlAttributes = new
+                        {
+                            style = "width:100%;",
+                            @class = "vehicle-field"
+                        }
+                    })
+            </div>
+
+            <div class="form-group col-md-4">
+                @Html.LabelFor(m => m.Year, "Year")
+                @(Html.Kendo().NumericTextBoxFor(m => m.Year)
+                    .Format("0")
+                    .Min(1900)
+                    .Max(DateTime.Now.Year + 1)
+                    .HtmlAttributes(new
+                    {
+                        style = "width:100%;",
+                        @class = "vehicle-field"
+                    }))
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group col-md-4">
+                @Html.LabelFor(m => m.Engine, "Engine")
+                @Html.EditorFor(m => m.Engine, "ComboBoxEditor", new
+                    {
+                        htmlAttributes = new
+                        {
+                            style = "width:100%;",
+                            @class = "vehicle-field"
+                        }
+                    })
+            </div>
+
+            <div class="form-group col-md-4">
+                @Html.LabelFor(m => m.Transmission, "Transmission")
+                @Html.EditorFor(m => m.Transmission, "ComboBoxEditor", new
+                    {
+                        htmlAttributes = new
+                        {
+                            style = "width:100%;",
+                            @class = "vehicle-field"
+                        }
+                    })
+            </div>
+
+            <div class="form-group col-md-4">
+                @Html.LabelFor(m => m.Differential, "Differential")
+                @Html.EditorFor(m => m.Differential, "ComboBoxEditor", new
+                    {
+                        htmlAttributes = new
+                        {
+                            style = "width:100%;",
+                            @class = "vehicle-field"
+                        }
+                    })
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group col-md-4">
+                @Html.LabelFor(m => m.ModifiedLastBy, "Last Modified By")
+                @(Html.Kendo().TextBoxFor(m => m.ModifiedLastBy)
+                    .HtmlAttributes(new
+                    {
+                        @readonly = "readonly",
+                        style = "width:100%; background-color:#f8f9fa;"
+                    }))
+            </div>
+
+            <div class="form-group col-md-4">
+                @Html.LabelFor(m => m.ModifiedLastDate, "Last Modified Date")
+                @(Html.Kendo().TextBoxFor(m => m.ModifiedLastDate)
+                    .HtmlAttributes(new
+                    {
+                        @readonly = "readonly",
+                        style = "width:100%; background-color:#f8f9fa;"
+                    }))
+            </div>
+        </div>
+    </form>
+</div>
+
+<style>
+    .k-edit-form-container {
+        background-color: white !important;
+    }
+
+    .popup-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eee;
+    }
+
+    .form-row {
+        display: flex;
+        flex-wrap: wrap;
+        margin: 0 -10px;
+    }
+
+    .form-group {
+        padding: 0 10px;
+        margin-bottom: 15px;
+        flex: 0 0 33.333%;
+        max-width: 33.333%;
+    }
+
+        .form-group.col-md-8 {
+            flex: 0 0 66.666%;
+            max-width: 66.666%;
+        }
+
+        .form-group.col-md-4 {
+            flex: 0 0 33.333%;
+            max-width: 33.333%;
+        }
+
+    .k-edit-form-container label {
+        font-weight: 500;
+        margin-bottom: 5px;
+        display: block;
+        color: #333;
+    }
+
+    .tab-actions {
+        display: flex;
+        gap: 8px;
+    }
+
+    .k-textbox[readonly],
+    .k-numerictextbox[readonly] .k-numeric-wrap,
+    .k-combobox[readonly] .k-dropdown-wrap {
+        background-color: #f8f9fa;
+        cursor: not-allowed;
+    }
+
+    .vehicle-field {
+        background-color: #fff;
+    }
+</style>
+VehiclesController.cs :
+namespace BCES.Controllers.Parts
+{
+    // [Route("api/[controller]")]
+    public class VehiclesController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IServiceProvider _serviceProvider;
+        private readonly BusesController _busesController;
+        private readonly LabourDetailsController _labourDetailsController;
+        private static List<string> _selectedBuses = new List<string>();
+
+
+        public VehiclesController(DapperContext dapper, IHttpContextAccessor httpContextAccessor,
+                                      IServiceProvider serviceProvider, BusesController busesController,
+                                      LabourDetailsController labourDetailsController
+                                    ) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+            _httpContextAccessor = httpContextAccessor;
+            _serviceProvider = serviceProvider;
+            _busesController = busesController;
+            _labourDetailsController = labourDetailsController;
+        }
+
+        [HttpGet("VehiclesIndex")]
+        [AllowAnonymous]
+        public IActionResult VehiclesIndex()
+        {
+            // return View();
+            //GetRebuiltPartsData();
+            return View("~/Views/Vehicles/Index.cshtml");
+        }
+
+        [AllowAnonymous]
+        public IActionResult ArchivedIndex()
+        {
+            // return View();
+            return View("~/Views/Vehicles/ArchivedIndex.cshtml");
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<JsonResult> GetVehiclesView([DataSourceRequest] DataSourceRequest request)
+        {
+            try
+            {
+                var model = await GetVehiclesData();
+                return Json(model.ToDataSourceResult(request));
+            }
+            catch (Exception ex)
+            {
+                return Json(new { error = ex.Message });
+            }
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<JsonResult> GetArchivedVehiclesView([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid 
+            try
+            {
+                var model = await GetArchivedVehiclesData();
+
+                return Json(model.ToDataSourceResult(request));
+            }
+            catch (Exception ex)
+            {
+                return Json(ex);
+            }
+        }
+
+        public ActionResult GetVehicleById(int id, bool readOnly = false)
+        {
+            var vehicle = id == 0
+                ? new VehicleViewModel() // Add mode
+                : _dbConnection.QueryFirstOrDefault<VehicleViewModel>(@"
+            SELECT  [VehicleListId]
+                                              ,[VehSeriesCode]
+                                              ,[NumOfVehicles]
+                                              ,[ProjDesc]
+                                              ,[DateEntered]
+                                              ,[EnteredBy]
+                                              ,[ModifiedLastBy]
+                                              ,[ModifiedLastDate]
+                                              ,[Make]
+                                              ,[Model]
+                                              ,[Year]
+                                              ,[Engine]
+                                              ,[Transmission]
+                                              ,[Differential]
+                                              ,[Sopnumber]
+                                          FROM [CES].[SBCES].[VehicleList] WHERE VehicleListId = @Id", new { Id = id });
+
+            if (vehicle == null)
+                return Content("Vehicle not found");
+
+            ViewBag.ReadOnly = readOnly;
+            ViewBag.FormattedDate = vehicle.ModifiedLastDate == default
+                ? "System Generated"
+                : vehicle.ModifiedLastDate.ToString("MMM dd, yyyy hh:mm:ss tt");
+
+            return PartialView("_VehPopUp", vehicle);
+        }
+        [AllowAnonymous]
+        private async Task<IEnumerable<VehicleViewModel>> GetVehiclesData()
+        {
+            try
+            {
+                var vehiclesQuery = @"
+                                         SELECT  [VehicleListId]
+                                              ,[VehSeriesCode]
+                                              ,[NumOfVehicles]
+                                              ,[ProjDesc]
+                                              ,[DateEntered]
+                                              ,[EnteredBy]
+                                              ,[ModifiedLastBy]
+                                              ,[ModifiedLastDate]
+                                              ,[Make]
+                                              ,[Model]
+                                              ,[Year]
+                                              ,[Engine]
+                                              ,[Transmission]
+                                              ,[Differential]
+                                              ,[Sopnumber]
+                                          FROM [CES].[SBCES].[VehicleList]
+                                         
+                                          ORDER BY VehicleListId DESC   
+                                                                    ";
+
+
+                var vehicles = _dbConnection.Query<VehicleViewModel>(vehiclesQuery).ToList();
+
+
+                return vehicles.Distinct().ToList();
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error fetching vehicles data: {ex.Message}");
+                return Enumerable.Empty<VehicleViewModel>();
+            }
+        }
+
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        //[Consumes("application/x-www-form-urlencoded")]
+        public async Task<IActionResult> UpdateVehiclesView([DataSourceRequest] DataSourceRequest request, VehicleViewModel vehiclesViewModel)
+        {
+            vehiclesViewModel.ModifiedLastBy = ViewBag.UserName;
+            vehiclesViewModel.ModifiedLastDate = DateTime.Now;
+            ModelState.Clear();
+            try
+            {
+
+                await UpdateVehiclesAsync(vehiclesViewModel);
+
+                return Json(new[] { vehiclesViewModel }.ToDataSourceResult(request));
+
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while updating the vehicle estimate.");
+            }
+        }
+
+        [AllowAnonymous]
+        private async Task UpdateVehiclesAsync(VehicleViewModel vehicleViewModel)
+        {
+            var userName = ViewBag.UserName;
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Update the [VehicleListId] table
+                    var updateVehiclelistQuery = @"
+                                                    UPDATE SBCES.[VehicleList]
+                                                    SET 
+                                                        Sopnumber = @Sopnumber,
+                                                        ProjDesc =@ProjDesc,
+                                                        Differential = @Differential,
+                                                        Engine = @Engine,
+                                                        NumOfVehicles = @NumOfVehicles,
+                                                        
+                                                        Make = @Make,
+                                                        Model = @VehModel,
+                                                        Transmission = @Transmission,
+                                                        VehSeriesCode = @VehSeriesCode,
+                                                        Year = @Year,
+                                                        
+
+                                                        ModifiedLastBy = @LastModifiedBy,
+                                                        ModifiedLastDate = @ModifiedLastDate
+                    
+                                                    WHERE VehicleListId = @VehicleListId;
+                                                ";
+
+                    await _dbConnection.ExecuteAsync(updateVehiclelistQuery, new
+                    {
+                        vehicleViewModel.Sopnumber,
+                        vehicleViewModel.ProjDesc,
+                        vehicleViewModel.Differential,
+                        vehicleViewModel.Engine,
+                        vehicleViewModel.NumOfVehicles,
+
+
+                        vehicleViewModel.Make,
+                        vehicleViewModel.VehModel,
+                        vehicleViewModel.Transmission,
+                        vehicleViewModel.VehSeriesCode,
+                        vehicleViewModel.Year,
+
+                        LastModifiedBy = userName,
+                        ModifiedLastDate = DateTime.Now,
+                        vehicleViewModel.VehicleListId
+
+                    }, transaction);
+
+
+                    // Commit the transaction
+                    transaction.Commit();
+
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of an error
+                    transaction.Rollback();
+                    Console.WriteLine($"Error updating vehicle estimate: {ex.Message}");
+                    throw; // Re-throw the exception to propagate it
+                }
+            }
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> DeleteVehicle(string VehicleListId)
+        {
+
+            try
+            {
+                if (string.IsNullOrEmpty(VehicleListId))
+                {
+                    return BadRequest("Invalid data.");
+                }
+
+                var deletePartSql = "DELETE FROM SBCES.[VehicleList] WHERE VehicleListId = '" + VehicleListId + "'";
+
+                await _dbConnection.ExecuteAsync(deletePartSql, new { VehicleListId });
+
+                //Delete Labour
+                string deleteLabourQuery = @"
+                    DELETE FROM SBCES.EmployeeLabour 
+                    WHERE LINKNUMBER = '" + VehicleListId + "' AND TypeId = 'BUS'";
+
+                await _dbConnection.ExecuteAsync(deleteLabourQuery, new { VehicleListId });
+
+                //Delete SC Parts
+                string deleteScPartsQuery = @"DELETE FROM SBCES.SCPartsUsed
+                                            WHERE
+                                                LINKTYPE = 'BUS'
+                                                AND RebuiltPart = 'N'
+                                                AND LinkCode = '" + VehicleListId + "'";
+                await _dbConnection.ExecuteAsync(deleteScPartsQuery, new { VehicleListId });
+
+                //Delete NSC Parts
+                string deleteNscPartsQuery = @"
+                              DELETE FROM SBCES.NSCPartsUsed 
+                              WHERE  LINKTYPE = 'BUS'                                                
+                             AND LinkCode = '" + VehicleListId + "'";
+                await _dbConnection.ExecuteAsync(deleteNscPartsQuery, new { VehicleListId });
+
+                //Delete SC Parts
+                string deleteRbPartsQuery = @"DELETE FROM SBCES.SCPartsUsed
+                                            WHERE
+                                                LINKTYPE = 'BUS'
+                                                AND RebuiltPart = 'Y'
+                                                AND LinkCode = '" + VehicleListId + "'";
+                await _dbConnection.ExecuteAsync(deleteRbPartsQuery, new { VehicleListId });
+
+
+                return Json(new { success = true });
+                //return RedirectToAction("VehiclesIndex");
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = $"Internal server error: {ex.Message}" });
+            }
+        }
+
+
+        [AllowAnonymous]
+        private async Task<IEnumerable<VehicleViewModel>> GetArchivedVehiclesData()
+        {
+            try
+            {
+                // Base query for rebuilt parts data
+                var vehQuery = @"            
+                                        SELECT         
+                                               [OldId] 
+                                               ,[ArchVehicleListId] 
+                                              
+                                              ,[VehSeriesCode]
+                                              ,[NumOfVehicles]
+                                              ,[ProjDesc]
+                                              ,[DateEntered]
+                                              ,[EnteredBy]
+                                              ,[Make]
+                                              ,[Model]
+                                              ,[Year]
+                                              ,[Engine]
+                                              ,[Transmission]
+                                              ,[Differential]
+                                              ,[LabourCost]
+                                              ,[LabourOverheadAmount]
+                                              ,[LabourTotal]
+                                              ,[MaterialsTotal]
+                                              ,[TotalBusEstimateCost]
+                                              ,[TotalTax]
+                                              ,[TotalCostTax]
+                                              ,[OemKitsTotal]
+                                              ,[Sopnumber]
+                                              
+                                          FROM [CES].[SBCES].[ArchVehicleList]
+                                           order by OldId desc
+                                            ";
+
+                var vehArchived = (await _dbConnection.QueryAsync<VehicleViewModel>(vehQuery)).ToList();
+
+
+                return vehArchived;
+            }
+            catch (Exception ex)
+            {
+                // Handle errors gracefully
+                return null;
+            }
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> AddVehiclesView([DataSourceRequest] DataSourceRequest request, VehicleViewModel vehicleViewModel)
+        {
+            try
+            {
+                var maxVehicleListId = await AddVehicleAsync(vehicleViewModel);
+                vehicleViewModel.VehicleListId = maxVehicleListId; //pass back to the grid & notification
+
+                ModelState.Clear();
+                return Json(new[] { vehicleViewModel }.ToDataSourceResult(request, ModelState));
+
+            }
+            catch (Exception ex)
+            {
+                ModelState.AddModelError("", "Error occurred: " + ex.Message);
+                return Json(new[] { vehicleViewModel }.ToDataSourceResult(request, ModelState));
+            }
+        }
+
+        private async Task<int> AddVehicleAsync(VehicleViewModel vehicleViewModel)
+        {
+            var userName = ViewBag.UserName;
+            var maxVehicleListId =
+                        _dbConnection.QueryFirstOrDefault<int>(@"SELECT MAX(VehicleListId) + 1  FROM SBCES.VehicleList");
+
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Insert into the main RbMasterlist table
+                    var insertVehlistQuery = @"
+                                                        INSERT INTO SBCES.VehicleList ( VehicleListId,NumOfVehicles,
+                                                            Sopnumber, ProjDesc, Differential, Engine, 
+                                                             Make, Model, VehSeriesCode, Year, Transmission,  EnteredBy,
+                                                            DateEntered, ModifiedLastBy, ModifiedLastDate
+                                                        )
+                                                        VALUES (
+                                                            @VehicleListId,@NumOfVehicles, @Sopnumber, @ProjDesc, @Differential, @Engine, 
+                                                             @Make, @VehModel, @VehSeriesCode, @Year, @Transmission, @EnteredBy,
+                                                            @DateEntered, @ModifiedLastBy, @ModifiedLastDate
+                                                        );
+                                                        
+                                                    ";
+
+                    await _dbConnection.ExecuteAsync(insertVehlistQuery, new
+                    {
+                        VehicleListId = maxVehicleListId,
+                        vehicleViewModel.NumOfVehicles,
+                        vehicleViewModel.Sopnumber,
+                        vehicleViewModel.ProjDesc,
+                        vehicleViewModel.Differential,
+                        vehicleViewModel.Engine,
+
+                        vehicleViewModel.Make,
+                        vehicleViewModel.VehModel,
+                        vehicleViewModel.Transmission,
+                        vehicleViewModel.VehSeriesCode,
+                        vehicleViewModel.Year,
+
+
+                        EnteredBy = userName,
+                        DateEntered = DateTime.Now,
+                        ModifiedLastBy = userName,
+                        ModifiedLastDate = DateTime.Now
+
+                    }, transaction);
+
+
+
+                    // Commit the transaction
+                    transaction.Commit();
+
+                    return maxVehicleListId;
+
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of an error
+                    // transaction.Rollback();
+                    Console.WriteLine($"Error creating Vehicle data: {ex.Message}");
+                    throw; // Re-throw the exception to propagate it
+                }
+            }
+
+        }
+
+
+        [AllowAnonymous]
+        public IActionResult LabourDetailsPartial([FromQuery] string id, [FromQuery] string gridType)
+        {
+            //set 
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<LabourDetailsRebuiltPartsViewModel> { };
+            return PartialView("_LabourDetails", model);
+        }
+        [AllowAnonymous]
+        public IActionResult ScPartsUsedInEstimates(string id, string gridType)
+        {
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+
+            var model = new List<BCES.Models.Parts.StockCodedPartsViewModel> { };
+
+            return PartialView("_ScPartsUsed", model);
+
+        }
+
+        [AllowAnonymous]
+        public IActionResult LabourHourSummaryPartial(string id, string gridType)
+        {
+            // Pass the PartNum to the partial view
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<BCES.Models.Parts.LabourDetailsRebuiltPartsViewModel> { };
+            return PartialView("_LabourHourSummary", model);
+        }
+
+        [AllowAnonymous]
+        public IActionResult MaterialCostSummaryPartial(string id, string gridType)
+        {
+            // Pass the PartNum to the partial view
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<BCES.Models.Parts.MaterialCostSummaryInRbViewModel> { };
+            return PartialView("_MaterialCostSummary", model);
+        }
+        [AllowAnonymous]
+        public IActionResult NscDetailsPartial(string id, string gridType)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<BCES.Models.Parts.NscPartsUsedViewModel> { };
+
+            return PartialView("_NscPartsUsed", model);
+
+        }
+        [AllowAnonymous]
+        public IActionResult RbDetailsPartial(string id, string gridType)
+        {
+            // Pass the rebuiltPartNum to the partial view
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<BCES.Models.Parts.RebuiltPartsViewModel> { };
+            return PartialView("_RbPartsUsed", model);
+        }
+
+        [AllowAnonymous]
+        public IActionResult TotalCostPartial(string id, string gridType)
+        {
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<BCES.Models.Parts.TotalCostInEstimates> { };
+            return PartialView("_TotalCost", model);
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public IActionResult SaveDetails()
+        {
+            // Save logic here
+            return Json(new { success = true, message = "Saved Details successfully." });
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public IActionResult CancelDetails(int vehicleListId)
+        {
+            try
+            {
+                // Return a success response
+                return Json(new { success = true, message = "Changes discarded successfully." });
+            }
+            catch (Exception ex)
+            {
+
+                return Json(new { success = false, message = "An error occurred while discarding changes. Please try again." });
+            }
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> ArchiveVehicleDetails([FromBody] ArchiveVehicleRequestModel payload)
+        {
+            try
+            {
+                var parameters = new DynamicParameters();
+                parameters.Add("@VehicleListId", payload.VehicleListId);
+                parameters.Add("@ReturnValue", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
+
+                await _dbConnection.ExecuteAsync(
+                    "[SBCES].[ArchiveVehicleV1]",
+                    parameters,
+                    commandType: CommandType.StoredProcedure
+                );
+
+                var retVal = parameters.Get<int>("@ReturnValue");
+
+                return Json(new
+                {
+                    success = retVal == 0,
+                    message = retVal == 0
+                        ? $"Archived Vehicle List Id: {payload.VehicleListId}"
+                        : $"Archive failed with return value: {retVal}"
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new
+                {
+                    success = false,
+                    message = $"Archive failed: {ex.Message}"
+                });
+            }
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> SendEmail(string to, string subject, string body, string rebuiltPartNum)
+        {
+            try
+            {
+                // Resolve the ExportController from the service provider
+                var exportController = _serviceProvider.GetRequiredService<ExportController>();
+
+                // Generate the Excel file in memory by calling SaveToExcel
+                var memoryStream = await exportController.SaveToExcel(rebuiltPartNum);
+
+
+                // Send the email with the attached Excel file
+                var message = new MimeMessage();
+                message.From.Add(new MailboxAddress("Sandeep Kanao", "sandeep.kanao@ttc.ca"));
+                message.To.Add(new MailboxAddress("Sandeep.Kanao@ttc.ca", to));
+                message.Subject = subject;
+                message.Body = new TextPart("plain") { Text = body };
+
+                var attachment = new MimePart("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                {
+                    Content = new MimeContent((Stream)memoryStream),
+                    ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+                    ContentTransferEncoding = ContentEncoding.Base64,
+                    FileName = $"{rebuiltPartNum}_Vehicle_Estimate.xlsx"
+                };
+
+                var multipart = new Multipart("mixed");
+                multipart.Add(message.Body);
+                multipart.Add(attachment);
+                message.Body = multipart;
+
+                using (var client = new SmtpClient())
+                {
+                    await client.ConnectAsync("smtp.freesmtpservers.com", 25, SecureSocketOptions.StartTls);
+                    // await client.AuthenticateAsync("sandeep.kanao@gmail.com", "Perf4you@");
+                    await client.SendAsync(message);
+                    await client.DisconnectAsync(true);
+                }
+
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                // Log the exception 
+                Console.WriteLine($"Error sending email: {ex.Message}");
+
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        [AllowAnonymous]
+        public IActionResult DownloadExcel(string filePath)
+        {
+            var fileBytes = System.IO.File.ReadAllBytes(filePath);
+            return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Path.GetFileName(filePath));
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public IActionResult CopyEstimate(
+        [FromBody] CopyEstimateRequest request) // Create this DTO class
+        {
+            try
+            {
+                var parameters = new DynamicParameters();
+                parameters.Add("@VehicleListId", request.vehicleListId, DbType.Int32);
+                parameters.Add("@BusSeriesCode", request.newVehSeriesCode, DbType.String);
+                parameters.Add("@ProjDesc", request.newprojDesc, DbType.String);
+                parameters.Add("@EnteredBy", ViewBag.UserName, DbType.String);
+                parameters.Add("@EstimateType", "BUS", DbType.String);
+                parameters.Add("@NewVehicleListId", dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+                _dbConnection.Execute("SBCES.CopyEstimate", parameters, commandType: CommandType.StoredProcedure);
+
+                int newVehicleListId = parameters.Get<int>("@NewVehicleListId");
+                return Json(new { success = true, newVehicleListId });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+        public class CopyEstimateRequest
+        {
+            public int vehicleListId { get; set; }
+            public string oldVehSeriesCode { get; set; }
+            public string newVehSeriesCode { get; set; }
+            public string oldprojDesc { get; set; }
+            public string newprojDesc { get; set; }
+        }
+    }
+
+}
+ComboBoxEditor.cshtml :
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+    var columnLockMap = ViewData["LockMap"]?.ToString() ?? "";
+    var comboValue = Model?.ToString() ?? ""; 
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .Value(comboValue)
+    .DataValueField("Value")
+    .Filter(FilterType.Contains)
+    .Placeholder("Search...")
+    .AutoBind(true)
+    @* .MinLength(2) *@
+    .EnforceMinLength(true)
+    .NoDataTemplate("<div style='color: red; font-weight: bold;'>Invalid Selection</div>")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName },
+        { "data-column", fieldName },
+        { "data-role", "combobox" },
+        { "data-lock-map", columnLockMap },
+        { "class", "auto-lock-column"  + " required-cell"},
+        {"required", "required"}
+    })
+    .Events(e =>
+    {
+        e.DataBound("onComboBoxDataBound");
+        e.Change("onComboBoxChange");
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #")
+)
