@@ -99,3 +99,181 @@ Additional details :
          return StatusCode(500, "Add failed: " + ex.Message);
      }
  }
+============================================
+Additinal details : I would keep all the below 4 functions, just modify to get VehicleJson data. You can create a new function to return vehicle json data. Remove duplicate logic. Pls give me full changes for the functions you are creating or updatig. Full changes so I can copy and paste
+[HttpPost]
+public async Task<IActionResult> AddVehiclesView([FromBody] VehicleViewModel vehicleViewModel)
+{
+    if (vehicleViewModel == null)
+        return BadRequest("Model binding failed.");
+
+    try
+    {
+        var newId = await AddVehicleAsync(vehicleViewModel);
+
+        // Re-fetch full model from DB
+        var updated =  GetVehicleById(newId);
+
+        return Ok(updated);
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, "Add failed: " + ex.Message);
+    }
+}
+
+private async Task<int> AddVehicleAsync([FromBody] VehicleViewModel vehicleViewModel)
+{
+    var userName = ViewBag.UserName;
+    var maxVehicleListId =
+                _dbConnection.QueryFirstOrDefault<int>(@"SELECT MAX(VehicleListId) + 1  FROM SBCES.VehicleList");
+
+    _dbConnection.Open();
+    using (var transaction = _dbConnection.BeginTransaction())
+    {
+        try
+        {
+            // Insert into the main RbMasterlist table
+            var insertVehlistQuery = @"
+                                                INSERT INTO SBCES.VehicleList ( VehicleListId,NumOfVehicles,
+                                                    Sopnumber, ProjDesc, Differential, Engine, 
+                                                     Make, Model, VehSeriesCode, Year, Transmission,  EnteredBy,
+                                                    DateEntered, ModifiedLastBy, ModifiedLastDate
+                                                )
+                                                VALUES (
+                                                    @VehicleListId,@NumOfVehicles, @Sopnumber, @ProjDesc, @Differential, @Engine, 
+                                                     @Make, @VehModel, @VehSeriesCode, @Year, @Transmission, @EnteredBy,
+                                                    @DateEntered, @ModifiedLastBy, @ModifiedLastDate
+                                                );
+                                                
+                                            ";
+
+            await _dbConnection.ExecuteAsync(insertVehlistQuery, new
+            {
+                VehicleListId = maxVehicleListId,
+                vehicleViewModel.NumOfVehicles,
+                vehicleViewModel.Sopnumber,
+                vehicleViewModel.ProjDesc,
+                vehicleViewModel.Differential,
+                vehicleViewModel.Engine,
+
+                vehicleViewModel.Make,
+                vehicleViewModel.VehModel,
+                vehicleViewModel.Transmission,
+                vehicleViewModel.VehSeriesCode,
+                vehicleViewModel.Year,
+
+
+                EnteredBy = userName,
+                DateEntered = DateTime.Now,
+                ModifiedLastBy = userName,
+                ModifiedLastDate = DateTime.Now
+
+            }, transaction);
+
+
+
+            // Commit the transaction
+            transaction.Commit();
+
+            return maxVehicleListId;
+
+        }
+        catch (Exception ex)
+        {
+            // Rollback the transaction in case of an error
+            // transaction.Rollback();
+            Console.WriteLine($"Error creating Vehicle data: {ex.Message}");
+            throw; // Re-throw the exception to propagate it
+        }
+    }
+
+}
+Update :
+ [HttpPost]
+ public async Task<IActionResult> UpdateVehiclesView([FromBody] VehicleViewModel vehicleViewModel)
+ {
+     if (vehicleViewModel == null)
+         return BadRequest("Model binding failed.");
+
+     try
+     {
+         await UpdateVehiclesAsync(vehicleViewModel);
+
+         var updated =  GetVehicleById(vehicleViewModel.VehicleListId);
+
+         return Ok(updated);
+     }
+     catch (Exception ex)
+     {
+         return StatusCode(500, "Update failed: " + ex.Message);
+     }
+ }
+
+ [AllowAnonymous]
+ private async Task UpdateVehiclesAsync(VehicleViewModel vehicleViewModel)
+ {
+     var userName = ViewBag.UserName;
+     _dbConnection.Open();
+     using (var transaction = _dbConnection.BeginTransaction())
+     {
+         try
+         {
+             // Update the [VehicleListId] table
+             var updateVehiclelistQuery = @"
+                                             UPDATE SBCES.[VehicleList]
+                                             SET 
+                                                 Sopnumber = @Sopnumber,
+                                                 ProjDesc =@ProjDesc,
+                                                 Differential = @Differential,
+                                                 Engine = @Engine,
+                                                 NumOfVehicles = @NumOfVehicles,
+                                                 
+                                                 Make = @Make,
+                                                 Model = @VehModel,
+                                                 Transmission = @Transmission,
+                                                 VehSeriesCode = @VehSeriesCode,
+                                                 Year = @Year,
+                                                 
+
+                                                 ModifiedLastBy = @LastModifiedBy,
+                                                 ModifiedLastDate = @ModifiedLastDate
+             
+                                             WHERE VehicleListId = @VehicleListId;
+                                         ";
+
+             await _dbConnection.ExecuteAsync(updateVehiclelistQuery, new
+             {
+                 vehicleViewModel.Sopnumber,
+                 vehicleViewModel.ProjDesc,
+                 vehicleViewModel.Differential,
+                 vehicleViewModel.Engine,
+                 vehicleViewModel.NumOfVehicles,
+
+
+                 vehicleViewModel.Make,
+                 vehicleViewModel.VehModel,
+                 vehicleViewModel.Transmission,
+                 vehicleViewModel.VehSeriesCode,
+                 vehicleViewModel.Year,
+
+                 LastModifiedBy = userName,
+                 ModifiedLastDate = DateTime.Now,
+                 vehicleViewModel.VehicleListId
+
+             }, transaction);
+
+
+             // Commit the transaction
+             transaction.Commit();
+
+         }
+         catch (Exception ex)
+         {
+             // Rollback the transaction in case of an error
+             transaction.Rollback();
+             Console.WriteLine($"Error updating vehicle estimate: {ex.Message}");
+             throw; // Re-throw the exception to propagate it
+         }
+     }
+ }
