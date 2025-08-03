@@ -1,0 +1,175 @@
+This is my old sourcecode. The goal is to modify only view. Can I simply replace below _ScPartsused.cshtml with the above new form?
+Controller, model, JS should be same like in _ScPartsused.cshtml
+VehicleController.cs :
+ [AllowAnonymous]
+ public IActionResult ScPartsUsedInEstimates(string id, string gridType)
+ {
+     ViewBag.PartNum = id;
+     if (gridType == null)
+     {
+         ViewBag.GridType = "VehicleGrid";
+     }
+     else
+     {
+         ViewBag.GridType = gridType;
+
+     }
+
+     var model = new List<BCES.Models.Parts.StockCodedPartsViewModel> { };
+
+     return PartialView("_ScPartsUsed", model);
+
+ }
+ScPartsUsedInEstimateController :
+private async Task<IEnumerable<StockCodedPartsViewModel>> GetScPartsUsedInVehicleEstimates(string id, string gridType)
+{
+
+    try
+    {
+
+        var query = @"
+                     DECLARE @Id VARCHAR(30) = '" + id + "'" +
+                     @"
+                       
+                         SELECT 
+                        UPPER(SCP.MMSSTOCKCODE) AS MMSStockCode,
+                        ISNULL(SCP.MMSCOST, 0) AS UnitCost,
+                        ..
+                        ";
+
+        return await _dbConnection.QueryAsync<StockCodedPartsViewModel>(query);
+
+    }
+    ..
+_ScPartsused.cshtml :
+    @model IEnumerable<BCES.Models.Parts.StockCodedPartsViewModel>
+
+@{
+    ViewData["Title"] = "Stock Coded Parts Details";
+    var scGridName = $"ScPartsMaterialDetailsRebuiltPartsGrid";
+    bool isArchived = ViewBag.GridType == "ArchivedVehicleGrid"; //ArchiveDisable
+    bool isAdmin = ViewBag.RoleId == 1; //ArchiveDisable
+    ViewBag.scGridName = scGridName;
+    string gridName = $"ScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}"; //for JS
+}
+<script>
+    // Store grid name for JavaScript access
+    var scInEstimateGridName = '@gridName';
+</script>
+<input type="hidden" id="scGridNameField" value="@scGridName" /> @* save gridname in hidden field for JS *@
+<h6>Stock Coded Parts Used</h6>
+
+@(
+Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()    
+     .Name($"ScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}") 
+     .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "RbGrid" }) //lockcols
+      .Events(events => events
+                    .DataBound("onGridDataBound")
+                    .Save("onGridCellSave")
+                    //.SaveChanges("onSaveChanges")
+                    .CellClose("onGridCellClose")  
+                )
+    .Columns(columns =>
+    {
+       // columns.Bound(c => c.MMSStockCode).Title("Stock Code").IncludeInMenu(false).EditorTemplateName("ComboBoxEditor").Width(70);
+        columns.Bound(c => c.MMSStockCode)
+                        .Title("Stock Code")
+                        .HtmlAttributes(new { @class = "stock-code-cell", data_field = "MMSStockCode" })
+                        .IncludeInMenu(false)
+                        .HeaderHtmlAttributes(new { @class = "required-header" })
+                        .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                        .EditorTemplateName("ScComboBox")
+                        .Width(180);
+      @*  columns.Command(command =>
+        {
+            command.Custom("Populate Details").Click("refreshScPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+        }).Width(60); *@
+        columns.Bound(c => c.PartType)
+    .Title("Part Type")
+    .Width(150)
+    .EditorTemplateName("ComboBoxEditor")
+    .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+    ;
+
+        columns.Bound(c => c.OrigSupplierNum)
+        .Title("Supplier Num")
+        .Width(150)
+        .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains")
+        .SuggestionOperator(FilterType.Contains)))
+        .EditorTemplateName("ComboBoxEditor")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+        ;
+       ..
+       
+        // columns.Bound(c => c.DateRevised).Title("Date Revised");
+       @*  columns.Command(command =>
+        {
+          ..
+        }).Width(100); *@
+        ..
+    })
+  
+     .ToolBar(toolbar =>
+    {
+        if (!isArchived && isAdmin) //ArchiveDisable
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    //.Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Editable(editable => editable
+                    .Mode(isArchived ? GridEditMode.InLine : GridEditMode.InCell)
+                    .Enabled(!isArchived)
+                )
+    .Pageable(p => p
+    .PageSizes(new int[] { 1, 10, 20, 50 }) // Dropdown options
+    .Position(GridPagerPosition.Bottom)
+
+    )
+    .Sortable()
+    .Resizable(r => r.Columns(true))
+    //.Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(false)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.MMSStockCode); 
+            model.Field(c => c.MMSStockCode);
+            model.Field(c => c.UnitCost);
+       ..
+        })
+
+        .Events(events =>
+        {
+            events.RequestEnd("onScRequestEnd");
+            events.Error("onDataSourceError");
+             
+        })
+
+        .Read(read => read.Url(Url.Action("GetScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+)
+
+@(Html.Kendo().Dialog()
+    .Name("partDetailsDialog")
+    .Title("Part Details")
+    .Width(400)
+    .Modal(true)
+    .Visible(false)
+    .Actions(actions =>
+    {
+        actions.Add().Text("Close").Primary(true);
+    })
+)
+
