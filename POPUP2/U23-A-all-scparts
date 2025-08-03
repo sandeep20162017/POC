@@ -1,0 +1,269 @@
+1. First, update ScpartsUsedInEstimatesController.cs with a new action for getting part details:
+csharp
+[AllowAnonymous]
+public async Task<IActionResult> GetScPartUsedDetail(string mmsStockCode, string vehicleListId)
+{
+    try
+    {
+        var query = @"
+            SELECT 
+                scp.MMSStockCode,
+                scp.PartType,
+                scp.OrigSupplierNum,
+                scp.OrigSupplierName,
+                scp.DetailedDesc AS PartDescription,
+                scp.MmsNewCost AS UnitCost,
+                scp.CoreCost,
+                scused.CostCentre,
+                scused.QtyReqd AS Qty,
+                scused.PercentUsage AS Percentage,
+                scused.LastModifiedBy AS ModBy,
+                scused.LastModifiedDate AS ModDate,
+                dbo.FINALCOST(CAST(scused.PercentUsage AS NUMERIC(18,2)), 
+                    CAST(scused.QtyReqd AS NUMERIC(18,2)), 
+                    scp.MmsNewCost, 0) AS TotalCost
+            FROM SBCES.SCPartsUsed scused
+            INNER JOIN SBCES.StockCodedParts scp 
+                ON scused.MMSStockCode = scp.MMSStockCode
+            WHERE scused.MMSStockCode = @mmsStockCode 
+                AND scused.LinkCode = @vehicleListId
+                AND scused.LinkType = 'BUS'
+                AND scused.RebuiltPart = 'N'";
+
+        var part = await _dbConnection.QueryFirstOrDefaultAsync<StockCodedPartsViewModel>(
+            query, 
+            new { mmsStockCode, vehicleListId });
+            
+        return part != null 
+            ? Json(part) 
+            : NotFound();
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, ex.Message);
+    }
+}
+2. Update _ScpartsPartial.cshtml with complete JavaScript implementation:
+html
+@model IEnumerable<BCES.Models.Parts.StockCodedPartsViewModel>
+@{
+    ViewData["Title"] = "Stock Coded Parts Details";
+    var scGrid = $"ScPartsGrid_{ViewBag.PartNum}";
+    var partNum = ViewBag.PartNum;
+}
+
+<h6>Stock Coded Parts Used</h6>
+
+<!-- Grid Container -->
+<div id="scGridContainer">
+    @(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
+        .Name(scGrid)
+        .Columns(columns =>
+        {
+            columns.Bound(p => p.MMSStockCode)
+                .Title("Stock Code")
+                .ClientTemplate("<a class='scLink' href='javascript:void(0)'>#= MMSStockCode #</a>");
+            columns.Bound(p => p.PartType).Title("Part Type");
+            columns.Bound(p => p.OrigSupplierNum).Title("Supplier Num");
+            columns.Bound(p => p.OrigSupplierName).Title("Supplier Name");
+            columns.Bound(p => p.UnitCost).Title("Unit Cost").Format("{0:c}");
+            columns.Bound(p => p.Qty).Title("Qty");
+            columns.Bound(p => p.TotalCost).Title("Total Cost").Format("{0:c}");
+            columns.Command(command => 
+            {
+                command.Custom("Delete").Text("Delete").Click("scDeleteClick");
+            }).Title("Actions");
+        })
+        .DataSource(dataSource => dataSource
+            .Ajax()
+            .Read(read => read.Action("GetScPartsUsedInEstimates", "ScPartsUsedInEstimates", 
+                new { id = partNum, gridType = "VehicleGrid" }))
+        )
+        .ToClientTemplate()
+    )
+</div>
+
+<button id="scAddNew" class="k-button k-primary" style="margin-bottom:8px;">
+    <span class="k-icon k-i-plus"></span> Add New Stock Coded Part
+</button>
+
+<!-- Form remains the same -->
+<form id="scDetailForm" style="display:none;">
+    <!-- ... existing form content ... -->
+</form>
+
+<script>
+    $(function() {
+        var gridName = "@scGrid";
+        var partNum = "@ViewBag.PartNum";
+        var grid = $("#" + gridName).data("kendoGrid");
+        
+        // Load part details when clicking a row
+        $("#" + gridName).on("click", ".scLink", function() {
+            var row = $(this).closest("tr");
+            var dataItem = grid.dataItem(row);
+            loadPartDetails(dataItem.MMSStockCode);
+        });
+
+        // Add new button
+        $("#scAddNew").click(function() {
+            clearDetailForm();
+            $("#scDetailForm").data("mode", "add");
+            showDetailForm();
+        });
+
+        // Cancel button
+        $("#scCancelBtn").click(function() { 
+            $("#scDetailForm").hide(); 
+            $(".scLink").prop("disabled", false); 
+        });
+
+        // Update/Save button
+        $("#scUpdateBtn").click(function() {
+            saveScPart();
+        });
+
+        // Auto-calculate total cost
+        $("#scQty, #scPerc").on("change input", function() {
+            calculateTotalCost();
+        });
+    });
+
+    // Delete handler
+    function scDeleteClick(e) {
+        e.preventDefault();
+        var grid = e.sender;
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        
+        kendo.confirm("Delete this part?").then(function() {
+            $.ajax({
+                url: '@Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates")',
+                type: 'POST',
+                data: { 
+                    id: dataItem.MMSStockCode, 
+                    parentPartId: "@ViewBag.PartNum",
+                    gridType: "VehicleGrid"
+                },
+                success: function() {
+                    grid.dataSource.read();
+                    kendo.alert("Part deleted successfully");
+                },
+                error: function(xhr) {
+                    kendo.alert("Delete failed: " + xhr.responseText);
+                }
+            });
+        });
+    }
+
+    // Load part details via AJAX
+    function loadPartDetails(stockCode) {
+        $(".scLink").prop("disabled", true);
+        
+        $.get('@Url.Action("GetScPartUsedDetail", "ScPartsUsedInEstimates")', {
+            mmsStockCode: stockCode,
+            vehicleListId: "@ViewBag.PartNum"
+        }, function(data) {
+            if (data) {
+                $("#scStockCode").val(data.MMSStockCode);
+                $("#scPartType").val(data.PartType);
+                $("#scSupplierNum").val(data.OrigSupplierNum);
+                $("#scSupplierName").val(data.OrigSupplierName);
+                $("#scUnitCost").val(data.UnitCost);
+                $("#scQty").val(data.Qty);
+                $("#scTotCost").val(data.TotalCost);
+                $("#scCoreCost").val(data.CoreCost);
+                $("#scCostCentre").val(data.CostCentre);
+                $("#scPerc").val(data.Percentage);
+                $("#scPartDesc").val(data.PartDescription);
+                $("#scModBy").val(data.ModBy);
+                $("#scModDate").val(data.ModDate ? new Date(data.ModDate).toLocaleString() : "");
+                
+                $("#scDetailForm").data("mode", "edit");
+                showDetailForm();
+            }
+        }).always(function() {
+            $(".scLink").prop("disabled", false);
+        });
+    }
+
+    // Save part via AJAX
+    function saveScPart() {
+        var mode = $("#scDetailForm").data("mode");
+        var isAdd = mode === "add";
+        var vehicleListId = "@ViewBag.PartNum";
+        
+        var partData = {
+            MMSStockCode: isAdd ? prompt("Enter Stock Code:") : $("#scStockCode").val(),
+            CC: $("#scCostCentre").val(),
+            Qty: $("#scQty").val(),
+            Percentage: $("#scPerc").val(),
+            UnitCost: $("#scUnitCost").val(),
+            CoreCost: $("#scCoreCost").val(),
+            LinkCode: vehicleListId
+        };
+        
+        if (isAdd && !partData.MMSStockCode) {
+            kendo.alert("Stock Code is required!");
+            return;
+        }
+        
+        var url, method;
+        if (isAdd) {
+            url = '@Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates")';
+            method = 'POST';
+        } else {
+            url = '@Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates")';
+            method = 'POST';
+        }
+        
+        $.ajax({
+            url: url,
+            type: method,
+            data: {
+                id: vehicleListId,
+                gridType: "VehicleGrid",
+                model: partData
+            },
+            success: function() {
+                $("#@scGrid").data("kendoGrid").dataSource.read();
+                $("#scDetailForm").hide();
+                $(".scLink").prop("disabled", false);
+                kendo.alert("Part saved successfully");
+            },
+            error: function(xhr) {
+                kendo.alert("Save failed: " + xhr.responseText);
+            }
+        });
+    }
+
+    // Calculate total cost
+    function calculateTotalCost() {
+        var qty = parseInt($("#scQty").val()) || 0;
+        var unitCost = parseFloat($("#scUnitCost").val()) || 0;
+        var perc = parseInt($("#scPerc").val()) || 0;
+        var total = qty * unitCost * (1 + perc/100);
+        $("#scTotCost").val(total.toFixed(2));
+    }
+
+    // Clear form
+    function clearDetailForm() {
+        $("#scDetailForm input").val("");
+        $("#scDetailForm").data("mode", "add");
+    }
+
+    // Show form
+    function showDetailForm() {
+        $("#scDetailForm").show();
+    }
+</script>
+3. Update the Index.cshtml to load the partial correctly:
+html
+<!-- In Index.cshtml -->
+<div id="stockCodedPartsTabContent">
+    @await Html.PartialAsync("_ScPartsPartial", 
+        new List<StockCodedPartsViewModel>(), 
+        new ViewDataDictionary(ViewData) {
+            { "PartNum", ViewBag.PartNum }
+        })
+</div>
+Key Features Implemented:
