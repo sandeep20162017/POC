@@ -1,0 +1,51 @@
+1. Update loadVehicleForm (Remove Tab Selection)
+javascript
+// Replace the existing loadVehicleForm function with this
+window.loadVehicleForm = function(vehicleId) {
+    $.get('@Url.Action("GetVehicleById","Vehicles")', { id: vehicleId }, function(html) {
+        $("#vehicleTabContent").html(html);
+        window.tabContentLoaded[0] = true;
+        window.wireVehicleForm(); // rebind save/cancel/edit/etc
+    });
+    
+    // REMOVED THIS PROBLEMATIC CODE:
+    // var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+    // tabStrip.select(0); // THIS WAS CAUSING INFINITE RECURSION
+};
+2. Update onTabSelect (Add Guard Clause)
+javascript
+// Replace the existing onTabSelect function with this
+window.onTabSelect = function(e) {
+    // Get tab index without jQuery for better performance
+    var idx = e.item.index();
+    
+    // Prevent infinite recursion
+    if (window.currentlyLoadingTab === idx) return;
+    window.currentlyLoadingTab = idx;
+    
+    if (pendingChanges && idx > 0) {
+        e.preventDefault();
+        window.currentlyLoadingTab = null;
+        return kendo.alert("Please save or cancel before switching tabs.");
+    }
+    
+    if (!window.tabContentLoaded[idx] && window.currentVehicleId > 0) {
+        loadTabContent(idx, window.currentVehicleId);
+    }
+    
+    window.currentlyLoadingTab = null;
+};
+3. Update openEstimatePopup (Initialize Loading Flag)
+javascript
+// Add this at the top of the function
+window.openEstimatePopup = function(vehicleId) {
+    // Initialize loading tracker
+    window.currentlyLoadingTab = null;
+    
+    // ... rest of existing code ...
+    pendingChanges = false;
+    currentVehicleId = vehicleId;
+    window.tabContentLoaded = [false, false, false, false, false, false, false, false];
+    
+    // ... rest of function ...
+};
