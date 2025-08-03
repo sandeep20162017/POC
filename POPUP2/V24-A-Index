@@ -1,0 +1,215 @@
+1. Update Index.cshtml (Vehicles View)
+html
+<!-- Update the tab strip with new order -->
+<div id="estimatePopup" style="display:none;">
+    @(Html.Kendo().TabStrip()
+        .Name("estimateTabs")
+        .SelectedIndex(0)
+        .Events(e => e.Select("onTabSelect"))
+        .Items(tb =>
+        {
+            tb.Add().Text("Vehicle").Content(@<text>
+                <div id="vehicleTabContent">
+                    <!-- Vehicle content loaded dynamically -->
+                </div>
+            </text>);
+
+            tb.Add().Text("StockCoded Parts").Content(@<text>
+                <div id="stockCodedPartsTabContent">
+                    <!-- StockCoded Parts content loaded dynamically -->
+                </div>
+            </text>).Enabled(false);
+
+            tb.Add().Text("NonStock Parts").Content(@<text>
+                <div id="nonStockPartsTabContent">
+                    <!-- NonStock Parts content loaded dynamically -->
+                </div>
+            </text>).Enabled(false);
+
+            tb.Add().Text("Rebuilt Parts").Content(@<text>
+                <div id="rebuiltPartsTabContent">
+                    <!-- Rebuilt Parts content loaded dynamically -->
+                </div>
+            </text>).Enabled(false);
+
+            tb.Add().Text("Labour Details").Content("<div id='labourDetailsContent'></div>").Enabled(false);
+            tb.Add().Text("Labour Estimate").Content("<div id='labourEstimateContent'></div>").Enabled(false);
+            tb.Add().Text("Material Estimate").Content("<div id='materialEstimateContent'></div>").Enabled(false);
+            tb.Add().Text("Total Cost").Content("<div id='totalCostContent'></div>").Enabled(false);
+        })
+    )
+</div>
+2. Update JavaScript in Index.cshtml
+javascript
+// Replace the existing loadTabContent function
+window.loadTabContent = function(index, id) {
+    var urls = [
+        "", // Vehicle (handled separately)
+        '@Url.Action("ScPartsUsedInEstimates","Vehicles")', // StockCoded Parts
+        '@Url.Action("NscDetailsPartial","Vehicles")', // NonStock Parts
+        '@Url.Action("RbDetailsPartial","Vehicles")', // Rebuilt Parts
+        '@Url.Action("LabourDetailsPartial","Vehicles")', // Labour Details
+        '@Url.Action("LabourHourSummaryPartial","Vehicles")', // Labour Estimate
+        '@Url.Action("MaterialCostSummaryPartial","Vehicles")', // Material Estimate
+        '@Url.Action("TotalCostPartial","Vehicles")' // Total Cost
+    ];
+    
+    // Special handling for Vehicle tab
+    if(index === 0) {
+        loadVehicleForm(id);
+        return;
+    }
+    
+    var paneId = [
+        "", // Vehicle
+        "stockCodedPartsTabContent", // StockCoded Parts
+        "nonStockPartsTabContent", // NonStock Parts
+        "rebuiltPartsTabContent", // Rebuilt Parts
+        "labourDetailsContent", // Labour Details
+        "labourEstimateContent", // Labour Estimate
+        "materialEstimateContent", // Material Estimate
+        "totalCostContent" // Total Cost
+    ][index];
+    
+    var pane = $("#" + paneId);
+    pane.html("<div class='k-loading-mask'><span class='k-loading-text'>Loading…</span></div>");
+    
+    if (urls[index]) {
+        $.get(urls[index], { id: id }, data => {
+            pane.html(data);
+            window.tabContentLoaded[index] = true;
+            
+            // Enable the tab after loading
+            var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+            tabStrip.enable(tabStrip.tabGroup.children().eq(index), true);
+        });
+    }
+};
+
+// Update tabContentLoaded array initialization
+// Find this line in your script:
+// window.tabContentLoaded = [false, false, false, false, false, false, false];
+// Replace with:
+window.tabContentLoaded = [false, false, false, false, false, false, false, false];
+3. Update VehiclesController.cs
+csharp
+// Add these new actions
+[AllowAnonymous]
+public IActionResult NonStockPartsPartial(string id, string gridType)
+{
+    ViewBag.PartNum = id;
+    ViewBag.GridType = gridType ?? "VehicleGrid";
+    return PartialView("_NscPartsUsed", new List<NscPartsUsedViewModel>());
+}
+
+[AllowAnonymous]
+public IActionResult RebuiltPartsPartial(string id, string gridType)
+{
+    ViewBag.PartNum = id;
+    ViewBag.GridType = gridType ?? "VehicleGrid";
+    return PartialView("_RbPartsUsed", new List<RebuiltPartsViewModel>());
+}
+
+// Update existing actions to match new tab order
+[AllowAnonymous]
+public IActionResult LabourDetailsPartial([FromQuery] string id, [FromQuery] string gridType)
+{
+    ViewBag.PartNum = id;
+    ViewBag.GridType = gridType ?? "VehicleGrid";
+    return PartialView("_LabourDetails", new List<LabourDetailsRebuiltPartsViewModel>());
+}
+
+[AllowAnonymous]
+public IActionResult LabourHourSummaryPartial(string id, string gridType)
+{
+    ViewBag.PartNum = id;
+    ViewBag.GridType = gridType ?? "VehicleGrid";
+    return PartialView("_LabourHourSummary", new List<LabourDetailsRebuiltPartsViewModel>());
+}
+
+[AllowAnonymous]
+public IActionResult MaterialCostSummaryPartial(string id, string gridType)
+{
+    ViewBag.PartNum = id;
+    ViewBag.GridType = gridType ?? "VehicleGrid";
+    return PartialView("_MaterialCostSummary", new List<MaterialCostSummaryInRbViewModel>());
+}
+4. Create New Partial Views (or rename existing ones)
+Create _NscPartsUsed.cshtml (NonStock Parts):
+
+html
+@model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+
+@{
+    ViewData["Title"] = "Non-Stock Parts Details";
+}
+
+<h6>Non-Stock Parts Used</h6>
+
+<div class="form-container">
+    <!-- Add your NonStock Parts UI here -->
+    <p>Non-Stock Parts content will be loaded here</p>
+</div>
+Create _RbPartsUsed.cshtml (Rebuilt Parts):
+
+html
+@model IEnumerable<BCES.Models.Parts.RebuiltPartsViewModel>
+
+@{
+    ViewData["Title"] = "Rebuilt Parts Details";
+}
+
+<h6>Rebuilt Parts Used</h6>
+
+<div class="form-container">
+    <!-- Add your Rebuilt Parts UI here -->
+    <p>Rebuilt Parts content will be loaded here</p>
+</div>
+5. Update VehicleViewModel.cs (Ensure Initialization)
+csharp
+// Add these properties to VehicleViewModel
+public List<NscPartsUsedViewModel> NonStockParts { get; set; }
+public List<RebuiltPartsViewModel> RebuiltParts { get; set; }
+
+// Update constructor
+public VehicleViewModel()
+{
+    StockCodedParts = new List<StockCodedPartsViewModel>();
+    NonStockParts = new List<NscPartsUsedViewModel>();
+    RebuiltParts = new List<RebuiltPartsViewModel>();
+}
+6. Update Controller Query Methods
+csharp
+// Add these query methods to VehiclesController
+private async Task<IEnumerable<NscPartsUsedViewModel>> GetNonStockParts(string id)
+{
+    try
+    {
+        return await _dbConnection.QueryAsync<NscPartsUsedViewModel>(@"
+            SELECT * 
+            FROM SBCES.NSCPartsUsed 
+            WHERE LinkCode = @Id AND LinkType = 'BUS'", 
+            new { Id = id });
+    }
+    catch
+    {
+        return new List<NscPartsUsedViewModel>();
+    }
+}
+
+private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltParts(string id)
+{
+    try
+    {
+        return await _dbConnection.QueryAsync<RebuiltPartsViewModel>(@"
+            SELECT * 
+            FROM SBCES.SCPartsUsed 
+            WHERE LinkCode = @Id AND LinkType = 'BUS' AND RebuiltPart = 'Y'", 
+            new { Id = id });
+    }
+    catch
+    {
+        return new List<RebuiltPartsViewModel>();
+    }
+}
+Summary of Changes:
