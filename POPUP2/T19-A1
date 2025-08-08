@@ -1,0 +1,74 @@
+Updated openEstimatePopup
+This version forces the TabStrip to initialize every time the popup is shown, even if Kendo didn’t run on page load.
+
+javascript
+Copy
+Edit
+// ── Open vehicle popup and load form partial
+window.openEstimatePopup = function (vehicleId) {
+    window.currentlyLoadingTab = null;
+
+    // Create or get Kendo Window
+    var win = $("#estimatePopup").data("kendoWindow");
+    if (!win) {
+        win = $("#estimatePopup").kendoWindow({
+            modal: true,
+            width: 1150,
+            height: 600,
+            title: vehicleId === 0 ? "Add New Estimate" : "Estimate #" + vehicleId,
+            visible: false,
+            actions: ["Close"],
+            activate: function () {
+                // Force TabStrip init every time popup opens
+                $("#estimateTabs").kendoTabStrip({
+                    animation: { open: { effects: "fadeIn" } },
+                    select: onTabSelect
+                });
+            },
+            deactivate: function () {
+                if (pendingChanges && !confirm("Unsaved changes. Close anyway?")) {
+                    return false;
+                }
+            }
+        }).data("kendoWindow");
+    }
+
+    win.title(vehicleId === 0 ? "Add New Estimate" : "Vehicle Estimate #" + vehicleId);
+    win.center().open();
+
+    // Reset state
+    pendingChanges = false;
+    currentVehicleId = vehicleId;
+    window.tabContentLoaded = [false, false, false, false, false, false, false, false];
+
+    // Load the first tab content
+    loadVehicleForm(vehicleId);
+};
+Updated loadVehicleForm
+This version auto-enables the other tabs if the record already exists.
+
+javascript
+Copy
+Edit
+// ── Load the form into the first tab
+window.loadVehicleForm = function (vehicleId) {
+    $.get('@Url.Action("GetVehicleById", "Vehicles")', { id: vehicleId }, function (html) {
+        $("#vehicleTabContent").html(html);
+        window.tabContentLoaded[0] = true;
+        window.wireVehicleForm(); // rebind save/cancel/edit/etc
+
+        var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+
+        // If it's an existing record, enable other tabs
+        if (vehicleId !== 0 && tabStrip) {
+            for (var i = 1; i <= 7; i++) {
+                tabStrip.enable(tabStrip.tabGroup.children().eq(i), true);
+            }
+        } else if (vehicleId === 0 && tabStrip) {
+            // New record: disable all other tabs
+            for (var i = 1; i <= 7; i++) {
+                tabStrip.enable(tabStrip.tabGroup.children().eq(i), false);
+            }
+        }
+    });
+};
