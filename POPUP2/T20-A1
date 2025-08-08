@@ -12,9 +12,8 @@
 /* CSS styles remain unchanged */
 </style>
 
-<!-- Add this script block BEFORE the grid -->
 <script>
-// Global functions must be defined BEFORE they're referenced in grid templates
+// Define critical functions BEFORE the grid is rendered
 window.openEstimatePopup = function(vehicleId) {
     // Initialize loading tracker
     window.currentlyLoadingTab = null;
@@ -34,7 +33,7 @@ window.openEstimatePopup = function(vehicleId) {
 
     win.title(vehicleId === 0 ? "Add New Estimate" : "Vehicle Estimate #" + vehicleId);
     win.center().open();
-    loadVehicleForm(vehicleId);
+    window.loadVehicleForm(vehicleId); // Use window. to ensure global scope
 
     pendingChanges = false;
     currentVehicleId = vehicleId;
@@ -49,7 +48,7 @@ window.openEstimatePopup = function(vehicleId) {
     }
 };
 
-// Delete handler - fixed function name
+// Delete handler
 window.showDeleteConfirmation = function(e) {
     e.preventDefault();
     var grid = $("#VehicleGrid").data("kendoGrid");
@@ -87,17 +86,17 @@ window.showDeleteConfirmation = function(e) {
           .Name("VehicleGrid")
           .Columns(c => {
               c.Bound(v => v.VehicleListId).Title("Estimate #")
-               .ClientTemplate("<a class='estimate-link' onclick='openEstimatePopup(#=VehicleListId#)'>#=VehicleListId#</a>").Width(120);
+               .ClientTemplate("<a class='estimate-link' onclick='window.openEstimatePopup(#=VehicleListId#)'>#=VehicleListId#</a>").Width(120);
               c.Bound(v => v.VehSeriesCode).Title("Vehicle Series").HeaderHtmlAttributes(new { @class="required-header" }).EditorTemplateName("ComboBoxEditor").Width(150);
               c.Bound(v => v.NumOfVehicles).Title("Qty").HeaderHtmlAttributes(new { @class="required-header"}).Width(80);
               c.Bound(v => v.ProjDesc).Title("Description").HeaderHtmlAttributes(new { @class="required-header"}).Width(250);
               c.Command(cmd => {
                   cmd.Custom("Copy").IconClass("k-icon k-i-copy").Click("window.onCopyEstimate");
                   cmd.Custom("Archive").IconClass("k-icon k-i-folder").Click("window.onArchiveClick");
-                  cmd.Custom("Delete").IconClass("k-icon k-i-delete").Click("showDeleteConfirmation");
+                  cmd.Custom("Delete").IconClass("k-icon k-i-delete").Click("window.showDeleteConfirmation");
               }).Width(180);
           })
-          .ToolBar(tb => tb.ClientTemplate("<button class='k-button k-button-icontext' onclick='openEstimatePopup(0)'><span class='k-icon k-i-plus'></span>Add New Record</button>"))
+          .ToolBar(tb => tb.ClientTemplate("<button class='k-button k-button-icontext' onclick='window.openEstimatePopup(0)'><span class='k-icon k-i-plus'></span>Add New Record</button>"))
           .Pageable(p => p.PageSizes(new[] {10,20,50}))
           .Sortable().Filterable().Scrollable().HtmlAttributes(new { style="height:550px;" })
           .DataSource(ds => ds.Ajax()
@@ -269,6 +268,15 @@ window.onArchiveClick= function(e) {
     });
 };
 
+// ── Load the form into the first tab
+window.loadVehicleForm = function (vehicleId) {
+    $.get('@Url.Action("GetVehicleById", "Vehicles")', { id: vehicleId }, function (html) {
+        $("#vehicleTabContent").html(html);
+        window.tabContentLoaded[0] = true;
+        window.wireVehicleForm();
+    });
+};
+
 // ── Load partial tabs
 window.loadTabContent = function (index, id) {
     var urls = [
@@ -368,15 +376,6 @@ window.onTabSelect = function (e) {
     window.currentlyLoadingTab = null;
 };
 
-// ── Load the form into the first tab
-window.loadVehicleForm = function (vehicleId) {
-    $.get('@Url.Action("GetVehicleById", "Vehicles")', { id: vehicleId }, function (html) {
-        $("#vehicleTabContent").html(html);
-        window.tabContentLoaded[0] = true;
-        window.wireVehicleForm();
-    });
-};
-
 // ── Wire up form submit and cancel actions inside popup
 window.wireVehicleForm = function() {
     $("#btnCancelVehicle").off("click").on("click", function(){
@@ -426,7 +425,7 @@ window.wireVehicleForm = function() {
                 if (response && response.VehicleListId) {
                     window.currentVehicleId = response.VehicleListId;
                     $("#VehicleGrid").data("kendoGrid").dataSource.read();
-                    loadVehicleForm(response.VehicleListId);
+                    window.loadVehicleForm(response.VehicleListId);
 
                     var tabStrip = $("#estimateTabs").data("kendoTabStrip");
                     for (var i = 1; i <= 7; i++) {
