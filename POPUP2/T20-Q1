@@ -18,13 +18,118 @@ Index.cshtml :
 window.pendingChanges = false;
 window.currentVehicleId = 0;
 window.tabContentLoaded = [false, false, false, false, false, false, false];
+        // ── Copy estimate handler
+        window.onCopyEstimate = function (e) {
+            e.preventDefault();
+            var grid = $("#VehicleGrid").data("kendoGrid");
+            var item = grid.dataItem($(e.currentTarget).closest("tr"));
+            var win = $("#copyEstimateDialog").kendoWindow({
+                title: "Copy Estimate",
+                modal: true,
+                width: 400,
+                visible: false
+            }).data("kendoWindow");
 
-        $(document).ready(function () {
-            // Event delegation for grid actions
-            $(document).on("click", ".copy-estimate", window.onCopyEstimate);
-            $(document).on("click", ".archive-estimate", window.onArchiveClick);
-            $(document).on("click", ".delete-estimate", window.showDeleteConfirmation);
-        });
+            $("#vehicleListId").val(item.VehicleListId);
+            $("#oldVehSeriesCode").val(item.VehSeriesCode);
+            $("#oldprojDesc").val(item.ProjDesc);
+            $("#newVehSeriesCode, #newprojDesc").val("");
+
+            win.center().open();
+
+            // Wire up copy button
+            $("#copyEstimateBtn").off("click").on("click", function () {
+                var payload = {
+                    vehicleListId: $("#vehicleListId").val(),
+                    oldVehSeriesCode: $("#oldVehSeriesCode").val(),
+                    newVehSeriesCode: $("#newVehSeriesCode").val(),
+                    oldprojDesc: $("#oldprojDesc").val(),
+                    newprojDesc: $("#newprojDesc").val()
+                };
+
+                if (!payload.newVehSeriesCode || !payload.newprojDesc) {
+                    return kendo.alert("Please fill required fields.");
+                }
+
+                $.ajax({
+                    url: '@Url.Action("CopyEstimate", "Vehicles")',
+                    type: 'POST',
+                    contentType: "application/json",
+                    data: JSON.stringify(payload),
+                    success: function (response) {
+                        if (response.success) {
+                            kendo.alert("Estimate copied successfully! New ID: " + response.newVehicleListId);
+                            $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                            win.close();
+                        } else {
+                            kendo.alert("Copy failed: " + response.message);
+                        }
+                    }
+                });
+            });
+
+            $("#cancelCopyBtn").off("click").on("click", function () {
+                win.close();
+            });
+        };
+
+        // ── Archive handler
+        window.onArchiveClick = function (e) {
+            e.preventDefault();
+            var grid = $("#VehicleGrid").data("kendoGrid");
+            var item = grid.dataItem($(e.currentTarget).closest("tr"));
+
+            kendo.confirm("Archive estimate #" + item.VehicleListId + "?").then(function () {
+                $.ajax({
+                    url: '@Url.Action("ArchiveVehicleDetails", "Vehicles")',
+                    type: 'POST',
+                    contentType: "application/json",
+                    data: JSON.stringify({
+                        VehicleListId: item.VehicleListId,
+                        VehSeriesCode: item.VehSeriesCode,
+                        TypeId: "BUS",
+                        Username: "@ViewBag.UserName".toUpperCase()
+                    }),
+                    success: function (r) {
+                        if (r.success) {
+                            grid.dataSource.read();
+                            kendo.alert(r.message);
+                        } else {
+                            kendo.alert("Archive failed: " + r.message);
+                        }
+                    }
+                });
+            });
+        };
+
+        // ── Delete handler
+        window.showDeleteConfirmation = function (e) {
+            e.preventDefault();
+            var grid = $("#VehicleGrid").data("kendoGrid");
+            var item = grid.dataItem($(e.currentTarget).closest("tr"));
+            var dlg = $("#deleteConfirmationDialog").kendoWindow({
+                title: "Confirm Delete",
+                modal: true,
+                width: 400,
+                visible: false,
+                resizable: false
+            }).data("kendoWindow");
+
+            dlg.center().open();
+
+            $("#confirmDeleteBtn").off("click").on("click", function () {
+                $.post('@Url.Action("DeleteVehicle", "Vehicles")', { VehicleListId: item.VehicleListId }, function () {
+                    grid.dataSource.read();
+                    dlg.close();
+                });
+            });
+
+            $("#cancelDeleteBtn").off("click").on("click", function () {
+                dlg.close();
+            });
+        };
+
+        
 // ── Load partial tabs
         window.loadTabContent = function (index, id) {
             var urls = [
@@ -280,116 +385,7 @@ window.wireVehicleForm = function() {
 
 }
 
-// ── Copy estimate handler
-window.onCopyEstimate = function(e) {
-    e.preventDefault();
-    var grid = $("#VehicleGrid").data("kendoGrid");
-    var item = grid.dataItem($(e.currentTarget).closest("tr"));
-    var win = $("#copyEstimateDialog").kendoWindow({ 
-        title: "Copy Estimate", 
-        modal: true, 
-        width: 400, 
-        visible: false 
-    }).data("kendoWindow");
-    
-    $("#vehicleListId").val(item.VehicleListId);
-    $("#oldVehSeriesCode").val(item.VehSeriesCode);
-    $("#oldprojDesc").val(item.ProjDesc);
-    $("#newVehSeriesCode, #newprojDesc").val("");
-    
-    win.center().open();
-    
-    // Wire up copy button
-    $("#copyEstimateBtn").off("click").on("click", function() {
-        var payload = {
-            vehicleListId: $("#vehicleListId").val(),
-            oldVehSeriesCode: $("#oldVehSeriesCode").val(),
-            newVehSeriesCode: $("#newVehSeriesCode").val(),
-            oldprojDesc: $("#oldprojDesc").val(),
-            newprojDesc: $("#newprojDesc").val()
-        };
-        
-        if (!payload.newVehSeriesCode || !payload.newprojDesc) {
-            return kendo.alert("Please fill required fields.");
-        }
-        
-        $.ajax({
-            url: '@Url.Action("CopyEstimate", "Vehicles")',
-            type: 'POST',
-            contentType: "application/json",
-            data: JSON.stringify(payload),
-            success: function(response) {
-                if (response.success) {
-                    kendo.alert("Estimate copied successfully! New ID: " + response.newVehicleListId);
-                    $("#VehicleGrid").data("kendoGrid").dataSource.read();
-                    win.close();
-                } else {
-                    kendo.alert("Copy failed: " + response.message);
-                }
-            }
-        });
-    });
-    
-    $("#cancelCopyBtn").off("click").on("click", function() {
-        win.close();
-    });
-};
 
-// ── Archive handler
-window.onArchiveClick = function(e) {
-    e.preventDefault();
-    var grid = $("#VehicleGrid").data("kendoGrid");
-    var item = grid.dataItem($(e.currentTarget).closest("tr"));
-    
-    kendo.confirm("Archive estimate #" + item.VehicleListId + "?").then(function(){
-        $.ajax({
-            url: '@Url.Action("ArchiveVehicleDetails","Vehicles")',
-            type: 'POST',
-            contentType: "application/json",
-            data: JSON.stringify({ 
-                VehicleListId: item.VehicleListId, 
-                VehSeriesCode: item.VehSeriesCode, 
-                TypeId: "BUS", 
-                Username: "@ViewBag.UserName".toUpperCase() 
-            }),
-            success: function(r) {
-                if (r.success) { 
-                    grid.dataSource.read(); 
-                    kendo.alert(r.message); 
-                } else { 
-                    kendo.alert("Archive failed: " + r.message); 
-                }
-            }
-        });
-    });
-};
-
-// ── Delete handler
-window.showDeleteConfirmation = function(e) {
-    e.preventDefault();
-    var grid = $("#VehicleGrid").data("kendoGrid");
-    var item = grid.dataItem($(e.currentTarget).closest("tr"));
-    var dlg = $("#deleteConfirmationDialog").kendoWindow({ 
-        title: "Confirm Delete", 
-        modal: true, 
-        width: 400, 
-        visible: false, 
-        resizable: false 
-    }).data("kendoWindow");
-    
-    dlg.center().open();
-    
-    $("#confirmDeleteBtn").off("click").on("click", function(){
-        $.post('@Url.Action("DeleteVehicle","Vehicles")', { VehicleListId: item.VehicleListId }, function(){
-            grid.dataSource.read();
-            dlg.close();
-        });
-    });
-    
-    $("#cancelDeleteBtn").off("click").on("click", function(){ 
-        dlg.close(); 
-    });
-};
 
 window.setFormReadOnly = function(readOnly) {
     $("#vehicleForm :input").each(function() {
