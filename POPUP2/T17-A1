@@ -1,0 +1,199 @@
+Gotcha — so each tab has its own partial view (.cshtml) and you want them to load dynamically when the user clicks on a tab.
+We’ll wire it up so that:
+
+Vehicle tab → loads _VehPopUp.cshtml
+
+Parts → loads _PartsDetails.cshtml
+
+Labour → loads _LabourDetails.cshtml
+
+Stock Coded Parts → loads _ScParts.cshtml
+
+Non Stock Coded Parts → loads _NscPartsUsed.cshtml
+
+Rebuilt Parts → loads _RebuiltParts.cshtml
+
+Final Estimate → loads _FinalEstimate.cshtml
+
+HTML for Popup + TabStrip
+html
+Copy
+Edit
+<div id="estimatePopup" style="display:none;">
+    <div id="estimateTabs">
+        <ul>
+            <li class="k-state-active">Vehicle</li>
+            <li>Parts Details</li>
+            <li>Labour Details</li>
+            <li>Stock Coded Parts</li>
+            <li>Non Stock Coded Parts</li>
+            <li>Rebuilt Parts</li>
+            <li>Final Estimate</li>
+        </ul>
+
+        <div id="vehicleTabContent"></div>
+        <div id="partsTabContent"></div>
+        <div id="labourTabContent"></div>
+        <div id="stockCodedPartsTabContent"></div>
+        <div id="nonStockCodedPartsTabContent"></div>
+        <div id="rebuiltPartsTabContent"></div>
+        <div id="finalEstimateTabContent"></div>
+    </div>
+</div>
+JavaScript
+javascript
+Copy
+Edit
+var currentVehicleId = 0;
+
+$(document).ready(function () {
+    // Initialize popup
+    $("#estimatePopup").kendoWindow({
+        modal: true,
+        width: 1150,
+        height: 600,
+        title: "Estimate",
+        visible: false,
+        actions: ["Close"]
+    });
+
+    // Initialize TabStrip
+    $("#estimateTabs").kendoTabStrip({
+        animation: { open: { effects: "fadeIn" } },
+        select: onTabSelect
+    });
+
+    // Disable all tabs except Vehicle
+    disableOtherTabs();
+});
+
+function openEstimatePopup(vehicleId) {
+    var win = $("#estimatePopup").data("kendoWindow");
+    currentVehicleId = vehicleId;
+
+    win.title(vehicleId === 0 ? "Add New Estimate" : "Vehicle Estimate #" + vehicleId);
+    win.center().open();
+
+    // Load vehicle tab first
+    loadTabContent("vehicleTabContent", "/Vehicles/VehPopUp", { id: vehicleId }, function () {
+        if (vehicleId !== 0) {
+            enableAllTabs();
+        }
+    });
+}
+
+function onTabSelect(e) {
+    var index = $(e.item).index();
+    var tabsConfig = [
+        { id: "vehicleTabContent", url: "/Vehicles/VehPopUp" },
+        { id: "partsTabContent", url: "/Parts/PartsDetails" },
+        { id: "labourTabContent", url: "/Labour/LabourDetails" },
+        { id: "stockCodedPartsTabContent", url: "/Parts/ScParts" },
+        { id: "nonStockCodedPartsTabContent", url: "/Parts/NscPartsUsed" },
+        { id: "rebuiltPartsTabContent", url: "/Parts/RebuiltParts" },
+        { id: "finalEstimateTabContent", url: "/Estimates/FinalEstimate" }
+    ];
+
+    var tab = tabsConfig[index];
+    if ($("#" + tab.id).is(":empty")) {
+        loadTabContent(tab.id, tab.url, { id: currentVehicleId });
+    }
+}
+
+function loadTabContent(targetId, url, data, callback) {
+    $("#" + targetId).load(url, data, function () {
+        if (typeof callback === "function") callback();
+    });
+}
+
+function disableOtherTabs() {
+    var ts = $("#estimateTabs").data("kendoTabStrip");
+    for (var i = 1; i <= 6; i++) {
+        ts.enable(ts.tabGroup.children().eq(i), false);
+    }
+}
+
+function enableAllTabs() {
+    var ts = $("#estimateTabs").data("kendoTabStrip");
+    for (var i = 1; i <= 6; i++) {
+        ts.enable(ts.tabGroup.children().eq(i), true);
+    }
+}
+Controller Actions
+Example for VehiclesController:
+
+csharp
+Copy
+Edit
+public IActionResult VehPopUp(int id)
+{
+    var model = _vehicleService.GetVehicleById(id);
+    return PartialView("_VehPopUp", model);
+}
+Example for PartsController:
+
+csharp
+Copy
+Edit
+public IActionResult PartsDetails(int id)
+{
+    var model = _partsService.GetPartsByVehicleId(id);
+    return PartialView("_PartsDetails", model);
+}
+
+public IActionResult ScParts(int id)
+{
+    var model = _partsService.GetStockCodedParts(id);
+    return PartialView("_ScParts", model);
+}
+
+public IActionResult NscPartsUsed(int id)
+{
+    var model = _partsService.GetNonStockCodedParts(id);
+    return PartialView("_NscPartsUsed", model);
+}
+
+public IActionResult RebuiltParts(int id)
+{
+    var model = _partsService.GetRebuiltParts(id);
+    return PartialView("_RebuiltParts", model);
+}
+Example for LabourController:
+
+csharp
+Copy
+Edit
+public IActionResult LabourDetails(int id)
+{
+    var model = _labourService.GetLabourByVehicleId(id);
+    return PartialView("_LabourDetails", model);
+}
+Example for EstimatesController:
+
+csharp
+Copy
+Edit
+public IActionResult FinalEstimate(int id)
+{
+    var model = _estimateService.GetFinalEstimate(id);
+    return PartialView("_FinalEstimate", model);
+}
+How it works
+Popup opens → openEstimatePopup() runs → loads Vehicle tab content.
+
+New record → only Vehicle tab enabled.
+Existing record → all tabs enabled immediately.
+
+Tab click → onTabSelect loads the matching .cshtml partial from the correct controller.
+
+AJAX keeps the page light and only loads the tab you need.
+
+If you want, I can make it so that Parts / Labour / Final Estimate tabs pre-load automatically right after the popup opens for existing records, so the user sees them instantly without waiting for click. That would make the UX smoother for your scenario.
+
+
+
+
+
+
+
+Ask ChatGPT
