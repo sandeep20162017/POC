@@ -1,0 +1,348 @@
+@{
+    ViewData["Title"] = "Total Cost Summary";
+    string gridName = $"LabourDetailsGrid_{ViewBag.PartNum}";
+}
+
+<script>
+    // Store parameters from ViewBag
+    var partNum = '@ViewBag.PartNum';
+    var gridType = '@ViewBag.GridType';
+    
+    // Build URL with proper parameter encoding
+    var totalCostDataUrl = '@Url.Action("GetTotalCostInEstimates", "TotalCost")' + 
+                           '?id=' + encodeURIComponent(partNum) + 
+                           '&gridType=' + encodeURIComponent(gridType);
+</script>
+
+<h6>Total Cost Summary</h6>
+
+<div class="total-cost-container">
+    <!-- Loading indicator -->
+    <div id="loadingIndicator" class="loading-section">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+        </div>
+        <p>Loading cost data...</p>
+    </div>
+
+    <!-- Cost summary content -->
+    <div id="costSummaryContent" style="display: none;">
+        <!-- Material Costs Section -->
+        <div class="section-title">Material Costs</div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Materials Cost (Without Tax)</label>
+                <input id="materialCostWithoutTax" class="read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Tax</label>
+                <input id="materialTax" class="read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Material Cost (With Tax)</label>
+                <input id="materialCostWithTax" class="read-only" readonly />
+            </div>
+        </div>
+
+        <!-- Labour Costs Section -->
+        <div class="section-title">Labour Costs</div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Fringe</label>
+                <input id="labourFringe" class="read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Blended Fringe & Benefit Percent</label>
+                <input id="blendedFringePercent" class="read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Blended Fringe & Benefit Cost</label>
+                <input id="blendedFringeCost" class="read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Overhead</label>
+                <input id="labourOverhead" class="read-only" readonly />
+            </div>
+        </div>
+        
+        <!-- Blank row for spacing -->
+        <div class="form-row">
+            <div class="form-group" style="height: 28px;"></div>
+        </div>
+        
+        <!-- Material and Labour Totals Section -->
+        <div class="section-title">Totals (Material and Labour)</div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Total Material Cost (With Tax)</label>
+                <input id="totalMaterialCost" class="read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Total Labour Costs</label>
+                <input id="totalLabourCost" class="read-only" readonly />
+            </div>
+        </div>
+
+        <!-- Overall Totals Section -->
+        <div class="section-title">Total Costs</div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Total Without Tax</label>
+                <input id="totalWithoutTax" class="read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Total With Tax</label>
+                <input id="totalWithTax" class="read-only" readonly />
+            </div>
+        </div>
+    </div>
+
+    <!-- No data message -->
+    <div id="noDataMessage" class="no-data-message" style="display: none;">
+        <div class="warning-icon">⚠️</div>
+        <p>No cost data available for this estimate</p>
+        <button id="retryButton" class="k-button k-primary">Retry Loading</button>
+    </div>
+</div>
+
+<style>
+    /* Match _ScPartsUsed.cshtml styling */
+    .total-cost-container { 
+        background: white; 
+        padding: 16px; 
+        border-radius: 4px; 
+        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        border: 1px solid #e0e0e0;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    
+    h6 { 
+        font-size: 15px; 
+        color: #2c3e50; 
+        margin-bottom: 12px; 
+        padding-bottom: 8px;
+        border-bottom: 1px solid #3498db;
+        font-weight: 600;
+        padding-left: 6px;
+    }
+    
+    .section-title { 
+        font-size: 13px; 
+        color: #2c3e50; 
+        margin: 16px 0 8px; 
+        padding-bottom: 6px; 
+        border-bottom: 1px solid #3498db; 
+        display: flex; 
+        align-items: center; 
+        gap: 5px;
+        font-weight: 600;
+        padding-left: 4px;
+    }
+    
+    .form-row { 
+        display: flex; 
+        gap: 12px; 
+        margin-bottom: 12px; 
+        align-items: flex-start;
+    }
+    
+    .form-group { 
+        display: flex; 
+        flex-direction: column; 
+        flex: 1;
+        min-width: 0; /* Allow shrinking */
+    }
+    
+    .form-label { 
+        font-size: 12px; 
+        color: #2c3e50; 
+        font-weight: 600; 
+        margin-bottom: 5px;
+        padding-left: 2px;
+    }
+    
+    .read-only { 
+        border: 1px solid #d1d5db; 
+        border-radius: 4px; 
+        padding: 6px 10px; 
+        height: 34px; 
+        font-size: 13px; 
+        background: #f8fafc; 
+        color: #4b5563; 
+        cursor: not-allowed;
+        width: 100%;
+        box-sizing: border-box;
+        font-weight: 500;
+    }
+    
+    /* Loading styles */
+    .loading-section {
+        text-align: center;
+        padding: 30px 0;
+    }
+    
+    .loading-spinner {
+        display: inline-block;
+        margin-bottom: 15px;
+    }
+    
+    .spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid rgba(59, 89, 152, 0.2);
+        border-top: 4px solid #3b5998;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto;
+    }
+    
+    .loading-section p {
+        color: #3f51b5;
+        font-size: 14px;
+        margin-top: 10px;
+    }
+    
+    /* No data message */
+    .no-data-message {
+        text-align: center;
+        padding: 30px 0;
+        color: #e74c3c;
+    }
+    
+    .warning-icon {
+        font-size: 40px;
+        margin-bottom: 15px;
+    }
+    
+    .no-data-message p {
+        font-size: 14px;
+        margin-bottom: 20px;
+    }
+    
+    /* Button styles */
+    .k-button {
+        padding: 6px 12px;
+        font-size: 13px;
+        height: 34px;
+        border-radius: 4px;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: all 0.2s;
+    }
+    
+    .k-button.k-primary {
+        background: #3f51b5;
+        color: white;
+        border-color: #3f51b5;
+    }
+    
+    .k-button.k-primary:hover {
+        background: #303f9f;
+        border-color: #283593;
+    }
+    
+    /* Animation */
+    @@keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+</style>
+
+<script>
+    $(document).ready(function() {
+        // Fetch data on page load
+        fetchTotalCostData();
+        
+        // Retry button handler
+        $("#retryButton").click(function() {
+            $("#noDataMessage").hide();
+            $("#loadingIndicator").show();
+            $("#costSummaryContent").hide();
+            fetchTotalCostData();
+        });
+    });
+
+    function fetchTotalCostData() {
+        console.log("Fetching data from:", totalCostDataUrl);
+        
+        $.ajax({
+            url: totalCostDataUrl,
+            type: 'GET',
+            dataType: 'json',
+            success: function(data) {
+                console.log("Data received:", data);
+                
+                if (data && data.length > 0) {
+                    populateCostSummary(data[0]);
+                    $("#loadingIndicator").hide();
+                    $("#costSummaryContent").show();
+                    $("#noDataMessage").hide();
+                } else {
+                    showNoDataMessage();
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error("Error fetching cost data:", {
+                    status: status,
+                    error: error,
+                    responseText: xhr.responseText
+                });
+                showNoDataMessage();
+            }
+        });
+    }
+
+    function populateCostSummary(costData) {
+        console.log("Populating with:", costData);
+        
+        // Material Costs
+        setCurrencyValue("#materialCostWithoutTax", costData.MaterialTotalCostNoTax);
+        setCurrencyValue("#materialTax", costData.MaterialTotalTaxAmount);
+        setCurrencyValue("#materialCostWithTax", costData.MaterialTotalWithTax);
+        
+        // Labour Costs
+        setCurrencyValue("#labourFringe", costData.LabourFringe);
+        setPercentValue("#blendedFringePercent", costData.BlendedFringeBenefitPercent);
+        setCurrencyValue("#blendedFringeCost", costData.BlendedFringeBenefitCost);
+        setCurrencyValue("#labourOverhead", costData.LabourOverhead);
+        
+        // Totals
+        setCurrencyValue("#totalMaterialCost", costData.MaterialTotalWithTax);
+        setCurrencyValue("#totalLabourCost", costData.FinalLabourCost);
+        setCurrencyValue("#totalWithoutTax", costData.TotalWithoutTax);
+        setCurrencyValue("#totalWithTax", costData.TotalWithTax);
+    }
+
+    function setCurrencyValue(selector, value) {
+        if (value === null || value === undefined) {
+            $(selector).val("N/A");
+            return;
+        }
+        
+        // Format as currency with commas and two decimal places
+        var formatted = '$' + parseFloat(value).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+        $(selector).val(formatted);
+    }
+
+    function setPercentValue(selector, value) {
+        if (value === null || value === undefined) {
+            $(selector).val("N/A");
+            return;
+        }
+        
+        var formatted = parseFloat(value).toFixed(2) + '%';
+        $(selector).val(formatted);
+    }
+
+    function showNoDataMessage() {
+        $("#loadingIndicator").hide();
+        $("#costSummaryContent").hide();
+        $("#noDataMessage").show();
+    }
+</script>
