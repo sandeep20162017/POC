@@ -1,0 +1,374 @@
+You are ASP,NET core, Telerik ASP.NET core and UI/UX expert. I need you assistance to update old  _TotalCostEstimate.cshtml. Take off grid and replace it with following template. Keep all the other logic from the old _TotalCostEstimate.cshtml. All the fields in the new _TotalCostEstimate.cshtml mustbe read only. Keep the required javascipts and other functionality.
+Give me full code. Keep same style sheet like in _ScPartsUsed.cshtml
+It must have same look and feel like below _ScPartsUsed.cshtml
+Use following template for the new _TotalCostEstimate.cshtml :
+Material costs
+Row 1 Materils Cost (withut  Tax), TAx, Material ccost (with Tax)
+Labour Costs
+Row 2 Fringe, Blended Fringe & Benefit Percent, Blended Fringe & Benefit Cost, Overhead
+Row 3 blank
+Totals (Material and Labour)
+Row 4 Total Material ccost (with Tax), Total Labour costs
+Total Costs
+Row 5 Total With out Tax, Total With Tax
+Old _TotalCostEstimate.cshtml :
+@model IEnumerable<BCES.Models.Parts.TotalCostInEstimates>
+
+@{
+    ViewData["Title"] = "Total Cost Summary";
+    string gridName = $"LabourDetailsGrid_{ViewBag.PartNum}";
+}
+<script>
+    // Store grid name for JavaScript access
+    var totalCostGridName = '@gridName';
+</script>
+<h6>Total Cost Summary</h6>
+
+@(
+Html.Kendo().Grid<BCES.Models.Parts.TotalCostInEstimates>()
+                
+                //.Name($"TotalCostInRbModelGrid")
+                .Name($"TotalCostInRbModelGrid_{ViewBag.PartNum}")
+                .Columns(columns =>
+                {
+                    columns.Bound(c => c.LinkCode).Title("Estimate #").Hidden();
+                  
+                    columns.Bound(c => c.MaterialTotalCostNoTax).Title("Materials Cost (Without Tax)").Format("{0:C2}");
+                    columns.Bound(c => c.MaterialTotalTaxAmount).Title("Tax").Format("{0:C2}");
+                    columns.Bound(c => c.MaterialTotalWithTax).Title("Material Cost (With Tax)").Format("{0:C2}");
+                   
+                    columns.Bound(c => c.LabourFringe).Title("Fringe").Format("{0:C2}");
+                    columns.Bound(c => c.BlendedFringeBenefitPercent).Title("Blended Fringe & Benefit Percent").Format("{0:C2}");
+                    columns.Bound(c => c.BlendedFringeBenefitCost).Title("Blended Fringe & Benefit Cost ").Format("{0:C2}");
+                    columns.Bound(c => c.LabourOverhead).Title("Overhead").Format("{0:C2}");
+                    columns.Bound(c => c.FinalLabourCost).Title("Final Labour Cost").Format("{0:C2}");
+                    columns.Bound(c => c.TotalWithoutTax).Title("Total Without Tax").Format("{0:C2}");
+                    columns.Bound(c => c.TotalWithTax).Title("Total With Tax").Format("{0:C2}");
+
+                                    })
+
+                .Pageable()
+                .Sortable()
+                .Resizable(r => r.Columns(true))
+                .ColumnMenu(menu => menu.Enabled(true))
+                .Scrollable(s => s.Height("auto"))
+
+    //.Scrollable()
+                .DataSource(dataSource => dataSource
+                    .Ajax()
+                    .Model(model =>
+                            {
+                                model.Id(c => c.LinkCode); // not displayed, tracking only
+                                model.Field(c => c.LinkCode);
+                                model.Field(c => c.TotalLabourCost);
+                                model.Field(c => c.TotalWithTax);
+                                
+                            })
+
+                    .Read(read => read.Url(Url.Action("GetTotalCostInEstimates", "TotalCost") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+
+    )
+)
+
+
+_ScPartsUsed.cshtml
+@model IEnumerable<BCES.Models.Parts.StockCodedPartsViewModel>
+@{
+    ViewData["Title"] = "Stock Coded Parts Details";
+    var scGrid = $"ScPartsGrid_{ViewBag.PartNum}";
+    var partNum = ViewBag.PartNum;
+}
+
+<h6>Stock Coded Parts Used</h6>
+
+<!-- Grid Container -->
+<div id="scGridContainer">
+    @(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
+        .Name(scGrid)
+        .Columns(columns =>
+        {
+            columns.Bound(p => p.MMSStockCode)
+            .Title("Stock Code")
+            .ClientTemplate("<a class='scLink' href='javascript:void(0)'>#= MMSStockCode #</a>");
+            columns.Bound(p => p.PartType).Title("Part Type");
+            columns.Bound(p => p.OrigSupplierNum).Title("Supplier Num");
+            columns.Bound(p => p.OrigSupplierName).Title("Supplier Name");
+            columns.Bound(p => p.UnitCost).Title("Unit Cost").Format("{0:c}");
+            columns.Bound(p => p.Qty).Title("Qty");
+            columns.Bound(p => p.TotalCost).Title("Total Cost").Format("{0:c}");
+            columns.Command(command =>
+            {
+                command.Custom("Delete").Text("Delete").Click("scDeleteClick");
+            }).Title("Actions");
+        })
+        .DataSource(dataSource => dataSource
+        .Ajax()
+        .Read(read => read.Action("GetScPartsUsedInEstimates", "ScPartsUsedInEstimates",
+        new { id = partNum, gridType = "VehicleGrid" }))
+        )
+        .ToClientTemplate()
+        )
+</div>
+
+<button id="scAddNew" class="k-button k-primary" style="margin-bottom:8px;">
+    <span class="k-icon k-i-plus"></span> Add New Stock Coded Part
+</button>
+
+
+    <form id="scDetailForm" style="display:none;">
+        <div class="section-title">Part Details</div>
+        <!-- Row 1 -->
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">StockCode</label>
+                <input id="scStockCode" class="stock-field" readonly style="width:100%; height:28px;" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">PartType</label>
+                <input id="scPartType" readonly class="read-only" style="width:100%; height:28px;" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Supplier Num</label>
+                <input id="scSupplierNum" readonly class="read-only" style="width:100%; height:28px;" />
+            </div>
+        </div>
+        <!-- Row 2 -->
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Supplier Name</label>
+                <input id="scSupplierName" readonly class="read-only" style="width:100%; height:28px;" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Part Description</label>
+                <input id="scPartDesc" readonly class="read-only" style="width:100%; height:28px;" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Part Unit Cost</label>
+                <input id="scUnitCost" readonly class="read-only" style="width:100%; height:28px;" />
+            </div>
+        </div>
+        <!-- Row 3 -->
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Core Cost</label>
+                <input id="scCoreCost" readonly class="read-only" style="width:100%; height:28px;" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Cost Centre</label>
+                <input id="scCostCentre" class="stock-field" style="width:100%; height:28px;" />
+            </div>
+        </div>
+        <!-- Row 4 -->
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Qty</label>
+                <input id="scQty" class="stock-field" style="width:100%; height:28px;" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Percentage</label>
+                <input id="scPerc" class="stock-field" style="width:100%; height:28px;" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Total Cost</label>
+                <input id="scTotCost" readonly class="read-only" style="width:100%; height:28px;" />
+            </div>
+        </div>
+        <!-- Row 5 -->
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Last Modified By</label>
+                <input id="scModBy" readonly class="read-only" style="width:100%; height:28px;" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Last Modified Date</label>
+                <input id="scModDate" readonly class="read-only" style="width:100%; height:28px;" />
+            </div>
+        </div>
+        <div style="margin-top:8px;">
+            <button id="scUpdateBtn" type="button" class="k-button k-primary">Update</button>
+            <button id="scCancelBtn" type="button" class="k-button">Cancel</button>
+        </div>
+    </form>
+</div>
+
+<style>
+    /* Reuse VehPopUp styles */
+    .form-container { background:white; padding:12px; border-radius:4px; box-shadow:0 1px 4px rgba(0,0,0,0.05); }
+    .section-title { font-size:12px; color:#2c3e50; margin-bottom:6px; padding-bottom:4px; border-bottom:1px solid #3498db; display:flex; align-items:center; gap:5px;}
+    .form-row { display:flex; gap:8px; margin-bottom:6px; align-items:flex-start;}
+    .form-group { display:flex; flex-direction:column; flex:1;}
+    .form-label { font-size:11px; color:#2c3e50; font-weight:600; margin-bottom:3px;}
+    .stock-field, .read-only { border:1px solid #d1d5db; border-radius:3px; padding:4px 8px; min-height:28px; font-size:12px; }
+    .read-only { background:#f8fafc !important; color:#4b5563 !important; cursor:not-allowed!important; }
+    h6 { font-size:13px; color:#2c3e50; margin-bottom:8px; border-bottom:1px solid #3498db; padding-bottom:4px;}
+    .k-button { padding:4px 6px; font-size:12px; height:28px; border-radius:3px;}
+    .k-button.k-primary { background:#3f51b5; color:white; border-color:#3f51b5;}
+</style>
+
+<script>
+    $(function() {
+        var gridName = "@scGrid";
+            var partNum = "@ViewBag.PartNum";
+            var grid = $("#" + gridName).data("kendoGrid");
+
+            // Load part details when clicking a row
+            $("#" + gridName).on("click", ".scLink", function() {
+                var row = $(this).closest("tr");
+                var dataItem = grid.dataItem(row);
+                loadPartDetails(dataItem.MMSStockCode);
+            });
+
+            // Add new button
+            $("#scAddNew").click(function() {
+                clearDetailForm();
+                $("#scDetailForm").data("mode", "add");
+                showDetailForm();
+            });
+
+            // Cancel button
+            $("#scCancelBtn").click(function() {
+                $("#scDetailForm").hide();
+                $(".scLink").prop("disabled", false);
+            });
+
+            // Update/Save button
+            $("#scUpdateBtn").click(function() {
+                saveScPart();
+            });
+
+            // Auto-calculate total cost
+            $("#scQty, #scPerc").on("change input", function() {
+                calculateTotalCost();
+            });
+        });
+
+        // Delete handler
+        function scDeleteClick(e) {
+            e.preventDefault();
+            var grid = e.sender;
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+
+            kendo.confirm("Delete this part?").then(function() {
+                $.ajax({
+                    url: '@Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates")',
+                    type: 'POST',
+                    data: {
+                        id: dataItem.MMSStockCode,
+                        parentPartId: "@ViewBag.PartNum",
+                        gridType: "VehicleGrid"
+                    },
+                    success: function() {
+                        grid.dataSource.read();
+                        kendo.alert("Part deleted successfully");
+                    },
+                    error: function(xhr) {
+                        kendo.alert("Delete failed: " + xhr.responseText);
+                    }
+                });
+            });
+        }
+
+        // Load part details via AJAX
+        function loadPartDetails(stockCode) {
+            $(".scLink").prop("disabled", true);
+
+            $.get('@Url.Action("GetScPartUsedDetail", "ScPartsUsedInEstimates")', {
+                mmsStockCode: stockCode,
+                vehicleListId: "@ViewBag.PartNum"
+            }, function(data) {
+                if (data) {
+                    $("#scStockCode").val(data.MMSStockCode);
+                    $("#scPartType").val(data.PartType);
+                    $("#scSupplierNum").val(data.OrigSupplierNum);
+                    $("#scSupplierName").val(data.OrigSupplierName);
+                    $("#scUnitCost").val(data.UnitCost);
+                    $("#scQty").val(data.Qty);
+                    $("#scTotCost").val(data.TotalCost);
+                    $("#scCoreCost").val(data.CoreCost);
+                    $("#scCostCentre").val(data.CostCentre);
+                    $("#scPerc").val(data.Percentage);
+                    $("#scPartDesc").val(data.PartDescription);
+                    $("#scModBy").val(data.ModBy);
+                    $("#scModDate").val(data.ModDate ? new Date(data.ModDate).toLocaleString() : "");
+
+                    $("#scDetailForm").data("mode", "edit");
+                    showDetailForm();
+                }
+            }).always(function() {
+                $(".scLink").prop("disabled", false);
+            });
+        }
+
+        // Save part via AJAX
+        function saveScPart() {
+            var mode = $("#scDetailForm").data("mode");
+            var isAdd = mode === "add";
+            var vehicleListId = "@ViewBag.PartNum";
+
+            var partData = {
+                MMSStockCode: isAdd ? prompt("Enter Stock Code:") : $("#scStockCode").val(),
+                CC: $("#scCostCentre").val(),
+                Qty: $("#scQty").val(),
+                Percentage: $("#scPerc").val(),
+                UnitCost: $("#scUnitCost").val(),
+                CoreCost: $("#scCoreCost").val(),
+                LinkCode: vehicleListId
+            };
+
+            if (isAdd && !partData.MMSStockCode) {
+                kendo.alert("Stock Code is required!");
+                return;
+            }
+
+            var url, method;
+            if (isAdd) {
+                url = '@Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates")';
+                method = 'POST';
+            } else {
+                url = '@Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates")';
+                method = 'POST';
+            }
+
+            $.ajax({
+                url: url,
+                type: method,
+                data: {
+                    id: vehicleListId,
+                    gridType: "VehicleGrid",
+                    model: partData
+                },
+                success: function() {
+                    $("#@scGrid").data("kendoGrid").dataSource.read();
+                    $("#scDetailForm").hide();
+                    $(".scLink").prop("disabled", false);
+                    kendo.alert("Part saved successfully");
+                },
+                error: function(xhr) {
+                    kendo.alert("Save failed: " + xhr.responseText);
+                }
+            });
+        }
+
+        // Calculate total cost
+        function calculateTotalCost() {
+            var qty = parseInt($("#scQty").val()) || 0;
+            var unitCost = parseFloat($("#scUnitCost").val()) || 0;
+            var perc = parseInt($("#scPerc").val()) || 0;
+            var total = qty * unitCost * (1 + perc/100);
+            $("#scTotCost").val(total.toFixed(2));
+        }
+
+        // Clear form
+        function clearDetailForm() {
+            $("#scDetailForm input").val("");
+            $("#scDetailForm").data("mode", "add");
+        }
+
+        // Show form
+        function showDetailForm() {
+            $("#scDetailForm").show();
+        }
+</script>
+
+
+
