@@ -1,0 +1,92 @@
+2. Controller Fixes (ScPartsUsedInEstimatesController.cs)
+csharp
+// ... OTHER USING STATEMENTS ...
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.Data.SqlClient;
+using BCES.Controllers.Common;
+
+namespace BCES.Controllers.Parts
+{
+    public class ScPartsUsedInEstimatesController : BaseController
+    {
+        // ... EXISTING CONSTRUCTOR AND FIELDS ...
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> DeleteScPartsUsedInEstimates(
+            string id, 
+            string parentPartId,
+            string gridType)
+        {
+            try
+            {
+                _dbConnection.Open();
+                using var transaction = _dbConnection.BeginTransaction();
+                
+                var sql = @"DELETE FROM SBCES.SCPartsUsed 
+                            WHERE MMSStockCode = @id
+                            AND LinkCode = @parentPartId
+                            AND LinkType = @gridType";
+
+                var parameters = new { 
+                    id, 
+                    parentPartId, 
+                    gridType = gridType == "VehicleGrid" ? "BUS" : "RB" 
+                };
+
+                int affectedRows = await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+                transaction.Commit();
+
+                if (gridType == "VehicleGrid")
+                {
+                    await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, parentPartId);
+                }
+
+                return Json(new { success = affectedRows > 0 });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Delete failed: {ex.Message}");
+            }
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> CreateScPartsUsedInEstimates(
+            [FromBody] StockCodedPartsViewModel model,
+            [FromQuery] string id,
+            [FromQuery] string gridType)
+        {
+            // ... EXISTING CODE WITH FOLLOWING CHANGES ...
+
+            // Change in AJAX call parameters:
+            var partData = new {
+                id = partNum,
+                gridType,
+                model = new {
+                    MMSStockCode = model.MMSStockCode,
+                    CC = model.CC,
+                    Qty = model.Qty,
+                    Percentage = model.Percentage,
+                    UnitCost = model.UnitCost,
+                    CoreCost = model.CoreCost
+                }
+            };
+
+            // ... REST OF CREATE LOGIC ...
+        }
+
+        [HttpPut]
+        [AllowAnonymous]
+        public async Task<IActionResult> UpdateScPartsUsedInEstimates(
+            [FromBody] StockCodedPartsViewModel model,
+            [FromQuery] string id,
+            [FromQuery] string gridType)
+        {
+            // ... EXISTING CODE ...
+        }
+    }
+}
+Key Fixes in Controller:
+
