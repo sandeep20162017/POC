@@ -1,0 +1,271 @@
+You are ASP.NET core and Telerik ASP.net core expert.
+Following code uses InLinEdit.
+Need 1. Telerik Edit/Save Button on each row - along with existing buttons.
+2. Call appropriate controller actions 
+Give me full file along with all the existing functions, style and javascript
+File to refator :
+    @model IEnumerable<BCES.Models.Parts.StockCodedPartsViewModel>
+
+@{
+    ViewData["Title"] = "Stock Coded Parts Details";
+    var scGridName = $"ScPartsMaterialDetailsRebuiltPartsGrid";
+    bool isArchived = ViewBag.GridType == "ArchivedVehicleGrid"; //ArchiveDisable
+    bool isAdmin = ViewBag.RoleId == 1; //ArchiveDisable
+    ViewBag.scGridName = scGridName;
+    string gridName = $"ScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}"; //for JS
+}
+<script>
+    // Store grid name for JavaScript access
+    var scInEstimateGridName = '@gridName';
+</script>
+<input type="hidden" id="scGridNameField" value="@scGridName" /> @* save gridname in hidden field for JS *@
+<h6>Stock Coded Parts Used</h6>
+
+@(
+Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()    
+     .Name($"ScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}") 
+     .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "RbGrid" }) //lockcols
+      .Events(events => events
+                    .DataBound("onGridDataBound")
+                    .Save("onGridCellSave")
+                    //.SaveChanges("onSaveChanges")
+                    .CellClose("onGridCellClose")  
+                )
+    .Columns(columns =>
+    {
+       // columns.Bound(c => c.MMSStockCode).Title("Stock Code").IncludeInMenu(false).EditorTemplateName("ComboBoxEditor").Width(70);
+        columns.Bound(c => c.MMSStockCode)
+                        .Title("Stock Code")
+                        .HtmlAttributes(new { @class = "stock-code-cell", data_field = "MMSStockCode" })
+                        .IncludeInMenu(false)
+                        .HeaderHtmlAttributes(new { @class = "required-header" })
+                        .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                        .EditorTemplateName("ScComboBox")
+                        .Width(180);
+      @*  columns.Command(command =>
+        {
+            command.Custom("Populate Details").Click("refreshScPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+        }).Width(60); *@
+        columns.Bound(c => c.PartType)
+    .Title("Part Type")
+    .Width(150)
+    .EditorTemplateName("ComboBoxEditor")
+    .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+    ;
+
+        columns.Bound(c => c.OrigSupplierNum)
+        .Title("Supplier Num")
+        .Width(150)
+        .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains")
+        .SuggestionOperator(FilterType.Contains)))
+        .EditorTemplateName("ComboBoxEditor")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+        ;
+        columns.Bound(c => c.OrigSupplierName)
+        .Title("Supplier Name")
+        .Width(150)
+        .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains")
+        .SuggestionOperator(FilterType.Contains)))
+        .EditorTemplateName("ComboBoxEditor")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+        ;
+        columns.Bound(c => c.DetailedDesc)
+        .Title("Part Description")
+        .Width(150)
+        .EditorTemplateName("ComboBoxEditor")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+        ;
+
+        columns.Bound(c => c.UnitCost)
+        .Title("Part Unit Cost")
+        .Width(90)
+        .Format("{0:C2}")
+        .EditorTemplateName("ComboBoxEditor")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+        .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" });
+        ;
+
+        columns.Bound(c => c.CoreCost)
+        .Title("Core Cost")
+        .Width(90)
+        .Format("{0:C2}")
+        // .EditorTemplateName("ComboBoxEditor")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:notNew" } //lockcols 
+        })
+        .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" });
+        ;
+
+        columns.Bound(c => c.CC).Title("Cost Centre")
+        .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains")
+        .SuggestionOperator(FilterType.Contains)))
+        .EditorTemplateName("ComboBoxEditor")
+        .HeaderHtmlAttributes(new { @class = "required-header" })
+        .HtmlAttributes(new { @class = "required-cell", required = "required" })
+        .Width(120); ;
+
+        columns.Bound(c => c.Qty).Title("Qty").Width(70)
+        .HeaderHtmlAttributes(new { @class = "required-header" })
+        .HtmlAttributes(new { @class = "required-cell", required = "required" })
+        .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" });
+
+        columns.Bound(c => c.Percentage).Title("%").Width(70)
+        .HeaderHtmlAttributes(new { @class = "required-header" })
+        .HtmlAttributes(new { @class = "required-cell", required = "required" })
+        .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive, MustBePercentage" });
+
+       @*  columns.Bound(c => c.CoreCharge)
+       .Title("Total Core Cost")
+       .Width(90)
+       .EditorTemplateName("ComboBoxEditor")
+       .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+       })
+       ; *@
+        columns.Bound(c => c.TotalCost)
+        .Title("Total Cost")
+        .Width(90)
+        .Format("{0:C2}")
+        .Editable("false")
+        .EditorTemplateName("ComboBoxEditor")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+        ;
+        
+        columns.Bound(c => c.LinkCode).Hidden(true);
+
+        
+             
+        @* columns.Bound(c => c.CoreCost)
+        .Title("Core Cost")
+        .Format("{0:N2}")
+        .Width(140);  *@
+
+        columns.Bound(c => c.LastModifiedBy)
+        .Title("Modified By")
+        .EditorTemplateName("ComboBoxEditor")
+        .ClientTemplate("#= LastModifiedBy && LastModifiedBy !== 0 ? LastModifiedBy : '(System Generated)' #")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        })
+        .Width(160);
+        columns.Bound(c => c.LastModifiedDate)
+        .Title("Modified Date")
+        .Width(160)
+        .EditorTemplateName("ComboBoxEditor")
+        .ClientTemplate("#=  LastModifiedDate !== 0 ? formatToEST(LastModifiedDate) : '(System Generated)' #")
+        .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+        });
+       // .Format("{0:MMMM dd, yyyy HH:mm:ss}"); //  format dateTime;;
+     //   columns.Bound(c => c.TotalCost).Title("Total Cost").Format("{0:N2}").Width(100); ;
+      
+       
+        // columns.Bound(c => c.DateRevised).Title("Date Revised");
+       @*  columns.Command(command =>
+        {
+            if (@ViewBag.RoleId == 1)
+            {
+               // command.Edit().Text(" ").IconClass("k-icon k-i-edit").HtmlAttributes(new { title = "Edit" }); // Edit button with tooltip
+            }
+            if (@ViewBag.RoleId == 1)
+            {
+
+                command.Destroy().Text(" ").IconClass("k-icon k-i-delete").HtmlAttributes(new { title = "Delete" }); // Delete button with tooltip
+            }
+        }).Width(100); *@
+        columns.Command(command =>
+        {
+            
+            if (!isArchived && isAdmin) //ArchiveDisable
+            {
+
+                command.Custom("Delete")
+                 .Click("showDeleteConfirmation")
+                 .Text(" ")
+                 .IconClass("k-icon k-i-delete")
+                 .HtmlAttributes(new
+                 {
+                     @class = "text-danger",
+                     title = "Delete",
+                     data_grid = $"ScPartsMaterialDetailsRebuiltPartsGrid",
+                     data_url = Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates"),
+                     data_id_field = "id",
+                     //  data_mmsstockcode_field = "parentPartId",
+                     data_grid_type = "SCPartGrid"
+                 });
+            }
+        }).Width(100);
+    })
+  
+     .ToolBar(toolbar =>
+    {
+        if (!isArchived && isAdmin) //ArchiveDisable
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.InLine))
+    
+    .Pageable(p => p
+    .PageSizes(new int[] { 1, 10, 20, 50 }) // Dropdown options
+    .Position(GridPagerPosition.Bottom)
+
+    )
+    .Sortable()
+    .Resizable(r => r.Columns(true))
+    //.Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(false)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.MMSStockCode); 
+            model.Field(c => c.MMSStockCode);
+            model.Field(c => c.UnitCost);
+            model.Field(c => c.LastModifiedBy).Editable(false);
+            model.Field(c => c.LastModifiedDate).Editable(false);
+         //   model.Field(c => c.PartType).Editable(false);
+         //   model.Field(c => c.DetailedDesc).Editable(false);
+        })
+
+        .Events(events =>
+        {
+            events.RequestEnd("onScRequestEnd");
+            events.Error("onDataSourceError");
+             
+        })
+
+        .Read(read => read.Url(Url.Action("GetScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+)
+
+@(Html.Kendo().Dialog()
+    .Name("partDetailsDialog")
+    .Title("Part Details")
+    .Width(400)
+    .Modal(true)
+    .Visible(false)
+    .Actions(actions =>
+    {
+        actions.Add().Text("Close").Primary(true);
+    })
+)
+
