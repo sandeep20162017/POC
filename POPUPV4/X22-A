@@ -1,0 +1,523 @@
+I'll move the StockCodedParts_getGridParams function to the main Index.cshtml file. Here's the complete solution with the function moved to the main page:
+
+_ScPartsUsed.cshtml (Partial View)
+html
+@model IEnumerable<BCES.Models.Parts.StockCodedPartsViewModel>
+@using Kendo.Mvc.UI
+@{
+    ViewData["Title"] = "Stock Coded Parts Details";
+    var scGrid = $"ScPartsGrid_{ViewBag.PartNum}";
+    var partNum = ViewBag.PartNum;
+    var gridType = ViewBag.GridType ?? "VehicleGrid";
+}
+
+<div id="scPartsContainer" data-grid-name="@scGrid" data-part-num="@partNum" data-grid-type="@gridType">
+    <h6>Stock Coded Parts Used</h6>
+
+    <!-- Grid Container -->
+    <div id="scGridContainer">
+        @(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
+            .Name(scGrid)
+            .Columns(columns =>
+            {
+                columns.Bound(p => p.MMSStockCode)
+                    .Title("Stock Code")
+                    .ClientTemplate("<a class='sc-link' data-sc-code='#= MMSStockCode #' href='javascript:void(0)'>#= MMSStockCode #</a>")
+                    .Width(120);
+                columns.Bound(p => p.PartType).Title("Part Type").Width(120);
+                columns.Bound(p => p.OrigSupplierNum).Title("Supplier #").Width(120);
+                columns.Bound(p => p.OrigSupplierName).Title("Supplier Name").Width(150);
+                columns.Bound(p => p.UnitCost).Title("Unit Cost").Format("{0:c}").Width(100);
+                columns.Bound(p => p.Qty).Title("Qty").Width(80);
+                columns.Bound(p => p.TotalCost).Title("Total Cost").Format("{0:c}").Width(120);
+                columns.Command(command =>
+                {
+                    command.Custom("Edit").Click("StockCodedParts_showEditPopup");
+                    command.Custom("Delete").Click("StockCodedParts_onDeleteClick");
+                }).Width(150).Title("Actions");
+            })
+            .Pageable(p => p.PageSizes(new[] { 5, 10, 20 }))
+            .Scrollable()
+            .DataSource(dataSource => dataSource
+                .Ajax()
+                .Read(read => read
+                    .Action("GetScPartsUsedInEstimates", "ScPartsUsedInEstimates")
+                    .Data("StockCodedParts_getGridParams")
+                )
+            )
+    </div>
+
+    <button id="scAddNew" class="k-button k-primary" style="margin-top:12px;">
+        <span class="k-icon k-i-plus"></span> Add New Stock Coded Part
+    </button>
+</div>
+
+<!-- Popup Window -->
+@(Html.Kendo().Window()
+    .Name("scEditWindow")
+    .Title("Stock Coded Part Details")
+    .Visible(false)
+    .Modal(true)
+    .Draggable(true)
+    .Resizable()
+    .Width(800)
+    .Actions(actions => actions.Close())
+)
+
+<!-- Hidden container for popup content -->
+<div id="scPopupContent" style="display:none;">
+    <form id="scDetailForm">
+        <div class="section-title">Part Details</div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Stock Code</label>
+                <input id="scStockCode" class="k-textbox stock-field" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Part Type</label>
+                <input id="scPartType" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Supplier #</label>
+                <input id="scSupplierNum" class="k-textbox read-only" readonly />
+            </div>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Supplier Name</label>
+                <input id="scSupplierName" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Description</label>
+                <input id="scPartDesc" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Unit Cost</label>
+                <input id="scUnitCost" class="k-textbox read-only" readonly />
+            </div>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Core Cost</label>
+                <input id="scCoreCost" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Cost Centre</label>
+                @(Html.Kendo().TextBox()
+                    .Name("scCostCentre")
+                    .HtmlAttributes(new { @class = "stock-field", style = "width:100%" })
+                )
+            </div>
+            <div class="form-group">
+                <label class="form-label">Qty</label>
+                @(Html.Kendo().NumericTextBox<int>()
+                    .Name("scQty")
+                    .Format("0")
+                    .Min(1)
+                    .HtmlAttributes(new { style = "width:100%" })
+                )
+            </div>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Percentage</label>
+                @(Html.Kendo().NumericTextBox<int>()
+                    .Name("scPerc")
+                    .Format("0")
+                    .Min(0)
+                    .Max(100)
+                    .HtmlAttributes(new { style = "width:100%" })
+                )
+            </div>
+            <div class="form-group">
+                <label class="form-label">Total Cost</label>
+                <input id="scTotCost" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group"></div> <!-- Spacer -->
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Modified By</label>
+                <input id="scModBy" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Modified Date</label>
+                <input id="scModDate" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group"></div> <!-- Spacer -->
+        </div>
+        
+        <div style="margin-top:20px; display:flex; gap:12px;">
+            <button id="scUpdateBtn" type="button" class="k-button k-primary">Save</button>
+            <button type="button" class="k-button" onclick="$('#scEditWindow').data('kendoWindow').close()">Cancel</button>
+        </div>
+    </form>
+</div>
+
+<style>
+    /* ... existing styles ... */
+</style>
+
+<script>
+    // Initialize when document is ready
+    $(document).ready(function() {
+        // Initialize popup window
+        const editWindow = $("#scEditWindow").kendoWindow({
+            width: "800px",
+            height: "auto",
+            visible: false,
+            modal: true,
+            resizable: false
+        }).data("kendoWindow");
+        
+        // Set popup content
+        editWindow.content($("#scPopupContent").html());
+        $("#scPopupContent").remove();
+        
+        // Add new button handler
+        $("#scAddNew").click(function() {
+            StockCodedParts_clearForm();
+            $("#scDetailForm").data("mode", "add");
+            editWindow.title("Add New Stock Coded Part");
+            editWindow.center().open();
+        });
+        
+        // Initialize form controls
+        StockCodedParts_initializeFormEvents();
+    });
+    
+    // Initialize form events
+    function StockCodedParts_initializeFormEvents() {
+        $("#scUpdateBtn").click(StockCodedParts_savePart);
+        
+        // Auto-calculate total cost
+        $("#scQty, #scPerc").on("change", function() {
+            StockCodedParts_calculateTotalCost();
+        });
+    }
+    
+    // Clear form
+    function StockCodedParts_clearForm() {
+        $("#scDetailForm input").val("");
+        $("#scCostCentre").val("");
+        
+        const qtyNumeric = $("#scQty").data("kendoNumericTextBox");
+        if (qtyNumeric) qtyNumeric.value(0);
+        
+        const percNumeric = $("#scPerc").data("kendoNumericTextBox");
+        if (percNumeric) percNumeric.value(0);
+        
+        $("#scTotCost").val("");
+    }
+    
+    // Calculate total cost
+    function StockCodedParts_calculateTotalCost() {
+        const qty = $("#scQty").data("kendoNumericTextBox").value() || 0;
+        const unitCost = parseFloat($("#scUnitCost").val().replace(/[^0-9.-]+/g, "")) || 0;
+        const perc = $("#scPerc").data("kendoNumericTextBox").value() || 0;
+        const total = qty * unitCost * (1 + perc/100);
+        $("#scTotCost").val(kendo.toString(total, "c2"));
+    }
+    
+    // Save stock coded part
+    function StockCodedParts_savePart() {
+        const $container = $("#scPartsContainer");
+        const partNum = $container.data("part-num");
+        const gridType = $container.data("grid-type");
+        const mode = $("#scDetailForm").data("mode");
+        const isAdd = mode === "add";
+
+        const partData = {
+            MMSStockCode: $("#scStockCode").val(),
+            CC: $("#scCostCentre").val(),
+            Qty: $("#scQty").data("kendoNumericTextBox").value(),
+            Percentage: $("#scPerc").data("kendoNumericTextBox").value(),
+            UnitCost: parseFloat($("#scUnitCost").val().replace(/[^0-9.-]+/g, "")),
+            CoreCost: parseFloat($("#scCoreCost").val().replace(/[^0-9.-]+/g, "")),
+            LinkCode: partNum
+        };
+
+        if (isAdd && !partData.MMSStockCode) {
+            kendo.alert("Stock Code is required!");
+            return;
+        }
+
+        const action = isAdd 
+            ? '@Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates")'
+            : '@Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates")';
+
+        $.ajax({
+            url: action,
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify({
+                model: partData,
+                id: partNum,
+                gridType: gridType
+            }),
+            beforeSend: function() {
+                kendo.ui.progress($("#scEditWindow"), true);
+            },
+            success: function() {
+                const gridName = $container.data("grid-name");
+                const grid = $("#" + gridName).data("kendoGrid");
+                grid.dataSource.read();
+                $("#scEditWindow").data("kendoWindow").close();
+                kendo.alert("Stock-coded part saved successfully");
+            },
+            error: function(xhr) {
+                kendo.alert("Save failed: " + xhr.responseText);
+            },
+            complete: function() {
+                kendo.ui.progress($("#scEditWindow"), false);
+            }
+        });
+    }
+</script>
+Index.cshtml (Main Page)
+html
+<!-- Add this script section to your main page -->
+<script>
+    // Global functions for stock coded parts
+    
+    // Grid parameters function moved to main page
+    function StockCodedParts_getGridParams() {
+        const $container = $("#scPartsContainer");
+        if ($container.length) {
+            return {
+                id: $container.data("part-num"),
+                gridType: $container.data("grid-type")
+            };
+        }
+        return {};
+    }
+    
+    function StockCodedParts_showEditPopup(e) {
+        e.preventDefault();
+        const $row = $(e.currentTarget).closest("tr");
+        const $container = $row.closest("#scPartsContainer");
+        const gridName = $container.data("grid-name");
+        const partNum = $container.data("part-num");
+        const gridType = $container.data("grid-type");
+        const grid = $("#" + gridName).data("kendoGrid");
+        const dataItem = grid.dataItem($row);
+        
+        // Load details with HTTP GET
+        StockCodedParts_loadDetails(dataItem.MMSStockCode, partNum, gridType);
+        
+        const editWindow = $("#scEditWindow").data("kendoWindow");
+        editWindow.title("Edit Stock Coded Part");
+        editWindow.center().open();
+    }
+    
+    function StockCodedParts_onDeleteClick(e) {
+        e.preventDefault();
+        const $row = $(e.currentTarget).closest("tr");
+        const $container = $row.closest("#scPartsContainer");
+        const gridName = $container.data("grid-name");
+        const partNum = $container.data("part-num");
+        const gridType = $container.data("grid-type");
+        const grid = $("#" + gridName).data("kendoGrid");
+        const dataItem = grid.dataItem($row);
+        
+        kendo.confirm("Are you sure you want to delete this stock-coded part?").then(function() {
+            $.ajax({
+                url: '@Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates")',
+                type: 'POST', // HTTP POST for delete
+                contentType: "application/json",
+                data: JSON.stringify({
+                    id: dataItem.MMSStockCode,
+                    parentPartId: partNum,
+                    gridType: gridType
+                }),
+                beforeSend: function() {
+                    kendo.ui.progress(grid.element, true);
+                },
+                success: function() {
+                    grid.dataSource.read();
+                    kendo.alert("Stock-coded part deleted successfully");
+                },
+                error: function(xhr) {
+                    kendo.alert("Delete failed: " + xhr.responseText);
+                },
+                complete: function() {
+                    kendo.ui.progress(grid.element, false);
+                }
+            });
+        });
+    }
+    
+    function StockCodedParts_loadDetails(stockCode, partNum, gridType) {
+        $.ajax({
+            url: '@Url.Action("GetScPartUsedDetail", "ScPartsUsedInEstimates")',
+            type: 'GET', // HTTP GET for details
+            data: { 
+                mmsStockCode: stockCode, 
+                vehicleListId: partNum,
+                gridType: gridType
+            },
+            beforeSend: function() {
+                kendo.ui.progress($("#scEditWindow"), true);
+            },
+            success: function(data) {
+                if (data) {
+                    $("#scStockCode").val(data.MMSStockCode);
+                    $("#scPartType").val(data.PartType);
+                    $("#scSupplierNum").val(data.OrigSupplierNum);
+                    $("#scSupplierName").val(data.OrigSupplierName);
+                    $("#scPartDesc").val(data.PartDescription);
+                    $("#scUnitCost").val(kendo.toString(data.UnitCost, "c2"));
+                    $("#scCoreCost").val(kendo.toString(data.CoreCost, "c2"));
+                    $("#scCostCentre").val(data.CostCentre);
+                    
+                    const qtyNumeric = $("#scQty").data("kendoNumericTextBox");
+                    if (qtyNumeric) qtyNumeric.value(data.Qty);
+                    
+                    const percNumeric = $("#scPerc").data("kendoNumericTextBox");
+                    if (percNumeric) percNumeric.value(data.Percentage);
+                    
+                    $("#scTotCost").val(kendo.toString(data.TotalCost, "c2"));
+                    $("#scModBy").val(data.ModBy);
+                    $("#scModDate").val(data.ModDate ? new Date(data.ModDate).toLocaleString() : "");
+                    
+                    $("#scDetailForm").data("mode", "edit");
+                }
+            },
+            error: function(xhr) {
+                kendo.alert("Error loading part details: " + xhr.responseText);
+            },
+            complete: function() {
+                kendo.ui.progress($("#scEditWindow"), false);
+            }
+        });
+    }
+</script>
+Controller Fixes for Parameter Handling
+csharp
+// ScPartsUsedInEstimatesController.cs
+
+[HttpGet] // Specify HTTP verb
+[AllowAnonymous]
+public async Task<ActionResult> GetScPartsUsedInEstimates(
+    [DataSourceRequest] DataSourceRequest request, 
+    [FromQuery] string id, 
+    [FromQuery] string gridType)
+{
+    // Add validation
+    if (string.IsNullOrEmpty(id))
+    {
+        return BadRequest("id is required");
+    }
+
+    if (string.IsNullOrEmpty(gridType))
+    {
+        return BadRequest("gridType is required");
+    }
+
+    // Rest of your existing code...
+    if (gridType == "RbGrid")
+    {
+        var rbNscModel = await GetScPartsUsedInRBEstimates(id, gridType);
+        return Json(rbNscModel.ToDataSourceResult(request));
+    }
+    if (gridType == "VehicleGrid")
+    {
+        var vehNscmodel = await GetScPartsUsedInVehicleEstimates(id, gridType);
+        return Json(vehNscmodel.ToDataSourceResult(request));
+    }
+    if (gridType == "ArchivedVehicleGrid")
+    {
+        var vehNscmodel = await GetArchivedScPartsUsedInVehicleEstimates(id, gridType);
+        return Json(vehNscmodel.ToDataSourceResult(request));
+    }
+
+    return BadRequest("Invalid gridType");
+}
+
+// Update GetScPartUsedDetail to include gridType
+[AllowAnonymous]
+[HttpGet] // Specify HTTP verb
+public async Task<IActionResult> GetScPartUsedDetail(
+    [FromQuery] string mmsStockCode, 
+    [FromQuery] string vehicleListId,
+    [FromQuery] string gridType)
+{
+    try
+    {
+        // Add gridType to your query
+        var query = @"
+            SELECT 
+                scp.MMSStockCode,
+                scp.PartType,
+                scp.OrigSupplierNum,
+                scp.OrigSupplierName,
+                scp.DetailedDesc AS PartDescription,
+                scp.MmsNewCost AS UnitCost,
+                scp.CoreCost,
+                scused.CostCentre,
+                scused.QtyReqd AS Qty,
+                scused.PercentUsage AS Percentage,
+                scused.LastModifiedBy AS ModBy,
+                scused.LastModifiedDate AS ModDate,
+                dbo.FINALCOST(CAST(scused.PercentUsage AS NUMERIC(18,2)), 
+                    CAST(scused.QtyReqd AS NUMERIC(18,2)), 
+                    scp.MmsNewCost, 0) AS TotalCost
+            FROM SBCES.SCPartsUsed scused
+            INNER JOIN SBCES.StockCodedParts scp 
+                ON scused.MMSStockCode = scp.MMSStockCode
+            WHERE scused.MMSStockCode = @mmsStockCode 
+                AND scused.LinkCode = @vehicleListId
+                AND scused.LinkType = @linkType
+                AND scused.RebuiltPart = 'N'";
+
+        // Map gridType to database link type
+        var linkType = gridType == "VehicleGrid" ? "BUS" : 
+                      gridType == "RbGrid" ? "RB" : 
+                      gridType == "ArchivedVehicleGrid" ? "BUS" : "BUS";
+
+        var part = await _dbConnection.QueryFirstOrDefaultAsync<StockCodedPartsViewModel>(
+            query,
+            new { 
+                mmsStockCode, 
+                vehicleListId,
+                linkType
+            });
+
+        return part != null
+            ? Json(part)
+            : NotFound();
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, ex.Message);
+    }
+}
+Key Changes:
+Moved StockCodedParts_getGridParams to Main Page:
+
+The function is now defined in the main Index.cshtml
+
+Retrieves parameters from the container's data attributes
+
+Ensures proper parameter passing to the controller
+
+Robust Parameter Handling:
+
+Added null checks in controller action
+
+Returns proper error messages for missing parameters
+
+Maps gridType to database link types
+
+HTTP Verb Specification:
+
+Added [HttpGet] to all GET actions
+
+Added [HttpPost] to all POST actions
+
+Explicitly specified verbs in AJAX calls
