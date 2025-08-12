@@ -1,0 +1,457 @@
+@model IEnumerable<BCES.Models.Parts.StockCodedPartsViewModel>
+@using Kendo.Mvc.UI
+@{
+    ViewData["Title"] = "Stock Coded Parts Details";
+    var scGrid = $"ScPartsGrid_{ViewBag.PartNum}";
+    var partNum = ViewBag.PartNum;
+    var gridType = ViewBag.GridType ?? "VehicleGrid";
+}
+
+<div id="scPartsContainer">
+    <h6>Stock Coded Parts Used</h6>
+
+    <!-- Grid Container -->
+    <div id="scGridContainer">
+        @(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
+            .Name(scGrid)
+            .Columns(columns =>
+            {
+                columns.Bound(p => p.MMSStockCode)
+                    .Title("Stock Code")
+                    .ClientTemplate("<a class='sc-link' data-sc-code='#= MMSStockCode #' href='javascript:void(0)'>#= MMSStockCode #</a>")
+                    .Width(120);
+                columns.Bound(p => p.PartType).Title("Part Type").Width(120);
+                columns.Bound(p => p.OrigSupplierNum).Title("Supplier #").Width(120);
+                columns.Bound(p => p.OrigSupplierName).Title("Supplier Name").Width(150);
+                columns.Bound(p => p.UnitCost).Title("Unit Cost").Format("{0:c}").Width(100);
+                columns.Bound(p => p.Qty).Title("Qty").Width(80);
+                columns.Bound(p => p.TotalCost).Title("Total Cost").Format("{0:c}").Width(120);
+                columns.Command(command =>
+                {
+                    command.Custom("Edit").Click("showEditPopup");
+                    command.Custom("Delete").Click("onStockCodedDeleteClick");
+                }).Width(150).Title("Actions");
+            })
+            .Pageable(p => p.PageSizes(new[] { 5, 10, 20 }))
+            .Scrollable()
+            .DataSource(dataSource => dataSource
+                .Ajax()
+                .Read(read => read
+                    .Action("GetScPartsUsedInEstimates", "ScPartsUsedInEstimates")
+                    .Data("function() { return { id: '" + partNum + "', gridType: '" + gridType + "' }; }")
+                )
+            )
+    </div>
+
+    <button id="scAddNew" class="k-button k-primary" style="margin-top:12px;">
+        <span class="k-icon k-i-plus"></span> Add New Stock Coded Part
+    </button>
+</div>
+
+<!-- Popup Window -->
+@(Html.Kendo().Window()
+    .Name("scEditWindow")
+    .Title("Stock Coded Part Details")
+    .Visible(false)
+    .Modal(true)
+    .Draggable(true)
+    .Resizable()
+    .Width(800)
+    .Actions(actions => actions.Close())
+    .Events(ev => ev.Close("onScWindowClose"))
+)
+
+<!-- Hidden container for popup content -->
+<div id="scPopupContent" style="display:none;">
+    <form id="scDetailForm">
+        <div class="section-title">Part Details</div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Stock Code</label>
+                <input id="scStockCode" class="k-textbox stock-field" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Part Type</label>
+                <input id="scPartType" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Supplier #</label>
+                <input id="scSupplierNum" class="k-textbox read-only" readonly />
+            </div>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Supplier Name</label>
+                <input id="scSupplierName" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Description</label>
+                <input id="scPartDesc" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Unit Cost</label>
+                <input id="scUnitCost" class="k-textbox read-only" readonly />
+            </div>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Core Cost</label>
+                <input id="scCoreCost" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Cost Centre</label>
+                @(Html.Kendo().TextBox()
+                    .Name("scCostCentre")
+                    .HtmlAttributes(new { @class = "stock-field", style = "width:100%" })
+                )
+            </div>
+            <div class="form-group">
+                <label class="form-label">Qty</label>
+                @(Html.Kendo().NumericTextBox<int>()
+                    .Name("scQty")
+                    .Format("0")
+                    .Min(1)
+                    .HtmlAttributes(new { style = "width:100%" })
+                )
+            </div>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Percentage</label>
+                @(Html.Kendo().NumericTextBox<int>()
+                    .Name("scPerc")
+                    .Format("0")
+                    .Min(0)
+                    .Max(100)
+                    .HtmlAttributes(new { style = "width:100%" })
+                )
+            </div>
+            <div class="form-group">
+                <label class="form-label">Total Cost</label>
+                <input id="scTotCost" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group"></div> <!-- Spacer -->
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Modified By</label>
+                <input id="scModBy" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Modified Date</label>
+                <input id="scModDate" class="k-textbox read-only" readonly />
+            </div>
+            <div class="form-group"></div> <!-- Spacer -->
+        </div>
+        
+        <div style="margin-top:20px; display:flex; gap:12px;">
+            <button id="scUpdateBtn" type="button" class="k-button k-primary">Save</button>
+            <button type="button" class="k-button" onclick="$('#scEditWindow').data('kendoWindow').close()">Cancel</button>
+        </div>
+    </form>
+</div>
+
+<style>
+    #scPartsContainer {
+        padding: 20px;
+        background-color: #fff;
+        border-radius: 8px;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+    }
+    
+    .k-window-titlebar {
+        background: #3f51b5;
+        color: white;
+        font-weight: 600;
+        padding: 12px 15px;
+    }
+    
+    .k-window-content {
+        padding: 25px;
+        background-color: #f8f9fa;
+    }
+    
+    .section-title {
+        font-size: 16px;
+        color: #2c3e50;
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #3498db;
+        font-weight: 600;
+    }
+    
+    .form-row {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 20px;
+        align-items: flex-start;
+    }
+    
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .form-label {
+        font-size: 13px;
+        color: #2c3e50;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+    
+    .stock-field, .read-only {
+        border: 1px solid #d1d5db;
+        border-radius: 4px;
+        padding: 8px 12px;
+        height: 36px;
+        font-size: 14px;
+    }
+    
+    .read-only {
+        background: #f8fafc !important;
+        color: #4b5563 !important;
+        cursor: not-allowed !important;
+    }
+    
+    h6 {
+        font-size: 16px;
+        color: #2c3e50;
+        margin-bottom: 15px;
+        border-bottom: 1px solid #3498db;
+        padding-bottom: 10px;
+        font-weight: 600;
+    }
+    
+    .k-button {
+        padding: 8px 16px;
+        font-size: 14px;
+        height: 36px;
+        border-radius: 4px;
+        min-width: 100px;
+    }
+    
+    .k-grid {
+        border-radius: 6px;
+        overflow: hidden;
+    }
+    
+    .k-grid td {
+        padding: 10px 12px !important;
+    }
+    
+    .k-grid th {
+        padding: 12px 12px !important;
+        font-weight: 600;
+        background-color: #f0f4f8;
+    }
+    
+    .k-grid-content {
+        overflow-y: auto;
+    }
+</style>
+
+<script>
+    $(document).ready(function() {
+        // Initialize popup window
+        const editWindow = $("#scEditWindow").kendoWindow({
+            width: "800px",
+            height: "auto",
+            visible: false,
+            modal: true,
+            resizable: false
+        }).data("kendoWindow");
+        
+        // Set popup content
+        editWindow.content($("#scPopupContent").html());
+        $("#scPopupContent").remove();
+        
+        // Add new button handler
+        $("#scAddNew").click(function() {
+            clearStockCodedDetailForm();
+            $("#scDetailForm").data("mode", "add");
+            editWindow.title("Add New Stock Coded Part");
+            editWindow.center().open();
+        });
+        
+        // Initialize form controls
+        initializeFormEvents();
+    });
+    
+    function initializeStockCodedGrid() {
+        const grid = $("#@scGrid").data("kendoGrid");
+        if (grid) {
+            grid.dataSource.read({
+                id: "@partNum",
+                gridType: "@gridType"
+            });
+        }
+    }
+    
+    function showEditPopup(e) {
+        e.preventDefault();
+        const grid = $("#@scGrid").data("kendoGrid");
+        const dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        loadStockCodedPartDetails(dataItem.MMSStockCode);
+        
+        const editWindow = $("#scEditWindow").data("kendoWindow");
+        editWindow.title("Edit Stock Coded Part");
+        editWindow.center().open();
+    }
+    
+    function loadStockCodedPartDetails(stockCode) {
+        $.ajax({
+            url: '@Url.Action("GetScPartUsedDetail", "ScPartsUsedInEstimates")',
+            type: 'GET',
+            data: { 
+                mmsStockCode: stockCode, 
+                vehicleListId: "@partNum"
+            },
+            beforeSend: function() {
+                kendo.ui.progress($("#scEditWindow"), true);
+            },
+            success: function(data) {
+                if (data) {
+                    $("#scStockCode").val(data.MMSStockCode);
+                    $("#scPartType").val(data.PartType);
+                    $("#scSupplierNum").val(data.OrigSupplierNum);
+                    $("#scSupplierName").val(data.OrigSupplierName);
+                    $("#scPartDesc").val(data.PartDescription);
+                    $("#scUnitCost").val(kendo.toString(data.UnitCost, "c2"));
+                    $("#scCoreCost").val(kendo.toString(data.CoreCost, "c2"));
+                    $("#scCostCentre").val(data.CostCentre);
+                    $("#scQty").data("kendoNumericTextBox").value(data.Qty);
+                    $("#scPerc").data("kendoNumericTextBox").value(data.Percentage);
+                    $("#scTotCost").val(kendo.toString(data.TotalCost, "c2"));
+                    $("#scModBy").val(data.ModBy);
+                    $("#scModDate").val(data.ModDate ? new Date(data.ModDate).toLocaleString() : "");
+                    
+                    $("#scDetailForm").data("mode", "edit");
+                }
+            },
+            error: function(xhr) {
+                kendo.alert("Error loading part details: " + xhr.responseText);
+            },
+            complete: function() {
+                kendo.ui.progress($("#scEditWindow"), false);
+            }
+        });
+    }
+    
+    function initializeFormEvents() {
+        $("#scUpdateBtn").click(saveStockCodedPart);
+        
+        // Auto-calculate total cost
+        $("#scQty, #scPerc").on("change", function() {
+            calculateStockCodedTotalCost();
+        });
+    }
+    
+    function onScWindowClose() {
+        clearStockCodedDetailForm();
+    }
+    
+    function saveStockCodedPart() {
+        const mode = $("#scDetailForm").data("mode");
+        const isAdd = mode === "add";
+
+        const partData = {
+            MMSStockCode: $("#scStockCode").val(),
+            CC: $("#scCostCentre").val(),
+            Qty: $("#scQty").data("kendoNumericTextBox").value(),
+            Percentage: $("#scPerc").data("kendoNumericTextBox").value(),
+            UnitCost: parseFloat($("#scUnitCost").val().replace(/[^0-9.-]+/g, "")),
+            CoreCost: parseFloat($("#scCoreCost").val().replace(/[^0-9.-]+/g, "")),
+            LinkCode: "@partNum"
+        };
+
+        if (isAdd && !partData.MMSStockCode) {
+            kendo.alert("Stock Code is required!");
+            return;
+        }
+
+        const action = isAdd 
+            ? '@Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates")'
+            : '@Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates")';
+
+        $.ajax({
+            url: action,
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify({
+                model: partData,
+                id: "@partNum",
+                gridType: "@gridType"
+            }),
+            beforeSend: function() {
+                kendo.ui.progress($("#scEditWindow"), true);
+            },
+            success: function() {
+                const grid = $("#@scGrid").data("kendoGrid");
+                grid.dataSource.read();
+                $("#scEditWindow").data("kendoWindow").close();
+                kendo.alert("Stock-coded part saved successfully");
+            },
+            error: function(xhr) {
+                kendo.alert("Save failed: " + xhr.responseText);
+            },
+            complete: function() {
+                kendo.ui.progress($("#scEditWindow"), false);
+            }
+        });
+    }
+    
+    function calculateStockCodedTotalCost() {
+        const qty = $("#scQty").data("kendoNumericTextBox").value() || 0;
+        const unitCost = parseFloat($("#scUnitCost").val().replace(/[^0-9.-]+/g, "")) || 0;
+        const perc = $("#scPerc").data("kendoNumericTextBox").value() || 0;
+        const total = qty * unitCost * (1 + perc/100);
+        $("#scTotCost").val(kendo.toString(total, "c2"));
+    }
+    
+    function clearStockCodedDetailForm() {
+        $("#scDetailForm input").val("");
+        $("#scCostCentre").val("");
+        $("#scQty").data("kendoNumericTextBox").value(0);
+        $("#scPerc").data("kendoNumericTextBox").value(0);
+        $("#scTotCost").val("");
+    }
+    
+    function onStockCodedDeleteClick(e) {
+        e.preventDefault();
+        const grid = $("#@scGrid").data("kendoGrid");
+        const dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        
+        kendo.confirm("Are you sure you want to delete this stock-coded part?").then(function() {
+            $.ajax({
+                url: '@Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates")',
+                type: 'POST',
+                data: JSON.stringify({
+                    id: dataItem.MMSStockCode,
+                    parentPartId: "@partNum",
+                    gridType: "@gridType"
+                }),
+                contentType: "application/json",
+                beforeSend: function() {
+                    kendo.ui.progress(grid.element, true);
+                },
+                success: function() {
+                    grid.dataSource.read();
+                    kendo.alert("Stock-coded part deleted successfully");
+                },
+                error: function(xhr) {
+                    kendo.alert("Delete failed: " + xhr.responseText);
+                },
+                complete: function() {
+                    kendo.ui.progress(grid.element, false);
+                }
+            });
+        });
+    }
+</script>
