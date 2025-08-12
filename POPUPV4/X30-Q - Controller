@@ -1,0 +1,627 @@
+For Add, Update, delete, do we need any additional functions in VehicleController.cs? 
+ScPartsUsedInEstimatesController.cs
+namespace BCES.Controllers.Parts
+{
+    public class ScPartsUsedInEstimatesController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public ScPartsUsedInEstimatesController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<ActionResult> GetScPartsUsedInEstimates([DataSourceRequest] DataSourceRequest request, [FromQuery] string id, [FromQuery] string gridType)
+        {
+            // Fetch data for the grid
+
+            if (string.IsNullOrEmpty(id))
+            {
+                return BadRequest("id is required for :" + gridType);
+            }
+
+            if (gridType == "RbGrid")
+            {
+                var rbNscModel = await GetScPartsUsedInRBEstimates(id, gridType);
+                return Json(rbNscModel.ToDataSourceResult(request));
+            }
+            if (gridType == "VehicleGrid")
+            {
+                var vehNscmodel = await GetScPartsUsedInVehicleEstimates(id, gridType);
+                return Json(vehNscmodel.ToDataSourceResult(request));
+            }
+            if (gridType == "ArchivedVehicleGrid")
+            {
+                var vehNscmodel = await GetArchivedScPartsUsedInVehicleEstimates(id, gridType);
+                return Json(vehNscmodel.ToDataSourceResult(request));
+            }
+
+            return null; //Add exception
+
+
+        }
+
+        private async Task<IEnumerable<StockCodedPartsViewModel>> GetArchivedScPartsUsedInVehicleEstimates(string partNum, string gridType)
+        {
+            try
+            {
+                var query = @"
+                            SELECT 
+                                ascp.MmsStockCode,
+                                ascp.DateEntered AS LastModifiedDate,
+                                ascp.RebPartCost,
+                                ascp.UserEntered AS LastModifiedBy,
+                                ascp.MmsCost AS UnitCost,
+                                ascp.OemCost,
+                                ascp.MmsRebuiltCode,
+                                ascp.CostCentre,
+                                ascp.QtyReqd AS Qty,
+                                ascp.PercentUsage AS Percentage,
+                                ascp.LinkCode,
+                                ascp.RebuiltPart,
+                                ascp.LinkType,
+                                ascp.Corecost,
+                                ascp.ArchVehicleListId,
+                                ascp.TotalCost,
+                                ascp.ScKeyword,
+                                ascp.ScDescription,
+                                scp.PartType,
+                                scp.OrigSupplierName ,
+                                scp.OrigSupplierNum ,
+                                scp.DetailedDesc 
+                            FROM 
+                                CES.SBCES.ArchVehScPartsUsed AS ascp
+                            JOIN 
+                                SBCES.StockCodedParts AS scp ON ascp.MmsStockCode = scp.MmsStockCode
+                            WHERE 
+                                ascp.LinkType = 'BUS'
+                                AND ascp.ArchVehicleListId = @id;";
+
+
+                var parameters = new { id = partNum };
+
+                var result = await _dbConnection.QueryAsync<StockCodedPartsViewModel>(query, parameters);
+
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in GetLabourDetailsData: {ex.Message}");
+                throw; // Rethrow the exception for centralized handling
+            }
+        }
+        private async Task<IEnumerable<StockCodedPartsViewModel>> GetScPartsUsedInVehicleEstimates(string id, string gridType)
+        {
+
+            try
+            {
+
+                var query = @"
+                             DECLARE @Id VARCHAR(30) = '" + id + "'" +
+                             @"
+                               
+                                 SELECT 
+                                UPPER(SCP.MMSSTOCKCODE) AS MMSStockCode,
+                                ISNULL(SCP.MMSCOST, 0) AS UnitCost,
+                                ISNULL(SCP.CoreCost, 0) AS CoreCost,
+                                UPPER(SCP.QTYREQD) AS Qty,
+                                
+                                REPLACE(SCP.PERCENTUSAGE, ',', '.') AS [Percentage],
+                                REPLACE(
+                                    CAST(SBCES.FINALCOST(
+                                        CAST(SCP.PERCENTUSAGE AS NUMERIC(18,2)), 
+                                        CAST(SCP.QTYREQD AS NUMERIC(18,2)), 
+                                        SCP.CORECOST, 
+                                        
+                                        0
+                                    ) AS DECIMAL(18,2)), ',', '.'
+                                ) AS CoreCharge,
+                                REPLACE(
+                                    CAST(SBCES.FINALCOST(
+                                        CAST(SCP.PERCENTUSAGE AS NUMERIC(18,2)), 
+                                        CAST(SCP.QTYREQD AS NUMERIC(18,2)), 
+                                        SCP.MMSCOST, 
+                                        0
+                                    ) AS DECIMAL(18,2)), ',', '.'
+                                ) AS TotalCost,
+                                UPPER(SCP.COSTCENTRE) AS CC,
+                                ISNULL(UPPER(SCPARTS.DETAILEDDESC), '') AS DetailedDesc,
+                                ISNULL(UPPER(SCPARTS.PARTTYPE), '') AS PartType,
+                                SCP.OEMCOST AS [OEM COST],
+                                SCP.MMSREBUILTCODE AS MMSREBUILTCODE,
+                                SCP.REBPARTCOST AS [RebuiltPartCost],
+                                UPPER(SCP.REBUILTPART) AS REBUILTPART,
+                                SCP.LinkCode,
+                                 UPPER(SCP.LastModifiedBy) AS LastModifiedBy,
+                                SCP.LastModifiedDate AS LastModifiedDate,
+                                SCPARTS.OrigSupplierNum,
+                                SCPARTS.OrigSupplierName
+                            FROM 
+                                SBCES.SCPARTSUSED SCP
+                            LEFT JOIN 
+                                SBCES.STOCKCODEDPARTS SCPARTS 
+                                ON SCPARTS.MMSSTOCKCODE = SCP.MMSSTOCKCODE
+                            WHERE 
+                                SCP.LINKCODE = @Id 
+                                AND SCP.LINKTYPE = 'BUS'
+                                AND SCP.MMSSTOCKCODE is NOT NULL
+                                AND SCP.RebuiltPart ='N'
+                            ORDER BY 
+                                SCP.MMSSTOCKCODE;
+
+                                ";
+
+                return await _dbConnection.QueryAsync<StockCodedPartsViewModel>(query);
+
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+
+        private async Task<IEnumerable<StockCodedPartsViewModel>> GetScPartsUsedInRBEstimates(string id, string gridType)
+        {
+
+
+            try
+            {
+
+                var query = @"
+                             DECLARE @Id VARCHAR(30) = '" + id + "'" +
+                             @"
+                               
+                                 SELECT 
+                                UPPER(SCP.MMSSTOCKCODE) AS MMSSTOCKCODE,
+                                ISNULL(SCP.MMSCOST, 0) AS UnitCost,
+                                UPPER(SCP.QTYREQD) AS QTY,
+                                REPLACE(SCP.PERCENTUSAGE, ',', '.') AS [Percentage],
+                                REPLACE(
+                                    CAST(SBCES.FINALCOST(
+                                        CAST(SCP.PERCENTUSAGE AS NUMERIC(18,2)), 
+                                        CAST(SCP.QTYREQD AS NUMERIC(18,2)), 
+                                        SCP.CORECOST, 
+                                        0
+                                    ) AS DECIMAL(18,2)), ',', '.'
+                                ) AS CORECOST,
+                                REPLACE(
+                                    CAST(SBCES.FINALCOST(
+                                        CAST(SCP.PERCENTUSAGE AS NUMERIC(18,2)), 
+                                        CAST(SCP.QTYREQD AS NUMERIC(18,2)), 
+                                        SCP.MMSCOST, 
+                                        0
+                                    ) AS DECIMAL(18,2)), ',', '.'
+                                ) AS TOTALCOST,
+                                UPPER(SCP.COSTCENTRE) AS CC,
+                                ISNULL(UPPER(SCPARTS.DETAILEDDESC), '') AS DESCRIPTION,
+                                ISNULL(UPPER(SCPARTS.PARTTYPE), '') AS KEYWORD,
+                                SCP.OEMCOST AS [OEM COST],
+                                SCP.MMSREBUILTCODE AS MMSREBUILTCODE,
+                                SCP.REBPARTCOST AS [RebuiltPartCost],
+                                UPPER(SCP.REBUILTPART) AS REBUILTPART,
+                                SCP.LinkCode
+    
+                            FROM 
+                                SBCES.SCPARTSUSED SCP
+                            LEFT JOIN 
+                                SBCES.STOCKCODEDPARTS SCPARTS 
+                                ON SCPARTS.MMSSTOCKCODE = SCP.MMSSTOCKCODE
+                            WHERE 
+                                SCP.LINKCODE = @Id 
+                                AND SCP.LINKTYPE = 'RB'
+                            ORDER BY 
+                                SCP.MMSSTOCKCODE;
+
+                                ";
+
+                return await _dbConnection.QueryAsync<StockCodedPartsViewModel>(query);
+
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        
+        public async Task<IActionResult> CreateScPartsUsedInEstimates(
+            [FromBody] StockCodedPartsViewModel model,
+            [FromQuery] string id,
+            [FromQuery] string gridType)
+        {
+            _dbConnection.Open();
+            using var transaction = _dbConnection.BeginTransaction();
+
+            try
+            {
+                var enteredBy = ViewBag.UserName?.ToString().ToUpper() ?? "SYSTEM";
+                var dateEntered = DateTime.Now;
+                var linkCode = id;
+                string linkType = gridType == "RbGrid" ? "RB" : "BUS";
+                var isRebuiltPart = 'N';
+                // Change in AJAX call parameters:
+                var partData = new
+                {
+                    id ,
+                    gridType,
+                    model = new
+                    {
+                        MMSStockCode = model.MMSStockCode,
+                        CC = model.CC,
+                        Qty = model.Qty,
+                        Percentage = model.Percentage,
+                        UnitCost = model.UnitCost,
+                        CoreCost = model.CoreCost
+                    }
+                };
+
+                //  var model = models.FirstOrDefault(); // only one model expected when Batch(false)
+                if (model == null)
+                {
+                    ModelState.AddModelError("", "No data submitted.");
+                    return null;;
+                }
+
+                var mmsStockCode = model.MMSStockCode?.ToUpperInvariant();
+
+                //  Duplicate check
+                var duplicateCheckSql = @"
+                                SELECT COUNT(*) 
+                                FROM SBCES.SCPartsUsed 
+                                WHERE UPPER(MMSStockCode) = @MMSStockCode
+                                  AND UPPER(LinkCode) = @LinkCode
+                                  AND UPPER(LinkType) = @LinkType";
+
+                var duplicateCount = await _dbConnection.ExecuteScalarAsync<int>(
+                    duplicateCheckSql,
+                    new { MMSStockCode = mmsStockCode, LinkCode = linkCode.ToUpper(), LinkType = linkType },
+                    transaction
+                );
+
+                if (duplicateCount > 0)
+                {
+                    ModelState.AddModelError("MMSStockCode", $"MMSStockCode '{mmsStockCode}' already exists for this estimate.");
+                    return null;
+                }
+
+                var parameters = new DynamicParameters();
+                parameters.Add("MMSStockCode", mmsStockCode);
+                parameters.Add("CC", model.CC?.ToUpperInvariant() ?? " ");
+                parameters.Add("CorePartNumber", model.CorePartNumber?.ToUpperInvariant() ?? " ");
+                parameters.Add("EnteredBy", enteredBy);
+                parameters.Add("DateEntered", dateEntered);
+                parameters.Add("LinkCode", linkCode.ToUpper());
+                parameters.Add("LinkType", linkType);
+                parameters.Add("RebuiltPartNum", id);
+                parameters.Add("IsRebuiltPart", isRebuiltPart);
+                parameters.Add("UnitCost", model.UnitCost ?? 0m);
+                parameters.Add("MmsNewCost", model.MmsNewCost ?? 0m);
+                parameters.Add("CoreCost", model.CoreCost ?? 0m);
+                parameters.Add("RebPartCost", model.PartCost ?? 0m);
+                parameters.Add("LastModifiedBy", enteredBy);
+                parameters.Add("LastModifiedDate", dateEntered);
+                parameters.Add("Qty", (model.Qty ?? "0").ToUpperInvariant());
+                parameters.Add("Percentage", (model.Percentage ?? "0").ToUpperInvariant());
+                parameters.Add("OrigSupplierNum", (model.OrigSupplierNum ?? "0").ToUpperInvariant());
+                parameters.Add("OrigSupplierName", (model.OrigSupplierName ?? "").ToUpperInvariant());
+                parameters.Add("DetailedDesc", (model.DetailedDesc ?? "").ToUpperInvariant());
+                parameters.Add("PartType", (model.PartType ?? "").ToUpperInvariant());
+
+                var sql = @"
+            INSERT INTO SBCES.SCPartsUsed (
+                MMSStockCode, DateEntered, EnteredBy, MMSCost, OEMCost,
+                LastModifiedBy, LastModifiedDate, CostCentre, QtyReqd,
+                PercentUsage, LinkCode, RebuiltPart, LinkType, MMSRebuiltCode,
+                CoreCost, RebPartCost, OrigSupplierName, OrigSupNum
+            ) VALUES (
+                UPPER(@MMSStockCode), 
+                @LastModifiedDate, 
+                UPPER(@EnteredBy),
+                @UnitCost, 
+                @MmsNewCost,
+                UPPER(@LastModifiedBy), 
+                @LastModifiedDate, 
+                UPPER(@CC),
+                UPPER(@Qty), 
+                UPPER(@Percentage),
+                UPPER(@LinkCode), 
+                UPPER(@IsRebuiltPart), 
+                UPPER(@LinkType),
+                UPPER(@RebuiltPartNum), 
+                @CoreCost,
+                @RebPartCost,
+                UPPER(@OrigSupplierName),
+                UPPER(@OrigSupplierNum)                               
+            )";
+
+                await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+                transaction.Commit();
+
+                if (gridType == "VehicleGrid")
+                {
+                    await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, id);
+                }
+
+                return StatusCode(200, $"success");
+            }
+            catch (SqlException sqlEx)
+            {
+                transaction.Rollback();
+                ModelState.AddModelError("", $"Database error: {sqlEx.Message}");
+                // return Json(models.ToDataSourceResult(request, ModelState));
+                return StatusCode(500, $"failed");
+            }
+            catch (Exception ex)
+            {
+                transaction.Rollback();
+                ModelState.AddModelError("", $"Unexpected error: {ex.Message}");
+                //return Json(models.ToDataSourceResult(request, ModelState));
+                return StatusCode(500, $"Delete failed: {ex.Message}");
+            }
+        }
+
+        [AcceptVerbs("Post")]
+        [AllowAnonymous]
+        public async Task<IActionResult> UpdateScPartsUsedInEstimates(
+            [FromBody] StockCodedPartsViewModel model,
+            [FromQuery] string id,
+            [FromQuery] string gridType)
+        {
+            
+            string linkType = string.Empty;
+            if (gridType == "RbGrid")
+            {
+                linkType = "RB";
+            }
+            if (gridType == "VehicleGrid")
+            {
+                linkType = "BUS";
+            }
+            if (!ModelState.IsValid)
+            {
+                return StatusCode(500, $"failed");
+                // return Json(models.ToDataSourceResult(request, ModelState));
+            }
+            _dbConnection.Open();
+            using var transaction = _dbConnection.BeginTransaction();
+            try
+            {
+                var enteredBy = ViewBag.UserADId?.ToString().ToUpper() ?? "SYSTEM";
+                var dateModified = DateTime.Now;
+
+                //foreach (var model in models)
+                {
+                    var parameters = new DynamicParameters();
+                    parameters.Add("MMSStockCode", model.MMSStockCode?.ToUpperInvariant());
+                    parameters.Add("CC", model.CC?.ToUpperInvariant() ?? " ");
+                    parameters.Add("UnitCost", model.UnitCost ?? 0m);
+                    parameters.Add("Qty", (model.Qty ?? "0").ToUpperInvariant());
+                    parameters.Add("Percentage", (model.Percentage ?? "0").ToUpperInvariant());
+                    parameters.Add("CoreCost", model.CoreCost ?? 0m);
+                    parameters.Add("RebuiltPartNum", id?.ToUpperInvariant());
+                    parameters.Add("LastModifiedBy", ViewBag.UserName);
+                    parameters.Add("LastModifiedDate", DateTime.Now);
+                    parameters.Add("LinkType", linkType);
+                    parameters.Add("LinkCode", model.LinkCode);
+
+                    var sql = @"
+                                UPDATE SBCES.SCPartsUsed 
+                                SET 
+                                    CostCentre = UPPER(@CC),
+                                    MMSCost = @UnitCost,
+                                    QtyReqd = UPPER(@Qty),
+                                    PercentUsage = UPPER(@Percentage),
+                                    CoreCost = @CoreCost,
+                                    LastModifiedBy = @LastModifiedBy,
+                                    LastModifiedDate = @LastModifiedDate
+                                WHERE 
+                                    MMSStockCode = @MMSStockCode
+                                    AND LinkCode = @LinkCode
+                                    AND LinkType = @LinkType
+                                    
+                                    ";
+
+                    await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+                }
+
+
+                transaction.Commit();
+
+                if (gridType == "VehicleGrid")
+                {
+                    //update estimates
+                    await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, id);
+                }
+                return StatusCode(200, $"success");
+                // return Json(models.ToDataSourceResult(request));
+            }
+            catch (Exception ex)
+            {
+                transaction.Rollback();
+                ModelState.AddModelError("", $"Error updating record: {ex.Message}");
+                //return Json(models.ToDataSourceResult(request, ModelState));
+                return StatusCode(500, $"failed");
+            }
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> DeleteScPartsUsedInEstimates(
+            string id,
+            string parentPartId,
+            string gridType)
+        {
+            try
+            {
+                _dbConnection.Open();
+                using var transaction = _dbConnection.BeginTransaction();
+
+                var sql = @"DELETE FROM SBCES.SCPartsUsed 
+                            WHERE MMSStockCode = @id
+                            AND LinkCode = @parentPartId
+                            AND LinkType = @gridType";
+
+                var parameters = new
+                {
+                    id,
+                    parentPartId,
+                    gridType = gridType == "VehicleGrid" ? "BUS" : "RB"
+                };
+
+                int affectedRows = await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+                transaction.Commit();
+
+                if (gridType == "VehicleGrid")
+                {
+                    await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, parentPartId);
+                }
+
+                return Json(new { success = affectedRows > 0 });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Delete failed: {ex.Message}");
+            }
+        }
+
+
+        [AllowAnonymous]
+        public async Task<IActionResult> GetScPartUsedDetail(string mmsStockCode, string vehicleListId)
+        {
+            try
+            {
+                var query = @"
+            SELECT 
+                scp.MMSStockCode,
+                scp.PartType,
+                scp.OrigSupplierNum,
+                scp.OrigSupplierName,
+                scp.DetailedDesc AS PartDescription,
+                scp.MmsNewCost AS UnitCost,
+                scp.CoreCost,
+                scused.CostCentre,
+                scused.QtyReqd AS Qty,
+                scused.PercentUsage AS Percentage,
+                scused.LastModifiedBy AS ModBy,
+                scused.LastModifiedDate AS ModDate,
+                dbo.FINALCOST(CAST(scused.PercentUsage AS NUMERIC(18,2)), 
+                    CAST(scused.QtyReqd AS NUMERIC(18,2)), 
+                    scp.MmsNewCost, 0) AS TotalCost
+            FROM SBCES.SCPartsUsed scused
+            INNER JOIN SBCES.StockCodedParts scp 
+                ON scused.MMSStockCode = scp.MMSStockCode
+            WHERE scused.MMSStockCode = @mmsStockCode 
+                AND scused.LinkCode = @vehicleListId
+                AND scused.LinkType = 'BUS'
+                AND scused.RebuiltPart = 'N'";
+
+                var part = await _dbConnection.QueryFirstOrDefaultAsync<StockCodedPartsViewModel>(
+                    query,
+                    new { mmsStockCode, vehicleListId });
+
+                return part != null
+                    ? Json(part)
+                    : NotFound();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, ex.Message);
+            }
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetScPartDetails(string mmsStockCode, string gridType)
+        {
+            if (string.IsNullOrEmpty(mmsStockCode))
+            {
+                return NotFound("Stock Code is required");
+            }
+
+            try
+            {
+                var query = @"
+                            SELECT TOP 1 
+                                PartType, DetailedDesc, MmsNewCost as UnitCost
+
+                            FROM SBCES.StockCodedParts F
+                            WHERE MMSStockCode ='" + mmsStockCode + "'";
+
+                using (var connection = _db.CreateConnection())
+                {
+                    var result = await connection.QueryFirstOrDefaultAsync(query, new { mmsStockCode });
+
+                    if (result == null)
+                    {
+                        return NotFound(new { Message = "Stock Code not found" });
+                    }
+
+                    return Ok(new
+                    {
+                        PartType = result.PartType,
+                        DetailedDesc = result.DetailedDesc,
+                        UnitCost = result.UnitCost
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log error here
+                return StatusCode(500, new { Message = "Error retrieving part details" });
+            }
+        }
+    }
+}
+VehicleController.cs :
+
+        [AllowAnonymous]
+        public IActionResult ScDetailsPartial(string id, string gridType)
+        {
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+
+            var model = new List<BCES.Models.Parts.StockCodedPartsViewModel> { };
+
+            return PartialView("_ScPartsUsed", model);
+
+        }
+SCPartsUsedInEstimatesController.cs
+
+        [AllowAnonymous]
+        public IActionResult ScDetailsPartial(string id, string gridType)
+        {
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+
+            var model = new List<BCES.Models.Parts.StockCodedPartsViewModel> { };
+
+            return PartialView("_ScPartsUsed", model);
+
+        }
