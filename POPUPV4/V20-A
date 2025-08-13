@@ -1,0 +1,73 @@
+How to fix it
+1️⃣ Ensure template is in correct folder
+Kendo will only auto-bind templates from:
+
+swift
+Copy
+Edit
+/Views/Shared/EditorTemplates/ScPartsPopUp.cshtml
+(not /Views/Shared/_ScPartsPopUp.cshtml — remove underscore in filename and TemplateName).
+
+2️⃣ Null-safe in template
+Wrap all model usages in ?. and default values:
+
+csharp
+Copy
+Edit
+@(Model?.MMSStockCode ?? "")
+This prevents the template from dying if the model is null.
+
+3️⃣ Make sure grid model is correct
+In _ScPartsUsed.cshtml grid definition:
+
+csharp
+Copy
+Edit
+.Model(model =>
+{
+    model.Id(c => c.MMSStockCode);
+    model.Field(c => c.MMSStockCode).DefaultValue("");
+    model.Field(c => c.UnitCost).DefaultValue(0);
+    // ...
+})
+This ensures Kendo passes a valid model instance to the popup, even for "Add New".
+
+4️⃣ Support “popup inside popup”
+Since _ScPartsPopUp is being rendered inside a tab of _VehPopUp, you should avoid Kendo trying to open its own default popup window style and instead use a nested Kendo Window:
+
+In _ScPartsUsed.cshtml:
+
+csharp
+Copy
+Edit
+.Events(ev => ev.Edit("onScPartsEdit"))
+In JS:
+
+javascript
+Copy
+Edit
+function onScPartsEdit(e) {
+    var wnd = e.container.data("kendoWindow");
+    wnd.setOptions({
+        modal: true,
+        width: "950px",
+        title: e.model.isNew() ? "Add Part" : "Edit Part",
+        appendTo: "#vehiclePopupContainer" // ensures it renders inside outer popup
+    });
+}
+5️⃣ When inside tabs, defer grid initialization
+If your grid is inside a hidden tab, Kendo sometimes initializes it before it’s visible → popup size glitches.
+Call:
+
+javascript
+Copy
+Edit
+$('#tabs').kendoTabStrip({
+    activate: function(e) {
+        var grid = $("#ScPartsGrid").data("kendoGrid");
+        if (grid) {
+            grid.resize();
+        }
+    }
+});
+If you want, I can rewrite _ScPartsPopUp.cshtml so it:
