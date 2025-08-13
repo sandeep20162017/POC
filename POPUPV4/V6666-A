@@ -1,0 +1,212 @@
+Alright — let’s make this fully integrated so that:
+
+_ScPartsUsed.cshtml handles all CRUD wiring (Add, Edit, Save, Cancel, Delete) with Kendo popups and confirmations.
+
+StockCodedPartsViewModel.cshtml popup just contains the form — all save/cancel logic is in _ScPartsUsed.cshtml.
+
+Index.cshtml can simply call functions like triggerAddScPart(), triggerEditScPart(id), and triggerDeleteScPart(id) without caring about URLs.
+
+1️⃣ _ScPartsUsed.cshtml Changes
+Key changes:
+
+Keep your existing grid, but add:
+
+Delete confirmation dialog logic
+
+Save and Cancel handlers for the popup
+
+Helper functions for Index to trigger CRUD
+
+Here’s the integrated _ScPartsUsed.cshtml (shortened where your columns remain unchanged):
+
+csharp
+Copy
+Edit
+@model IEnumerable<BCES.Models.Parts.StockCodedPartsViewModel>
+
+@{
+    var partsList = Model ?? Enumerable.Empty<BCES.Models.Parts.StockCodedPartsViewModel>();
+    var scGridName = $"ScPartsMaterialDetailsRebuiltPartsGrid";
+    bool isArchived = ViewBag.GridType == "ArchivedVehicleGrid";
+    bool isAdmin = ViewBag.RoleId == 1;
+    ViewBag.scGridName = scGridName;
+    string gridName = $"ScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}";
+}
+
+<script>
+    var scInEstimateGridName = '@gridName';
+
+    // --- Cancel with warning ---
+    function cancelScPartPopup() {
+        if (confirm("All unsaved changes will be lost. Do you want to continue?")) {
+            $(".k-window-content.k-content").data("kendoWindow").close();
+        }
+    }
+
+    // --- Save popup (Add or Update) ---
+    function saveScPartPopup() {
+        var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+        var form = $("#scPartsForm");
+
+        if (!form.valid()) {
+            alert("Please fill all required fields.");
+            return;
+        }
+
+        var formData = form.serialize();
+        var isEdit = $("#MMSStockCode").val() !== "";
+
+        $.ajax({
+            url: isEdit
+                ? '@Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates")?id=' + '@ViewBag.PartNum' + "&gridType=" + '@ViewBag.GridType'
+                : '@Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates")?id=' + '@ViewBag.PartNum' + "&gridType=" + '@ViewBag.GridType',
+            type: "POST",
+            data: formData,
+            success: function () {
+                $(".k-window-content.k-content").data("kendoWindow").close();
+                grid.dataSource.read();
+            },
+            error: function (xhr) {
+                alert("Save failed: " + xhr.responseText);
+            }
+        });
+    }
+
+    // --- Delete confirmation ---
+    function showDeleteConfirmation(e) {
+        e.preventDefault();
+        var tr = $(e.currentTarget).closest("tr");
+        var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+        var dataItem = grid.dataItem(tr);
+
+        $("<div></div>").kendoDialog({
+            title: "Confirm Deletion",
+            content: "Are you sure you want to delete this part?",
+            width: "400px",
+            modal: true,
+            actions: [
+                { text: "No" },
+                {
+                    text: "Yes", primary: true, action: function () {
+                        $.ajax({
+                            url: '@Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates")',
+                            type: "POST",
+                            data: { id: dataItem.MMSStockCode, gridType: '@ViewBag.GridType', partNum: '@ViewBag.PartNum' },
+                            success: function () {
+                                grid.dataSource.read();
+                            },
+                            error: function (xhr) {
+                                alert("Delete failed: " + xhr.responseText);
+                            }
+                        });
+                    }
+                }
+            ]
+        }).data("kendoDialog").open();
+    }
+
+    // --- Refresh grid after any CRUD ---
+    function onScRequestEnd(e) {
+        if (["create", "update", "destroy"].includes(e.type)) {
+            this.dataSource.read();
+        }
+    }
+
+    // --- External triggers (Index.cshtml can call these) ---
+    function triggerAddScPart() {
+        $("#" + scInEstimateGridName).data("kendoGrid").addRow();
+    }
+    function triggerEditScPart(id) {
+        var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+        var item = grid.dataSource.get(id);
+        if (item) grid.editRow(grid.table.find("tr[data-uid='" + item.uid + "']"));
+    }
+    function triggerDeleteScPart(id) {
+        var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+        var item = grid.dataSource.get(id);
+        if (item) {
+            showDeleteConfirmation({ currentTarget: grid.table.find("tr[data-uid='" + item.uid + "']").find(".k-grid-Delete")[0], preventDefault: function () { } });
+        }
+    }
+</script>
+
+<h6>Stock Coded Parts Used</h6>
+
+@(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
+    .Name(gridName)
+    .BindTo(partsList)
+    .Events(events => events
+        .RequestEnd("onScRequestEnd")
+        .Save("onGridCellSave")
+        .CellClose("onGridCellClose")
+    )
+    .Columns(columns =>
+    {
+        // Keep your existing columns here...
+        columns.Command(command =>
+        {
+            if (!isArchived && isAdmin)
+            {
+                command.Edit().Text(" ");
+                command.Custom("Delete")
+                    .Click("showDeleteConfirmation")
+                    .Text(" ")
+                    .IconClass("k-icon k-i-delete");
+            }
+        }).Width(150);
+    })
+    .ToolBar(toolbar =>
+    {
+        if (!isArchived && isAdmin)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.PopUp))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Model(model =>
+        {
+            model.Id(c => c.MMSStockCode);
+        })
+        .Read(read => read.Url(Url.Action("GetScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get).Data("getVehicleId"))
+        .Create(create => create.Url(Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(destroy => destroy.Url(Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+    )
+)
+2️⃣ StockCodedPartsViewModel.cshtml Changes
+No more JS logic here — just keep the form and ensure onclick calls our shared functions:
+
+csharp
+Copy
+Edit
+<button id="btnSavePart" class="k-button k-primary" type="button" onclick="saveScPartPopup()">
+    <span class="k-icon k-i-save"></span> Save
+</button>
+<button id="btnCancelPart" class="k-button" type="button" onclick="cancelScPartPopup()">
+    <span class="k-icon k-i-cancel"></span> Cancel
+</button>
+Everything else in your form stays exactly the same.
+
+3️⃣ Index.cshtml Usage
+You can now call from anywhere:
+
+javascript
+Copy
+Edit
+// Add a new part
+triggerAddScPart();
+
+// Edit an existing part
+triggerEditScPart("STOCKCODE123");
+
+// Delete an existing part
+triggerDeleteScPart("STOCKCODE123");
+4️⃣ How to Apply Changes
+Replace _ScPartsUsed.cshtml with the above integrated version (keeping your columns the same, just inserting my <script> block at the top).
+
+Update StockCodedPartsViewModel.cshtml so the Save/Cancel buttons call saveScPartPopup() and cancelScPartPopup() — remove any old save/cancel JS logic from this file.
+
+In Index.cshtml, just call triggerAddScPart(), triggerEditScPart(id), and triggerDeleteScPart(id) when needed.
