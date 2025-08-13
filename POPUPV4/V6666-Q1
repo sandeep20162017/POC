@@ -1,0 +1,370 @@
+I already have following :
+.Read(read => read.Url(Url.Action("GetScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get).Data("getVehicleId"))
+.Create(create => create.Url(Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+.Update(update => update.Url(Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+.Destroy(destroy => destroy.Url(Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+
+Would like to call these  .Create,.Update,.Destroy in index.cshtml. For Add, Update, Delete.
+Add is in _ScPartsUsed.
+Delete is for each row in _SPartsUsed
+Update (Save) cancel is in shared/editor/StockCodedPartsViewModel
+Cancel should warn user, all the changes will be lost
+Delete should show Kendo - 'Are you sure yo want to delete' Yes, No. Take proper action 
+Update/Add/Delete should refresh grid
+shared/_ScPartsUsed.cshtml
+@model IEnumerable<BCES.Models.Parts.StockCodedPartsViewModel>
+
+@{
+    var partsList = Model ?? Enumerable.Empty<BCES.Models.Parts.StockCodedPartsViewModel>();
+
+    ViewData["Title"] = "Stock Coded Parts Details";
+    var scGridName = $"ScPartsMaterialDetailsRebuiltPartsGrid";
+    bool isArchived = ViewBag.GridType == "ArchivedVehicleGrid";
+    bool isAdmin = ViewBag.RoleId == 1;
+    ViewBag.scGridName = scGridName;
+    string gridName = $"ScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}";
+}
+
+<script>
+    var scInEstimateGridName = '@gridName';
+</script>
+
+<input type="hidden" id="scGridNameField" value="@scGridName" />
+
+<h6>Stock Coded Parts Used</h6>
+
+@(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
+    .Name(gridName)
+    .BindTo(partsList)
+    .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "RbGrid" })
+    .Events(events => events
+        .DataBound("onGridDataBound")
+        .Save("onGridCellSave")
+        .CellClose("onGridCellClose")
+    )
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.MMSStockCode)
+            .Title("Stock Code")
+            .HtmlAttributes(new { @class = "stock-code-cell", data_field = "MMSStockCode" })
+            .IncludeInMenu(false)
+            .HeaderHtmlAttributes(new { @class = "required-header" })
+            .HtmlAttributes(new { @class = "required-cell", required = "required" })
+            .EditorTemplateName("ScComboBox")
+            .Width(180);
+
+        columns.Bound(c => c.PartType)
+            .Title("Part Type")
+            .Width(150)
+            .EditorTemplateName("ComboBoxEditor")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" }
+            });
+
+        columns.Bound(c => c.OrigSupplierNum)
+            .Title("Supplier Num")
+            .Width(150)
+            .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+            .EditorTemplateName("ComboBoxEditor")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" }
+            });
+
+        columns.Bound(c => c.OrigSupplierName)
+            .Title("Supplier Name")
+            .Width(150)
+            .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+            .EditorTemplateName("ComboBoxEditor")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" }
+            });
+
+        columns.Bound(c => c.DetailedDesc)
+            .Title("Part Description")
+            .Width(150)
+            .EditorTemplateName("ComboBoxEditor")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" }
+            });
+
+        columns.Bound(c => c.UnitCost)
+            .Title("Part Unit Cost")
+            .Width(90)
+            .Format("{0:C2}")
+            .EditorTemplateName("ComboBoxEditor")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" }
+            })
+            .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" });
+
+        columns.Bound(c => c.CoreCost)
+            .Title("Core Cost")
+            .Width(90)
+            .Format("{0:C2}")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:notNew" }
+            })
+            .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" });
+
+        columns.Bound(c => c.CC)
+            .Title("Cost Centre")
+            .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+            .EditorTemplateName("ComboBoxEditor")
+            .HeaderHtmlAttributes(new { @class = "required-header" })
+            .HtmlAttributes(new { @class = "required-cell", required = "required" })
+            .Width(120);
+
+        columns.Bound(c => c.TotalCost)
+            .Title("Total Cost")
+            .Width(90)
+            .Format("{0:C2}")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" }
+            });
+
+        columns.Bound(c => c.LinkCode).Hidden(true);
+
+        columns.Bound(c => c.LastModifiedBy)
+            .Title("Modified By")
+            .ClientTemplate("#= LastModifiedBy && LastModifiedBy !== 0 ? LastModifiedBy : '(System Generated)' #")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" }
+            })
+            .Width(160);
+
+        columns.Bound(c => c.LastModifiedDate)
+            .Title("Modified Date")
+            .Width(160)
+            .ClientTemplate("#=  LastModifiedDate !== 0 ? formatToEST(LastModifiedDate) : '(System Generated)' #")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" }
+            });
+
+        columns.Command(command =>
+        {
+            if (!isArchived && isAdmin)
+            {
+                command.Edit()
+                    .Text(" ")
+                    .UpdateText("Save")
+                    .CancelText(" ")
+                    .IconClass("k-icon k-i-edit")
+                    .HtmlAttributes(new { title = "Edit", @class = "k-grid-edit" });
+
+                command.Custom("SaveChanges")
+                    .Text(" ")
+                    .IconClass("k-icon k-i-save")
+                    .Click("saveCurrentRow")
+                    .HtmlAttributes(new
+                    {
+                        title = "Save Changes",
+                        @class = "k-grid-save-changes",
+                        style = "display:none;"
+                    });
+
+                command.Custom("Delete")
+                    .Click("showDeleteConfirmation")
+                    .Text(" ")
+                    .IconClass("k-icon k-i-delete")
+                    .HtmlAttributes(new
+                    {
+                        @class = "text-danger",
+                        title = "Delete",
+                        data_grid = $"ScPartsMaterialDetailsRebuiltPartsGrid",
+                        data_url = Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates"),
+                        data_id_field = "id",
+                        data_grid_type = "SCPartGrid"
+                    });
+            }
+        }).Width(150);
+    })
+    .ToolBar(toolbar =>
+    {
+        if (!isArchived && isAdmin)
+        {
+            toolbar.Create();
+            toolbar.Save();
+        }
+    })
+    .Editable(editable => editable.Mode(GridEditMode.PopUp))
+    .Pageable(p => p
+        .PageSizes(new int[] { 1, 10, 20, 50 })
+        .Position(GridPagerPosition.Bottom)
+    )
+    .Events(e => e.Edit("onScPartsEdit"))
+    .Sortable()
+    .Resizable(r => r.Columns(true))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(false)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.MMSStockCode);
+            model.Field(c => c.MMSStockCode);
+            model.Field(c => c.UnitCost);
+            model.Field(c => c.LastModifiedBy).Editable(false);
+            model.Field(c => c.LastModifiedDate).Editable(false);
+        })
+        .Events(events =>
+        {
+            events.RequestEnd("onScRequestEnd");
+            events.Error("onDataSourceError");
+        })
+        .Read(read => read.Url(Url.Action("GetScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get).Data("getVehicleId"))
+        .Create(create => create.Url(Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(destroy => destroy.Url(Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        
+    )
+)
+
+@(Html.Kendo().Dialog()
+    .Name("partDetailsDialog")
+    .Title("Part Details")
+    .Width(400)
+    .Modal(true)
+    .Visible(false)
+    .Actions(actions =>
+    {
+        actions.Add().Text("Close").Primary(true);
+    })
+)
+
+<div id="notification"></div>
+PopUp For parts edit, 
+shared/editor/StockCodedPartsViewModel.cshtml
+@model BCES.Models.Parts.StockCodedPartsViewModel
+@{
+    var mdl = Model ?? new BCES.Models.Parts.StockCodedPartsViewModel();
+}
+<div id="notification"></div>
+<div class="popup-container">
+    <div class="popup-header">
+        <div class="popup-title">@(mdl.MMSStockCode == null ? "Add New Stock Coded Part" : $"Edit Part - {mdl.MMSStockCode}")</div>
+        <div class="tab-actions">
+            <button id="btnSavePart" class="k-button k-primary" type="button" onclick="saveScPartPopup()">
+                <span class="k-icon k-i-save"></span> Save
+            </button>
+            <button id="btnCancelPart" class="k-button" type="button" onclick="cancelScPartPopup()">
+                <span class="k-icon k-i-cancel"></span> Cancel
+            </button>
+        </div>
+    </div>
+
+    <div class="form-container">
+        <form id="scPartsForm">
+            @Html.HiddenFor(m => m.LinkCode)
+
+            <!-- Row 1 -->
+            <div class="form-row">
+                <div class="form-group">
+                    @Html.LabelFor(m => m.MMSStockCode, "Stock Code", new { @class = "form-label required-label" })
+                    @Html.EditorFor(m => m.MMSStockCode, "ScComboBox", new
+                        {
+                            htmlAttributes = new { required = "required", style = "width:100%; height:28px;" }
+                        })
+                </div>
+                <div class="form-group">
+                    @Html.LabelFor(m => m.PartType, "Part Type", new { @class = "form-label" })
+                    @Html.EditorFor(m => m.PartType, "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new { style = "width:100%; height:28px;" }
+                        })
+                </div>
+                <div class="form-group">
+                    @Html.LabelFor(m => m.CC, "Cost Centre", new { @class = "form-label required-label" })
+                    @Html.EditorFor(m => m.CC, "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new { required = "required", style = "width:100%; height:28px;" }
+                        })
+                </div>
+            </div>
+
+            <!-- Row 2 -->
+            <div class="form-row">
+                <div class="form-group">
+                    @Html.LabelFor(m => m.OrigSupplierNum, "Supplier Num", new { @class = "form-label" })
+                    @Html.EditorFor(m => m.OrigSupplierNum, "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new { style = "width:100%; height:28px;" }
+                        })
+                </div>
+                <div class="form-group">
+                    @Html.LabelFor(m => m.OrigSupplierName, "Supplier Name", new { @class = "form-label" })
+                    @Html.EditorFor(m => m.OrigSupplierName, "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new { style = "width:100%; height:28px;" }
+                        })
+                </div>
+                <div class="form-group">
+                    @Html.LabelFor(m => m.DetailedDesc, "Part Description", new { @class = "form-label" })
+                    @Html.EditorFor(m => m.DetailedDesc, "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new { style = "width:100%; height:28px;" }
+                        })
+                </div>
+            </div>
+
+            <!-- Row 3 -->
+            <div class="form-row">
+                <div class="form-group">
+                    @Html.LabelFor(m => m.UnitCost, "Unit Cost", new { @class = "form-label" })
+                    @(Html.Kendo().NumericTextBoxFor(m => m.UnitCost)
+                        .Format("c2")
+                        .HtmlAttributes(new { style = "width:100%; height:28px;" }))
+                </div>
+                <div class="form-group">
+                    @Html.LabelFor(m => m.CoreCost, "Core Cost", new { @class = "form-label" })
+                    @(Html.Kendo().NumericTextBoxFor(m => m.CoreCost)
+                        .Format("c2")
+                        .HtmlAttributes(new { style = "width:100%; height:28px;" }))
+                </div>
+                <div class="form-group">
+                    @Html.LabelFor(m => m.TotalCost, "Total Cost", new { @class = "form-label" })
+                    @(Html.Kendo().NumericTextBoxFor(m => m.TotalCost)
+                        .Format("c2")
+                        .HtmlAttributes(new { style = "width:100%; height:28px;", @readonly = "readonly" }))
+                </div>
+            </div>
+
+            <!-- Row 4 -->
+            <div class="form-row">
+                <div class="form-group">
+                    @Html.LabelFor(m => m.Qty, "Quantity", new { @class = "form-label required-label" })
+                    @(Html.Kendo().NumericTextBoxFor(m => m.Qty)
+                        .Format("n0")
+                        .HtmlAttributes(new { style = "width:100%; height:28px;", required = "required" }))
+                </div>
+                <div class="form-group">
+                    @Html.LabelFor(m => m.Percentage, "%", new { @class = "form-label required-label" })
+                    @(Html.Kendo().NumericTextBoxFor(m => m.Percentage)
+                        .Format("n0")
+                        .Min(0).Max(100)
+                        .HtmlAttributes(new { style = "width:100%; height:28px;", required = "required" }))
+                </div>
+                <div class="form-group">
+                    @Html.LabelFor(m => m.LastModifiedBy, "Modified By", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.LastModifiedBy)
+                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%; height:28px;" }))
+                </div>
+            </div>
+
+            <!-- Row 5 -->
+            <div class="form-row">
+                <div class="form-group">
+                    @Html.LabelFor(m => m.LastModifiedDate, "Modified Date", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.LastModifiedDate)
+                        .HtmlAttributes(new { @readonly = "readonly", style = "width:100%; height:28px;" }))
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+
+
+
+
+
+
