@@ -1,0 +1,57 @@
+You can pass VehicleListId from _VehPopUp.cshtml to ViewBag.EstimateNumber by setting it in the controller action that returns the popup view.
+
+Right now, _VehPopUp.cshtml is strongly typed to your VehicleViewModel, so Model.VehicleListId is already available in the Razor.
+That means you can just do this in your controller before returning the view:
+
+Controller
+csharp
+Copy
+Edit
+public IActionResult VehPopup(int vehicleId)
+{
+    var model = _service.GetVehicle(vehicleId);
+
+    // VehicleListId is the "Estimate #"
+    ViewBag.EstimateNumber = model.VehicleListId;
+
+    return PartialView("_VehPopUp", model);
+}
+_VehPopUp.cshtml
+Now you have ViewBag.EstimateNumber available to pass into your Stock Coded Parts grid popup.
+
+razor
+Copy
+Edit
+<input type="hidden" id="estimateNumber" value="@ViewBag.EstimateNumber" />
+
+<!-- Your existing readonly text box -->
+@(Html.Kendo().TextBoxFor(m => m.VehicleListId)
+    .Value(Model.VehicleListId == 0 ? "0" : Model.VehicleListId.ToString())
+    .HtmlAttributes(new
+    {
+        @readonly = "readonly",
+        @class = "k-textbox read-only",
+        style = "width:100%; padding: 4px 6px; height: 28px;"
+    }))
+_ScPartsUsed.cshtml
+Now, estimateNumber will always be available in JavaScript for CRUD calls:
+
+javascript
+Copy
+Edit
+function getScPartsParams(dataItem) {
+    return {
+        id: dataItem.MMSStockCode,
+        gridType: $('#scGridNameField').attr('data_grid_type') || '@ViewBag.GridType',
+        estimateNumber: $('#estimateNumber').val()
+    };
+}
+And then use it in .Create(), .Update(), .Destroy() like:
+
+csharp
+Copy
+Edit
+.Create(create => create.Url(Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates")).Data("getScPartsParams"))
+.Update(update => update.Url(Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates")).Data("getScPartsParams"))
+.Destroy(destroy => destroy.Url(Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates")).Data("getScPartsParams"))
+If you want, I can rewrite _ScPartsUsed.cshtml so that all CRUD operations automatically pass
