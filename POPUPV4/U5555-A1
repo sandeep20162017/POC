@@ -1,0 +1,61 @@
+Step 1 – Global variable for the ScGrid model
+let currentScPartsModel = null;
+
+function onScPartsEdit(e) {
+    // Check if this edit is from the ScGrid
+    if (e.sender && e.sender.options && e.sender.options.name === "ScPartsMaterialDetailsRebuiltPartsGrid_") {
+        currentScPartsModel = e.model;
+        console.log("Captured ScGrid model:", currentScPartsModel);
+    }
+}
+
+Step 2 – Use that model in onScPartNumSelect
+function onScPartNumSelect(e) {
+    onScPartChange(e);
+
+    console.warn('inside onScPartNumSelect');
+    const selectedValue = e.sender.value();
+
+    const model = currentScPartsModel; // Use captured popup model
+
+    if (!model || !selectedValue) {
+        console.warn("No selected value or model.");
+        return;
+    }
+
+    // Clear values
+    model.set("MmsStockCode", "");
+    model.set("Description", "");
+    model.set("KeyWord", "");
+    model.set("CoreCharge", "");
+    model.set("UnitCost", "");
+
+    $.ajax({
+        url: "/AutoComplete/GetScPartDetails",
+        type: "GET",
+        data: { mmsStockCode: selectedValue },
+        success: function (result) {
+            if (result) {
+                model.set("MmsStockCode", result.MmsStockCode || "");
+                model.set("DetailedDesc", result.DetailedDesc || "");
+                model.set("PartType", result.PartType || "");
+                model.set("OrigSupplierNum", result.OrigSupplierNum || "");
+                model.set("OrigSupplierName", result.OrigSupplierName || "");
+                model.set("CoreCost", result.PartCost || "");
+                model.set("UnitCost", result.UnitCost || "");
+            }
+            console.warn("✅ AJAX result:", result);
+        },
+        error: function (xhr) {
+            console.error("❌ Failed to fetch part details:", xhr.responseText);
+        }
+    });
+}
+
+Why this works
+
+onScPartsEdit runs every time the Stock Coded Parts popup opens.
+
+We check if the grid name matches the ScGrid, then store its model in currentScPartsModel.
+
+When onScPartNumSelect runs inside that popup editor, it uses the stored model — no DOM row lookup needed.
