@@ -1,0 +1,104 @@
+Following JS worked for InCell and InLine edit.
+I have refactored other code for  PopUp.
+In PopUp Mode, model is null.
+Grid uses AJAX to bind with partsList
+Pls help fix.
+
+function onScPartNumSelect(e) {
+
+    onScPartChange(e);
+
+    console.warn('inside onScPartNumSelect');
+    const selectedValue = e.sender.value();
+
+    const $input = $(e.sender.input);
+    const $row = $input.closest("tr");
+    var gridName = "@scGridName";
+    var grid = $("#" + gridName).data("kendoGrid");
+    if (!grid) {
+        console.error(" Could not resolve grid.");
+        return;
+    }
+
+    const model = grid.dataItem($row);
+    if (!model || !selectedValue) {
+        console.warn(" No selected value or model.");
+        return;
+    }
+
+    // Clear existing values if needed
+    model.set("MmsStockCode", "");
+    model.set("Description", "");
+    model.set("KeyWord", "");
+    model.set("CoreCharge", "");
+    model.set("UnitCost", "");
+
+    // ✅ Pass selected value to AJAX call
+    $.ajax({
+        url: "/AutoComplete/GetScPartDetails",
+        type: "GET",
+        data: { mmsStockCode: selectedValue },
+        success: function (result) {
+            if (result) {
+                model.set("MmsStockCode", result.MmsStockCode || "");
+                model.set("DetailedDesc", result.DetailedDesc || "");
+                model.set("PartType", result.PartType || "");
+                model.set("OrigSupplierNum", result.OrigSupplierNum || "");
+                model.set("OrigSupplierName", result.OrigSupplierName || "");
+                model.set("CoreCost", result.PartCost || "");
+                model.set("UnitCost", result.UnitCost || "");
+            }
+
+
+            console.warn("✅ AJAX result:", result);
+        },
+        error: function (xhr) {
+            console.error("❌ Failed to fetch part details:", xhr.responseText);
+        }
+    });
+@model IEnumerable<BCES.Models.Parts.StockCodedPartsViewModel>
+
+@{
+    var partsList = Model ?? Enumerable.Empty<BCES.Models.Parts.StockCodedPartsViewModel>();
+}
+@(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
+    .Name("ScPartsMaterialDetailsRebuiltPartsGrid_")
+    .BindTo(partsList)
+    .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "RbGrid" })
+    .Events(events => events
+        .DataBound("onGridDataBound")
+        .Save("onGridCellSave")
+        .CellClose("onGridCellClose")
+    )
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.MMSStockCode)
+            .Title("Stock Code")
+            .HtmlAttributes(new { @class = "stock-code-cell", data_field = "MMSStockCode" })
+            .IncludeInMenu(false)
+            .HeaderHtmlAttributes(new { @class = "required-header" })
+            .HtmlAttributes(new { @class = "required-cell", required = "required" })
+            .EditorTemplateName("ScComboBox")
+            .Width(180);
+
+        columns.Bound(c => c.PartType)
+            .Title("Part Type")
+            .Width(150)
+            .EditorTemplateName("ComboBoxEditor")
+            .EditorViewData(new Dictionary<string, object> {
+                { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" }
+            });
+..other cols
+ .Editable(editable => editable.Mode(GridEditMode.PopUp))
+..
+Events(e => e.Edit("onScPartsEdit"))
+    .Sortable()
+    .Resizable(r => r.Columns(true))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(false)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.MMSStockCode);
+            model.Field(c => c.MMSStockCode);
