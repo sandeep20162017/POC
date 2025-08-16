@@ -1,0 +1,115 @@
+In the following JS - saveScPartPopup gets called for Add and Edit.
+formDataObject.MMSStockCode will always have value for Add/Edity. This is required field
+As a result isEdit is always true.
+I want to call Add for new and Edit for existig.
+_ScPartsGrid.cshtml uses popup editor which popup form
+
+// --- Save popup (Add or Update) ---
+function saveScPartPopup() {
+    console.warn('Inside saveScPartPopup');
+    var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+    var form = $("#scPartsForm");
+
+    if (!form.valid()) {
+        alert("Please fill all required fields.");
+        return;
+    }
+
+    var formArray = form.serializeArray();
+    var formDataObject = {};
+
+    $.each(formArray, function (_, field) {
+        if (!field.name.endsWith("_input")) {
+            formDataObject[field.name] = field.value;
+        }
+    });
+
+    ["UnitCost", "CoreCost", "Qty", "Percentage", "TotalCost"].forEach(function (key) {
+        if (formDataObject[key] !== undefined && formDataObject[key] !== "") {
+            formDataObject[key] = parseFloat(formDataObject[key]);
+        }
+    });
+
+    //  Convert date to ISO 8601 for ASP.NET Core JSON binding
+    if (formDataObject.LastModifiedDate) {
+        formDataObject.LastModifiedDate = new Date(formDataObject.LastModifiedDate).toISOString();
+    }
+
+    console.warn('Cleaned formDataObject:', formDataObject);
+    console.warn('MMSStockCode:', formDataObject.MMSStockCode);
+    console.warn('MMSStockCode - val:', $("#MMSStockCode").val());
+    var isEdit = !!formDataObject.MMSStockCode && formDataObject.MMSStockCode.trim() !== "";
+    console.warn('isEdit:', isEdit);
+
+
+    $.ajax({
+        url: isEdit
+            ? '@Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates")?id=' + '@ViewBag.PartNum' + "&gridType=" + '@ViewBag.GridType'
+            : '@Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates")?id=' + '@ViewBag.PartNum' + "&gridType=" + '@ViewBag.GridType',
+        type: "POST",
+        contentType: "application/json; charset=UTF-8",
+        data: JSON.stringify(formDataObject),
+        success: function () {
+                                var partNo = $("#MMSStockCode").val();
+                                var message = isEdit
+                                    ? `${partNo} updated successfully`
+                                    : `${partNo} added successfully`;
+
+                                // Show confirmation
+                                if ($("#notification").length && $("#notification").data("kendoNotification")) {
+                                    $("#notification").data("kendoNotification").show(message, "success");
+                                } else {
+                                    alert(message);
+                                }
+
+                                // Reset change tracking so close won't warn
+                                popupHasChanges = false;
+                                originalData = null;
+
+                                // Close popup
+                                var popupWindow = $("#scPartsForm").closest(".k-window-content").data("kendoWindow");
+                                if (popupWindow) {
+                                    grid.dataSource.read(); 
+                                    popupWindow.close();
+                                } else {
+                                    console.warn(" No popup window found to close");
+                                }
+                            },
+        error: function (xhr) {
+            alert("Save failed: " + xhr.status + " " + xhr.responseText);
+        }
+    });
+..
+popup editor
+ <div class="popup-header">
+     <div class="popup-title">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate" : $"Estimate #{Model.VehicleListId}")</div>
+     <div class="tab-actions">
+         <button id="btnSavePart" class="k-button k-primary" type="button" onclick="saveScPartPopup()">
+             <span class="k-icon k-i-save"></span> Save
+         </button>
+         <button id="btnCancelPart" class="k-button" type="button" onclick="cancelScPartPopup()">
+             <span class="k-icon k-i-cancel"></span> Cancel
+         </button>
+     </div>
+_ScPartsGrid.cshtml
+@(Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()
+    .Name(gridName)
+    .BindTo(partsList)
+    .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "RbGrid" })
+    .Events(events => events        
+         .DataBound("onScGridDataBound") //cache clear    
+.Editable(editable => editable.Mode(GridEditMode.PopUp))
+        
+    )
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.MMSStockCode)
+            .Title("Stock Code")
+            .HtmlAttributes(new { @class = "stock-code-cell", data_field = "MMSStockCode" })
+            .IncludeInMenu(false)
+            .HeaderHtmlAttributes(new { @class = "required-header" })
+            .HtmlAttributes(new { @class = "required-cell", required = "required" })
+            .EditorTemplateName("ScComboBox")
+            .Width(180);
+
+}
