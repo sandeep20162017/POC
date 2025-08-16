@@ -1,0 +1,81 @@
+function saveScPartPopup() {
+    console.warn('Inside saveScPartPopup');
+    var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+    var form = $("#scPartsForm");
+
+    if (!form.valid()) {
+        alert("Please fill all required fields.");
+        return;
+    }
+
+    var formArray = form.serializeArray();
+    var formDataObject = {};
+
+    $.each(formArray, function (_, field) {
+        if (!field.name.endsWith("_input")) {
+            formDataObject[field.name] = field.value;
+        }
+    });
+
+    // Convert numeric fields
+    ["UnitCost", "CoreCost", "Qty", "Percentage", "TotalCost"].forEach(function (key) {
+        if (formDataObject[key] !== undefined && formDataObject[key] !== "") {
+            formDataObject[key] = parseFloat(formDataObject[key]);
+        }
+    });
+
+    // Convert date
+    if (formDataObject.LastModifiedDate) {
+        formDataObject.LastModifiedDate = new Date(formDataObject.LastModifiedDate).toISOString();
+    }
+
+    console.warn('Cleaned formDataObject:', formDataObject);
+    console.warn('MMSStockCode:', formDataObject.MMSStockCode);
+
+    // ✅ Check if this stock code already exists in grid
+    var existingItem = grid.dataSource.get(formDataObject.MMSStockCode);
+
+    // Determine Add vs Edit
+    var isEdit = !!existingItem;
+
+    // ✅ Prevent duplicates when adding
+    if (!isEdit && existingItem) {
+        alert("Stock code " + formDataObject.MMSStockCode + " already exists in the list.");
+        return;
+    }
+
+    $.ajax({
+        url: isEdit
+            ? '@Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates")?id=' + '@ViewBag.PartNum' + "&gridType=" + '@ViewBag.GridType'
+            : '@Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates")?id=' + '@ViewBag.PartNum' + "&gridType=" + '@ViewBag.GridType',
+        type: "POST",
+        contentType: "application/json; charset=UTF-8",
+        data: JSON.stringify(formDataObject),
+        success: function () {
+            var partNo = formDataObject.MMSStockCode;
+            var message = isEdit
+                ? `${partNo} updated successfully`
+                : `${partNo} added successfully`;
+
+            if ($("#notification").length && $("#notification").data("kendoNotification")) {
+                $("#notification").data("kendoNotification").show(message, "success");
+            } else {
+                alert(message);
+            }
+
+            popupHasChanges = false;
+            originalData = null;
+
+            var popupWindow = $("#scPartsForm").closest(".k-window-content").data("kendoWindow");
+            if (popupWindow) {
+                grid.dataSource.read();
+                popupWindow.close();
+            } else {
+                console.warn("No popup window found to close");
+            }
+        },
+        error: function (xhr) {
+            alert("Save failed: " + xhr.status + " " + xhr.responseText);
+        }
+    });
+}
