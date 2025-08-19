@@ -1,0 +1,106 @@
+Index.cshtml 
+Pls suggest where to call initScPopupForm()
+
+window.wireVehicleForm = function() {
+    $("#btnCancelVehicle").off("click").on("click", function(){
+        if (!pendingChanges || confirm("Discard changes?")) {
+            $("#estimatePopup").data("kendoWindow").close();
+        }
+    });
+    
+    $("#btnSave").off("click").on("click", function(e){
+        e.preventDefault();
+        $("#vehicleForm").submit();
+    });
+    
+    $("#vehicleForm").off("submit").on("submit", function(e) {
+        e.preventDefault();
+        if (!pendingChanges) return;
+        
+        function getComboValue(selector) {
+            const combo = $(selector).data("kendoComboBox");
+            return combo ? combo.value() : $(selector).val();
+        }
+
+        var vm = {
+            VehicleListId: $("#VehicleListId").val(),
+            VehSeriesCode: getComboValue("#VehSeriesCode"),
+            NumOfVehicles: $("#NumOfVehicles").val(),
+            ProjDesc: getComboValue("#ProjDesc"),
+            Make: getComboValue("#Make"),
+            VehModel: getComboValue("#VehModel"),
+            Year: $("#Year").val(),
+            Engine: getComboValue("#Engine"),
+            Transmission: getComboValue("#Transmission"),
+            Differential: getComboValue("#Differential"),
+            Sopnumber: $("#Sopnumber").val()
+        };
+    
+        var url = window.currentVehicleId === 0
+            ? '@Url.Action("AddVehiclesView","Vehicles")'
+            : '@Url.Action("UpdateVehiclesView","Vehicles")';
+            
+        $.ajax({
+            url: url,
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify(vm),
+            success: function(response) {
+                if (response && response.VehicleListId) {
+                    
+                    window.currentVehicleId = response.VehicleListId;
+                    $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                    window.loadVehicleForm(response.VehicleListId);
+
+                    var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+                    for (var i = 1; i <= 7; i++) {
+                        tabStrip.enable(tabStrip.tabGroup.children().eq(i), true);
+                       
+                    }
+
+                    var win = $("#estimatePopup").data("kendoWindow");
+                    if (win) {
+                        win.title("Vehicle Estimate #" + response.VehicleListId);
+
+                    }
+
+                    kendo.alert("Saved successfully! Estimate #: " + response.VehicleListId);
+                } else {
+                    kendo.alert("Save succeeded but no Estimate ID was returned.");
+                }
+
+                pendingChanges = false;
+            },
+            error: function() {
+                kendo.alert("Error saving data.");
+            }
+        });
+    });
+    
+    $("#vehicleForm input, #vehicleForm select").off("change input").on("input change", function(){
+        pendingChanges = true;
+    });
+}
+
+    // ── Open vehicle popup and load form partial
+    window.openEstimatePopup = function (vehicleId) {
+        var win = $("#estimatePopup").data("kendoWindow");
+        currentVehicleId = vehicleId;
+
+        win.title(vehicleId === 0 ? "Add New Estimate" : "Vehicle Estimate #" + vehicleId);
+        win.center().open();
+
+        // Load vehicle tab first
+        loadTabContent(
+            "vehicleTabContent",
+            '@Url.Action("GetVehicleById", "Vehicles")',
+            { id: vehicleId },
+            function () {
+                if (vehicleId !== 0) {
+                    enableAllTabs();
+                }
+            }
+        );
+
+        
+    };
