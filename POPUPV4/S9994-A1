@@ -1,0 +1,188 @@
+First, let's modify the Index.cshtml to ensure the Vehicle tab strip is expanded on page load:
+
+html
+<script>
+    $(document).ready(function () {
+        // Initialize and expand the Vehicle tab strip
+        var tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+        tabStrip.select(0); // Select the first tab (Vehicles)
+        
+        // Rest of your initialization code...
+    });
+</script>
+Now, let's modify the openEstimatePopup function to handle both Add and Edit modes properly:
+
+javascript
+window.openEstimatePopup = function (vehicleId) {
+    var win = $("#estimatePopup").data("kendoWindow");
+    currentVehicleId = vehicleId;
+    pendingChanges = false; // Reset changes flag
+
+    win.title(vehicleId === 0 ? "Add New Estimate" : "Vehicle Estimate #" + vehicleId);
+    win.center().open();
+
+    // Load vehicle tab first
+    loadTabContent(
+        "vehicleTabContent",
+        '@Url.Action("GetVehicleById", "Vehicles")',
+        { id: vehicleId },
+        function () {
+            initVehiclePopupForm();
+            wireVehicleForm();
+            
+            if (vehicleId !== 0) {
+                enableAllTabs();
+            }
+        }
+    );
+};
+Update the wireVehicleForm function to handle save operations properly:
+
+javascript
+window.wireVehicleForm = function() {
+    $("#btnCancelVehicle").off("click").on("click", function(){
+        if (pendingChanges) {
+            showCloseConfirmation();
+        } else {
+            $("#estimatePopup").data("kendoWindow").close();
+        }
+    });
+    
+    $("#btnSave").off("click").on("click", function(e){
+        e.preventDefault();
+        $("#vehicleForm").submit();
+    });
+    
+    $("#vehicleForm").off("submit").on("submit", function(e) {
+        e.preventDefault();
+        
+        // Validate form here if needed
+        
+        var vm = {
+            VehicleListId: $("#VehicleListId").val(),
+            VehSeriesCode: $("#VehSeriesCode").data("kendoComboBox").value(),
+            NumOfVehicles: $("#NumOfVehicles").val(),
+            ProjDesc: $("#ProjDesc").data("kendoComboBox").value(),
+            Make: $("#Make").data("kendoComboBox").value(),
+            VehModel: $("#VehModel").data("kendoComboBox").value(),
+            Year: $("#Year").val(),
+            Engine: $("#Engine").data("kendoComboBox").value(),
+            Transmission: $("#Transmission").data("kendoComboBox").value(),
+            Differential: $("#Differential").data("kendoComboBox").value(),
+            Sopnumber: $("#Sopnumber").val()
+        };
+    
+        var url = currentVehicleId === 0
+            ? '@Url.Action("AddVehiclesView","Vehicles")'
+            : '@Url.Action("UpdateVehiclesView","Vehicles")';
+            
+        $.ajax({
+            url: url,
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify(vm),
+            success: function(response) {
+                if (response && response.VehicleListId) {
+                    pendingChanges = false;
+                    currentVehicleId = response.VehicleListId;
+                    $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                    
+                    // Update window title with new ID
+                    var win = $("#estimatePopup").data("kendoWindow");
+                    win.title("Vehicle Estimate #" + response.VehicleListId);
+                    
+                    kendo.alert("Saved successfully! Estimate #: " + response.VehicleListId);
+                } else {
+                    kendo.alert("Save succeeded but no Estimate ID was returned.");
+                }
+            },
+            error: function() {
+                kendo.alert("Error saving data.");
+            }
+        });
+    });
+    
+    // Track form changes
+    $("#vehicleForm input, #vehicleForm select").off("change input").on("input change", function(){
+        pendingChanges = true;
+    });
+}
+Implement the close confirmation functionality:
+
+javascript
+function showCloseConfirmation() {
+    kendo.confirm("You have unsaved changes. Are you sure you want to close?")
+        .then(function() {
+            // User clicked OK
+            pendingChanges = false;
+            $("#estimatePopup").data("kendoWindow").close();
+        }, function() {
+            // User clicked Cancel - do nothing
+        });
+}
+
+// Add close event handler to the popup window
+$("#estimatePopup").kendoWindow({
+    // ... existing options ...
+    close: function(e) {
+        if (pendingChanges) {
+            e.preventDefault();
+            showCloseConfirmation();
+        }
+    }
+});
+Update the _VehPopUp.cshtml to ensure proper form structure:
+
+html
+@model BCES.Models.Vehicle.VehicleViewModel
+
+<div class="popup-container">
+    <div class="popup-header">
+        <div class="popup-title">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate" : $"Estimate #{Model.VehicleListId}")</div>
+        <div class="tab-actions">
+            <button id="btnSave" class="k-button k-primary" type="button">
+                <span class="k-icon k-i-save"></span> Save
+            </button>
+            <button id="btnCancelVehicle" class="k-button" type="button">
+                <span class="k-icon k-i-cancel"></span> Cancel
+            </button>
+        </div>
+    </div>
+    
+    <div class="form-container">
+        <form id="vehicleForm">
+            @Html.HiddenFor(m => m.VehicleListId)
+            @Html.Hidden("formMode", Model.VehicleListId == 0 ? "Add" : "Edit", new { id = "formMode" })
+            
+            <!-- Rest of your form fields -->
+        </form>
+    </div>
+</div>
+Finally, ensure the controller methods are properly implemented:
+
+csharp
+[HttpPost]
+public async Task<IActionResult> AddVehiclesView([FromBody] VehicleViewModel vehicleViewModel)
+{
+    if (vehicleViewModel == null)
+    {
+        return BadRequest("Invalid vehicle data");
+    }
+    
+    // Your implementation here
+    // Return the newly created vehicle with its ID
+    return Ok(new { VehicleListId = newId, Success = true });
+}
+
+[HttpPost]
+public async Task<IActionResult> UpdateVehiclesView([FromBody] VehicleViewModel vehicleViewModel)
+{
+    if (vehicleViewModel == null)
+    {
+        return BadRequest("Invalid vehicle data");
+    }
+    
+    // Your implementation here
+    return Ok(new { VehicleListId = vehicleViewModel.VehicleListId, Success = true });
+}
+These changes will:
