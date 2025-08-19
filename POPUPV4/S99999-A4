@@ -1,0 +1,185 @@
+Index.cshtml — JS: define globals + call them
+1) Define helpers globally (before you use them)
+<script>
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Global helpers (prefix sc) available to the whole page
+    // ─────────────────────────────────────────────────────────────────────────────
+    window.setScReadonly = function (ids) {
+        ids.forEach(function (id) {
+            var $el = $("#" + id);
+            var widget = $el.data("kendoComboBox") || $el.data("kendoNumericTextBox");
+            if (widget) {
+                widget.enable(false);
+            } else {
+                $el.attr("readonly", true).addClass("k-state-disabled");
+            }
+        });
+    };
+
+    window.setScEditable = function (ids) {
+        ids.forEach(function (id) {
+            var $el = $("#" + id);
+            var widget = $el.data("kendoComboBox") || $el.data("kendoNumericTextBox");
+            if (widget) {
+                widget.enable(true);
+            } else {
+                $el.prop("readonly", false).removeClass("k-state-disabled");
+            }
+        });
+    };
+
+    // Initialize Add/Edit state once the partial is injected
+    window.initScPopupForm = function () {
+        var scFormMode = $("#scFormMode").val();
+        if (!scFormMode) return;
+
+        if (scFormMode === "Add") {
+            // Requirements: Estimate readonly; series/qty/desc/specs editable; audit readonly
+            setScEditable([
+                "scVehSeriesCode", "scNumOfVehicles", "scProjDesc",
+                "scMake", "scVehModel", "scYear",
+                "scEngine", "scTransmission", "scDifferential", "scSopnumber"
+            ]);
+            setScReadonly(["scModifiedLastBy", "scModifiedLastDate"]);
+        } else {
+            // Edit: Estimate readonly; series/desc/specs readonly; qty editable; audit readonly
+            setScReadonly([
+                "scVehSeriesCode", "scProjDesc",
+                "scMake", "scVehModel", "scYear",
+                "scEngine", "scTransmission", "scDifferential", "scSopnumber",
+                "scModifiedLastBy", "scModifiedLastDate"
+            ]);
+            setScEditable(["scNumOfVehicles"]);
+        }
+    };
+</script>
+
+2) Update your form wiring to use sc IDs
+<script>
+    // Keep the same name so your other code still calls wireVehicleForm()
+    window.wireVehicleForm = function () {
+
+        // Cancel
+        $("#scBtnCancel").off("click").on("click", function () {
+            if (!window.pendingChanges || confirm("Discard changes?")) {
+                $("#estimatePopup").data("kendoWindow").close();
+            }
+        });
+
+        // Save
+        $("#scBtnSave").off("click").on("click", function (e) {
+            e.preventDefault();
+            $("#scVehicleForm").submit();
+        });
+
+        // Submit
+        $("#scVehicleForm").off("submit").on("submit", function (e) {
+            e.preventDefault();
+            if (!window.pendingChanges) return;
+
+            function getComboValue(selector) {
+                const cmb = $(selector).data("kendoComboBox");
+                if (cmb) return cmb.value();
+                const ntb = $(selector).data("kendoNumericTextBox");
+                if (ntb) return ntb.value();
+                return $(selector).val();
+            }
+
+            var vm = {
+                VehicleListId: $("#VehicleListId").val(),
+                VehSeriesCode: getComboValue("#scVehSeriesCode"),
+                NumOfVehicles: getComboValue("#scNumOfVehicles"),
+                ProjDesc: getComboValue("#scProjDesc"),
+                Make: getComboValue("#scMake"),
+                VehModel: getComboValue("#scVehModel"),
+                Year: getComboValue("#scYear"),
+                Engine: getComboValue("#scEngine"),
+                Transmission: getComboValue("#scTransmission"),
+                Differential: getComboValue("#scDifferential"),
+                Sopnumber: getComboValue("#scSopnumber")
+            };
+
+            var url = window.currentVehicleId === 0
+                ? '@Url.Action("AddVehiclesView","Vehicles")'
+                : '@Url.Action("UpdateVehiclesView","Vehicles")';
+
+            $.ajax({
+                url: url,
+                type: 'POST',
+                contentType: "application/json",
+                data: JSON.stringify(vm),
+                success: function (response) {
+                    if (response && response.VehicleListId) {
+                        window.currentVehicleId = response.VehicleListId;
+
+                        // Refresh grid
+                        $("#VehicleGrid").data("kendoGrid").dataSource.read();
+
+                        // Reload form in Edit mode
+                        window.loadVehicleForm(response.VehicleListId);
+
+                        // Enable other tabs
+                        var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+                        if (tabStrip) {
+                            for (var i = 1; i <= 7; i++) {
+                                tabStrip.enable(tabStrip.tabGroup.children().eq(i), true);
+                            }
+                        }
+
+                        // Update window title
+                        var win = $("#estimatePopup").data("kendoWindow");
+                        if (win) {
+                            win.title("Vehicle Estimate #" + response.VehicleListId);
+                        }
+
+                        kendo.alert("Saved successfully! Estimate #: " + response.VehicleListId);
+                    } else {
+                        kendo.alert("Save succeeded but no Estimate ID was returned.");
+                    }
+
+                    window.pendingChanges = false;
+                },
+                error: function () {
+                    kendo.alert("Error saving data.");
+                }
+            });
+        });
+
+        // Change tracking
+        $("#scVehicleForm")
+            .off("input change")
+            .on("input change", "input, select, .k-input", function () {
+                window.pendingChanges = true;
+            });
+    };
+</script>
+
+3) Call the initializer after you inject the partial
+<script>
+    // ── Open vehicle popup and load form partial
+    window.openEstimatePopup = function (vehicleId) {
+        var win = $("#estimatePopup").data("kendoWindow");
+        window.currentVehicleId = vehicleId;
+
+        win.title(vehicleId === 0 ? "Add New Estimate" : "Vehicle Estimate #" + vehicleId);
+        win.center().open();
+
+        // Load vehicle tab first
+        loadTabContent(
+            "vehicleTabContent",
+            '@Url.Action("GetVehicleById", "Vehicles")',
+            { id: vehicleId },
+            function () {
+                // ⬇️ partial HTML is now in the DOM
+                initScPopupForm();   // set Add/Edit enable/disable
+                wireVehicleForm();   // bind Save/Cancel/Submit + change tracking
+
+                if (vehicleId !== 0) {
+                    enableAllTabs();
+                }
+            }
+        );
+    };
+</script>
+
+Why this fixes your error
