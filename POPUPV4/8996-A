@@ -1,0 +1,509 @@
+Fixing "showVehiclePopup not defined" Error
+The error you're encountering is due to a JavaScript syntax error that's preventing your functions from being properly defined. Let me provide a complete, working solution.
+
+Complete JavaScript Implementation
+html
+<script>
+    // ===== GLOBAL VARIABLES =====
+    var vehiclePopupState = {
+        isOpen: false,
+        hasChanges: false,
+        currentVehicleId: 0,
+        originalData: {},
+        isEditMode: false
+    };
+
+    var pendingChanges = false;
+    var currentVehicleId = 0;
+
+    // ===== VEHICLE POPUP MANAGEMENT =====
+    function showVehiclePopup(vehicleId) {
+        console.log("Showing vehicle popup for ID:", vehicleId);
+        
+        // Reset state
+        vehiclePopupState.isOpen = true;
+        vehiclePopupState.currentVehicleId = vehicleId;
+        vehiclePopupState.hasChanges = false;
+        vehiclePopupState.isEditMode = vehicleId !== 0;
+        pendingChanges = false;
+        
+        // Show the overlay with forced visibility
+        $("#vehiclePopupOverlay")
+            .css({
+                "display": "flex",
+                "opacity": 1,
+                "visibility": "visible",
+                "z-index": "99999"
+            });
+        
+        console.log("Popup overlay display set to flex");
+        
+        // Load vehicle data
+        loadVehicleData(vehicleId);
+    }
+
+    function hideVehiclePopup() {
+        console.log("Hiding vehicle popup");
+        
+        if (vehiclePopupState.hasChanges || pendingChanges) {
+            showCloseConfirmation();
+        } else {
+            closeVehiclePopup();
+        }
+    }
+
+    function closeVehiclePopup() {
+        console.log("Closing vehicle popup");
+        
+        vehiclePopupState.isOpen = false;
+        vehiclePopupState.hasChanges = false;
+        pendingChanges = false;
+        
+        // Hide the overlay
+        $("#vehiclePopupOverlay").css("display", "none");
+    }
+
+    function loadVehicleData(vehicleId) {
+        console.log("Loading vehicle data for ID:", vehicleId);
+        
+        // Show loading state
+        $("#vehicleFormContainer").html('<div class="vehicle-loading">Loading vehicle data...</div>');
+        
+        // Update popup title
+        $("#vehiclePopupTitle").text(vehicleId === 0 ? "Add New Vehicle Estimate" : "Estimate #" + vehicleId);
+        
+        // Fetch vehicle data
+        $.get('@Url.Action("GetVehicleById", "Vehicles")', { id: vehicleId })
+            .done(function(data) {
+                console.log("Vehicle data loaded successfully");
+                $("#vehicleFormContainer").html(data);
+                
+                // Force the popup to be visible
+                $("#vehiclePopupOverlay")
+                    .css({
+                        "display": "flex",
+                        "opacity": 1,
+                        "visibility": "visible",
+                        "z-index": "99999"
+                    });
+                
+                initVehiclePopupForm();
+                wireVehicleForm();
+                vehiclePopupState.originalData = getFormData();
+                
+                console.log("Popup content loaded and displayed");
+            })
+            .fail(function(xhr, status, error) {
+                console.error("Failed to load vehicle data:", error);
+                $("#vehicleFormContainer").html('<div class="vehicle-notification error">Failed to load vehicle data. Please try again.</div>');
+                
+                // Still show the popup with error message
+                $("#vehiclePopupOverlay")
+                    .css({
+                        "display": "flex",
+                        "opacity": 1,
+                        "visibility": "visible",
+                        "z-index": "99999"
+                    });
+            });
+    }
+
+    function getFormData() {
+        var form = document.getElementById('vehicleForm');
+        if (!form) return {};
+        
+        var formData = {};
+        var inputs = form.querySelectorAll('input, select, textarea');
+        
+        inputs.forEach(function(input) {
+            formData[input.name] = input.value;
+        });
+        
+        return formData;
+    }
+
+    function saveVehicleData() {
+        console.log("Saving vehicle data");
+        
+        var form = document.getElementById('vehicleForm');
+        if (!form) return;
+        
+        // Validate form
+        if (!validateVehicleForm()) {
+            return;
+        }
+        
+        // Show saving state
+        var saveButton = document.getElementById('btnSave');
+        if (saveButton) {
+            saveButton.disabled = true;
+            saveButton.innerHTML = '<span class="vehicle-btn-icon">⏳</span> Saving...';
+        }
+        
+        // Prepare data
+        var formData = new FormData(form);
+        var vehicleData = {};
+        formData.forEach(function(value, key) {
+            vehicleData[key] = value;
+        });
+        
+        // Determine URL based on mode (add or edit)
+        var url = vehiclePopupState.currentVehicleId === 0
+            ? '@Url.Action("AddVehiclesView", "Vehicles")'
+            : '@Url.Action("UpdateVehiclesView", "Vehicles")';
+        
+        // Send request
+        $.ajax({
+            url: url,
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(vehicleData),
+            success: function(response) {
+                if (response && response.VehicleListId) {
+                    // Success
+                    showNotification('success', 'Vehicle data saved successfully!');
+                    vehiclePopupState.hasChanges = false;
+                    pendingChanges = false;
+                    vehiclePopupState.currentVehicleId = response.VehicleListId;
+                    
+                    // Update grid
+                    $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                    
+                    // Update popup title
+                    $("#vehiclePopupTitle").text('Vehicle Estimate #' + response.VehicleListId);
+                } else {
+                    showNotification('error', 'Failed to save vehicle data.');
+                }
+                
+                // Reset save button
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.innerHTML = '<span class="vehicle-btn-icon">✓</span> Save';
+                }
+            },
+            error: function() {
+                showNotification('error', 'Error saving vehicle data.');
+                
+                // Reset save button
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.innerHTML = '<span class="vehicle-btn-icon">✓</span> Save';
+                }
+            }
+        });
+    }
+
+    function validateVehicleForm() {
+        var form = document.getElementById('vehicleForm');
+        if (!form) return false;
+        
+        var isValid = true;
+        var requiredFields = form.querySelectorAll('[required]');
+        
+        requiredFields.forEach(function(field) {
+            if (!field.value.trim()) {
+                isValid = false;
+                field.style.borderColor = '#e74c3c';
+            } else {
+                field.style.borderColor = '';
+            }
+        });
+        
+        if (!isValid) {
+            showNotification('error', 'Please fill in all required fields.');
+        }
+        
+        return isValid;
+    }
+
+    function showNotification(type, message) {
+        var notification = $("#notification").data("kendoNotification");
+        if (notification) {
+            notification.show(message, type);
+        }
+    }
+
+    function showCloseConfirmation() {
+        kendo.confirm("You have unsaved changes. Are you sure you want to close?")
+            .then(function() {
+                closeVehiclePopup();
+            }, function() {
+                // User clicked Cancel - do nothing
+            });
+    }
+
+    // ===== EXISTING FUNCTIONS =====
+    function openEstimatePopup(vehicleId) {
+        showVehiclePopup(vehicleId);
+    }
+
+    function onCopyEstimate(e) {
+        e.preventDefault();
+        var grid = $("#VehicleGrid").data("kendoGrid");
+        var item = grid.dataItem($(e.currentTarget).closest("tr"));
+        var win = $("#copyEstimateDialog").data("kendoWindow");
+
+        $("#vehicleListId").val(item.VehicleListId);
+        $("#oldVehSeriesCode").val(item.VehSeriesCode);
+        $("#oldprojDesc").val(item.ProjDesc);
+        $("#newVehSeriesCode, #newprojDesc").val("");
+
+        win.center().open();
+
+        $("#copyEstimateBtn").off("click").on("click", function () {
+            var payload = {
+                vehicleListId: $("#vehicleListId").val(),
+                oldVehSeriesCode: $("#oldVehSeriesCode").val(),
+                newVehSeriesCode: $("#newVehSeriesCode").val(),
+                oldprojDesc: $("#oldprojDesc").val(),
+                newprojDesc: $("#newprojDesc").val()
+            };
+
+            if (!payload.newVehSeriesCode || !payload.newprojDesc) {
+                return showNotification('error', "Please fill required fields.");
+            }
+
+            $.ajax({
+                url: '@Url.Action("CopyEstimate", "Vehicles")',
+                type: 'POST',
+                contentType: "application/json",
+                data: JSON.stringify(payload),
+                success: function (response) {
+                    if (response.success) {
+                        showNotification('success', "Estimate copied successfully! New ID: " + response.newVehicleListId);
+                        $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                        win.close();
+                    } else {
+                        showNotification('error', "Copy failed: " + response.message);
+                    }
+                }
+            });
+        });
+
+        $("#cancelCopyBtn").off("click").on("click", function () {
+            win.close();
+        });
+    }
+
+    function onArchiveClick(e) {
+        e.preventDefault();
+        var grid = $("#VehicleGrid").data("kendoGrid");
+        var item = grid.dataItem($(e.currentTarget).closest("tr"));
+
+        kendo.confirm("Archive estimate #" + item.VehicleListId + "?").then(function () {
+            $.ajax({
+                url: '@Url.Action("ArchiveVehicleDetails", "Vehicles")',
+                type: 'POST',
+                contentType: "application/json",
+                data: JSON.stringify({
+                    VehicleListId: item.VehicleListId,
+                    VehSeriesCode: item.VehSeriesCode,
+                    TypeId: "BUS",
+                    Username: "@ViewBag.UserName".toUpperCase()
+                }),
+                success: function (r) {
+                    if (r.success) {
+                        grid.dataSource.read();
+                        showNotification('success', r.message);
+                    } else {
+                        showNotification('error', "Archive failed: " + r.message);
+                    }
+                }
+            });
+        });
+    }
+
+    function showDeleteConfirmation(e) {
+        e.preventDefault();
+        var grid = $("#VehicleGrid").data("kendoGrid");
+        var item = grid.dataItem($(e.currentTarget).closest("tr"));
+        var dlg = $("#deleteConfirmationDialog").data("kendoWindow");
+
+        dlg.center().open();
+
+        $("#confirmDeleteBtn").off("click").on("click", function () {
+            $.post('@Url.Action("DeleteVehicle", "Vehicles")', { VehicleListId: item.VehicleListId }, function () {
+                grid.dataSource.read();
+                dlg.close();
+                showNotification('success', "Record deleted successfully.");
+            });
+        });
+
+        $("#cancelDeleteBtn").off("click").on("click", function () {
+            dlg.close();
+        });
+    }
+
+    // ===== FORM MANAGEMENT =====
+    function initVehiclePopupForm() {
+        var mode = $("#formMode").val();
+        if (!mode) return;
+
+        if (mode === "Add") {
+            setPopupEditable([
+                 "NumOfVehicles", "ProjDesc",
+                "Make", "VehModel", "Year",
+                "Engine", "Transmission", "Differential", "Sopnumber"
+            ]);
+            setPopupReadonly(["VehSeriesCode", "ModifiedLastBy", "ModifiedLastDate"]);
+        } else {
+            setPopupReadonly([
+                "VehSeriesCode", "ProjDesc", "Make", "VehModel", "Year",
+                "Engine", "Transmission", "Differential", "Sopnumber",
+                "ModifiedLastBy", "ModifiedLastDate"
+            ]);
+            setPopupEditable(["NumOfVehicles"]);
+        }
+    }
+
+    function setPopupReadonly(ids) {
+        ids.forEach(function (id) {
+            var $el = $("#" + id);
+            var widget = $el.data("kendoComboBox") || $el.data("kendoNumericTextBox");
+            if (widget) {
+                widget.enable(false);
+            } else {
+                $el.prop("readonly", true).addClass("k-state-disabled");
+            }
+        });
+    }
+
+    function setPopupEditable(ids) {
+        ids.forEach(function (id) {
+            var $el = $("#" + id);
+            var widget = $el.data("kendoComboBox") || $el.data("kendoNumericTextBox");
+            if (widget) {
+                widget.enable(true);
+            } else {
+                $el.prop("readonly", false).removeClass("k-state-disabled");
+            }
+        });
+    }
+
+    function wireVehicleForm() {
+        $("#btnCancelVehicle").off("click").on("click", function(){
+            hideVehiclePopup();
+        });
+        
+        $("#btnSave").off("click").on("click", function(e){
+            e.preventDefault();
+            saveVehicleData();
+        });
+        
+        $("#vehicleForm input, #vehicleForm select").off("change input").on("input change", function(){
+            pendingChanges = true;
+            vehiclePopupState.hasChanges = true;
+        });
+    }
+
+    // ===== DOCUMENT READY =====
+    $(document).ready(function () {
+        console.log("Document ready - initializing vehicle estimate components");
+        
+        // Initialize Kendo Notification
+        $("#notification").kendoNotification({
+            position: {
+                pinned: true,
+                top: 20,
+                right: 20
+            },
+            autoHideAfter: 5000,
+            stacking: "down",
+            hideOnClick: true
+        });
+
+        // Initialize vehicle popup
+        $(document).on('click', '#vehiclePopupOverlay', function(e) {
+            if (e.target === this) {
+                hideVehiclePopup();
+            }
+        });
+
+        // Initialize copy estimate dialog
+        var copyWindow = $("#copyEstimateDialog").kendoWindow({
+            title: "Copy Estimate",
+            modal: true,
+            visible: false,
+            resizable: false,
+            width: 400
+        }).data("kendoWindow");
+
+        // Initialize delete confirmation dialog
+        var deleteDialog = $("#deleteConfirmationDialog").kendoWindow({
+            title: "Confirm Delete",
+            modal: true,
+            visible: false,
+            resizable: false,
+            width: 400
+        }).data("kendoWindow");
+        
+        console.log("All components initialized successfully");
+    });
+</script>
+CSS Updates
+Add these critical styles to your vehicle-estimate.css file:
+
+css
+/* Ensure popup overlay is visible when active */
+.vehicle-popup-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Make sure the popup container is visible and on top */
+.vehicle-popup-container {
+    width: 900px;
+    max-height: 90vh;
+    overflow-y: auto;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    display: block !important;
+    visibility: visible !important;
+    position: relative;
+    z-index: 10001;
+}
+
+/* Loading state */
+.vehicle-loading {
+    padding: 40px;
+    text-align: center;
+    color: #7f8c8d;
+    font-size: 16px;
+}
+
+.vehicle-loading:before {
+    content: "⏳";
+    display: block;
+    font-size: 24px;
+    margin-bottom: 10px;
+}
+
+/* Ensure Kendo UI doesn't interfere with our popup */
+.k-window {
+    z-index: 1000 !important; /* Lower than our popup */
+}
+HTML Button Updates
+Make sure your buttons are calling the correct functions:
+
+html
+<!-- In your grid -->
+@(Html.Kendo().Grid<VehicleViewModel>()
+    .Name("VehicleGrid")
+    .Columns(c =>
+    {
+        c.Bound(v => v.VehicleListId).Title("Estimate #")
+            .ClientTemplate("<a class='estimate-link' onclick='showVehiclePopup(#=VehicleListId#)'>#=VehicleListId#</a>").Width(120);
+        // ... other columns
+    })
+    .ToolBar(tb => tb.ClientTemplate("<button class='k-button k-button-icontext' onclick='showVehiclePopup(0)'><span class='k-icon k-i-plus'></span>Add New Vehicle Estimate</button>"))
+    // ... other configuration
+)
