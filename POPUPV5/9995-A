@@ -1,0 +1,201 @@
+Here's the implementation:
+
+csharp
+[HttpGet]
+public ActionResult GetVehicleEstimatePopup(int id)
+{
+    // Get the vehicle data
+    VehicleViewModel vehicle;
+    
+    if (id == 0)
+    {
+        // Create a new vehicle for add mode
+        vehicle = new VehicleViewModel();
+    }
+    else
+    {
+        // Get existing vehicle data using Dapper
+        vehicle = _dbConnection.QueryFirstOrDefault<VehicleViewModel>(@"
+            SELECT  
+                [VehicleListId],
+                [VehSeriesCode],
+                [NumOfVehicles],
+                [ProjDesc],
+                [Sopnumber],
+                [Make],
+                [VehModel],
+                [Year],
+                [Engine],
+                [Transmission],
+                [Differential],
+                [ModifiedLastBy],
+                [ModifiedLastDate]
+            FROM [CES].[SBCES].[VehicleList] 
+            WHERE VehicleListId = @Id", 
+            new { Id = id });
+
+        if (vehicle == null)
+        {
+            return Content("Vehicle not found");
+        }
+    }
+
+    // Set ViewBag properties
+    ViewBag.ParentId = id;
+    ViewBag.FormattedDate = vehicle.ModifiedLastDate == default
+        ? "System Generated"
+        : vehicle.ModifiedLastDate.ToString("MMM dd, yyyy hh:mm:ss tt");
+    
+    // Set active tab
+    ViewBag.ActiveTab = "vehicle";
+
+    return PartialView("_VehEstimatePopUp", vehicle);
+}
+Now, let's update the _VehEstimatePopUp.cshtml to properly handle the tab structure and render the vehicle details in the Vehicle tab:
+
+html
+@model BCES.Models.Vehicle.VehicleViewModel
+@{
+    string activeTab = ViewBag.ActiveTab ?? "vehicle";
+}
+
+<div class="vehicle-estimate-popup">
+    <div class="popup-header">
+        <div class="popup-title">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate" : $"Estimate #{Model.VehicleListId}")</div>
+        <div class="tab-actions">
+            <button id="btnCloseEstimate" class="k-button" type="button" onclick="hideVehicleEstimatePopup()">
+                <span class="k-icon k-i-close"></span> Close
+            </button>
+        </div>
+    </div>
+    
+    @(Html.Kendo().TabStrip()
+        .Name("vehicleEstimateTabs")
+        .Items(tabs =>
+        {
+            tabs.Add()
+                .Text("Vehicle")
+                .Selected(activeTab == "vehicle")
+                .Content(Html.Partial("_VehPopUp", Model).ToHtmlString());
+                
+            tabs.Add()
+                .Text("Part Details")
+                .Selected(activeTab == "part-details")
+                .Content("<div class='tab-stub'>Part Details Content - <button class='k-button' onclick=\"alert('Part Details Clicked')\">Test Action</button></div>");
+                
+            tabs.Add()
+                .Text("Labour Details")
+                .Selected(activeTab == "labour-details")
+                .Content("<div class='tab-stub'>Labour Details Content - <button class='k-button' onclick=\"alert('Labour Details Clicked')\">Test Action</button></div>");
+                
+            tabs.Add()
+                .Text("Stock Coded Parts")
+                .Selected(activeTab == "stock-coded-parts")
+                .Content("<div class='tab-stub'>Stock Coded Parts Content - <button class='k-button' onclick=\"alert('Stock Coded Parts Clicked')\">Test Action</button></div>");
+                
+            tabs.Add()
+                .Text("Non Stock Coded Parts")
+                .Selected(activeTab == "non-stock-coded-parts")
+                .Content("<div class='tab-stub'>Non Stock Coded Parts Content - <button class='k-button' onclick=\"alert('Non Stock Coded Parts Clicked')\">Test Action</button></div>");
+                
+            tabs.Add()
+                .Text("Rebuilt Parts")
+                .Selected(activeTab == "rebuilt-parts")
+                .Content("<div class='tab-stub'>Rebuilt Parts Content - <button class='k-button' onclick=\"alert('Rebuilt Parts Clicked')\">Test Action</button></div>");
+                
+            tabs.Add()
+                .Text("Final Estimate")
+                .Selected(activeTab == "final-estimate")
+                .Content("<div class='tab-stub'>Final Estimate Content - <button class='k-button' onclick=\"alert('Final Estimate Clicked')\">Test Action</button></div>");
+        })
+        .Events(events => events.Select("onTabSelect"))
+    )
+</div>
+
+<script>
+    function onTabSelect(e) {
+        var tab = e.item;
+        console.log("Tab selected: " + $(tab).text());
+        
+        // You can add AJAX loading for tab content here if needed
+        // For now, we're using stubs with alert buttons
+    }
+    
+    // Make sure the vehicle form functions are available in this context
+    function initVehiclePopupForm() {
+        if (typeof window.parent.initVehiclePopupForm === 'function') {
+            window.parent.initVehiclePopupForm();
+        }
+    }
+    
+    function wireVehicleForm() {
+        if (typeof window.parent.wireVehicleForm === 'function') {
+            window.parent.wireVehicleForm();
+        }
+    }
+    
+    // Initialize form when document is ready
+    $(document).ready(function() {
+        initVehiclePopupForm();
+        wireVehicleForm();
+    });
+</script>
+
+<style>
+    .vehicle-estimate-popup {
+        width: 1100px;
+        background: white;
+        border-radius: 4px;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .vehicle-estimate-tabs .k-tabstrip-items .k-item {
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+    
+    .tab-stub {
+        padding: 20px;
+        text-align: center;
+        color: #666;
+    }
+    
+    .k-tabstrip-content {
+        padding: 15px;
+        overflow: auto;
+        max-height: 500px;
+    }
+</style>
+Key changes and notes:
+
+The GetVehicleEstimatePopup action now:
+
+Gets the vehicle data using Dapper (same as your existing GetVehicleById)
+
+Sets the ActiveTab in ViewBag to ensure the Vehicle tab is selected by default
+
+Returns the _VehEstimatePopUp view with the vehicle model
+
+The _VehEstimatePopUp.cshtml now:
+
+Uses Kendo TabStrip to create the tab interface
+
+Sets the Vehicle tab as selected by default (based on ViewBag.ActiveTab)
+
+Includes the _VehPopUp partial view as the content of the Vehicle tab
+
+Includes stubs for the other tabs with test buttons
+
+Adds JavaScript functions to ensure the vehicle form functions are available
+
+I've added JavaScript functions (initVehiclePopupForm and wireVehicleForm) that call the parent window's functions to ensure the vehicle form works correctly in this context.
+
+The styling ensures the tab content has proper padding and scrolling if needed.
+
+This implementation ensures that when a user clicks on an Estimate number in the index grid, the vehicle estimate popup appears with the Vehicle tab active and the vehicle details form displayed. The other tabs contain stubs with test buttons as requested.
+
+New chat
+Message DeepSeek
