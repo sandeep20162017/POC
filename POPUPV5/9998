@@ -16,6 +16,915 @@ Changes I need :
  same for other tabs.
  Shouer should be able to click on any tab and contents must be loaded using AJAX. 
  Need simpler but nice UI/UX eperience.
- Pls prive all the chnaged files separatlty.
- 
+ Pls provide all the chnaged files separatlty.
+ Index.cshtml :
+@using BCES.Models.Vehicle
+@using BCES.Models.Parts
+@model IEnumerable<VehicleViewModel>
+
+@{
+    ViewData["Title"] = "Vehicle Estimate";
+    string scGridName = $"ScPartsMaterialDetailsRebuiltPartsGrid_";
+}
+
+<h6 class="vehicle-estimate-header">Vehicle Estimate</h6>
+<!-- Include the CSS file in your view -->
+<link rel="stylesheet" href="~/css/vehicle-estimate.css" />
+
+<div id="notification"></div>
+<script>
+    // ===== GLOBAL VARIABLES =====
+    var vehiclePopupState = {
+        isOpen: false,
+        hasChanges: false,
+        currentVehicleId: 0,
+        originalData: {},
+        isEditMode: false
+    };
+
+    var pendingChanges = false;
+    var currentVehicleId = 0;
+
+    // ===== VEHICLE POPUP MANAGEMENT =====
+    function showVehiclePopup(vehicleId) {
+        console.log("Showing vehicle popup for ID:", vehicleId);
+
+        // Reset state
+        vehiclePopupState.isOpen = true;
+        vehiclePopupState.currentVehicleId = vehicleId;
+        vehiclePopupState.hasChanges = false;
+        vehiclePopupState.isEditMode = vehicleId !== 0;
+        pendingChanges = false;
+
+        // Show the overlay with forced visibility
+        $("#vehiclePopupOverlay")
+            .addClass("active")
+            .css({
+                "display": "flex",
+                "opacity": 1,
+                "visibility": "visible",
+                "z-index": "99999"
+            });
+
+        console.log("Popup overlay display set to flex");
+
+        // Load vehicle data
+        loadVehicleData(vehicleId);
+    }
+
+    function hideVehiclePopup() {
+        console.log("Hiding vehicle popup");
+
+        if (vehiclePopupState.hasChanges || pendingChanges) {
+            showCloseConfirmation();
+        } else {
+            closeVehiclePopup();
+        }
+    }
+
+    function closeVehiclePopup() {
+        console.log("Closing vehicle popup");
+
+        vehiclePopupState.isOpen = false;
+        vehiclePopupState.hasChanges = false;
+        pendingChanges = false;
+
+        // Hide the overlay
+        $("#vehiclePopupOverlay")
+            .removeClass("active")
+            .css("display", "none");
+    }
+
+    function loadVehicleData(vehicleId) {
+        console.log("Loading vehicle data for ID:", vehicleId);
+
+        // Show loading state
+        $("#vehicleFormContainer").html('<div class="vehicle-loading">Loading vehicle data...</div>');
+
+        // Update popup title
+        $("#vehiclePopupTitle").text(vehicleId === 0 ? "Add New Vehicle Estimate" : "Estimate #" + vehicleId);
+
+        // Fetch vehicle data
+        $.get('@Url.Action("GetVehicleById", "Vehicles")', { id: vehicleId })
+            .done(function (data) {
+                console.log("Vehicle data loaded successfully");
+
+                // Replace the entire popup content
+                $("#vehiclePopupOverlay").html(data);
+
+                // // Force the popup to be visible
+                // $("#vehiclePopupOverlay")
+                //     .addClass("active")
+                //     .css({
+                //         "display": "flex",
+                //         "opacity": 1,
+                //         "visibility": "visible",
+                //         "z-index": "99999"
+                //     });
+
+                // Reinitialize the form
+                initVehiclePopupForm();
+                wireVehicleForm();
+                vehiclePopupState.originalData = getFormData();
+
+                console.log("Popup content loaded and displayed");
+
+                // Debug: Check if elements are visible
+                setTimeout(function () {
+                    console.log("Popup visibility check:");
+                    console.log("Overlay display:", $("#vehiclePopupOverlay").css("display"));
+                    console.log("Overlay visibility:", $("#vehiclePopupOverlay").css("visibility"));
+                    console.log("Overlay opacity:", $("#vehiclePopupOverlay").css("opacity"));
+                    console.log("Container display:", $("#vehicleFormContainer").css("display"));
+                }, 100);
+            })
+            .fail(function (xhr, status, error) {
+                console.error("Failed to load vehicle data:", error);
+                $("#vehicleFormContainer").html('<div class="vehicle-notification error">Failed to load vehicle data. Please try again.</div>');
+
+                // Still show the popup with error message
+                $("#vehiclePopupOverlay")
+                    .addClass("active")
+                    .css({
+                        "display": "flex",
+                        "opacity": 1,
+                        "visibility": "visible",
+                        "z-index": "99999"
+                    });
+            });
+    }
+
+    function getFormData() {
+        var form = document.getElementById('vehicleForm');
+        if (!form) return {};
+
+        var formData = {};
+        var inputs = form.querySelectorAll('input, select, textarea');
+
+        inputs.forEach(function (input) {
+            formData[input.name] = input.value;
+        });
+
+        return formData;
+    }
+
+    function saveVehicleData() {
+        console.log("Saving vehicle data");
+
+        var form = document.getElementById('vehicleForm');
+        if (!form) return;
+
+        // Validate form
+        if (!validateVehicleForm()) {
+
+            return;
+        }
+
+        // Show saving state
+        var saveButton = document.getElementById('btnSave');
+        if (saveButton) {
+            saveButton.disabled = true;
+            saveButton.innerHTML = '<span class="vehicle-btn-icon">⏳</span> Saving...';
+        }
+
+        // Prepare data
+        var formData = new FormData(form);
+        var vehicleData = {};
+        formData.forEach(function (value, key) {
+            vehicleData[key] = value;
+        });
+
+        // Determine URL based on mode (add or edit)
+        var url = vehiclePopupState.currentVehicleId === 0
+            ? '@Url.Action("AddVehiclesView", "Vehicles")'
+            : '@Url.Action("UpdateVehiclesView", "Vehicles")';
+
+        // Send request
+        $.ajax({
+            url: url,
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(vehicleData),
+            success: function (response) {
+                if (response && response.VehicleListId) {
+                    // Success
+                    showNotification('success', 'Vehicle data saved successfully!');
+                    vehiclePopupState.hasChanges = false;
+                    pendingChanges = false;
+                    vehiclePopupState.currentVehicleId = response.VehicleListId;
+
+                    // Update grid
+                    $("#VehicleGrid").data("kendoGrid").dataSource.read();
+
+                    // Update popup title
+                    $("#vehiclePopupTitle").text('Vehicle Estimate #' + response.VehicleListId);
+                } else {
+                    showNotification('error', 'Failed to save vehicle data.');
+                }
+
+                // Reset save button
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.innerHTML = '<span class="vehicle-btn-icon">✓</span> Save';
+                }
+            },
+            error: function () {
+                showNotification('error', 'Error saving vehicle data.');
+
+                // Reset save button
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.innerHTML = '<span class="vehicle-btn-icon">✓</span> Save';
+                }
+            }
+        });
+    }
+
+    function validateVehicleForm() {
+        var form = document.getElementById('vehicleForm');
+        console.warn('inside validateVehicleForm - form :', form);
+        if (!form) 
+        {
+            console.warn('form is null');
+            return false;
+        }
+
+        var isValid = true;
+        var requiredFields = form.querySelectorAll('[required]');
+
+        requiredFields.forEach(function (field) {
+            if (!field.value.trim()) {
+                console.warn('field :', field);
+                console.warn('field.value.trim() :', field.value.trim());
+
+                isValid = false;
+                field.style.borderColor = '#e74c3c';
+            } else {
+                field.style.borderColor = '';
+            }
+        });
+
+        if (!isValid) {
+            showNotification('error', 'Please fill in all required fields.');
+        }
+
+        console.warn('returning : isValid:', isValid);
+        return isValid;
+    }
+
+    function showNotification(type, message) {
+        var notification = $("#notification").data("kendoNotification");
+        if (notification) {
+            notification.show(message, type);
+        }
+    }
+
+    function showCloseConfirmation() {
+        kendo.confirm("You have unsaved changes. Are you sure you want to close?")
+            .then(function () {
+                closeVehiclePopup();
+            }, function () {
+                // User clicked Cancel - do nothing
+            });
+    }
+
+    // ===== FORM MANAGEMENT =====
+    function initVehiclePopupForm() {
+        console.warn('initVehiclePopupForm');
+        var mode = $("#formMode").val();
+        console.warn('mode :', mode);
+        if (!mode) return;
+
+        if (mode === "Add") {
+            setPopupEditable([
+                "NumOfVehicles", "ProjDesc",
+                "Make", "VehModel", "Year",
+                "Engine", "Transmission", "Differential", "Sopnumber"
+            ]);
+            setPopupReadonly(["VehSeriesCode", "ModifiedLastBy", "ModifiedLastDate"]);
+        } else {
+            setPopupReadonly([
+                "VehSeriesCode", "ProjDesc", "Make", "VehModel", "Year",
+                "Engine", "Transmission", "Differential", "Sopnumber",
+                "ModifiedLastBy", "ModifiedLastDate"
+            ]);
+            setPopupEditable(["NumOfVehicles"]);
+        }
+    }
+
+    function setPopupReadonly(ids) {
+        ids.forEach(function (id) {
+            var $el = $("#" + id);
+            var widget = $el.data("kendoComboBox") || $el.data("kendoNumericTextBox");
+            if (widget) {
+                widget.enable(false);
+            } else {
+                $el.prop("readonly", true).addClass("k-state-disabled");
+            }
+        });
+    }
+
+    function setPopupEditable(ids) {
+        ids.forEach(function (id) {
+            var $el = $("#" + id);
+            var widget = $el.data("kendoComboBox") || $el.data("kendoNumericTextBox");
+            if (widget) {
+                widget.enable(true);
+            } else {
+                $el.prop("readonly", false).removeClass("k-state-disabled");
+            }
+        });
+    }
+
+    function wireVehicleForm() {
+        $("#btnCancelVehicle").off("click").on("click", function () {
+            hideVehiclePopup();
+        });
+
+        $("#btnSave").off("click").on("click", function (e) {
+            e.preventDefault();
+            saveVehicleData();
+        });
+
+        $("#vehicleForm input, #vehicleForm select").off("change input").on("input change", function () {
+            pendingChanges = true;
+            vehiclePopupState.hasChanges = true;
+        });
+    }
+
+    // ===== DOCUMENT READY =====
+    $(document).ready(function () {
+        console.log("Document ready - initializing vehicle estimate components");
+
+        // Initialize Kendo Notification
+        $("#notification").kendoNotification({
+            position: {
+                pinned: true,
+                top: 20,
+                right: 20
+            },
+            autoHideAfter: 5000,
+            stacking: "down",
+            hideOnClick: true
+        });
+
+        // Initialize vehicle popup
+        $(document).on('click', '#vehiclePopupOverlay', function (e) {
+            if (e.target === this) {
+                hideVehiclePopup();
+            }
+        });
+
+        console.log("All components initialized successfully");
+    });
+</script>
+<script>
+   
+        function onComboBoxDataBound(e) {
+            // Check if no data is available after filtering
+            var notification = $("#notification").data("kendoNotification");
+
+            if (e.sender.dataSource.total() === 0) {
+                e.sender.value(null); // Clear the input
+                e.sender.input.val(""); // Clear the text
+                setTimeout(function () {
+                    notification.show("Invalid Selection! Please choose from the list.", "error");
+                    //alert("Invalid Selection! Please choose from the list.");
+                }, 100);
+            }
+        }
+    function onComboBoxChange(e) {
+        var combo = e.sender;
+        if (combo.selectedIndex === -1) {
+            combo.value(null);
+            combo.input.val("");
+            combo.trigger("change");
+            // Optional: Show error message
+            $("#validationMessage").text("Invalid selection!").css("color", "red");
+        } else {
+            $("#validationMessage").text("");
+        }
+    }
+    function getComboBoxParams() {
+            var input = $(".k-combobox input.k-input:focus");
+            return {
+                columnName: input.attr("name")?.replace("_input", "").split('.').pop(),
+                searchText: input.val() || ""
+            };
+        }
+    function cancelScPartPopup (e) {
+        alert('cancelScPopUp clicked');
+    }
+</script>
+<!-- Kendo main grid -->
+<div class="vehicle-estimate-container">
+@(Html.Kendo().TabStrip()
+    .Name("vehicleTabStrip")
+    .Items(ts =>
+    {
+        ts.Add().Text("Vehicles").Selected(true)
+            .Content(@<text>
+    @(Html.Kendo().Grid<VehicleViewModel>()
+    .Name("VehicleGrid")
+    .Columns(c =>
+    {
+    c.Bound(v => v.VehicleListId).Title("Estimate #")
+    .ClientTemplate("<a class='estimate-link' onclick='showVehiclePopup(#=VehicleListId#)'>#=VehicleListId#</a>").Width(120);
+    c.Bound(v => v.VehSeriesCode).Title("Vehicle Series").HeaderHtmlAttributes(new { @class = "required-header" }).EditorTemplateName("ComboBoxEditor").Width(150);
+    c.Bound(v => v.NumOfVehicles).Title("Qty").HeaderHtmlAttributes(new { @class = "required-header" }).Width(80);
+    c.Bound(v => v.ProjDesc).Title("Description").HeaderHtmlAttributes(new { @class = "required-header" }).Width(250);
+    c.Command(cmd =>
+    {
+    cmd.Custom("Copy").IconClass("k-icon k-i-copy").Click("window.onCopyEstimate");
+    cmd.Custom("Archive").IconClass("k-icon k-i-folder").Click("window.onArchiveClick");
+    cmd.Custom("Delete").IconClass("k-icon k-i-delete").Click("window.showDeleteConfirmation");
+    }).Width(180);
+    })
+    .ToolBar(tb => tb.ClientTemplate("<button class='k-button k-button-icontext' onclick='showVehiclePopup(0)'><span class='k-icon k-i-plus'></span>Add New Vehicle Estimate</button>"))
+    .Pageable(p => p.PageSizes(new[] { 10, 20, 50 }))
+    .Sortable()
+    .Filterable()
+    
+    .HtmlAttributes(new { style = "height:540px;" })
+    .DataSource(ds => ds.Ajax()
+    .PageSize(10)
+    .Model(m => m.Id(v => v.VehicleListId))
+    .Read(r => r.Action("GetVehiclesView", "Vehicles").Type(HttpVerbs.Get))
+    .Create(c => c.Action("AddVehiclesView", "Vehicles").Type(HttpVerbs.Post))
+    .Update(u => u.Action("UpdateVehiclesView", "Vehicles").Type(HttpVerbs.Post))
+    .Destroy(d => d.Action("DeleteVehicle", "Vehicles").Type(HttpVerbs.Post))
+    )
+    
+    )
+</text>);
+    })
+
+)
+
+<!-- Popup tabs for vehicle details -->
+    <div id="vehiclePopupOverlay" class="vehicle-popup-overlay">
+    
+        <ul>
+            <li class="k-state-active">Vehicle</li>
+            <li>Parts Details</li>
+            <li>Labour Details</li>
+            <li>Stock Coded Parts</li>
+            <li>Non Stock Coded Parts</li>
+            <li>Rebuilt Parts</li>
+            <li>Final Estimate</li>
+        </ul>
+
+        <div id="vehicleTabContent"></div>
+        <div id="partsTabContent"></div>
+        <div id="labourTabContent"></div>
+        <div id="stockCodedPartsTabContent"></div>
+        <div id="nonStockCodedPartsTabContent"></div>
+        <div id="rebuiltPartsTabContent"></div>
+        <div id="finalEstimateTabContent"></div>
+    </div>
+
+
+<!-- Delete confirmation dialog -->
+<div id="deleteConfirmationDialog" style="display:none;">
+  <div class="confirmation-message"><span class="k-icon k-i-warning" style="font-size:24px;color:#f0ad4e;"></span><span style="margin-left:10px;">Are you sure you'd like to delete?</span></div>
+  <div class="confirmation-buttons"><button class="k-button" id="cancelDeleteBtn">Cancel</button><button class="k-button k-primary" id="confirmDeleteBtn" style="margin-left:10px;">Delete</button></div>
+</div>
+
+<!-- Copy estimate dialog -->
+<div id="copyEstimateDialog" style="display:none;">
+  <div class="k-form">
+    <div class="k-form-field"><label>Estimate #</label><input id="vehicleListId" class="k-textbox" readonly /></div>
+    <div class="k-form-field"><label>Old Series</label><input id="oldVehSeriesCode" class="k-textbox" readonly /></div>
+    <div class="k-form-field"><label>Old Description</label><input id="oldprojDesc" class="k-textbox" readonly /></div>
+    <div class="k-form-field"><label>New Vehicle Series<span style="color:red">*</span></label><input id="newVehSeriesCode" class="k-textbox" required /></div>
+    <div class="k-form-field"><label>New Description<span style="color:red">*</span></label><input id="newprojDesc" class="k-textbox" required /></div>
+    <div class="k-form-buttons">
+        <button type="button" class="k-button k-primary" id="copyEstimateBtn">Copy</button>
+        <button type="button" class="k-button" id="cancelCopyBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+</div>
+_VehPopUp.cshtml :
+@model BCES.Models.Vehicle.VehicleViewModel
+
+<div class="popup-container">
+    <div class="popup-header">
+        <div class="popup-title">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate" : $"Estimate #{Model.VehicleListId}")</div>
+        @Html.Hidden("formMode", Model.VehicleListId == 0 ? "Add" : "Edit", new { id = "formMode" })
+        <div class="tab-actions">
+            <button id="btnSavePart" class="k-button k-primary" type="button" onclick="saveVehicleData()">
+                <span class="k-icon k-i-save"></span> Save
+            </button>
+            <button id="btnCancelPart" class="k-button" type="button" onclick="showCloseConfirmation()">
+                <span class="k-icon k-i-cancel"></span> Cancel
+            </button>
+        </div>
+    </div>
+
+    <div class="form-container">
+        <form id="vehicleForm">
+            @Html.HiddenFor(m => m.VehicleListId)
+
+            <!-- Vehicle Information Section -->
+            <div class="section-title">Vehicle Information</div>
+
+            <input type="hidden" id="parentId" value="@ViewBag.ParentId" /> @* save parent id *@
+
+            <!-- Row 1: Estimate #, Vehicle Series, Quantity -->
+            <div class="form-row">
+                <div class="form-group">
+                    @Html.LabelFor(m => m.VehicleListId, "Estimate #", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.VehicleListId)
+                        .Value(Model.VehicleListId == 0 ? "0" : Model.VehicleListId.ToString())
+                        .HtmlAttributes(new
+                        {
+                            @readonly = "readonly",
+                            @class = "k-textbox read-only",
+                            style = "width:100%; padding: 4px 6px; height: 28px;"
+                        }))
+                </div>
+
+                <div class="form-group">
+                    @Html.LabelFor(m => m.VehSeriesCode, "Vehicle Series", new { @class = "form-label required-label" })
+                    @Html.EditorFor(m => m.VehSeriesCode, "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new
+                            {
+                                required = "required",
+                                @class = "vehicle-field",
+                                style = "width:100%; height: 28px;"
+                            }
+                        })
+                </div>
+
+                <div class="form-group">
+                    @Html.LabelFor(m => m.NumOfVehicles, "Quantity", new { @class = "form-label required-label" })
+                    @(Html.Kendo().NumericTextBoxFor(m => m.NumOfVehicles)
+                        .Format("0")
+                        .Min(1)
+                        .HtmlAttributes(new
+                        {
+                            required = "required",
+                            @class = "vehicle-field",
+                            style = "width:100%; height: 28px;"
+                        }))
+                </div>
+            </div>
+
+            <!-- Row 2: Description, SOP Number -->
+            <div class="form-row">
+                <div class="form-group double-width">
+                    @Html.LabelFor(m => m.ProjDesc, "Description", new { @class = "form-label required-label" })
+                    @Html.EditorFor(m => m.ProjDesc, "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new
+                            {
+                                required = "required",
+                                @class = "vehicle-field",
+                                style = "width:100%; height: 28px;"
+                            }
+                        })
+                </div>
+
+                <div class="form-group">
+                    @Html.LabelFor(m => m.Sopnumber, "SOP Number", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.Sopnumber)
+                        .HtmlAttributes(new
+                        {
+                            @class = "vehicle-field",
+                            style = "width:100%; padding: 4px 6px; height: 28px;"
+                        }))
+                </div>
+            </div>
+
+            <!-- Specifications Section -->
+            <div class="section-title">Specifications</div>
+
+            <!-- Row 3: Make, Model, Year -->
+            <div class="form-row">
+                <div class="form-group">
+                    @Html.LabelFor(m => m.Make, "Make", new { @class = "form-label" })
+                    @Html.EditorFor(m => m.Make, "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new
+                            {
+                                @class = "vehicle-field",
+                                style = "width:100%; height: 28px;"
+                            }
+                        })
+                </div>
+
+                <div class="form-group">
+                    @Html.LabelFor(m => m.VehModel, "Model", new { @class = "form-label" })
+                    @Html.EditorFor(m => m.VehModel, "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new
+                            {
+                                @class = "vehicle-field",
+                                style = "width:100%; height: 28px;"
+                            }
+                        })
+                </div>
+
+                <div class="form-group">
+                    @Html.LabelFor(m => m.Year, "Year", new { @class = "form-label" })
+                    @(Html.Kendo().NumericTextBoxFor(m => m.Year)
+                        .Format("0")
+                        .Min(1900)
+                        .Max(DateTime.Now.Year + 1)
+                        .HtmlAttributes(new
+                        {
+                            @class = "vehicle-field",
+                            style = "width:100%; height: 28px;"
+                        }))
+                </div>
+            </div>
+
+            <!-- Row 4: Engine, Transmission, Differential -->
+            <div class="form-row">
+                <div class="form-group">
+                    @Html.LabelFor(m => m.Engine, "Engine", new { @class = "form-label" })
+                    @Html.EditorFor(m => m.Engine, "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new
+                            {
+                                @class = "vehicle-field",
+                                style = "width:100%; height: 28px;"
+                            }
+                        })
+                </div>
+
+                <div class="form-group">
+                    @Html.LabelFor(m => m.Transmission, "Transmission", new { @class = "form-label" })
+                    @Html.EditorFor(m => m.Transmission, "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new
+                            {
+                                @class = "vehicle-field",
+                                style = "width:100%; height: 28px;"
+                            }
+                        })
+                </div>
+
+                <div class="form-group">
+                    @Html.LabelFor(m => m.Differential, "Differential", new { @class = "form-label" })
+                    @Html.EditorFor(m => m.Differential, "ComboBoxEditor", new
+                        {
+                            htmlAttributes = new
+                            {
+                                @class = "vehicle-field",
+                                style = "width:100%; height: 28px;"
+                            }
+                        })
+                </div>
+            </div>
+
+            <!-- Audit Section -->
+            <div class="section-title">Audit Information</div>
+
+            <!-- Row 5: Last Modified By, Last Modified Date -->
+            <div class="form-row">
+                <div class="form-group">
+                    @Html.LabelFor(m => m.ModifiedLastBy, "Last Modified By", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.ModifiedLastBy)
+                        .HtmlAttributes(new
+                        {
+                            @readonly = "readonly",
+                            @class = "k-textbox read-only",
+                            style = "width:100%; padding: 4px 6px; height: 28px;"
+                        }))
+                </div>
+
+                <div class="form-group">
+                    @Html.LabelFor(m => m.ModifiedLastDate, "Last Modified Date", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.ModifiedLastDate)
+                        .HtmlAttributes(new
+                        {
+                            @readonly = "readonly",
+                            @class = "k-textbox read-only",
+                            style = "width:100%; padding: 4px 6px; height: 28px;"
+                        }))
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+@* <style>
+    /* BASE STYLES - OPTIMIZED FOR 1100x600 */
+    .popup-container {
+        width: 1100px;
+        height: 500px;
+        background: white;
+        border-radius: 4px;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* HEADER - ULTRA COMPACT */
+    .popup-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 12px;
+        background: linear-gradient(to right, #2c3e50, #4a6491);
+        color: white;
+        flex-shrink: 0;
+        height: 32px;
+    }
+
+    .popup-title {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.1px;
+    }
+
+    .tab-actions {
+        display: flex;
+        gap: 6px;
+    }
+
+    .k-button {
+        border-radius: 3px;
+        font-weight: 500;
+        padding: 4px 8px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        background-color: #f0f0f0;
+        border: 1px solid #ccc;
+        color: #333;
+        font-size: 12px;
+        height: 26px;
+    }
+
+        .k-button:hover {
+            transform: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+
+        .k-button.k-primary {
+            background: #3f51b5;
+            border-color: #3f51b5;
+            color: white;
+        }
+
+    /* FORM CONTAINER - FILL SPACE WITHOUT SCROLL */
+    .form-container {
+        padding: 8px 15px;
+        overflow: hidden;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* FORM ROWS - TIGHT SPACING */
+    .form-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 6px;
+        align-items: flex-start;
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+    }
+
+    .double-width {
+        flex: 1.8;
+    }
+
+    /* FORM ELEMENTS - COMPACT & EFFICIENT */
+    .form-label {
+        display: block;
+        margin-bottom: 3px;
+        font-weight: 600;
+        color: #2c3e50;
+        font-size: 11px;
+    }
+
+    .required-label::after {
+        content: " *";
+        color: #e74c3c;
+        font-size: 11px;
+    }
+
+    .k-textbox, .k-combobox, .k-numerictextbox {
+        width: 100%;
+    }
+
+    .k-tabstrip-items .k-item.k-state-disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+        /* INPUT CONTROLS - MINIMAL HEIGHT */
+        .k-textbox, .k-numerictextbox .k-numeric-wrap,
+        .k-combobox .k-dropdown-wrap {
+            border: 1px solid #d1d5db;
+            border-radius: 3px;
+            padding: 4px 8px;
+            background: #fff;
+            min-height: 28px;
+            font-size: 12px;
+        }
+
+            .k-textbox:focus,
+            .k-numerictextbox .k-numeric-wrap:focus-within,
+            .k-combobox .k-dropdown-wrap:focus-within {
+                border-color: #3498db;
+                box-shadow: 0 0 0 1px rgba(52, 152, 219, 0.2);
+            }
+
+    /* READONLY FIELDS */
+    .read-only, .read-only .k-dropdown-wrap,
+    .read-only .k-numeric-wrap,
+    .read-only .k-input {
+        background-color: #f8fafc !important;
+        color: #4b5563 !important;
+        cursor: not-allowed !important;
+    }
+
+        .read-only .k-combobox .k-select {
+            display: none !important;
+        }
+
+    /* SECTION TITLES - MINIMAL SPACE */
+    .section-title {
+        font-size: 12px;
+        color: #2c3e50;
+        margin-bottom: 6px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid #3498db;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+        .section-title::before {
+            content: "";
+            display: block;
+            width: 4px;
+            height: 12px;
+            background: #3498db;
+            border-radius: 2px;
+        }
+</style> *@
+
+<script>
+    // Initialize form state based on mode (add vs edit)
+    $(document).ready(function () {
+        const isAddMode = @Model.VehicleListId === 0;
+
+        // For existing records, make all non-audit fields readonly
+        if (!isAddMode) {
+            $(".vehicle-field").each(function () {
+                $(this).prop("readonly", true);
+            });
+        }
+
+        // Handle Edit button click
+        $("#btnEdit").click(function () {
+            $(".vehicle-field").prop("readonly", false);
+            $(this).hide();
+        });
+    });
+
+    // Set form readonly state
+    function setFormReadOnly(readOnly) {
+        $(".vehicle-field").each(function () {
+            const input = $(this);
+            const widget = kendo.widgetInstance(input, kendo.ui);
+
+            if (widget) {
+                if (typeof widget.readonly === 'function') {
+                    widget.readonly(readOnly);
+                } else if (widget.element && widget.element.is("input")) {
+                    input.prop("readonly", readOnly);
+                }
+            } else {
+                input.prop("readonly", readOnly);
+            }
+
+            // Toggle readonly class for styling
+            input.toggleClass("read-only", readOnly);
+        });
+
+        // Special handling for comboboxes
+        $("[data-role='combobox']").each(function () {
+            const combo = $(this).data("kendoComboBox");
+            if (combo) {
+                combo.readonly(readOnly);
+                combo.enable(!readOnly);
+                $(combo.element).toggleClass("read-only", readOnly);
+            }
+        });
+    }
+</script>
  
