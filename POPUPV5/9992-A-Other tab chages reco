@@ -1,0 +1,160 @@
+1. Controller Actions for Each Tab
+Create separate controller actions for each tab:
+
+csharp
+[HttpGet]
+public ActionResult GetLabourDetailsTabContent(int vehicleId)
+{
+    // Fetch data for labour details
+    var labourDetails = _dbConnection.Query<LabourDetailsViewModel>(
+        "SELECT * FROM LabourDetails WHERE VehicleId = @VehicleId", 
+        new { VehicleId = vehicleId });
+    
+    return PartialView("_LabourDetailsPopUp", labourDetails);
+}
+
+[HttpGet]
+public ActionResult GetPartDetailsTabContent(int vehicleId)
+{
+    // Fetch data for part details
+    var partDetails = _dbConnection.Query<PartDetailsViewModel>(
+        "SELECT * FROM PartDetails WHERE VehicleId = @VehicleId", 
+        new { VehicleId = vehicleId });
+    
+    return PartialView("_PartDetailsPopUp", partDetails);
+}
+
+// Repeat for other tabs: StockCodedParts, NonStockCodedParts, RebuiltParts, FinalEstimate
+2. Partial Views for Each Tab
+Create partial views for each tab that contain the Telerik grids:
+
+Example: _LabourDetailsPopUp.cshtml
+
+html
+@model IEnumerable<LabourDetailsViewModel>
+
+<div class="labour-details-container">
+    <h4>Labour Details for Vehicle #@ViewBag.VehicleId</h4>
+    
+    @(Html.Kendo().Grid(Model)
+        .Name("LabourDetailsGrid")
+        .Columns(columns =>
+        {
+            columns.Bound(l => l.LabourCode);
+            columns.Bound(l => l.Hours);
+            columns.Bound(l => l.Rate);
+            columns.Bound(l => l.Total);
+            columns.Command(command => 
+            {
+                command.Edit();
+                command.Destroy();
+            });
+        })
+        .ToolBar(toolbar => toolbar.Create())
+        .Editable(editable => editable.Mode(GridEditMode.PopUp))
+        .Pageable()
+        .Sortable()
+        .DataSource(dataSource => dataSource
+            .Ajax()
+            .Model(model => model.Id(l => l.LabourDetailId))
+            .Read(read => read.Action("GetLabourDetails", "Labour"))
+            .Create(create => create.Action("CreateLabourDetail", "Labour"))
+            .Update(update => update.Action("UpdateLabourDetail", "Labour"))
+            .Destroy(destroy => destroy.Action("DeleteLabourDetail", "Labour"))
+        )
+    )
+</div>
+
+<script>
+    function refreshLabourGrid() {
+        $("#LabourDetailsGrid").data("kendoGrid").dataSource.read();
+    }
+</script>
+3. Update the JavaScript in _VehEstimatePopUp.cshtml
+Extend the tab loading logic to handle all tabs:
+
+javascript
+function onTabShow(e) {
+    var tab = $(e.item);
+    var tabName = tab.find("> .k-link").text().trim().toLowerCase().replace(/\s+/g, '-');
+    var vehicleId = @Model.VehicleListId;
+    
+    // Load tab content when shown
+    switch(tabName) {
+        case "vehicle":
+            loadVehicleTabContent(vehicleId);
+            break;
+        case "labour-details":
+            loadLabourDetailsTabContent(vehicleId);
+            break;
+        case "part-details":
+            loadPartDetailsTabContent(vehicleId);
+            break;
+        case "stock-coded-parts":
+            loadStockCodedPartsTabContent(vehicleId);
+            break;
+        case "non-stock-coded-parts":
+            loadNonStockCodedPartsTabContent(vehicleId);
+            break;
+        case "rebuilt-parts":
+            loadRebuiltPartsTabContent(vehicleId);
+            break;
+        case "final-estimate":
+            loadFinalEstimateTabContent(vehicleId);
+            break;
+    }
+}
+
+function loadLabourDetailsTabContent(vehicleId) {
+    $.get('@Url.Action("GetLabourDetailsTabContent", "Vehicles")', { vehicleId: vehicleId })
+        .done(function (data) {
+            $("#labour-detailsTabContent").html(data);
+            // Any additional initialization for the labour grid can go here
+        })
+        .fail(function (xhr, status, error) {
+            console.error("Failed to load labour details:", error);
+            $("#labour-detailsTabContent").html('<div class="error">Failed to load labour details.</div>');
+        });
+}
+
+// Create similar functions for the other tabs:
+// loadPartDetailsTabContent, loadStockCodedPartsTabContent, etc.
+4. Update the TabStrip Definition
+Ensure each tab has a content container:
+
+html
+@(Html.Kendo().TabStrip()
+    .Name("vehicleEstimateTabs")
+    .Items(tabs =>
+    {
+        tabs.Add()
+            .Text("Vehicle")
+            .Selected(activeTab == "vehicle")
+            .Content(@<text>
+                <div id="vehicleTabContent" class="tab-content">
+                    <div class="tab-loading">Loading vehicle data...</div>
+                </div>
+            </text>);
+            
+        tabs.Add()
+            .Text("Labour Details")
+            .Selected(activeTab == "labour-details")
+            .Content(@<text>
+                <div id="labour-detailsTabContent" class="tab-content">
+                    <div class="tab-loading">Loading labour details...</div>
+                </div>
+            </text>);
+            
+        tabs.Add()
+            .Text("Part Details")
+            .Selected(activeTab == "part-details")
+            .Content(@<text>
+                <div id="part-detailsTabContent" class="tab-content">
+                    <div class="tab-loading">Loading part details...</div>
+                </div>
+            </text>);
+            
+        // Repeat for other tabs...
+    })
+    .Events(events => events.Select("onTabSelect").Show("onTabShow"))
+)
