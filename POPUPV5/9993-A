@@ -1,0 +1,192 @@
+1. Update the Controller:
+
+csharp
+[HttpGet]
+public ActionResult GetVehicleTabContent(int id)
+{
+    // Get the vehicle data
+    VehicleViewModel vehicle;
+    
+    if (id == 0)
+    {
+        vehicle = new VehicleViewModel();
+    }
+    else
+    {
+        vehicle = _dbConnection.QueryFirstOrDefault<VehicleViewModel>(@"
+            SELECT  
+                [VehicleListId],
+                [VehSeriesCode],
+                [NumOfVehicles],
+                [ProjDesc],
+                [Sopnumber],
+                [Make],
+                [VehModel],
+                [Year],
+                [Engine],
+                [Transmission],
+                [Differential],
+                [ModifiedLastBy],
+                [ModifiedLastDate]
+            FROM [CES].[SBCES].[VehicleList] 
+            WHERE VehicleListId = @Id", 
+            new { Id = id });
+
+        if (vehicle == null)
+        {
+            return Content("Vehicle not found");
+        }
+    }
+
+    // Set ViewBag properties
+    ViewBag.ParentId = id;
+    ViewBag.FormattedDate = vehicle.ModifiedLastDate == default
+        ? "System Generated"
+        : vehicle.ModifiedLastDate.ToString("MMM dd, yyyy hh:mm:ss tt");
+    
+    return PartialView("_VehPopUp", vehicle);
+}
+2. Update _VehEstimatePopUp.cshtml:
+
+html
+@model BCES.Models.Vehicle.VehicleViewModel
+@{
+    string activeTab = ViewBag.ActiveTab ?? "vehicle";
+}
+
+<div class="vehicle-estimate-popup">
+    <div class="popup-header">
+        <div class="popup-title">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate" : $"Estimate #{Model.VehicleListId}")</div>
+        <div class="tab-actions">
+            <button id="btnCloseEstimate" class="k-button" type="button" onclick="parent.hideVehicleEstimatePopup()">
+                <span class="k-icon k-i-close"></span> Close
+            </button>
+        </div>
+    </div>
+    
+    @(Html.Kendo().TabStrip()
+        .Name("vehicleEstimateTabs")
+        .Items(tabs =>
+        {
+            tabs.Add()
+                .Text("Vehicle")
+                .Selected(activeTab == "vehicle")
+                .Content(@<text>
+                    <div id="vehicleTabContent" class="tab-content">
+                        <div class="tab-loading">Loading vehicle data...</div>
+                    </div>
+                </text>);
+                
+            tabs.Add()
+                .Text("Part Details")
+                .Selected(activeTab == "part-details")
+                .Content("<div class='tab-stub'>Part Details Content - <button class='k-button' onclick=\"alert('Part Details Clicked')\">Test Action</button></div>");
+                
+            // Other tabs...
+        })
+        .Events(events => events.Select("onTabSelect").Show("onTabShow"))
+    )
+</div>
+
+<script>
+    function onTabSelect(e) {
+        var tab = $(e.item);
+        var tabName = tab.find("> .k-link").text().trim().toLowerCase().replace(/\s+/g, '-');
+        console.log("Tab selected: " + tabName);
+    }
+    
+    function onTabShow(e) {
+        var tab = $(e.item);
+        var tabName = tab.find("> .k-link").text().trim().toLowerCase().replace(/\s+/g, '-');
+        
+        // Load tab content when shown
+        if (tabName === "vehicle") {
+            loadVehicleTabContent(@Model.VehicleListId);
+        }
+    }
+    
+    function loadVehicleTabContent(vehicleId) {
+        $.get('@Url.Action("GetVehicleTabContent", "Vehicles")', { id: vehicleId })
+            .done(function (data) {
+                $("#vehicleTabContent").html(data);
+                
+                // Initialize the form after loading
+                if (typeof parent.initVehiclePopupForm === 'function') {
+                    parent.initVehiclePopupForm();
+                }
+                if (typeof parent.wireVehicleForm === 'function') {
+                    parent.wireVehicleForm();
+                }
+            })
+            .fail(function (xhr, status, error) {
+                console.error("Failed to load vehicle tab data:", error);
+                $("#vehicleTabContent").html('<div class="vehicle-notification error">Failed to load vehicle data. Please try again.</div>');
+            });
+    }
+    
+    // Load the vehicle tab content when the document is ready
+    $(document).ready(function() {
+        // Only load if the vehicle tab is active
+        if ($("#vehicleEstimateTabs").data("kendoTabStrip").select().index() === 0) {
+            loadVehicleTabContent(@Model.VehicleListId);
+        }
+    });
+</script>
+
+<style>
+    .vehicle-estimate-popup {
+        width: 1100px;
+        background: white;
+        border-radius: 4px;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .vehicle-estimate-tabs .k-tabstrip-items .k-item {
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+    
+    .tab-stub {
+        padding: 20px;
+        text-align: center;
+        color: #666;
+    }
+    
+    .k-tabstrip-content {
+        padding: 15px;
+        overflow: auto;
+        max-height: 500px;
+    }
+    
+    .tab-loading {
+        padding: 40px;
+        text-align: center;
+        color: #666;
+    }
+</style>
+3. Update the JavaScript in index.cshtml:
+
+Add this function to handle tab content loading:
+
+javascript
+function loadTabContent(tabName) {
+    var vehicleId = vehicleEstimatePopupState.currentVehicleId;
+    var tabContentId = "#" + tabName + "TabContent";
+    
+    // Show loading indicator
+    $(tabContentId).html('<div class="tab-loading">Loading ' + tabName + ' data...</div>');
+
+    switch(tabName) {
+        case "vehicle":
+            // Vehicle tab content is now loaded via AJAX in the tab's own script
+            break;
+        case "part-details":
+            $(tabContentId).html('<div class="tab-stub">Part Details Content - <button class="k-button" onclick="alert(\'Part Details Clicked\')">Test Action</button></div>');
+            break;
+        // Other tabs...
+    }
+}
+Why this approach is better:
