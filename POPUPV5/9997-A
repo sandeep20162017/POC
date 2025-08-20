@@ -1,0 +1,448 @@
+1. Index.cshtml (updated):
+
+html
+@using BCES.Models.Vehicle
+@using BCES.Models.Parts
+@model IEnumerable<VehicleViewModel>
+
+@{
+    ViewData["Title"] = "Vehicle Estimate";
+    string scGridName = $"ScPartsMaterialDetailsRebuiltPartsGrid_";
+}
+
+<h6 class="vehicle-estimate-header">Vehicle Estimate</h6>
+<link rel="stylesheet" href="~/css/vehicle-estimate.css" />
+
+<div id="notification"></div>
+<script>
+    // ===== GLOBAL VARIABLES =====
+    var vehicleEstimatePopupState = {
+        isOpen: false,
+        currentVehicleId: 0,
+        activeTab: "vehicle"
+    };
+
+    // ===== VEHICLE ESTIMATE POPUP MANAGEMENT =====
+    function showVehicleEstimatePopup(vehicleId) {
+        console.log("Showing vehicle estimate popup for ID:", vehicleId);
+
+        vehicleEstimatePopupState.isOpen = true;
+        vehicleEstimatePopupState.currentVehicleId = vehicleId;
+        vehicleEstimatePopupState.activeTab = "vehicle";
+
+        $("#vehicleEstimatePopupOverlay")
+            .addClass("active")
+            .css({
+                "display": "flex",
+                "opacity": 1,
+                "visibility": "visible",
+                "z-index": "99999"
+            });
+
+        loadVehicleEstimateData(vehicleId);
+    }
+
+    function hideVehicleEstimatePopup() {
+        console.log("Hiding vehicle estimate popup");
+        closeVehicleEstimatePopup();
+    }
+
+    function closeVehicleEstimatePopup() {
+        console.log("Closing vehicle estimate popup");
+        vehicleEstimatePopupState.isOpen = false;
+
+        $("#vehicleEstimatePopupOverlay")
+            .removeClass("active")
+            .css("display", "none");
+    }
+
+    function loadVehicleEstimateData(vehicleId) {
+        console.log("Loading vehicle estimate data for ID:", vehicleId);
+
+        $("#vehicleEstimatePopupContainer").html('<div class="vehicle-loading">Loading vehicle estimate data...</div>');
+
+        $("#vehicleEstimatePopupTitle").text(vehicleId === 0 ? "Add New Vehicle Estimate" : "Estimate #" + vehicleId);
+
+        $.get('@Url.Action("GetVehicleEstimatePopup", "Vehicles")', { id: vehicleId })
+            .done(function (data) {
+                console.log("Vehicle estimate data loaded successfully");
+                $("#vehicleEstimatePopupContainer").html(data);
+                initVehicleEstimateTabs();
+            })
+            .fail(function (xhr, status, error) {
+                console.error("Failed to load vehicle estimate data:", error);
+                $("#vehicleEstimatePopupContainer").html('<div class="vehicle-notification error">Failed to load vehicle estimate data. Please try again.</div>');
+            });
+    }
+
+    function initVehicleEstimateTabs() {
+        // Initialize the tabstrip
+        $("#vehicleEstimateTabs").kendoTabStrip({
+            animation: {
+                open: {
+                    effects: "fadeIn"
+                }
+            },
+            select: onTabSelect,
+            activate: onTabActivate
+        });
+
+        // Load initial tab content
+        loadTabContent("vehicle");
+    }
+
+    function onTabSelect(e) {
+        var tab = $(e.item);
+        var tabName = tab.find("> .k-link").text().trim().toLowerCase().replace(/\s+/g, '-');
+        vehicleEstimatePopupState.activeTab = tabName;
+    }
+
+    function onTabActivate(e) {
+        var tab = $(e.item);
+        var tabName = tab.find("> .k-link").text().trim().toLowerCase().replace(/\s+/g, '-');
+        loadTabContent(tabName);
+    }
+
+    function loadTabContent(tabName) {
+        var vehicleId = vehicleEstimatePopupState.currentVehicleId;
+        var tabContentId = "#" + tabName + "TabContent";
+        
+        // Show loading indicator
+        $(tabContentId).html('<div class="tab-loading">Loading ' + tabName + ' data...</div>');
+
+        switch(tabName) {
+            case "vehicle":
+                loadVehicleTab(vehicleId, tabContentId);
+                break;
+            case "part-details":
+                $(tabContentId).html('<div class="tab-stub">Part Details Content - <button class="k-button" onclick="alert(\'Part Details Clicked\')">Test Action</button></div>');
+                break;
+            case "labour-details":
+                $(tabContentId).html('<div class="tab-stub">Labour Details Content - <button class="k-button" onclick="alert(\'Labour Details Clicked\')">Test Action</button></div>');
+                break;
+            case "stock-coded-parts":
+                $(tabContentId).html('<div class="tab-stub">Stock Coded Parts Content - <button class="k-button" onclick="alert(\'Stock Coded Parts Clicked\')">Test Action</button></div>');
+                break;
+            case "non-stock-coded-parts":
+                $(tabContentId).html('<div class="tab-stub">Non Stock Coded Parts Content - <button class="k-button" onclick="alert(\'Non Stock Coded Parts Clicked\')">Test Action</button></div>');
+                break;
+            case "rebuilt-parts":
+                $(tabContentId).html('<div class="tab-stub">Rebuilt Parts Content - <button class="k-button" onclick="alert(\'Rebuilt Parts Clicked\')">Test Action</button></div>');
+                break;
+            case "final-estimate":
+                $(tabContentId).html('<div class="tab-stub">Final Estimate Content - <button class="k-button" onclick="alert(\'Final Estimate Clicked\')">Test Action</button></div>');
+                break;
+        }
+    }
+
+    function loadVehicleTab(vehicleId, tabContentId) {
+        $.get('@Url.Action("GetVehicleById", "Vehicles")', { id: vehicleId })
+            .done(function (data) {
+                $(tabContentId).html(data);
+                initVehiclePopupForm();
+                wireVehicleForm();
+            })
+            .fail(function (xhr, status, error) {
+                console.error("Failed to load vehicle tab data:", error);
+                $(tabContentId).html('<div class="vehicle-notification error">Failed to load vehicle data. Please try again.</div>');
+            });
+    }
+
+    // ===== DOCUMENT READY =====
+    $(document).ready(function () {
+        console.log("Document ready - initializing vehicle estimate components");
+
+        $("#notification").kendoNotification({
+            position: {
+                pinned: true,
+                top: 20,
+                right: 20
+            },
+            autoHideAfter: 5000,
+            stacking: "down",
+            hideOnClick: true
+        });
+
+        $(document).on('click', '#vehicleEstimatePopupOverlay', function (e) {
+            if (e.target === this) {
+                hideVehicleEstimatePopup();
+            }
+        });
+
+        console.log("All components initialized successfully");
+    });
+</script>
+
+<!-- Kendo main grid -->
+<div class="vehicle-estimate-container">
+@(Html.Kendo().TabStrip()
+    .Name("vehicleTabStrip")
+    .Items(ts =>
+    {
+        ts.Add().Text("Vehicles").Selected(true)
+            .Content(@<text>
+    @(Html.Kendo().Grid<VehicleViewModel>()
+    .Name("VehicleGrid")
+    .Columns(c =>
+    {
+    c.Bound(v => v.VehicleListId).Title("Estimate #")
+    .ClientTemplate("<a class='estimate-link' onclick='showVehicleEstimatePopup(#=VehicleListId#)'>#=VehicleListId#</a>").Width(120);
+    c.Bound(v => v.VehSeriesCode).Title("Vehicle Series").HeaderHtmlAttributes(new { @class = "required-header" }).EditorTemplateName("ComboBoxEditor").Width(150);
+    c.Bound(v => v.NumOfVehicles).Title("Qty").HeaderHtmlAttributes(new { @class = "required-header" }).Width(80);
+    c.Bound(v => v.ProjDesc).Title("Description").HeaderHtmlAttributes(new { @class = "required-header" }).Width(250);
+    c.Command(cmd =>
+    {
+    cmd.Custom("Copy").IconClass("k-icon k-i-copy").Click("window.onCopyEstimate");
+    cmd.Custom("Archive").IconClass("k-icon k-i-folder").Click("window.onArchiveClick");
+    cmd.Custom("Delete").IconClass("k-icon k-i-delete").Click("window.showDeleteConfirmation");
+    }).Width(180);
+    })
+    .ToolBar(tb => tb.ClientTemplate("<button class='k-button k-button-icontext' onclick='showVehicleEstimatePopup(0)'><span class='k-icon k-i-plus'></span>Add New Vehicle Estimate</button>"))
+    .Pageable(p => p.PageSizes(new[] { 10, 20, 50 }))
+    .Sortable()
+    .Filterable()
+    
+    .HtmlAttributes(new { style = "height:540px;" })
+    .DataSource(ds => ds.Ajax()
+    .PageSize(10)
+    .Model(m => m.Id(v => v.VehicleListId))
+    .Read(r => r.Action("GetVehiclesView", "Vehicles").Type(HttpVerbs.Get))
+    .Create(c => c.Action("AddVehiclesView", "Vehicles").Type(HttpVerbs.Post))
+    .Update(u => u.Action("UpdateVehiclesView", "Vehicles").Type(HttpVerbs.Post))
+    .Destroy(d => d.Action("DeleteVehicle", "Vehicles").Type(HttpVerbs.Post))
+    )
+    
+    )
+</text>);
+    })
+)
+
+<!-- Vehicle Estimate Popup Overlay -->
+<div id="vehicleEstimatePopupOverlay" class="vehicle-popup-overlay">
+    <div class="vehicle-estimate-popup-container">
+        <div class="popup-header">
+            <div class="popup-title" id="vehicleEstimatePopupTitle">Vehicle Estimate</div>
+            <div class="tab-actions">
+                <button id="btnCloseEstimate" class="k-button" type="button" onclick="hideVehicleEstimatePopup()">
+                    <span class="k-icon k-i-close"></span> Close
+                </button>
+            </div>
+        </div>
+        
+        <div id="vehicleEstimateTabs" class="vehicle-estimate-tabs">
+            <ul>
+                <li class="k-state-active">Vehicle</li>
+                <li>Part Details</li>
+                <li>Labour Details</li>
+                <li>Stock Coded Parts</li>
+                <li>Non Stock Coded Parts</li>
+                <li>Rebuilt Parts</li>
+                <li>Final Estimate</li>
+            </ul>
+        </div>
+        
+        <div id="vehicleEstimatePopupContainer" class="vehicle-estimate-content">
+            <!-- Tab contents will be loaded here -->
+            <div id="vehicleTabContent" class="tab-content"></div>
+            <div id="part-detailsTabContent" class="tab-content" style="display:none;"></div>
+            <div id="labour-detailsTabContent" class="tab-content" style="display:none;"></div>
+            <div id="stock-coded-partsTabContent" class="tab-content" style="display:none;"></div>
+            <div id="non-stock-coded-partsTabContent" class="tab-content" style="display:none;"></div>
+            <div id="rebuilt-partsTabContent" class="tab-content" style="display:none;"></div>
+            <div id="final-estimateTabContent" class="tab-content" style="display:none;"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete confirmation dialog -->
+<div id="deleteConfirmationDialog" style="display:none;">
+  <div class="confirmation-message"><span class="k-icon k-i-warning" style="font-size:24px;color:#f0ad4e;"></span><span style="margin-left:10px;">Are you sure you'd like to delete?</span></div>
+  <div class="confirmation-buttons"><button class="k-button" id="cancelDeleteBtn">Cancel</button><button class="k-button k-primary" id="confirmDeleteBtn" style="margin-left:10px;">Delete</button></div>
+</div>
+
+<!-- Copy estimate dialog -->
+<div id="copyEstimateDialog" style="display:none;">
+  <div class="k-form">
+    <div class="k-form-field"><label>Estimate #</label><input id="vehicleListId" class="k-textbox" readonly /></div>
+    <div class="k-form-field"><label>Old Series</label><input id="oldVehSeriesCode" class="k-textbox" readonly /></div>
+    <div class="k-form-field"><label>Old Description</label><input id="oldprojDesc" class="k-textbox" readonly /></div>
+    <div class="k-form-field"><label>New Vehicle Series<span style="color:red">*</span></label><input id="newVehSeriesCode" class="k-textbox" required /></div>
+    <div class="k-form-field"><label>New Description<span style="color:red">*</span></label><input id="newprojDesc" class="k-textbox" required /></div>
+    <div class="k-form-buttons">
+        <button type="button" class="k-button k-primary" id="copyEstimateBtn">Copy</button>
+        <button type="button" class="k-button" id="cancelCopyBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+</div>
+2. _VehEstimatePopUp.cshtml (new file):
+
+html
+@model BCES.Models.Vehicle.VehicleViewModel
+
+<div class="vehicle-estimate-popup">
+    <div class="popup-header">
+        <div class="popup-title">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate" : $"Estimate #{Model.VehicleListId}")</div>
+        <div class="tab-actions">
+            <button id="btnCloseEstimate" class="k-button" type="button" onclick="hideVehicleEstimatePopup()">
+                <span class="k-icon k-i-close"></span> Close
+            </button>
+        </div>
+    </div>
+    
+    <div class="vehicle-estimate-tabs">
+        @(Html.Kendo().TabStrip()
+            .Name("vehicleEstimateTabs")
+            .Items(tabs =>
+            {
+                tabs.Add().Text("Vehicle").Selected(true)
+                    .Content(@<div id="vehicleTabContent">
+                        @Html.Partial("_VehPopUp", Model)
+                    </div>);
+                    
+                tabs.Add().Text("Part Details")
+                    .Content(@<div id="partDetailsTabContent" class="tab-stub">
+                        Part Details Content - <button class="k-button" onclick="alert('Part Details Clicked')">Test Action</button>
+                    </div>);
+                    
+                tabs.Add().Text("Labour Details")
+                    .Content(@<div id="labourDetailsTabContent" class="tab-stub">
+                        Labour Details Content - <button class="k-button" onclick="alert('Labour Details Clicked')">Test Action</button>
+                    </div>);
+                    
+                tabs.Add().Text("Stock Coded Parts")
+                    .Content(@<div id="stockCodedPartsTabContent" class="tab-stub">
+                        Stock Coded Parts Content - <button class="k-button" onclick="alert('Stock Coded Parts Clicked')">Test Action</button>
+                    </div>);
+                    
+                tabs.Add().Text("Non Stock Coded Parts")
+                    .Content(@<div id="nonStockCodedPartsTabContent" class="tab-stub">
+                        Non Stock Coded Parts Content - <button class="k-button" onclick="alert('Non Stock Coded Parts Clicked')">Test Action</button>
+                    </div>);
+                    
+                tabs.Add().Text("Rebuilt Parts")
+                    .Content(@<div id="rebuiltPartsTabContent" class="tab-stub">
+                        Rebuilt Parts Content - <button class="k-button" onclick="alert('Rebuilt Parts Clicked')">Test Action</button>
+                    </div>);
+                    
+                tabs.Add().Text("Final Estimate")
+                    .Content(@<div id="finalEstimateTabContent" class="tab-stub">
+                        Final Estimate Content - <button class="k-button" onclick="alert('Final Estimate Clicked')">Test Action</button>
+                    </div>);
+            })
+            .Events(events => events.Select("onTabSelect"))
+        )
+    </div>
+</div>
+
+<script>
+    function onTabSelect(e) {
+        var tab = e.item;
+        console.log("Tab selected: " + $(tab).text());
+        
+        // You can add AJAX loading for tab content here if needed
+        // For now, we're using stubs with alert buttons
+    }
+</script>
+
+<style>
+    .vehicle-estimate-popup {
+        width: 1100px;
+        background: white;
+        border-radius: 4px;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .vehicle-estimate-tabs .k-tabstrip-items .k-item {
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+    
+    .tab-stub {
+        padding: 20px;
+        text-align: center;
+        color: #666;
+    }
+</style>
+3. Updated CSS (vehicle-estimate.css):
+
+css
+/* Vehicle Estimate Popup Styles */
+.vehicle-estimate-popup-container {
+    width: 1100px;
+    background: white;
+    border-radius: 4px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    max-height: 80vh;
+}
+
+.vehicle-estimate-tabs .k-tabstrip-items .k-item {
+    padding: 8px 12px;
+    font-size: 12px;
+}
+
+.vehicle-estimate-content {
+    flex: 1;
+    overflow: auto;
+}
+
+.tab-content {
+    padding: 15px;
+}
+
+.tab-loading {
+    padding: 40px;
+    text-align: center;
+    color: #666;
+}
+
+.tab-stub {
+    padding: 20px;
+    text-align: center;
+    color: #666;
+}
+
+/* Overlay styles */
+.vehicle-popup-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+}
+
+.vehicle-popup-overlay.active {
+    display: flex;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+    .vehicle-estimate-popup-container {
+        width: 95%;
+        max-width: 1100px;
+    }
+}
+4. Controller Action (add to your VehiclesController):
+
+csharp
+public ActionResult GetVehicleEstimatePopup(int id)
+{
+    var vehicle = id == 0 ? 
+        new VehicleViewModel() : 
+        // Get your vehicle data from repository
+        _vehicleRepository.GetVehicleById(id);
+        
+    return PartialView("_VehEstimatePopUp", vehicle);
+}
+Key Changes:
