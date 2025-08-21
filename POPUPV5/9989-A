@@ -1,0 +1,65 @@
+You want the tab → action mapping defined once, in a place where both initVehicleEstimateTabs() and loadTabContent() can use it.
+Best spot = inside initVehicleEstimateTabs(), because that’s where your TabStrip is being initialized.
+
+Here’s the full function with Step 1 included:
+
+function initVehicleEstimateTabs() {
+    // 🔑 Step 1: Define tab → controller action mapping
+    var tabActions = {
+        "vehicle": '@Url.Action("GetVehicleById", "Vehicles")',
+        "part-details": '@Url.Action("GetPartDetailsTabContent", "Vehicles")',
+        "labour-details": '@Url.Action("GetLabourDetailsTabContent", "Vehicles")',
+        "stock-coded-parts": '@Url.Action("GetStockCodedPartsTabContent", "Vehicles")',
+        "non-stock-coded-parts": '@Url.Action("GetNonStockCodedPartsTabContent", "Vehicles")',
+        "rebuilt-parts": '@Url.Action("GetRebuiltPartsTabContent", "Vehicles")',
+        "final-estimate": '@Url.Action("GetFinalEstimateTabContent", "Vehicles")'
+    };
+
+    // Initialize TabStrip
+    $("#vehicleTabStrip").kendoTabStrip({
+        activate: function (e) {
+            var tabName = $(e.item).attr("data-tab-name");
+            loadTabContent(tabName, tabActions);
+        }
+    });
+
+    // Optionally preload first tab ("vehicle") so user sees content immediately
+    loadTabContent("vehicle", tabActions);
+}
+
+
+And update your loader to accept the mapping:
+
+function loadTabContent(tabName, tabActions) {
+    var vehicleId = vehicleEstimatePopupState.currentVehicleId;
+    var tabContentId = "#" + tabName + "TabContent";
+
+    $(tabContentId).html('<div class="tab-loading">Loading ' + tabName + '...</div>');
+
+    var actionUrl = tabActions[tabName];
+    if (!actionUrl) {
+        $(tabContentId).html('<div class="tab-error">No action configured for this tab.</div>');
+        return;
+    }
+
+    $.get(actionUrl, { vehicleId: vehicleId })
+        .done(function (data) {
+            $(tabContentId).html(data);
+
+            // optional tab-specific initializer
+            if (typeof window["init_" + tabName] === "function") {
+                window["init_" + tabName]();
+            }
+        })
+        .fail(function (xhr, status, error) {
+            console.error("Failed to load " + tabName + " tab:", error);
+            $(tabContentId).html('<div class="tab-error">Failed to load content. Please try again.</div>');
+        });
+}
+
+
+👉 This way:
+
+Mapping stays inside initVehicleEstimateTabs, so it’s localized and easy to maintain.
+
+Loader function remains generic, just receives the mapping as a parameter
