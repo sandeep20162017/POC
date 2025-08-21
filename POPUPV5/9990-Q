@@ -1,0 +1,139 @@
+
+Need unifrom logic to load partial view for each of the tabstrip  when tab is clickd.
+Each tab has its ontroller action and should be rendered when tab is clicked
+logic :
+index(VehicleGrid-clientTemplate)->showVehicleEstimatePopup->loadVehicleEstimateData (calls url action)->
+initVehicleEstimateTabs->onTabActivate->loadTabContent->
+
+index:
+<!-- Kendo main grid -->
+<div class="vehicle-estimate-container">
+@(Html.Kendo().TabStrip()
+    .Name("vehicleTabStrip")
+    .Items(ts =>
+    {
+        ts.Add().Text("Vehicles").Selected(true)
+            .Content(@<text>
+    @(Html.Kendo().Grid<VehicleViewModel>()
+    .Name("VehicleGrid")
+    .Columns(c =>
+    {
+    c.Bound(v => v.VehicleListId).Title("Estimate #")
+    .ClientTemplate("<a class='estimate-link' onclick='showVehicleEstimatePopup(#=VehicleListId#)'>#=VehicleListId#</a>").Width(120);
+    c.Bound(v => v.VehSeriesCode).Title("Vehicle Series").HeaderHtmlAttributes(new { @class = "required-header" 
+}).EditorTemplateName("ComboBoxEditor").Width(150);
+...
+
+function showVehicleEstimatePopup(vehicleId) {
+    console.log("Showing vehicle estimate popup for ID:", vehicleId);
+
+    vehicleEstimatePopupState.isOpen = true;
+    vehicleEstimatePopupState.currentVehicleId = vehicleId;
+    vehicleEstimatePopupState.activeTab = "vehicle";
+
+   
+    loadVehicleEstimateData(vehicleId);
+}
+ function loadVehicleEstimateData(vehicleId) {
+     console.log("Loading vehicle estimate data for ID:", vehicleId);
+
+     $("#vehicleEstimatePopupContainer").html('<div class="vehicle-loading">Loading vehicle estimate data...</div>');
+
+     $("#vehicleEstimatePopupTitle").text(vehicleId === 0 ? "Add New Vehicle Estimate" : "Estimate #" + vehicleId);
+
+     $.get('@Url.Action("GetVehicleEstimatePopup", "Vehicles")', { id: vehicleId })
+         .done(function (data) {
+             console.log("Vehicle estimate data loaded successfully");
+             $("#vehicleEstimatePopupContainer").html(data);
+             initVehicleEstimateTabs();
+....
+
+
+function loadTabContent(tabName) {
+    var vehicleId = vehicleEstimatePopupState.currentVehicleId;
+    var tabContentId = "#" + tabName + "TabContent";
+
+    // Show loading indicator
+    $(tabContentId).html('<div class="tab-loading">Loading ' + tabName + ' data...</div>');
+
+    switch(tabName) {
+        case "vehicle":
+            // TODO : load veh template here
+            break;
+        case "part-details":
+           //TODO : load partdetails here
+            $(tabContentId).html('<div class="tab-stub">Part Details Content - <button class="k-button" onclick="alert(\'Part Details Clicked\')">Test Action</button></div>');
+            break;
+        case "labour-details":
+            $(tabContentId).html('<div class="tab-stub">Labour Details Content - <button class="k-button" onclick="alert(\'Labour Details Clicked\')">Test Action</button></div>');
+            break;
+        case "stock-coded-parts":
+            $(tabContentId).html('<div class="tab-stub">Stock Coded Parts Content - <button class="k-button" onclick="alert(\'Stock Coded Parts Clicked\')">Test Action</button></div>');
+            break;
+        case "non-stock-coded-parts":
+            $(tabContentId).html('<div class="tab-stub">Non Stock Coded Parts Content - <button class="k-button" onclick="alert(\'Non Stock Coded Parts Clicked\')">Test Action</button></div>');
+            break;
+        case "rebuilt-parts":
+            $(tabContentId).html('<div class="tab-stub">Rebuilt Parts Content - <button class="k-button" onclick="alert(\'Rebuilt Parts Clicked\')">Test Action</button></div>');
+            break;
+        case "final-estimate":
+            $(tabContentId).html('<div class="tab-stub">Final Estimate Content - <button class="k-button" onclick="alert(\'Final Estimate Clicked\')">Test Action</button></div>');
+            break;
+    }
+}
+function loadVehicleTab(vehicleId, tabContentId) {
+    $.get('@Url.Action("GetVehicleById", "Vehicles")', { id: vehicleId })
+        .done(function (data) {
+            $(tabContentId).html(data);
+            initVehiclePopupForm();
+            wireVehicleForm();
+        })
+        .fail(function (xhr, status, error) {
+            console.error("Failed to load vehicle tab data:", error);
+            $(tabContentId).html('<div class="vehicle-notification error">Failed to load vehicle data. Please try again.</div>');
+        });
+}
+
+function loadLabourTab(vehicleId, tabContentId) {
+    $.get('@Url.Action("GetLabourDetailsTabContent", "Vehicles")', { id: vehicleId })
+        .done(function (data) {
+            $(tabContentId).html(data);
+            // initVehiclePopupForm();
+            // wireVehicleForm();
+        })
+Controller :
+[HttpGet]
+public ActionResult GetLabourDetailsTabContent(int vehicleId)
+{
+    // Fetch data for labour details
+    var labourDetails = _dbConnection.Query<LabourDetailsRebuiltPartsViewModel>(
+        "SELECT * FROM LabourDetails WHERE VehicleId = @VehicleId",
+        new { VehicleId = vehicleId });
+
+    return PartialView("_LabourDetails", labourDetails);
+}
+
+        [HttpGet] 
+        public ActionResult GetVehicleEstimatePopup(int id)
+        {
+            try
+            {
+                if (id == 0)
+                {
+                    // Create a new vehicle for add mode
+                    var newVehicle = new VehicleViewModel();
+                    ViewBag.ParentId = 0;
+                    ViewBag.FormattedDate = "System Generated";
+                    return PartialView("_VehEstimatePopUp", newVehicle);
+                }
+
+                // Get existing vehicle data using Dapper
+                var vehicle = _dbConnection.QueryFirstOrDefault<VehicleViewModel>(@"
+                SELECT  
+                    [VehicleListId],
+                    [VehSeriesCode],
+                    [NumOfVehicles],
+                    [ProjDesc],
+                    [Sopnumber],
+..
+  return PartialView("_VehPopUp", vehicle);
