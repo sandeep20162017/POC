@@ -1,0 +1,103 @@
+Step 1 – Define Tab → Action Mapping
+
+In your JS, create a simple lookup for tab actions:
+
+var tabActions = {
+    "vehicle": '@Url.Action("GetVehicleById", "Vehicles")',
+    "part-details": '@Url.Action("GetPartDetailsTabContent", "Vehicles")',
+    "labour-details": '@Url.Action("GetLabourDetailsTabContent", "Vehicles")',
+    "stock-coded-parts": '@Url.Action("GetStockCodedPartsTabContent", "Vehicles")',
+    "non-stock-coded-parts": '@Url.Action("GetNonStockCodedPartsTabContent", "Vehicles")',
+    "rebuilt-parts": '@Url.Action("GetRebuiltPartsTabContent", "Vehicles")',
+    "final-estimate": '@Url.Action("GetFinalEstimateTabContent", "Vehicles")'
+};
+
+Step 2 – Generic loadTabContent
+
+Instead of a switch, call the right action using the mapping:
+
+function loadTabContent(tabName) {
+    var vehicleId = vehicleEstimatePopupState.currentVehicleId;
+    var tabContentId = "#" + tabName + "TabContent";
+
+    // Show loading placeholder
+    $(tabContentId).html('<div class="tab-loading">Loading ' + tabName + '...</div>');
+
+    var actionUrl = tabActions[tabName];
+    if (!actionUrl) {
+        $(tabContentId).html('<div class="tab-error">No action configured for this tab.</div>');
+        return;
+    }
+
+    $.get(actionUrl, { vehicleId: vehicleId })
+        .done(function (data) {
+            $(tabContentId).html(data);
+
+            // Optional: call tab-specific init
+            if (typeof window["init_" + tabName] === "function") {
+                window["init_" + tabName]();
+            }
+        })
+        .fail(function (xhr, status, error) {
+            console.error("Failed to load " + tabName + " tab:", error);
+            $(tabContentId).html('<div class="tab-error">Failed to load content. Please try again.</div>');
+        });
+}
+
+Step 3 – TabStrip Activation
+
+Hook into the activate event of the Kendo TabStrip:
+
+function initVehicleEstimateTabs() {
+    $("#vehicleTabStrip").kendoTabStrip({
+        activate: function (e) {
+            var tabName = $(e.item).attr("data-tab-name"); 
+            loadTabContent(tabName);
+        }
+    });
+}
+
+
+And in your Razor, mark each tab with a data-tab-name:
+
+@(Html.Kendo().TabStrip()
+    .Name("vehicleTabStrip")
+    .Items(ts =>
+    {
+        ts.Add().Text("Vehicles").Selected(true)
+            .HtmlAttributes(new { ["data-tab-name"] = "vehicle" })
+            .Content("<div id='vehicleTabContent'></div>");
+
+        ts.Add().Text("Labour Details")
+            .HtmlAttributes(new { ["data-tab-name"] = "labour-details" })
+            .Content("<div id='labour-detailsTabContent'></div>");
+
+        ts.Add().Text("Part Details")
+            .HtmlAttributes(new { ["data-tab-name"] = "part-details" })
+            .Content("<div id='part-detailsTabContent'></div>");
+    })
+)
+
+Step 4 – Controller Partial Actions
+
+Each action should return a PartialView with its respective UI:
+
+[HttpGet]
+public ActionResult GetLabourDetailsTabContent(int vehicleId)
+{
+    var labourDetails = _dbConnection.Query<LabourDetailsRebuiltPartsViewModel>(
+        "SELECT * FROM LabourDetails WHERE VehicleId = @VehicleId",
+        new { VehicleId = vehicleId });
+
+    return PartialView("_LabourDetails", labourDetails);
+}
+
+[HttpGet]
+public ActionResult GetPartDetailsTabContent(int vehicleId)
+{
+    var partDetails = _dbConnection.Query<PartDetailsViewModel>(
+        "SELECT * FROM PartDetails WHERE VehicleId = @VehicleId",
+        new { VehicleId = vehicleId });
+
+    return PartialView("_PartDetails", partDetails);
+}
