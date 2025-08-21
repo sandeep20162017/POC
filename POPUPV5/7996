@@ -1,0 +1,58 @@
+My COmboBoxEditor calls GetAutoCompleteData. How to incorporate these changes in _VehPopUp?
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+    var columnLockMap = ViewData["LockMap"]?.ToString() ?? "";
+    var comboValue = Model?.ToString() ?? ""; 
+}
+
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Text")
+    .Value(comboValue)
+    .Text(comboValue)
+    
+    .Filter(FilterType.Contains)
+    .Placeholder("Search...")
+    .AutoBind(false)
+    @* .MinLength(2) *@
+    .EnforceMinLength(true)
+    .NoDataTemplate("<div style='color: red; font-weight: bold;'>Invalid Selection</div>")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "id", fieldName },
+        { "name", fieldName },
+        { "data-column", fieldName },
+        { "data-role", "combobox" },
+        { "data-lock-map", columnLockMap },
+        { "class", "auto-lock-column"  + " required-cell"},
+        {"required", "required"},
+        { "data-value-primitive", "true" }
+    })
+    .Events(e =>
+    {
+        e.DataBound("onComboBoxDataBound");
+        e.Change("onComboBoxChange");
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+    .Template("#= Text #")
+)
+ 
+ [HttpGet]
+ public IActionResult GetAutoCompleteData(string columnName, string searchText)
+ {
+     try
+     {
+         // 1. Validate parameters
+        if (string.IsNullOrEmpty(columnName))
