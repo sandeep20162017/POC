@@ -1,0 +1,92 @@
+Fix:
+
+Use the Kendo Grid’s this context inside the click handler to get the dataItem reliably:
+
+javascript
+window.showDeleteConfirmation = function (e) {
+    e.preventDefault();
+    var grid = this; // Kendo Grid instance
+    var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+    if (!dataItem) {
+        console.error("No dataItem found for delete action");
+        return;
+    }
+
+    var dlg = $("#deleteConfirmationDialog").data("kendoWindow");
+    dlg.center().open();
+
+    $("#confirmDeleteBtn").off("click").on("click", function () {
+        $.post('/Vehicles/DeleteVehicle', { VehicleListId: dataItem.VehicleListId }, function () {
+            grid.dataSource.read();
+            dlg.close();
+        });
+    });
+
+    $("#cancelDeleteBtn").off("click").on("click", function () {
+        dlg.close();
+    });
+};
+And in your column definition:
+
+csharp
+cmd.Custom("Delete")
+   .IconClass("k-icon k-i-delete")
+   .Click("showDeleteConfirmation");
+This ensures this is the grid, and dataItem will always be valid.
+
+2️⃣ Dynamic Scroll for Vehicle Grid
+You mentioned the scroll isn’t working. In your CSS you already have:
+
+css
+#VehicleGrid .k-grid-content {
+    max-height: calc(100vh - 280px);
+    overflow-y: auto;
+}
+But in your grid definition you’re using:
+
+csharp
+.Scrollable()
+without specifying height, so Kendo doesn’t lock the content area height.
+
+Fix:
+
+Use scrollable with height in the grid definition:
+
+csharp
+.Scrollable(s => s.Height("auto"))
+or for a fixed dynamic height:
+
+csharp
+.Scrollable(s => s.Height("calc(100vh - 280px)"))
+Alternatively, keep .Scrollable() and let CSS handle it, but ensure the parent container has a fixed height so the .k-grid-content can scroll.
+
+If you want true virtual scrolling for large datasets:
+
+csharp
+.Scrollable(s => s.Virtual(true).Height("calc(100vh - 280px)"))
+and in DataSource use .ServerOperation(true).
+
+3️⃣ UI/UX Enhancements
+While fixing these, you can also:
+
+Highlight delete row before confirmation:
+
+javascript
+var row = $(e.currentTarget).closest("tr");
+row.addClass("k-state-selected");
+Prevent accidental double-click on delete by disabling the button until the dialog closes.
+
+Responsive grid height: hook into $(window).resize() to recalc height dynamically:
+
+javascript
+function resizeVehicleGrid() {
+    var gridElement = $("#VehicleGrid"),
+        dataArea = gridElement.find(".k-grid-content"),
+        newHeight = $(window).height() - gridElement.offset().top - 50;
+    dataArea.height(newHeight);
+}
+$(window).resize(resizeVehicleGrid);
+resizeVehicleGrid();
+If you want, I can merge these fixes directly into your existing VehicleIndex.cshtml and JS so the delete works reliably and the grid scrolls dynamically without breaking your Kendo styling.
+
+Do you want me to prepare that full integrated code update next? That way you can drop it in and test immediately.
