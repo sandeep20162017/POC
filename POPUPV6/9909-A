@@ -1,0 +1,63 @@
+Identify the header element
+In your popup markup, the header might look something like:
+
+html
+<h2 id="estimateHeader">Vehicle Estimate #4312</h2>
+or it could be inside the Kendo Window title bar. If it’s in the Kendo Window title, you can still target it with jQuery — for example:
+
+html
+<div class="k-window-title">Vehicle Estimate #4312</div>
+2️⃣ Extract the numeric ID from the header
+You can use a simple regex to pull out the digits:
+
+javascript
+function getParentIdFromHeader() {
+    // Adjust selector to match your actual header element
+    var headerText = $("#estimateHeader").text().trim(); 
+    // Or if it's in the Kendo Window title:
+    // var headerText = $(".k-window-title").text().trim();
+
+    var match = headerText.match(/\d+/); // find first number in the string
+    return match ? match[0] : null;
+}
+If your header is exactly "Vehicle Estimate #4312", match[0] will be "4312".
+
+3️⃣ Use it in your delete function
+Replace your current id: dataItem.Id with the extracted parent ID:
+
+javascript
+function onScDelete(e) {
+    e.preventDefault();
+
+    var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+    var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+
+    var parentId = getParentIdFromHeader(); // from header text
+
+    kendo.confirm("Do you want to delete this stock coded part?")
+        .then(function () {
+            $.ajax({
+                url: "/ScPartsUsedInEstimates/DeleteScPartsUsedInEstimates",
+                type: "POST",
+                data: { 
+                    id: parentId,                  // parent Vehicle Estimation ID
+                    partNum: dataItem.PartNum,     // row-specific part number
+                    gridType: "SC"
+                },
+                success: function () {
+                    grid.dataSource.read();
+                    if (typeof materialSummaryGridName !== "undefined") {
+                        var parentGrid = $("#" + materialSummaryGridName).data("kendoGrid");
+                        if (parentGrid) parentGrid.dataSource.read();
+                    }
+                    $("#notification").data("kendoNotification")
+                        .success("Deleted successfully");
+                },
+                error: function (xhr) {
+                    $("#notification").data("kendoNotification")
+                        .error("Delete failed: " + xhr.responseText);
+                }
+            });
+        });
+}
+4️⃣ Why this works
