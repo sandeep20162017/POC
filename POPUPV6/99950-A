@@ -1,0 +1,219 @@
+Comprehensive fixes for stock coded parts, popups, sizing, delete, and scrolling
+You’ve got most hooks in place. Below are minimal, targeted changes to deliver the behaviors you want, while reusing your existing JS.
+
+Stock coded parts update/cancel button placement
+You’re seeing “bottom” buttons because Kendo Grid popup injects default footer buttons inside .k-edit-buttons. Keep your custom top buttons and hide Kendo’s defaults.
+
+1) Hide Kendo’s default popup footer buttons for Stock Coded Parts only
+Add to vehicle-estimate.css:
+
+css
+/* Hide Kendo default footer buttons in Stock Coded Parts popup */
+.scparts-popup-style .k-edit-buttons { 
+  display: none !important; 
+}
+2) Keep top-left buttons and wire them to the popup row
+Add or confirm these JS functions (they reuse your globals and current popup):
+
+html
+<script>
+  function saveScPartPopup() {
+      // Save the current popup row
+      var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+      if (grid) grid.saveRow();  // Triggers update/create
+  }
+  function cancelScPartPopup() {
+      var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+      if (grid) grid.cancelRow();
+      // Also close window if still open
+      var wnd = $(".k-window-content:visible").data("kendoWindow");
+      if (wnd) wnd.close();
+  }
+</script>
+Note: This keeps Update/Cancel at the top of your popup (as in StockCodedPartsViewModel.cshtml) and removes the bottom duplicates Kendo adds.
+
+Click-to-edit popup for Stock Coded Parts (like Vehicle Estimate link)
+You already bound a click handler for .stock-code-cell to call editRow. Ensure the grid column templates in the Stock Coded Parts grid render the clickable cell.
+
+1) Make the MMSStockCode column clickable
+In your Stock Coded Parts grid columns (wherever that grid is defined), use a client template:
+
+csharp
+columns.Bound(m => m.MMSStockCode)
+    .Title("Stock Code")
+    .ClientTemplate("<a href='javascript:void(0)' class='stock-code-cell'>#= MMSStockCode #</a>")
+    .Width(160);
+Your existing global handler will now work:
+
+js
+$(document).on("click", ".stock-code-cell", function () {
+  var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+  if (grid) grid.editRow($(this).closest("tr")); // opens popup editor
+});
+2) Keep the popup polished on open
+You already do this in onScPartsEdit. Keep it, but fix typos and centralize sizing:
+
+js
+function onScPartsEdit(e) {
+  var wnd = e.container.data("kendoWindow");
+  wnd.setOptions({
+    width: "720px",
+    height: "80vh",
+    scrollable: false,     // fix typo: scrolllable -> scrollable
+    title: e.model.isNew() ? "Add New Stock Coded Part" : "Edit Stock Coded Part",
+    modal: true,
+    resizable: false
+  });
+
+  e.container.closest(".k-window").addClass("scparts-popup-style");
+
+  // track current model for combobox select logic
+  currentScPartsModel = e.model;
+}
+Sizing: who sets width/height and how to unify
+Stock coded parts popup (container and contents)
+JS: onScPartsEdit sets width/height of the Kendo Window (authoritative at runtime).
+
+CSS: vehicle-estimate.css sets general popup/container rules. Right now it forces 1100px on .popup-container, which conflicts with your smaller popup.
+
+Fix by scoping the wide rule away from Stock Coded Parts:
+
+css
+/* Stop forcing 1100px width on every popup container */
+#estimatePopup { 
+  width: 1100px !important; 
+  max-width: 95%;
+  max-height: 80vh;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 4px;
+}
+
+/* Let Stock Coded Parts popup be sized by JS */
+.scparts-popup-style.popup-container {
+  width: auto !important;
+  max-width: 90vw;
+  max-height: 80vh;
+}
+And keep onScPartsEdit as the single source of truth for the SC popup sizing.
+
+Final estimates (container and contents)
+JS: #estimatePopup Kendo Window init sets width: "80vw", height: "100vh".
+
+CSS: #estimateTabs and #estimateTabs .k-content control internal layout.
+
+Keep these here (they’re the owners). Just correct the typo:
+
+js
+$("#estimatePopup").kendoWindow({
+  modal: true,
+  width: "80vw",
+  height: "100vh",
+  resizable: false,
+  scrollable: false,    // fix typo
+  title: "Estimate",
+  visible: false,
+  actions: ["Close"],
+  close: function (e) {
+    if (pendingChanges) { e.preventDefault(); showCloseConfirmation(); }
+  }
+});
+Delete confirmation for Stock Coded Parts
+You already have two delete patterns. Simplify for Stock Coded Parts with a single confirm, delete, then refresh parent grid.
+
+1) Use a clean handler for Stock Coded Parts delete
+Add a dedicated handler:
+
+html
+<script>
+  function onScDelete(e) {
+    e.preventDefault();
+
+    var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+    var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+
+    kendo.confirm("Do you want to delete this stock coded part?")
+      .then(function () {
+        // Call your existing endpoint; adjust route/ID as needed
+        $.ajax({
+          url: "/ScPartsUsedInEstimates/Delete",  // <- your actual route
+          type: "POST",
+          data: { id: dataItem.Id },              // <- your key field
+          success: function () {
+            grid.dataSource.read();               // refresh SC grid
+            // Also refresh parent summary grid if required
+            if (typeof materialSummaryGridName !== "undefined") {
+              var parent = $("#" + materialSummaryGridName).data("kendoGrid");
+              if (parent) parent.dataSource.read();
+            }
+            $("#notification").data("kendoNotification").success("Deleted successfully");
+          },
+          error: function (xhr) {
+            $("#notification").data("kendoNotification").error("Delete failed: " + xhr.responseText);
+          }
+        });
+      });
+  }
+</script>
+2) Wire it in the SC grid command column
+In your SC grid columns:
+
+csharp
+columns.Command(cmd =>
+{
+    cmd.Custom("Delete")
+       .IconClass("k-icon k-i-delete")
+       .Click("onScDelete");
+}).Width(110);
+This removes the fragile data-* passing and refreshes the right grids. If you must keep your generic dialog, ensure you fix the variable confusion (parentPartId vs parentGridId). The above is the minimal, robust route.
+
+Dynamic scrolling for Vehicle grid
+Right now you hardcode 540px height. Remove that and let the grid content calculate based on viewport. Two minimal steps:
+
+1) Drop the fixed height on the grid
+Remove:
+
+csharp
+.HtmlAttributes(new { style = "height:540px;" })
+Optionally add Kendo scrollable:
+
+csharp
+.Scrollable() // grid body scrolls when needed
+2) Add CSS to size the scrollable area relative to the viewport
+Add to vehicle-estimate.css:
+
+css
+/* Make Vehicle grid body scroll within the viewport */
+#VehicleGrid .k-grid-content {
+  max-height: calc(100vh - 280px); /* adjust header/toolbar footprint */
+  overflow-y: auto;
+}
+3) Resize on window changes (optional polish)
+Add:
+
+html
+<script>
+  $(window).on("resize", function () {
+    var grid = $("#VehicleGrid").data("kendoGrid");
+    if (grid) grid.resize();
+  });
+</script>
+This prevents awkward whitespace when resizing the window.
+
+Small cleanups that prevent UX drift
+Fix typos: scrolllable → scrollable in both window initializers.
+
+Avoid duplicating getComboBoxParams (it appears twice); keep one definition.
+
+Keep popup button logic single-sourced (use saveRow/cancelRow) to avoid desync.
+
+For tab content auto-load, you’re good — just ensure enableAllTabs() runs only after an estimate exists.
+
+What these changes deliver
+Stock Coded Parts popup shows only top Update/Cancel (no bottom duplicates).
+
+Clicking the stock code opens the edit popup, matching the Vehicle Estimate behavior.
+
+Sizing is predictable: SC popup uses JS-set width/height, Final Estimate uses the main window init.
+
+Delete flow is consistent: confirm → delete → refresh both SC grid and parent summary.
