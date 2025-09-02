@@ -1,0 +1,83 @@
+That means:
+
+jQuery sends application/x-www-form-urlencoded
+
+ASP.NET Core sees [FromBody] string id and expects raw request body (e.g., "ABC123") with Content-Type: application/json
+
+Mismatch → 415 Unsupported Media Type
+
+Two ways to fix it:
+
+Option A — Keep [FromBody] and send JSON
+
+javascript
+$.ajax({
+    url: "/ScPartsUsedInEstimates/DeleteScPartsUsedInEstimates",
+    type: "POST",
+    contentType: "application/json",
+    data: JSON.stringify("ABC123"), // just the string, not an object
+    success: ...
+});
+Option B — Remove [FromBody] and bind from form/query
+
+csharp
+public async Task<IActionResult> DeleteScPartsUsedInEstimates(
+    string id, string partNum, string gridType)
+Then your existing data: { id: ..., partNum: ..., gridType: ... } will bind fine.
+
+Recommendation: For consistency with your Create/Update actions (which use [FromForm]), drop [FromBody] here and let jQuery’s default form encoding work.
+
+2️⃣ Add Stock Coded Part → 500 Internal Server Error
+What’s working: The controller is being hit, id, gridType, and model are binding.
+
+What’s failing: A 500 means an unhandled exception inside CreateScPartsUsedInEstimates. Common culprits in your code:
+
+Duplicate check:
+
+csharp
+var duplicateCount = await _dbConnection.ExecuteScalarAsync<int>(duplicateCheckSql, ...);
+if (duplicateCount > 0) { return null; }
+Returning null from an MVC action can cause a runtime error if the framework tries to write a response.
+
+Nullables: If model.Qty or model.Percentage are null but your SQL expects numeric, you could get a conversion error.
+
+Column name mismatches: Your insert uses OrigSupNum but parameter is OrigSupplierNum — if the DB column name is wrong, SQL will throw.
+
+How to pinpoint:
+
+Wrap the insert in a try/catch and log ex.Message to console or a logger.
+
+Temporarily remove the duplicate check return null; and instead return BadRequest("Duplicate") so the client gets a clear message.
+
+Likely quick fix:
+
+csharp
+if (duplicateCount > 0)
+{
+    return BadRequest($"MMSStockCode '{mmsStockCode}' already exists for this estimate.");
+}
+…and ensure all numeric fields have defaults:
+
+csharp
+parameters.Add("Qty", model.Qty ?? 0);
+parameters.Add("Percentage", model.Percentage ?? 0);
+Suggested Alignment for All SC Parts Actions
+To avoid these mismatches:
+
+Use [FromForm] for all POSTs when sending via jQuery default data: {...}.
+
+Use [FromBody] only when sending raw JSON with contentType: "application/json".
+
+Keep parameter names in JS and C# identical.
+
+Always return a proper IActionResult (Ok(), BadRequest(), Json(...)) — never null.
+
+If you want, I can rewrite your Delete and Create JS calls so they both:
+
+Send the right content type
+
+Match the controller binding style
+
+Return clear success/error messages to the grid
+
+That way you’ll have a consistent pattern and no more 415/500 surprises. Would you like me to prepare that drop‑in JS update?
