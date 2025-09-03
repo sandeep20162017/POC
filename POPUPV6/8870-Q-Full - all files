@@ -1,0 +1,2541 @@
+You are asp.net core, Telerik AP.NET core, CSS, javascript and UI/UX expert
+In the following code, I am looking toimprove UI/UX experience. Make minimal changes. No need to change any existing logic.
+VehicleIndex has Telrik grid, when user clicks on Add New Vehicle or link in estimate number cell, _VehPopUp.cshtml is rendered
+I need to set and adjust width and height  of this pop up using css
+_VehPopup.cshtml has various tabs. When user clicks on Stock coded Parts, Non stock coded parts, Labour Details tab another pop up
+is rendered. Example for Non Stock coded Parts, editor template NcpartsUsedViewModel.cshtml is rendered.
+div classes in Stock coded Parts are same
+I am includig here with vehicle-estimate.css, and would like you to generate a new css. I will replace the new css with 
+VehicleEstimate.css
+All the fonts, buttons, controllers should have the same look and feel on all the pages.
+No transparency for the back ground pages (for all pop ups)
+Clearly comment css file  where to adjust width and height of the PopUp and where to  set background color and fontsize and transparencey
+All the container should have nice and professional look. Use very light blue colors.
+If Width and height are hardcoded, mention it n the reply.
+Index.cshtml :
+@using BCES.Models.Vehicle
+@using BCES.Models.Parts
+@model IEnumerable<VehicleViewModel>
+
+@{
+    ViewData["Title"] = "Vehicle Estimate";
+    string scGridName = $"ScPartsMaterialDetailsRebuiltPartsGrid_";
+}
+
+<h6 class="vehicle-estimate-header">Vehicle Estimate</h6>
+<!-- Include the CSS file in your view -->
+<link rel="stylesheet" href="~/css/vehicle-estimate.css" />
+
+<div id="notification"></div>
+<script>
+    let currentScPartsModel = null;
+    let currentPopupMdodel = null;
+    
+</script>
+
+<script>
+    let popupHasChanges = false; /* closing x */
+    let originalData = {}; /* closing x */
+
+    // ====== GLOBAL STATE DECLARATIONS ======
+    window.pendingChanges = false;
+    window.currentVehicleId = 0;
+    window.tabContentLoaded = [false, false, false, false, false, false, false, false]; // For 8 tabs
+    window.currentlyLoadingTab = null;
+
+    // ====== CORE FUNCTION DEFINITIONS ======
+    window.setPopupReadonly = function (ids) {
+        ids.forEach(function (id) {
+            var widget = getKendoWidget(id);
+            if (widget) {
+                widget.enable(false);
+            } else {
+                $("#" + id).prop("readonly", true).addClass("k-state-disabled");
+            }
+        });
+    };
+
+    window.initVehiclePopupForm = function () {
+        console.warn('inside window.initVehiclePopupForm');
+        var mode = $("#formMode").val();
+        console.warn('mode', mode);
+        if (!mode) return;
+
+        if (mode === "Add") {
+            console.warn('Add');
+            setPopupEditable([
+                "NumOfVehicles", "ProjDesc",
+                "Make", "VehModel", "Year",
+                "Engine", "Transmission", "Differential", "Sopnumber"
+            ]);
+            setPopupReadonly(["ModifiedLastBy", "ModifiedLastDate"]);
+        } else {
+            console.warn('Edit');
+            setPopupReadonly([
+                "VehSeriesCode", "ProjDesc", "Make", "VehModel", "Year",
+                "Engine", "Transmission", "Differential", "Sopnumber",
+                "ModifiedLastBy", "ModifiedLastDate"
+            ]);
+            setPopupEditable(["NumOfVehicles"]);
+        }
+    };
+
+    window.setPopupEditable = function (ids) {
+        ids.forEach(function (id) {
+            var widget = getKendoWidget(id);
+            if (widget) {
+                widget.enable(true);
+            } else {
+                $("#" + id).prop("readonly", false).removeClass("k-state-disabled");
+            }
+        });
+    };
+
+    window.getKendoWidget = function (id) {
+        var element = $("#" + id);
+        return element.data("kendoComboBox") ||
+            element.data("kendoNumericTextBox") ||
+            element.data("kendoDatePicker");
+    };
+    // ── Load the form into the first tab
+    window.loadVehicleForm = function (vehicleId) {
+        $.get('@Url.Action("GetVehicleById", "Vehicles")', { id: vehicleId }, function (html) {
+            $("#vehicleTabContent").html(html);
+            window.tabContentLoaded[0] = true;
+            window.wireVehicleForm(); // rebind save/cancel/edit/etc
+
+            var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+
+            // If it's an existing record, enable other tabs
+            if (vehicleId !== 0 && tabStrip) {
+                for (var i = 1; i <= 7; i++) {
+                    tabStrip.enable(tabStrip.tabGroup.children().eq(i), true);
+                }
+            } else if (vehicleId === 0 && tabStrip) {
+                // New record: disable all other tabs
+                for (var i = 1; i <= 7; i++) {
+                    tabStrip.enable(tabStrip.tabGroup.children().eq(i), false);
+                }
+            }
+        });
+    };
+
+    // ── Wire up form submit and cancel actions
+    window.wireVehicleForm = function () {
+        $("#btnCancelVehicle").off("click").on("click", function () {
+            if (pendingChanges) {
+                showCloseConfirmation();
+            } else {
+                $("#estimatePopup").data("kendoWindow").close();
+            }
+        });
+
+        $("#btnSave").off("click").on("click", function (e) {
+            e.preventDefault();
+            $("#vehicleForm").submit();
+        });
+
+        $("#vehicleForm").off("submit").on("submit", function (e) {
+            e.preventDefault();
+
+            // Validate form here if needed
+
+            var vm = {
+                VehicleListId: $("#VehicleListId").val(),
+                VehSeriesCode: $("#VehSeriesCode").data("kendoComboBox").value(),
+                NumOfVehicles: $("#NumOfVehicles").val(),
+                ProjDesc: $("#ProjDesc").data("kendoComboBox").value(),
+                Make: $("#Make").data("kendoComboBox").value(),
+                VehModel: $("#VehModel").data("kendoComboBox").value(),
+                Year: $("#Year").val(),
+                Engine: $("#Engine").data("kendoComboBox").value(),
+                Transmission: $("#Transmission").data("kendoComboBox").value(),
+                Differential: $("#Differential").data("kendoComboBox").value(),
+                Sopnumber: $("#Sopnumber").val()
+            };
+
+            var url = currentVehicleId === 0
+                ? '@Url.Action("AddVehiclesView", "Vehicles")'
+                : '@Url.Action("UpdateVehiclesView", "Vehicles")';
+
+            $.ajax({
+                url: url,
+                type: 'POST',
+                contentType: "application/json",
+                data: JSON.stringify(vm),
+                success: function (response) {
+                    if (response && response.VehicleListId) {
+                        pendingChanges = false;
+                        $("#estimatePopup").data("kendoWindow").unbind("close");
+                        currentVehicleId = response.VehicleListId;
+                        $("#VehicleGrid").data("kendoGrid").dataSource.read();
+
+                        // Update window title with new ID
+                        var win = $("#estimatePopup").data("kendoWindow");
+                        win.title("Vehicle Estimate #" + response.VehicleListId);
+
+                        kendo.alert(" Estimate #: " + response.VehicleListId + " Saved successfully!");
+                       // $("#ScPartsPopupWindow").data("kendoWindow").close();
+                    } else {
+                        kendo.alert("Save succeeded but no Estimate ID was returned.");
+                        $("#ScPartsPopupWindow").data("kendoWindow").close();
+                    }
+                },
+                error: function () {
+                    kendo.alert("Error saving data.");
+                }
+            });
+        });
+
+        // Track form changes
+        $("#vehicleForm input, #vehicleForm select").off("change input").on("input change", function () {
+            pendingChanges = true;
+        });
+    }
+
+    // ── Open vehicle popup and load form partial
+    window.openEstimatePopup = function (vehicleId) {
+        console.warn('inside window.openEstimatePopup');
+        var win = $("#estimatePopup").data("kendoWindow");
+        currentVehicleId = vehicleId;
+        pendingChanges = false; // Reset changes flag
+
+        win.title(vehicleId === 0 ? "Add New Estimate" : "Vehicle Estimate #" + vehicleId);
+        win.center().open();
+
+        // Load vehicle tab first
+        $("#vehicleTabContent").load('@Url.Action("GetVehicleById", "Vehicles")', { id: vehicleId }, function () {
+            // Initialize Kendo UI widgets in the loaded content
+            kendo.init($("#vehicleTabContent"));
+
+            // Set values for Kendo widgets after initialization
+            setTimeout(function () {
+                // Set values for ComboBoxEditor fields
+                setComboBoxValues();
+                initVehiclePopupForm();
+                wireVehicleForm();
+            }, 100);
+
+            if (vehicleId !== 0) {
+                enableAllTabs();
+            }
+        });
+    };
+
+    // ── Delete handler
+    window.showDeleteConfirmation = function (e) {
+        e.preventDefault();
+        var grid = this; // Kendo Grid instance
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        if (!dataItem) {
+            console.error("No dataItem found for delete action");
+            return;
+        }
+
+        var dlg = $("#deleteConfirmationDialog").data("kendoWindow");
+        dlg.center().open();
+
+        $("#confirmDeleteBtn").off("click").on("click", function () {
+            $.post('/Vehicles/DeleteVehicle', { VehicleListId: dataItem.VehicleListId }, function () {
+                grid.dataSource.read();
+                dlg.close();
+            });
+        });
+
+        $("#cancelDeleteBtn").off("click").on("click", function () {
+            dlg.close();
+        });
+    };
+
+    // ── Copy estimate handler
+    window.onCopyEstimate = function (e) {
+        e.preventDefault();
+        var grid = $("#VehicleGrid").data("kendoGrid");
+        var item = grid.dataItem($(e.currentTarget).closest("tr"));
+        var win = $("#copyEstimateDialog").kendoWindow({
+            title: "Copy Estimate",
+            modal: true,
+            width: 400,
+            visible: false
+        }).data("kendoWindow");
+
+        $("#vehicleListId").val(item.VehicleListId);
+        $("#oldVehSeriesCode").val(item.VehSeriesCode);
+        $("#oldprojDesc").val(item.ProjDesc);
+        $("#newVehSeriesCode, #newprojDesc").val("");
+
+        win.center().open();
+
+        // Wire up copy button
+        $("#copyEstimateBtn").off("click").on("click", function () {
+            var payload = {
+                vehicleListId: $("#vehicleListId").val(),
+                oldVehSeriesCode: $("#oldVehSeriesCode").val(),
+                newVehSeriesCode: $("#newVehSeriesCode").val(),
+                oldprojDesc: $("#oldprojDesc").val(),
+                newprojDesc: $("#newprojDesc").val()
+            };
+
+            if (!payload.newVehSeriesCode || !payload.newprojDesc) {
+                return kendo.alert("Please fill required fields.");
+            }
+
+            $.ajax({
+                url: '@Url.Action("CopyEstimate", "Vehicles")',
+                type: 'POST',
+                contentType: "application/json",
+                data: JSON.stringify(payload),
+                success: function (response) {
+                    if (response.success) {
+                        kendo.alert("Estimate copied successfully! New ID: " + response.newVehicleListId);
+                        $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                        win.close();
+                    } else {
+                        kendo.alert("Copy failed: " + response.message);
+                    }
+                }
+            });
+        });
+
+        $("#cancelCopyBtn").off("click").on("click", function () {
+            win.close();
+        });
+    };
+
+    // ── Archive handler
+    window.onArchiveClick = function (e) {
+        e.preventDefault();
+        var grid = $("#VehicleGrid").data("kendoGrid");
+        var item = grid.dataItem($(e.currentTarget).closest("tr"));
+
+        kendo.confirm("Archive estimate #" + item.VehicleListId + "?").then(function () {
+            $.ajax({
+                url: '@Url.Action("ArchiveVehicleDetails", "Vehicles")',
+                type: 'POST',
+                contentType: "application/json",
+                data: JSON.stringify({
+                    VehicleListId: item.VehicleListId,
+                    VehSeriesCode: item.VehSeriesCode,
+                    TypeId: "BUS",
+                    Username: "@ViewBag.UserName".toUpperCase()
+                }),
+                success: function (r) {
+                    if (r.success) {
+                        grid.dataSource.read();
+                        kendo.alert(r.message);
+                    } else {
+                        kendo.alert("Archive failed: " + r.message);
+                    }
+                }
+            });
+        });
+    };
+
+    // ── Load partial tabs
+    window.loadTabContent = function (elementId, url, data, callback) {
+        $("#" + elementId).load(url, data, function () {
+            if (typeof callback === "function") callback();
+        });
+    };
+
+    // ── Tab selection handler
+    window.onTabSelect = function (e) {
+        var index = $(e.item).index();
+
+        // Match your actual actions here
+        var tabsConfig = [
+            { id: "vehicleTabContent", url: '@Url.Action("GetVehicleById", "Vehicles")' },
+            { id: "partsTabContent", url: "/Vehicles/MaterialCostSummaryPartial" },   // Parts
+            { id: "labourTabContent", url: "/Vehicles/LabourHourSummaryPartial" },        // Labour
+            { id: "labourDetailsTabContent", url: "/Vehicles/LabourDetailsPartial" },
+            { id: "stockCodedPartsTabContent", url: "/Vehicles/ScDetailsPartial" },   // Stock coded
+            { id: "nonStockCodedPartsTabContent", url: "/Vehicles/NonStockPartsPartial" }, // Non stock coded
+            { id: "rebuiltPartsTabContent", url: "/Vehicles/RebuiltPartsPartial" },   // Rebuilt
+            { id: "finalEstimateTabContent", url: "/Vehicles/TotalCostPartial" }        // Final estimate
+        ];
+
+        var tab = tabsConfig[index];
+
+        // Safety check — skip if no mapping
+        if (!tab) return;
+
+        // Load only if empty
+        if ($("#" + tab.id).is(":empty")) {
+            loadTabContent(
+                tab.id,
+                tab.url,
+                { id: currentVehicleId, gridType: "VehicleGrid" }
+            );
+        }
+    };
+
+    window.setFormReadOnly = function (readOnly) {
+        $("#vehicleForm :input").each(function () {
+            var input = $(this);
+            var widget = kendo.widgetInstance(input, kendo.ui);
+
+            if (widget) {
+                if (typeof widget.readonly === 'function') {
+                    widget.readonly(readOnly);
+                } else if (widget.element && widget.element.is("input")) {
+                    input.prop("readonly", readOnly);
+                }
+            } else {
+                input.prop("readonly", readOnly);
+            }
+        });
+
+        $("[data-role='combobox']").each(function () {
+            var combo = $(this).data("kendoComboBox");
+            if (combo) {
+                combo.readonly(readOnly);
+            }
+        });
+    };
+
+    window.onComboBoxChange = function (e) {
+        var combo = e.sender;
+        if (combo.selectedIndex === -1) {
+            combo.value(null);
+            combo.input.val("");
+            combo.trigger("change");
+            $("#validationMessage").text("Invalid selection!").css("color", "red");
+        } else {
+            $("#validationMessage").text("");
+        }
+    }
+
+    window.getComboBoxParams = function () {
+        var input = $(".k-combobox input.k-input:focus");
+        return {
+            columnName: input.attr("name")?.replace("_input", "").split('.').pop(),
+            searchText: input.val() || ""
+        };
+    }
+
+    window.onComboBoxDataBound = function (e) {
+        var notification = $("#notification").data("kendoNotification");
+        if (e.sender.dataSource.total() === 0) {
+            e.sender.value(null);
+            e.sender.input.val("");
+            setTimeout(function () {
+                notification.show("Invalid Selection! Please choose from the list.", "error");
+            }, 100);
+        }
+    }
+</script>
+
+<!-- Kendo main grid -->
+@(Html.Kendo().TabStrip()
+    .Name("vehicleTabStrip")
+    .Items(ts =>
+    {
+        ts.Add().Text("Vehicles").Selected(true)
+            .Content(@<text>
+    @(Html.Kendo().Grid<VehicleViewModel>()
+    .Name("VehicleGrid")
+    .Columns(c =>
+    {
+    c.Bound(v => v.VehicleListId).Title("Estimate #")
+    .ClientTemplate("<a class='estimate-link' onclick='window.openEstimatePopup(#=VehicleListId#)'>#=VehicleListId#</a>").Width(120);
+    c.Bound(v => v.VehSeriesCode).Title("Vehicle Series").HeaderHtmlAttributes(new { @class = "required-header" }).EditorTemplateName("ComboBoxEditor").Width(150);
+    c.Bound(v => v.NumOfVehicles).Title("Qty").HeaderHtmlAttributes(new { @class = "required-header" }).Width(80);
+    c.Bound(v => v.ProjDesc).Title("Description").HeaderHtmlAttributes(new { @class = "required-header" }).Width(250);
+    c.Command(cmd =>
+    {
+    cmd.Custom("Copy").IconClass("k-icon k-i-copy").Click("window.onCopyEstimate");
+    cmd.Custom("Archive").IconClass("k-icon k-i-folder").Click("window.onArchiveClick");
+    cmd.Custom("Delete").IconClass("k-icon k-i-delete").Click("window.showDeleteConfirmation");
+    }).Width(180);
+    })
+    .ToolBar(tb => tb.ClientTemplate("<button class='k-button k-button-icontext' onclick='window.openEstimatePopup(0)'><span class='k-icon k-i-plus'></span>Add New Vehicle Estimate</button>"))
+    .Pageable(p => p.PageSizes(new[] { 10, 20, 50 }))
+    .Sortable()
+    .Filterable()
+
+    .Scrollable(s => s.Virtual(true).Height("400px"))
+    .DataSource(ds => ds.Ajax()
+    .PageSize(10)
+    .ServerOperation(true)
+    .Model(m => m.Id(v => v.VehicleListId))
+    .Read(r => r.Action("GetVehiclesView", "Vehicles").Type(HttpVerbs.Get))
+    .Create(c => c.Action("AddVehiclesView", "Vehicles").Type(HttpVerbs.Post))
+    .Update(u => u.Action("UpdateVehiclesView", "Vehicles").Type(HttpVerbs.Post))
+    .Destroy(d => d.Action("DeleteVehicle", "Vehicles").Type(HttpVerbs.Post))
+    )
+
+    )
+</text>);
+    })
+
+)
+<div class="vehicle-estimate-container">
+    <!-- Popup tabs for vehicle details -->
+    <div id="estimatePopup" style="display:none;">
+        <div id="estimateTabs">
+            <ul>
+                <li class="k-state-active">Vehicle</li>
+                <li>Parts Summary</li>
+                <li>Labour Summary</li>
+                <li>Labour Details</li>
+                <li>Stock Coded Parts</li>
+                <li>Non Stock Coded Parts</li>
+                <li>Rebuilt Parts</li>
+                <li>Final Estimate</li>
+            </ul>
+
+            <div id="vehicleTabContent"></div>
+            <div id="partsTabContent"></div>
+            <div id="labourTabContent"></div>
+            <div id="labourDetailsTabContent"></div>
+            <div id="stockCodedPartsTabContent"></div>
+            <div id="nonStockCodedPartsTabContent"></div>
+            <div id="rebuiltPartsTabContent"></div>
+            <div id="finalEstimateTabContent"></div>
+        </div>
+    </div>
+
+    <!-- Delete confirmation dialog -->
+    <div id="deleteConfirmationDialog" style="display:none;">
+        <div class="confirmation-message"><span class="k-icon k-i-warning" style="font-size:24px;color:#f0ad4e;"></span><span style="margin-left:10px;">Are you sure you'd like to delete?</span></div>
+        <div class="confirmation-buttons"><button class="k-button" id="cancelDeleteBtn">Cancel</button><button class="k-button k-primary" id="confirmDeleteBtn" style="margin-left:10px;">Delete</button></div>
+    </div>
+
+    <!-- Copy estimate dialog -->
+    <div id="copyEstimateDialog" style="display:none;">
+        <div class="k-form">
+            <div class="k-form-field"><label>Estimate #</label><input id="vehicleListId" class="k-textbox" readonly /></div>
+            <div class="k-form-field"><label>Old Series</label><input id="oldVehSeriesCode" class="k-textbox" readonly /></div>
+            <div class="k-form-field"><label>Old Description</label><input id="oldprojDesc" class="k-textbox" readonly /></div>
+            <div class="k-form-field"><label>New Vehicle Series<span style="color:red">*</span></label><input id="newVehSeriesCode" class="k-textbox" required /></div>
+            <div class="k-form-field"><label>New Description<span style="color:red">*</span></label><input id="newprojDesc" class="k-textbox" required /></div>
+            <div class="k-form-buttons">
+                <button type="button" class="k-button k-primary" id="copyEstimateBtn">Copy</button>
+                <button type="button" class="k-button" id="cancelCopyBtn">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+@section Scripts {
+    <script>
+        var currentVehicleId = 0;
+
+        $(document).ready(function () {
+            // Initialize and expand the Vehicle tab strip
+            var tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+            tabStrip.select(0); // Select the first tab (Vehicles)
+
+            $("#notification").kendoNotification();
+            // Initialize popup
+            $("#estimatePopup").kendoWindow({
+                modal: true,
+                width: "50vw",   // responsive width outer size
+                height: "90vh",  // ~10% taller than before
+                resizable: false,
+                scrolllable: false,
+                title: "Estimate",
+                visible: false,
+                actions: ["Close"],
+                close: function (e) {
+                    if (pendingChanges) {
+                        e.preventDefault();
+                        showCloseConfirmation();
+                    }
+                }
+            });
+
+            // Initialize TabStrip
+            $("#estimateTabs").kendoTabStrip({
+                animation: { open: { effects: "fadeIn" } },
+                select: onTabSelect,
+                activate: function (e) {
+                    // Load first tab immediately
+                    if ($(e.item).index() === 0 && $("#vehicleTabContent").is(":empty")) {
+                        loadTabContent(
+                            "vehicleTabContent",
+                            '@Url.Action("GetVehicleById", "Vehicles")',
+                            { id: currentVehicleId }
+                        );
+                    }
+                }
+            });
+
+            // Disable all tabs except Vehicle initially
+            disableOtherTabs();
+
+            var vehicleGrid = $("#VehicleGrid").data("kendoGrid");
+
+            if (vehicleGrid) {
+                vehicleGrid.dataSource.bind("requestEnd", function (e) {
+                    if (e.type === "create" && e.response && !e.response.Errors) {
+                        enableAllTabs();
+                    }
+                });
+            }
+
+            //make stock code column clickable for edit
+            $(document).on("click", ".stock-code-cell", function () {
+                var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+                if (grid) {
+                    var row = $(this).closest("tr");
+                    grid.editRow(row); // open popup editor
+                }
+            });
+        });
+
+
+        function disableOtherTabs() {
+            var ts = $("#estimateTabs").data("kendoTabStrip");
+            for (var i = 1; i <= 6; i++) {
+                ts.enable(ts.tabGroup.children().eq(i), false);
+            }
+        }
+
+        function enableAllTabs() {
+            var ts = $("#estimateTabs").data("kendoTabStrip");
+            for (var i = 1; i <= 6; i++) {
+                ts.enable(ts.tabGroup.children().eq(i), true);
+            }
+        }
+
+
+    </script>
+
+
+
+    <script>
+
+        $(document).ready(function () {
+
+            //copy estimte start san17
+            var copyWindow = $("#copyEstimateDialog").kendoWindow({
+                title: "Copy Estimate",
+                modal: true,
+                visible: false,
+                resizable: false,
+                width: 400
+            }).data("kendoWindow");
+
+            $("#cancelCopyBtn").click(function () {
+                copyWindow.close();
+            });
+
+            $("#copyEstimateBtn").click(function () {
+                var vehicleListId = $("#vehicleListId").val();
+                var oldCode = $("#oldVehSeriesCode").val();
+                var newCode = $("#newVehSeriesCode").val().trim();
+                var oldprojDesc = $("#oldprojDesc").val();
+                var newprojDesc = $("#newprojDesc").val().trim();
+
+
+                if (!newCode) {
+                    kendo.alert("New Vehicle Series is required.");
+                    return;
+                }
+                if (!newprojDesc) {
+                    kendo.alert("New Description is required.");
+                    return;
+                }
+
+                $.post('@Url.Action("CopyEstimate", "Vehicles")', {
+                    vehicleListId: vehicleListId,
+                    oldVehSeriesCode: oldCode,
+                    newVehSeriesCode: newCode,
+                    oldprojDesc: oldprojDesc,
+                    newprojDesc: newprojDesc
+                })
+                    .done(function (response) {
+                        if (response.success) {
+                            copyWindow.close();
+                            $("#VehicleGrid").data("kendoGrid").dataSource.read();
+
+                            var estimateId = response.newVehicleListId;
+                            $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                            kendo.alert('<div style="color: green; font-weight: bold;">Estimates are copied. Estimate Number ID: ' + estimateId + '</div>');
+
+                        } else {
+                            kendo.alert("Copy failed. Please contact support.");
+                        }
+
+                    })
+                    .fail(function () {
+                        kendo.alert("Copy failed. Please try again.");
+                    });
+            });
+
+        });
+
+        function onArchiveClick(e) {
+            e.preventDefault();
+
+            // Retrieve the data item from the clicked row in VehicleGrid
+            var grid = $("#VehicleGrid").data("kendoGrid");
+            var row = $(e.currentTarget).closest("tr");
+            var vehicleItem = grid.dataItem(row);
+
+            if (!vehicleItem) {
+                console.error("Vehicle data not found.");
+                return;
+            }
+
+            // Extract PartNum from the vehicleItem
+            var partNum = vehicleItem.VehicleListId;
+            if (!partNum) {
+                console.error("PartNum is missing in the vehicle data.");
+                return;
+            }
+
+            // Construct the ID of the TotalCost grid using PartNum
+            // var totalCostGridId = `#TotalCostInRbModelGrid`;
+            //  var totalCostGridId = '#TotalCostInRbModelGrid';
+
+            var totalCostGrid = $("#" + totalCostGridName).data("kendoGrid");
+
+            // var totalCostGrid = $(totalCostGridId).data("kendoGrid");
+
+            if (!totalCostGrid) {
+                console.error(`TotalCost grid with ID ${totalCostGridName} not found.`);
+                return;
+            }
+
+            // Retrieve the first (and only) data item from the TotalCost grid
+            var totalCostDataItem = totalCostGrid.dataSource.view()[0];
+
+            if (!totalCostDataItem) {
+                console.error("TotalCost data not found.");
+                return;
+            }
+
+            // Prepare the payload to send to the server
+            var payload = {
+                VehicleListId: vehicleItem.VehicleListId,
+                VehSeriesCode: vehicleItem.VehSeriesCode,
+                TypeId: "BUS", // Default value as per stored procedure
+                Username: '@ViewBag.UserName?.ToString().ToUpper()"',
+                LabourCost: totalCostDataItem.TotalLabourCost || 0,
+                LabourOverheadAmount: totalCostDataItem.TotalLabourOverheadCost || 0,
+                LabourTotal: totalCostDataItem.TotalLabourCost || 0,
+                MaterialsTotal: totalCostDataItem.TotalMaterialCost || 0,
+                TotalBusEstimateCost: (totalCostDataItem.TotalLabourCost + totalCostDataItem.TotalLabourOverheadCost + totalCostDataItem.TotalMaterialCost) || 0,
+                TaxTotal: totalCostDataItem.TaxTotal || 0,
+                TotalCostTax: totalCostDataItem.TotalRebuiltPartCostWithTax || 0,
+                OemKitsTotal: totalCostDataItem.OemKitsTotal || 0
+            };
+
+            console.log("Payload to be sent:", payload);
+
+            // Send the data to the server via AJAX
+            $.ajax({
+                url: '@Url.Action("ArchiveVehicleDetails", "Vehicles")',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(payload),
+                success: function (response) {
+                    var notification = $("#notification").kendoNotification({
+                        position: {
+                            pinned: true,
+                            top: 50,
+                            right: 50
+                        },
+                        autoHideAfter: 5000,
+                        stacking: "down"
+                    }).data("kendoNotification");
+
+                    notification.show(response.message || "Archived successfully.", "info");
+                },
+                error: function (xhr, status, error) {
+                    console.error("Error archiving:", error);
+                }
+            });
+        }
+
+
+        // Function to set values for ComboBoxEditor fields
+        function setComboBoxValues() {
+            // Get the model data from hidden fields or data attributes
+            var modelData = @Html.Raw(Json.Serialize(Model));
+
+            // Set values for each ComboBoxEditor field
+            if (modelData) {
+                if (modelData.VehSeriesCode) {
+                    setComboBoxValue("VehSeriesCode", modelData.VehSeriesCode);
+                }
+                if (modelData.ProjDesc) {
+                    setComboBoxValue("ProjDesc", modelData.ProjDesc);
+                }
+                if (modelData.Make) {
+                    setComboBoxValue("Make", modelData.Make);
+                }
+                if (modelData.VehModel) {
+                    setComboBoxValue("VehModel", modelData.VehModel);
+                }
+                if (modelData.Engine) {
+                    setComboBoxValue("Engine", modelData.Engine);
+                }
+                if (modelData.Transmission) {
+                    setComboBoxValue("Transmission", modelData.Transmission);
+                }
+                if (modelData.Differential) {
+                    setComboBoxValue("Differential", modelData.Differential);
+                }
+            }
+        }
+
+        // Helper function to set ComboBox value
+        function setComboBoxValue(fieldName, value) {
+            var comboBox = $("#" + fieldName).data("kendoComboBox");
+            if (comboBox) {
+                comboBox.value(value);
+                comboBox.text(value);
+            }
+        }
+
+    </script>
+
+    <script id="template" type="text/x-kendo-template">
+        <div id="detail-template-#=VehicleListId#"></div>
+    </script>
+
+    <script id="archived-template" type="text/x-kendo-template">
+        <div id="archived-detail-template-#=VehicleListId#"></div>
+    </script>
+
+
+    <script>
+
+        function onDataSourceError(e) {
+            var notification = $("#notification").data("kendoNotification");
+            let errorMessage = "Operation failed:";
+
+            // If there's an XHR response, try parsing it
+            if (e.xhr && e.xhr.responseText) {
+                console.warn('onDataSourceError-e.xhr.responseText :', e.xhr.responseText);
+                try {
+                    var response = JSON.parse(e.xhr.responseText);
+                    if (response.Errors && Array.isArray(response.Errors)) {
+                        response.Errors.forEach(function (msg) {
+                            notification.error(msg);
+                        });
+                        return; // We already displayed individual errors
+                    } else {
+                        errorMessage += e.xhr.responseText;
+                    }
+                } catch (err) {
+                    console.error('Error parsing response JSON:', err);
+                    errorMessage += e.xhr.responseText;
+                }
+            }
+            else if (e.errors) {
+                errorMessage += " Server validation failed.";
+            }
+            else if (e.errorThrown) {
+                errorMessage += e.errorThrown;
+            }
+
+            notification.error(errorMessage);
+        }
+
+        function onVehRequestEnd(e) {
+            var notification = $("#notification").data("kendoNotification");
+
+            if (e.type === "create" && e.response && Array.isArray(e.response.Data) && e.response.Data.length > 0) {
+                var newId = e.response.Data[0].VehicleListId;
+                kendo.alert("Record created with Estimate # <strong style='color:red'>" + newId + "</strong > ")
+                // notification.success("<strong style='color:red;'>Record created with Vehicle ID: " + newId + "</strong>");
+            } else if (e.type === "create") {
+                notification.success("Record created successfully.");
+            } else if (e.type === "update") {
+                notification.success("Record updated.");
+            } else if (e.type === "destroy") {
+                notification.success("Record deleted.");
+            }
+        }
+
+
+
+        function onRequestEnd(e) {
+            var grid = e.sender;
+            var notification = $("#notification").data("kendoNotification");
+            // notification.success("onRequestEnd called - check grid name");
+
+            // console.warn('Grid name from hidden field:', gridName);
+            console.warn('onScRequestEnd : grid:', grid);
+            //console.warn('Resolved grid:', grid);
+            //|| !grid.dataSource
+
+            if (!grid) {
+                console.error('Grid or its dataSource is undefined. Skipping data reload.');
+                return;
+            }
+
+
+            const reloadGrid = () => grid.dataSource.read();
+
+
+            if (e.type === "create" && !e.response.Errors) {
+                console.warn('onScRequestEnd - create');
+                setTimeout(reloadGrid, 50);
+                notification.success("Record created successfully.");
+            } else if (e.type === "update") {
+                console.warn('onScRequestEnd - update');
+                setTimeout(reloadGrid, 50);
+                notification.success("Record updated.");
+            } else if (e.type === "destroy") {
+                console.warn('onScRequestEnd - destroy');
+                setTimeout(reloadGrid, 50);
+                notification.success("Record deleted.");
+            }
+
+
+        }
+
+        function onLabourRequestEnd(e) {
+
+            //const grid = $("#LabourDetailsGrid").data("kendoGrid");
+            const grid = $("#" + labourGridName).data("kendoGrid");
+            //var grid = e.sender;
+            var notification = $("#notification").data("kendoNotification");
+            // notification.success("onRequestEnd called - check grid name");
+
+            // console.warn('Grid name from hidden field:', gridName);
+            console.warn('onScRequestEnd : grid:', grid);
+            //console.warn('Resolved grid:', grid);
+
+            if (!grid || !grid.dataSource) {
+                console.error('Grid or its dataSource is undefined. Skipping data reload.');
+                return;
+            }
+
+
+            const reloadGrid = () => grid.dataSource.read();
+
+
+            if (e.type === "create" && !e.response.Errors) {
+                console.warn('onLabourRequestEnd - create');
+                setTimeout(reloadGrid, 50);
+                notification.success("Record created successfully.");
+            } else if (e.type === "update") {
+                console.warn('onLabourRequestEnd - update');
+                setTimeout(reloadGrid, 50);
+                notification.success("Record updated.");
+            } else if (e.type === "destroy") {
+                console.warn('onLabourRequestEnd - destroy');
+                setTimeout(reloadGrid, 50);
+                notification.success("Record deleted.");
+            }
+        }
+
+        function onNScRequestEnd(e) {
+
+
+            //const grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            //var grid = e.sender;
+            var grid = $("#" + nscInEstimateGridName).data("kendoGrid");
+            var notification = $("#notification").data("kendoNotification");
+            // notification.success("onRequestEnd called - check grid name");
+
+            // console.warn('Grid name from hidden field:', gridName);
+            console.warn('onScRequestEnd : grid:', grid);
+            //console.warn('Resolved grid:', grid);
+
+            if (!grid || !grid.dataSource) {
+                console.error('Grid or its dataSource is undefined. Skipping data reload.');
+                return;
+            }
+
+
+            const reloadGrid = () => grid.dataSource.read();
+
+
+            if (e.type === "create" && !e.response.Errors) {
+                console.warn('onNScRequestEnd - create');
+                setTimeout(reloadGrid, 50);
+                notification.success("Record created successfully.");
+            } else if (e.type === "update") {
+                console.warn('onNScRequestEnd - update');
+                setTimeout(reloadGrid, 50);
+                notification.success("Record updated.");
+            } else if (e.type === "destroy") {
+                console.warn('onNScRequestEnd - destroy');
+                setTimeout(reloadGrid, 50);
+                notification.success("Record deleted.");
+            }
+        }
+
+        //start original request end
+
+
+    </script>
+    <script>
+        function getAutoCompleteParams() {
+            var input = $("input[data-role='autocomplete']:focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || "" // Handle empty search text
+            };
+        }
+
+        function getComboBoxParams() {
+            var input = $(".k-combobox input.k-input:focus");
+            return {
+                columnName: input.attr("name")?.replace("_input", "").split('.').pop(),
+                searchText: input.val() || ""
+            };
+        }
+
+    </script>
+
+
+
+
+    <script>
+        function refreshNscPartDetails(e) {
+            // var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            // nscGridName = $("#nscGridNameField").val(); // Get grid name from hidden field
+            var grid = $("#" + nscInEstimateGridName).data("kendoGrid");
+            console.log('nscGridName :', nscInEstimateGridName);
+            if (!nscInEstimateGridName) {
+                console.warn("NSC Grid name not found. returning");
+                return;
+            }
+
+            // var grid = $("#" + nscGridName).data("kendoGrid"); // Select the grid dynamically
+            //var grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+
+            if (grid) {
+                //  grid.dataSource.read(); // Refresh grid data
+            } else {
+                console.warn("Grid not found: " + nscInEstimateGridName);
+            }
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var notification = $("#notification").data("kendoNotification");
+
+            if (!dataItem.OrigSuppNum) {
+                notification.show("Supplier Number is required to refresh details", "error");
+                return;
+            }
+
+            $.ajax({
+                url: '@Url.Action("RefreshNscPartDetails", "NscPartsUsedInEstimates")',
+                data: { origSuppNum: dataItem.OrigSuppNum },
+                beforeSend: function () {
+                    notification.show("Refreshing part details...", "info");
+                },
+                success: function (response) {
+                    if (response.Message) {
+                        // Handle cost validation error
+                        notification.show(response.Message, "error");
+
+                        // Optional: Update other fields even if cost is invalid
+                        if (response.Data) {
+                            dataItem.set("OrigSupplierName", response.Data.OrigSupplierName);
+                            dataItem.set("KeyWord", response.Data.KeyWord);
+                            dataItem.set("Description", response.Data.Description);
+
+                            // grid.refresh();
+                        }
+                    } else {
+                        // Update all fields
+                        dataItem.set("OrigSupplierName", response.OrigSupplierName);
+                        dataItem.set("KeyWord", response.KeyWord);
+                        dataItem.set("Description", response.Description);
+                        dataItem.set("OemPartCost", response.OemPartCost);
+
+                        //  grid.refresh();
+                        notification.show("Details updated successfully", "success");
+                    }
+                },
+                error: function (xhr) {
+                    var errorMessage = xhr.status === 404
+                        ? "Supplier not found"
+                        : "Error refreshing details";
+                    notification.show(errorMessage, "error");
+                }
+            });
+        }
+    </script>
+
+    <script>
+
+        function onSaveChanges(e) {
+            var notification = $("#notification").data("kendoNotification");
+            // notification.success("onSaveChanges called");
+            // const grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            var grid = $("#" + nscInEstimateGridName).data("kendoGrid");
+            const row = $(e.currentTarget).closest("tr");
+            const dataItem = grid.dataItem(row);
+            // const needsRecalc = dataItem.get("needsRecalculation"); //ssk4
+            const needsRecalc = grid.dataSource.data().some(item => item.needsRecalculation);
+            //  const needsRecalc = grid.dataSource.data().some(item => item.needsRecalculation);
+            // showNotification("error", needsRecalc);
+
+            //const needsRecalc = dataItem.some(item => item.needsRecalculation);
+            // showNotification("error", needsRecalc);
+            //  showNotification("error", "inside onSaveChanges :.needsRecalc = " + needsRecalc);
+
+            // if (needsRecalc) {
+            //     e.preventDefault();
+            //     showNotification("error", "Recalculate Total Cost for modified rows before saving.");
+            // }
+        }
+
+        function recalculateTotalCost(e) {
+            e.preventDefault();
+            //const grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            var grid = $("#" + nscInEstimateGridName).data("kendoGrid");
+            const row = $(e.currentTarget).closest("tr");
+            const dataItem = grid.dataItem(row);
+
+            // Handle number formatting
+            const parseNumber = (value) => {
+                const num = typeof value === 'string'
+                    ? parseFloat(value.replace(/,/g, ''))
+                    : value;
+                return isNaN(num) ? 0 : num;
+            };
+
+            const percentage = parseNumber(dataItem.Percentage);
+            const qty = parseNumber(dataItem.Qty);
+            const oemPartCost = parseNumber(dataItem.OemPartCost);
+            console.log("Sending values:", {
+                percentage: percentage,
+                qty: qty,
+                oemPartCost: oemPartCost
+            });
+            $.ajax({
+                url: '@Url.Action("RecalculateTotalCost", "NscPartsUsedInEstimates")',
+                type: 'POST',
+                contentType: 'application/x-www-form-urlencoded',
+                data: {
+                    percentage: percentage,
+                    qty: qty,
+                    oemPartCost: oemPartCost
+                },
+                success: function (response) {
+                    if (response.success) {
+                        console.log("Now time to reset Recalculation. Received response:", response);
+
+                        // Update data item and refresh grid
+                        dataItem.set("TotalCost", response.totalCost);
+                        dataItem.set("needsRecalculation", false);
+
+                        // Force grid refresh
+
+                        //  grid.refresh(); //ssk2
+                        // grid.dataSource.sync(); //ssk2
+
+                        showNotification("success", "Total Cost updated: $" + response.totalCost.toFixed(2));
+                    } else {
+
+                        showNotification("error", response.message || "Recalculation failed");
+                    }
+                },
+                error: function (xhr) {
+                    showNotification("error", "Server error: " + xhr.statusText);
+                }
+            });
+        }
+
+        function showNotification(type, message) {
+            var notification = $("#notification").data("kendoNotification");
+            if (!notification) {
+                notification = $("#notification").kendoNotification({
+                    position: { pinned: true, top: 50, right: 50 },
+                    autoHideAfter: 5000
+                }).data("kendoNotification");
+            }
+            notification.show(message, type);
+        }
+    </script>
+
+    <script>
+        function refreshRbPartDetails(e) {
+            // var grid = $("#RbPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+            var grid = $("#" + rbInEstimateGridName).data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var notification = $("#notification").data("kendoNotification");
+            notification.show(dataItem.RebuiltStockNum, "error");
+
+            if (!dataItem.RebuiltStockNum) {
+                notification.show(dataItem.RebuiltStockNum, "error");
+                notification.show("Rebuilt Part Number is required to refresh details", "error");
+                return;
+            }
+
+            $.ajax({
+                url: '@Url.Action("RefreshRbPartDetails", "RbPartsUsedInEstimates")',
+                data: { rebuiltStockNum: dataItem.RebuiltStockNum },
+                beforeSend: function () {
+                    notification.show("Refreshing part details...", "info");
+                },
+                success: function (response) {
+                    if (response.Message) {
+                        // Handle cost validation error
+                        notification.show(response.Message, "error");
+
+                        // Optional: Update other fields even if cost is invalid
+                        if (response.Data) {
+                            // dataItem.set("RebuiltStockNum", response.Data.RebuiltStockNum);
+                            dataItem.set("KeyWord", response.Data.KeyWord);
+                            dataItem.set("Description", response.Data.Description);
+                            grid.dataSource.read(); //ssk5
+                        }
+                    } else {
+                        // Update all fields
+                        //  dataItem.set("RebuiltStockNum", response.RebuiltStockNum);
+                        dataItem.set("KeyWord", response.KeyWord);
+                        dataItem.set("Description", response.Description);
+
+                        //   grid.refresh();
+                        grid.dataSource.read(); //ssk5
+                        notification.show("Details updated successfully", "success");
+                    }
+                },
+                error: function (xhr) {
+                    var errorMessage = xhr.status === 404
+                        ? "Rebuilt Part  not found"
+                        : "Error refreshing details";
+                    notification.show(errorMessage, "error");
+                }
+            });
+        }
+    </script>
+
+
+
+    <script>
+        // Initialize custom confirmation dialog
+        var deleteDialog = $("#deleteConfirmationDialog").kendoWindow({
+            width: "400px",
+            title: "Confirm Delete",
+            modal: true,
+            visible: false,
+            actions: ["Close"]
+        }).data("kendoWindow");
+
+        // function showDeleteConfirmation(e) {
+        //     console.log("inside showDeleteConfirmation");
+        //     e.preventDefault();
+
+        //     var $btn = $(e.currentTarget);
+        //     var gridId = $btn.data("grid");
+
+        //     var deleteUrl = $btn.data("url");
+        //     var idField = $btn.data("id-field");
+        //     var gridType = $btn.data("grid-type");
+        //     var parentPartId = $btn.data("parentPartId_field");
+
+        //     // var mmsstockcodeField = $btn.data("mmsstockcode-field");
+        //     // console.log("$$$$$ mmsstockcodeField :", mmsstockcodeField);
+        //     // console.log("%%%%% parentGridId :", parentGridId);
+
+        //     var grid = $("#" + gridId).data("kendoGrid");
+        //     //var grid = e.sender;
+
+        //     var dataItem = grid.dataItem($btn.closest("tr"));
+
+        //     var $dialog = $("#deleteConfirmationDialog");
+        //     console.log("inside showDeleteConfirmation -2");
+        //     $dialog.data("grid", grid);
+        //     $dialog.data("dataItem", dataItem);
+        //     $dialog.data("url", deleteUrl);
+        //     $dialog.data("idField", idField);
+        //     $dialog.data("parentPartId", parentPartId);
+        //     $dialog.data("gridType", gridType); // add gridType
+        //     var rebuiltStockNumField = $btn.data("rebuiltstocknum-field"); //ssk4
+        //     $dialog.data("rebuiltStockNumField", rebuiltStockNumField); //ssk4
+        //     console.log("inside showDeleteConfirmation gridType = ", gridType);
+        //     deleteDialog.center().open();
+        // }
+
+
+        $(document).on("click", "#deleteConfirmationDialog .confirm-btn", function () {
+            console.log("inside deleteConfirmationDialog - 1");
+            var $dialog = $("#deleteConfirmationDialog");
+            var grid = $dialog.data("grid");
+            var dataItem = $dialog.data("dataItem");
+            console.warn('dataItem :', dataItem);
+            var deleteUrl = $dialog.data("url");
+            console.log("deleteUrl=", deleteUrl);
+            var idField = $dialog.data("idField");
+            //  var parentPartId = $dialog.data("parentGridId");
+            // var mmsstockcodeField = $dialog.data("mmsstockcodeField");
+            var gridType = $dialog.data("gridType");
+            var notification = $("#notification").data("kendoNotification");
+            console.log("******* inside deleteConfirmationDialog - 2");
+            console.log("idField : ", idField);
+            console.log("idField : ", idField);
+            //   console.log("***mmsstockcodeField : ", mmsstockcodeField);
+            console.log("gridType :", gridType);
+            // console.log("DEBUG >>>", {
+            //     mmsstockcodeField,
+            //     value: dataItem[mmsstockcodeField],
+            //     dataItem
+            // });
+            var dataToSend = {};
+            //  var mmsValue = dataItem[mmsstockcodeField] || "";
+            dataToSend[idField] = dataItem[idField];
+            // console.log("***** parentGridId :", parentGridId);
+            //  dataToSend[parentPartId] = dataItem[parentGridId];
+            dataToSend["parentPartId"] = parentGridId; //dataItem["VehicleListId"];;// dataItem[mmsValue];
+            dataToSend["gridType"] = gridType; // static param
+            var rebuiltStockNumField = $dialog.data("rebuiltStockNumField"); // ssk4
+            dataToSend["rebuiltStockNum"] = dataItem[rebuiltStockNumField]; // ssk4
+
+            $.ajax({
+                url: deleteUrl,
+                type: 'POST',
+                data: dataToSend,
+                success: function () {
+                    // grid.dataSource.remove(dataItem);
+                    grid.dataSource.read(); //force refresh grid
+                    notification.success("Record deleted successfully");
+                    deleteDialog.close();
+                },
+                error: function (xhr) {
+                    notification.error("Delete failed: " + xhr.responseText);
+                    deleteDialog.close();
+                }
+            });
+        });
+        // $(document).on("click", "#deleteConfirmationDialog .cancel-btn", function () {
+        //     deleteDialog.close();
+        // });
+    </script>
+
+    <script>
+
+        function onLabourGridSave(e) {
+            console.warn('onLabourGridSave');
+
+            const grid = e.sender;
+            const notification = $("#notification").data("kendoNotification");
+
+            grid.one("dataBound", () => grid.refresh());
+
+            notification.success("Changes saved successfully");
+
+            // Retry refresh safely
+            let attempts = 0;
+            const maxAttempts = 5;
+
+            function tryReload() {
+                if (grid && grid.dataSource) {
+                    if (!grid.dataSource.hasChanges()) {
+                        grid.dataSource.read().then(() => {
+                            unsavedChangesExist = false;
+                            console.log("Grid refreshed successfully after save.");
+                        });
+                    } else {
+                        console.warn("Changes pending, skipping dataSource.read() to avoid conflict.");
+                    }
+                } else if (attempts < maxAttempts) {
+                    attempts++;
+                    setTimeout(tryReload, 200);
+                } else {
+                    console.error("Failed to refresh grid — dataSource not ready.");
+                }
+            }
+
+            tryReload();
+        }
+
+        function onGridEdit(e) {
+            // Re-apply styles after edit
+            const grid = e.sender;
+            grid.one("dataBound", () => grid.refresh());
+        }
+    </script>
+    <script>
+        function onScGridDataBound(e) {
+            // var grid = this;
+
+            // // Clear Kendo's "pristine" data cache
+            // grid.dataSource._pristineData = [];
+
+            // // Optionally clear current in-memory data if needed
+            // grid.dataSource.data([]);
+
+            // console.log("Cleared cache for grid:", grid.element.attr("id"));
+        }
+    </script>
+    <script>
+        //ssk12 Save/Add button
+        function updateToolbarButtons(gridName) {
+            var grid = $("#" + gridName).data("kendoGrid");
+            var hasChanges = grid.dataSource.hasChanges();
+
+            $("#" + gridName).find(".k-grid-save-changes")
+                .prop("disabled", !hasChanges)
+                .toggleClass("k-state-disabled", !hasChanges);
+
+            $("#" + gridName).find(".k-grid-cancel-changes")
+                .prop("disabled", !hasChanges)
+                .toggleClass("k-state-disabled", !hasChanges);
+
+            $("#" + gridName).find(".k-grid-add")
+                .prop("disabled", hasChanges)
+                .toggleClass("k-state-disabled", hasChanges)
+                .off("click").on("click", function (e) {
+                    if (hasChanges) {
+                        e.preventDefault();
+                        e.stopImmediatePropagation();
+                    }
+                });
+        }
+    </script>
+    <script>
+        //san17 - onCopyEstimateClick
+        function onCopyEstimateClick(e) {
+            e.preventDefault();
+            var dataItem = this.dataItem($(e.currentTarget).closest("tr"));
+            $("#vehicleListId ").val(dataItem.VehicleListId);
+            $("#oldprojDesc  ").val(dataItem.ProjDesc);
+            $("#oldVehSeriesCode").val(dataItem.VehSeriesCode);
+            $("#newVehSeriesCode").val("");
+            $("#newprojDesc").val("");
+            $("#copyEstimateDialog").data("kendoWindow").center().open();
+        }
+    </script>
+
+
+    <script>
+        function formatToEST(dateStr) {
+            if (!dateStr || dateStr === 0) {
+                return "(System Generated)";
+            }
+
+            const date = new Date(dateStr);
+
+            if (isNaN(date.getTime())) {
+                return "(System Generated)";
+            }
+
+            const datePart = date.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: '2-digit'
+            });
+
+            const timePart = date.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            });
+
+            return `${datePart} ${timePart}`;
+        }
+
+
+
+    </script>
+
+    <script>
+
+
+        function cancelScPartPopup() {
+            $("#ScPartsPopupWindow").data("kendoWindow").close();
+        }
+
+        function onScPartsEdit(e) {
+            var wnd = e.container.data("kendoWindow"); //outer popupsize
+            wnd.setOptions({
+                width: "40vw",
+                height: "80vh",
+                scrollable: false,     // 
+                title: e.model.isNew() ? "Add New Stock Coded Part" : "Edit Stock Coded Part",
+                modal: true,
+                resizable: false
+            });
+
+            e.container.closest(".k-window").addClass("scparts-popup-style");
+
+            // track current model for combobox select logic
+            currentScPartsModel = e.model;
+        }
+
+    </script>
+    <script>
+        function onScPartNumSelect(e) {
+            // onScPartChange(e);
+
+            console.warn('inside onScPartNumSelect');
+            const selectedValue = e.sender.value();
+            console.warn('selectedValue', selectedValue);
+
+            // In Popup mode, use the stored model
+            const model = currentScPartsModel;
+
+            if (!model || !selectedValue) {
+                console.warn("No selected value or model.");
+                return;
+            }
+
+            // Clear existing values
+            model.set("MmsStockCode", "");
+            model.set("Description", "");
+            model.set("KeyWord", "");
+            model.set("CoreCharge", "");
+            model.set("UnitCost", "");
+
+            $.ajax({
+                url: "/AutoComplete/GetScPartDetails",
+                type: "GET",
+                data: { mmsStockCode: selectedValue },
+                success: function (result) {
+                    if (result) {
+                        model.set("MmsStockCode", result.MmsStockCode || "");
+                        model.set("DetailedDesc", result.DetailedDesc || "");
+                        model.set("PartType", result.PartType || "");
+                        model.set("OrigSupplierNum", result.OrigSupplierNum || "");
+                        model.set("OrigSupplierName", result.OrigSupplierName || "");
+                        model.set("CoreCost", result.PartCost || "");
+                        model.set("UnitCost", result.UnitCost || "");
+                    }
+                    console.warn(" AJAX result:", result);
+                },
+                error: function (xhr) {
+                    console.error("Failed to fetch part details:", xhr.responseText);
+                }
+            });
+        }
+    </script>
+    <script>
+        function showCloseConfirmation() {
+            kendo.confirm("You have unsaved changes. Are you sure you want to close?")
+                .then(function () {
+                    // User clicked OK
+                    pendingChanges = false;
+                    $("#estimatePopup").data("kendoWindow").close();
+                }, function () {
+                    // User clicked Cancel - do nothing
+                });
+        }
+    </script>
+    <script>
+        function onLabourGridDataBound(e) { }
+    </script>
+    <script>
+        function saveScPartPopup() {
+            // Save the current popup row
+            var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+            if (grid) grid.saveRow();  // Triggers update/create
+        }
+        function cancelScPartPopup() {
+            var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+            if (grid) grid.cancelRow();
+            // Also close window if still open
+            var wnd = $(".k-window-content:visible").data("kendoWindow");
+            if (wnd) wnd.close();
+        }
+    </script>
+    <script>
+        $(window).on("resize", function () {
+            var grid = $("#VehicleGrid").data("kendoGrid");
+            if (grid) grid.resize();
+        });
+    </script>
+    <script>
+        function onScDelete(e) {
+            e.preventDefault();
+
+            var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            var vehicleId = window.currentVehicleId || $('#VehicleListId').val()
+            kendo.confirm("Do you want to delete this stock coded part?")
+                .then(function () {
+                    // Call your existing endpoint; adjust route/ID as needed
+                    $.ajax({
+                        url: "/ScPartsUsedInEstimates/DeleteScPartsUsedInEstimates",  //  route
+                        type: "POST",
+                        data: { id: vehicleId, partNum: dataItem.MMSStockCode, gridType: 'VehicleGrid' },              // MMSStockCode
+                        success: function () {
+                            grid.dataSource.read();               // refresh SC grid
+                            // Also refresh parent summary grid if required
+                            if (typeof materialSummaryGridName !== "undefined") {
+                                var parent = $("#" + materialSummaryGridName).data("kendoGrid");
+                                if (parent) parent.dataSource.read();
+                            }
+                            $("#notification").data("kendoNotification").success("Deleted successfully");
+                        },
+                        error: function (xhr) {
+                            $("#notification").data("kendoNotification").error("Delete failed: " + xhr.responseText);
+                        }
+                    });
+                });
+        }
+    </script>
+    <script>
+        var prentId = '@ViewBag.ParentId'
+    </script>
+
+}
+_NscPartsUsed.cshtml :
+ @model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+
+@{
+    ViewData["Title"] = "Non Stock Coded Parts Details";
+    var nscGridName = $"NScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}"; /* save gridname in hidden field for JS */
+    var parentId = $"{ ViewBag.PartNum }";
+    bool isArchived = ViewBag.GridType == "ArchivedVehicleGrid"; //ArchiveDisable
+    bool isAdmin = ViewBag.RoleId == 1; //ArchiveDisable
+    string gridName = $"NscPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}"; //for JS
+}
+<script>
+    // Store grid name for JavaScript access
+    var nscInEstimateGridName = '@gridName';
+</script>
+<h6>Non Stock Coded Parts Used</h6>
+<input type="hidden" id="nscGridNameField" value="@nscGridName" /> @* save gridname in hidden field for JS *@
+@(
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()    
+                
+                .Name($"NscPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}")
+                 .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "NscGrid" }) //lockcols
+               
+                .Columns(columns =>
+                {
+                    columns.Bound(c => c.Oid).Title("Oid").Hidden(true);
+                    columns.Bound(c => c.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("Contains")))
+                    .EditorTemplateName("NscComboBox")
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                    .Width(140);
+                   @*  columns.Command(command =>
+                   {
+                       command.Custom("Populate Details").Click("refreshNscPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+                   }).Width(60); *@
+
+                    columns.Bound(c => c.OrigSupplierName)
+                    .Title("Supplier Name")
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell" })
+                    .Filterable(ftb => ftb.Cell(cell => cell.Operator("Contains")
+                    .SuggestionOperator(FilterType.Contains)))
+                    .EditorTemplateName("ComboBoxEditor")
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:notNew" } //lockcols
+                    })
+                    .EditorTemplateName("NscSupplierComboBox").Width(120);
+
+                   @*  columns.Bound(c => c.Description)
+                    .Title("Description")
+                    .EditorTemplateName("ComboBoxEditor")
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                    })
+                    .Width(140)
+                    ; *@
+                    columns.Bound(c => c.KeyWord)
+                    .Title("KeyWord")
+                    .EditorTemplateName("NscComboBoxEditor")
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                    })
+                    .Width(100);
+                    //  columns.Bound(c => c.OemPartCost).Title("Unit Cost").Format("{0:N2}").Width(30);
+                  @*   columns.Bound(c => c.CC).Title("Cost Centre")
+                    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains")
+                    .SuggestionOperator(FilterType.Contains))).EditorTemplateName("ComboBoxEditor").Width(70)
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell" });
+ *@
+                    columns.Bound(c => c.Qty).Title("Qty").Width(70)
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" }); 
+
+                    columns.Bound(c => c.Percentage).Title("%").HtmlAttributes(new { data_field = "Percentage"}).Width(60)
+                    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive, MustBePercentage" })
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" });
+
+                    columns.Bound(c => c.UnitCost).Title("Part Cost").Width(80)
+                    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" });
+                    columns.Bound(c => c.CoreCost).Title("Core Cost").Width(80)
+                    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters" })
+                    .EditorTemplateName("ComboBoxEditor");
+
+                   @*  columns.Bound(c => c.TotalCost)
+                   .Title("Total Cost")
+                   .Width(90)
+                   .Format("{0:C2}")
+                   .Editable("false")
+                   .EditorTemplateName("ComboBoxEditor")
+                   .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                   })
+                   ; *@
+                    @* columns.Bound(c => c.LastModifiedBy)
+         .Title("Modified By")
+         .EditorTemplateName("ComboBoxEditor")
+         .ClientTemplate("#= LastModifiedBy && LastModifiedBy !== 0 ? LastModifiedBy : '(System Generated)' #")
+         .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+         })
+         .Width(160); *@
+
+        @* columns.Bound(c => c.LastModifiedDate)
+        .Title("Modified Date")
+        .Width(160)
+        .EditorTemplateName("ComboBoxEditor")
+        .ClientTemplate("#=  LastModifiedDate !== 0 ? formatToEST(LastModifiedDate) : '(System Generated)' #")
+        .EditorViewData(new Dictionary<string, object> {
+        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+         }); *@
+                   
+                    @* columns.Command(command =>
+                    {
+                        command.Custom("Re-Calculate")
+                            .Click("recalculateTotalCost")
+                            .HtmlAttributes(new { @class = "k-grid-recalculate" });
+                    }).HtmlAttributes( new { data_field = "Commands" }).Width(80);
+
+                    columns.Bound(c => c.TotalCost).Title("Total Cost").Width(30); *@
+                    
+                    // columns.Bound(c => c.DateRevised).Title("Date Revised");
+                    // columns.Command(command => command.Edit()).Title("Actions");
+                    columns.Command(command =>
+        {
+            if (!isArchived && isAdmin) //ArchiveDisable
+            {
+
+                command.Custom("Delete")
+                 .Click("showDeleteConfirmation")
+                 .Text(" ")
+                 .IconClass("k-icon k-i-delete")
+                 .HtmlAttributes(new
+                 {
+                     @class = "text-danger",
+                     title = "Delete",
+                     data_grid = $"NscPartsMaterialDetailsRebuiltPartsGrid",
+                     data_url = Url.Action("DeleteNscPartsUsedInEstimates", "NscPartsUsedInEstimates"),
+                     data_id_field = "id",
+                     data_parentPartId_field = "0000",
+                     data_grid_type = "NSCPartGrid"
+                 });
+            }
+        }).Width(100);
+                })
+
+                
+     .ToolBar(toolbar =>
+    {
+        if (!isArchived && isAdmin) //ArchiveDisable
+        {
+            toolbar.Create();
+           // toolbar.Save();
+        }
+    })
+    //.Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Editable(editable => editable.Mode(GridEditMode.PopUp)
+        .Window(w => w.Width("600px").Title("Edit Non Stock Coded Part")))
+    .Pageable()
+    .Sortable()
+    .Resizable(r => r.Columns(true))
+   // .Scrollable()
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .Batch(false)
+        .ServerOperation(false)
+        .Model(model =>
+        {
+            model.Id(c => c.OrigSuppNum);
+            model.Field(c => c.OrigSupplierName);
+            model.Field(c => c.OrigSuppNum);
+            model.Field(c => c.KeyWord);
+            model.Field(c => c.Description);
+            model.Field(c => c.UnitCost);
+            model.Field(c => c.Percentage);
+            model.Field(c => c.TotalCost);
+            model.Field(c => c.LastModifiedBy).Editable(false);
+            model.Field(c => c.LastModifiedDate).Editable(false);
+           // model.Field(c => c.TotalCost).Editable(true);
+         
+          //  model.Field("needsRecalculation", typeof(bool)).DefaultValue(false);
+        })
+        .Events(events =>
+        {
+                      
+            events.RequestEnd("onNScRequestEnd");
+            events.Error("onDataSourceError");
+        })
+
+        .Read(read => read.Url(Url.Action("GetNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+       
+        .Create(create => create.Url(Url.Action("CreateNscPartsUsedInEstimatess", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        //.Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsedInRbtParts", "NscPartsUsedInEstimates") + "?parentId=0000" + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete
+            .Url(Url.Action("DeleteNscPartsUsedInEstimates", "NscPartsUsedInEstimates")
+                 + $"?id="+ViewBag.PartNum +"&gridType={ViewBag.GridType}")
+            .Type(HttpVerbs.Post)
+)
+    )
+
+)
+
+NscPartsUsedViewmodel.cshtml :
+@model BCES.Models.Parts.NscPartsUsedViewModel
+
+<div class="scparts-popup-style">
+
+    <!-- Top-left action buttons -->
+    <div class="popup-actions">
+        <button class="k-button k-primary" type="button" onclick="saveScPartPopup()">Update</button>
+        <button class="k-button" type="button" onclick="cancelScPartPopup()">Cancel</button>
+    </div>
+
+    <!-- ===================== Row 1 ===================== -->
+    <div class="section-title">Supplier Information</div>
+    <div class="form-row">
+        <!-- Supplier Number -->
+        <div class="form-group  double-width">
+            <label class="form-label required-label">Supplier Number</label>
+            @(Html.Kendo().ComboBoxFor(m => m.OrigSuppNum)
+                .DataTextField("Text")
+                .DataValueField("Value")
+                .Filter("contains")
+                .Suggest(true)
+                .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                .BindTo((System.Collections.IEnumerable)ViewData["SupplierNumList"])
+                )
+        </div>
+
+        <!-- Supplier Name -->
+        <div class="form-group  double-width">
+            <label class="form-label required-label">Supplier Name</label>
+            @(Html.Kendo().ComboBoxFor(m => m.OrigSupplierName)
+                .DataTextField("Text")
+                .DataValueField("Value")
+                .Filter("contains")
+                .Suggest(true)
+                .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                .BindTo((System.Collections.IEnumerable)ViewData["SupplierNameList"])
+                )
+        </div>
+
+        <!-- Keyword -->
+        <div class="form-group  double-width">
+            <label class="form-label">Keyword</label>
+            @(Html.Kendo().TextBoxFor(m => m.KeyWord)
+                .HtmlAttributes(new { @class = "k-textbox" })
+                )
+        </div>
+    </div>
+
+    <!-- ===================== Row 2 ===================== -->
+    <div class="section-title">Part Description</div>
+    <div class="form-row">
+        <!-- Description -->
+        <div class="form-group  full-width">
+            <label class="form-label">Description</label>
+            @(Html.Kendo().TextBoxFor(m => m.Description)
+                .HtmlAttributes(new { @class = "k-textbox" })
+                )
+        </div>
+
+        <!-- Part Cost -->
+        <div class="section-title">Part Details</div>
+        <div class="form-group  double-width">
+            <label class="form-label">Part Cost</label>
+            @(Html.Kendo().NumericTextBoxFor(m => m.UnitCost)
+                .Format("{0:C2}")
+                .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" })
+                )
+        </div>
+    </div>
+
+    <!-- ===================== Row 3 ===================== -->
+    <div class="form-row">
+        <!-- Cost Centre -->
+        <div class="form-group  double-width">
+            <label class="form-label required-label">Cost Centre</label>
+            @(Html.Kendo().ComboBoxFor(m => m.CC)
+                .DataTextField("Text")
+                .DataValueField("Value")
+                .Filter("contains")
+                .Suggest(true)
+                .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                .BindTo((System.Collections.IEnumerable)ViewData["CostCentreList"])
+                )
+        </div>
+
+        <!-- Qty -->
+        <div class="form-group  double-width">
+            <label class="form-label required-label">Qty</label>
+            @(Html.Kendo().NumericTextBoxFor(m => m.Qty)
+                .HtmlAttributes(new { @class = "required-cell", required = "required", data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" })
+                )
+        </div>
+    </div>
+
+    @* ====== COMMENTED OUT FIELDS FROM _NScPartsUsed.cshtml ====== *@
+    @* Core Cost
+    <div class="form-row">
+    <div class="form-group">
+    <label class="form-label">Core Cost</label>
+    @(Html.Kendo().NumericTextBoxFor(m => m.CoreCost)
+    .Format("{0:C2}")
+    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" })
+    )
+    </div>
+    </div>
+    *@
+
+    @* Total Cost
+    <div class="form-row">
+    <div class="form-group">
+    <label class="form-label">Total Cost</label>
+    @(Html.Kendo().NumericTextBoxFor(m => m.TotalCost)
+    .Format("{0:C2}")
+    .HtmlAttributes(new { @readonly = "readonly" })
+    )
+    </div>
+    </div>
+    *@
+
+    @* Last Modified By
+    <div class="form-row">
+    <div class="form-group">
+    <label class="form-label">Modified By</label>
+    @(Html.Kendo().TextBoxFor(m => m.LastModifiedBy)
+    .HtmlAttributes(new { @readonly = "readonly", @class = "k-textbox" })
+    )
+    </div>
+    </div>
+    *@
+
+    @* Last Modified Date
+    <div class="form-row">
+    <div class="form-group">
+    <label class="form-label">Modified Date</label>
+    @(Html.Kendo().DatePickerFor(m => m.LastModifiedDate)
+    .HtmlAttributes(new { @readonly = "readonly" })
+    )
+    </div>
+    </div>
+    *@
+
+</div>
+
+@section scripts {
+    <script>
+        (function () {
+            var $popup = $('.k-window-content:visible');
+
+            // Save button triggers Kendo's update
+            $popup.on('click', '.sc-save-btn', function () {
+                $popup.find('.k-grid-update').trigger('click');
+            });
+
+            // Cancel button triggers Kendo's cancel
+            $popup.on('click', '.sc-cancel-btn', function () {
+                $popup.find('.k-grid-cancel').trigger('click');
+            });
+        })();
+    </script>
+}
+_VehPopUp.cshtml :
+@model BCES.Models.Vehicle.VehicleViewModel
+
+<div class="vehicle-popup-header">
+    <div class="vehicle-popup-title">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate" : $"Estimate #{Model.VehicleListId}")</div>
+    <div class="vehicle-tab-actions">
+        <button id="btnSave" class="vehicle-popup-btn vehicle-popup-btn-primary" type="button">
+            <span class="vehicle-btn-icon">✓</span> Save
+        </button>
+        <button id="btnCancelVehicle" class="vehicle-popup-btn vehicle-popup-btn-secondary" type="button">
+            <span class="vehicle-btn-icon">✕</span> Cancel
+        </button>
+    </div>
+</div>
+
+<div class="vehicle-form-container">
+    <form id="vehicleForm">
+        @Html.HiddenFor(m => m.VehicleListId)
+        @Html.Hidden("formMode", Model.VehicleListId == 0 ? "Add" : "Edit", new { id = "formMode" })
+
+        <!-- Vehicle Information Section -->
+        <div class="vehicle-section-title">Vehicle Information</div>
+
+        <!-- Row 1: Estimate #, Vehicle Series, Quantity -->
+        <div class="vehicle-form-row">
+            <div class="vehicle-form-group">
+                @Html.LabelFor(m => m.VehicleListId, "Estimate #", new { @class = "vehicle-form-label" })
+                @Html.TextBoxFor(m => m.VehicleListId, new { @class = "vehicle-form-control", @readonly = "readonly" })
+            </div>
+
+            <div class="vehicle-form-group">
+                @Html.LabelFor(m => m.VehSeriesCode, "Vehicle Series", new { @class = "vehicle-form-label vehicle-required-label" })
+                @Html.EditorFor(m => m.VehSeriesCode, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "vehicle-form-control required-cell" },
+                { "required", "required" }
+                }
+                    })
+            </div>
+
+            <div class="vehicle-form-group">
+                @Html.LabelFor(m => m.NumOfVehicles, "# Of Vehicles", new { @class = "vehicle-form-label vehicle-required-label" })
+                @(Html.Kendo().NumericTextBox()
+                    .Name("NumOfVehicles")
+                    .Format("0")
+                    .Min(1)
+                    .Value(Model.NumOfVehicles)
+                    .HtmlAttributes(new { @class = "vehicle-form-control", required = "required" })
+                    )
+            </div>
+        </div>
+
+        <!-- Row 2: Description, SOP Number -->
+        <div class="vehicle-form-row">
+            <div class="vehicle-form-group vehicle-double-width">
+                @Html.LabelFor(m => m.ProjDesc, "Description", new { @class = "vehicle-form-label vehicle-required-label" })
+                @Html.EditorFor(m => m.ProjDesc, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "vehicle-form-control required-cell" },
+                { "required", "required" }
+                }
+                    })
+            </div>
+
+            <div class="vehicle-form-group">
+                @Html.LabelFor(m => m.Sopnumber, "SOP Number", new { @class = "vehicle-form-label" })
+                @Html.TextBoxFor(m => m.Sopnumber, new { @class = "vehicle-form-control", Value = Model.Sopnumber })
+            </div>
+        </div>
+
+        <!-- Specifications Section -->
+        <div class="vehicle-section-title">Specifications</div>
+
+        <!-- Row 3: Make, Model, Year -->
+        <div class="vehicle-form-row">
+            <div class="vehicle-form-group">
+                @Html.LabelFor(m => m.Make, "Make", new { @class = "vehicle-form-label" })
+                @Html.EditorFor(m => m.Make, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "vehicle-form-control" }
+                }
+                    })
+            </div>
+
+            <div class="vehicle-form-group">
+                @Html.LabelFor(m => m.VehModel, "Model", new { @class = "vehicle-form-label" })
+                @Html.EditorFor(m => m.VehModel, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "vehicle-form-control" }
+                }
+                    })
+            </div>
+
+            <div class="vehicle-form-group">
+                @Html.LabelFor(m => m.Year, "Year", new { @class = "vehicle-form-label" })
+                @(Html.Kendo().NumericTextBox()
+                    .Name("Year")
+                    .Format("0")
+                    .Min(1900)
+                    .Max(2100)
+                    .Value(Model.Year)
+                    .HtmlAttributes(new { @class = "vehicle-form-control" })
+                    )
+            </div>
+        </div>
+
+        <!-- Row 4: Engine, Transmission, Differential -->
+        <div class="vehicle-form-row">
+            <div class="vehicle-form-group">
+                @Html.LabelFor(m => m.Engine, "Engine", new { @class = "vehicle-form-label" })
+                @Html.EditorFor(m => m.Engine, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "vehicle-form-control" }
+                }
+                    })
+            </div>
+
+            <div class="vehicle-form-group">
+                @Html.LabelFor(m => m.Transmission, "Transmission", new { @class = "vehicle-form-label" })
+                @Html.EditorFor(m => m.Transmission, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "vehicle-form-control" }
+                }
+                    })
+            </div>
+
+            <div class="vehicle-form-group">
+                @Html.LabelFor(m => m.Differential, "Differential", new { @class = "vehicle-form-label" })
+                @Html.EditorFor(m => m.Differential, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "vehicle-form-control" }
+                }
+                    })
+            </div>
+        </div>
+
+        
+    </form>
+</div>
+Vehicle-Estimate.css :
+/* ==========================================
+   THEME VARIABLES (use these for consistency)
+========================================== */
+:root {
+    --blue-primary: #1e88e5;
+    --blue-secondary: #64b5f6;
+    --blue-light: #e3f2fd;
+    --blue-dark: #0d47a1;
+    --grey-light: #f8fafc;
+    --grey-border: #d1d5db;
+    --popup-z-index: 10000;
+    --overlay-z-index: 9999;
+    --font-small: 11px;
+    --font-normal: 12px;
+    --font-section: 14px;
+}
+
+/* ==========================================
+   POPUP WINDOWS
+========================================== */
+.k-window {
+    background-color: #e6f2ff !important; /* no transparency */
+    border: 1px solid var(--blue-secondary) !important;
+}
+
+/* Ensure popup content stays contained */
+#estimatePopup,
+.popup-container {
+    width: 950px !important;
+    max-width: 95%;
+    max-height: 80vh;
+    overflow: hidden;
+    background: #fff;
+    border-radius: 4px;
+}
+
+/* Fix Stock Coded popup not centered */
+.k-window-wrapper {
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+}
+
+/* ==========================================
+   SECTION TITLES (Vehicle Info, Specifications, etc.)
+========================================== */
+.vehicle-section-title,
+.section-title,
+.confirmation-title {
+    font-size: var(--font-section);
+    font-weight: 600;
+    margin: 15px 0 8px 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #2c3e50;
+}
+
+    /* Add the vertical blue bar */
+    .vehicle-section-title::before,
+    .section-title::before,
+    .confirmation-title::before {
+        content: "";
+        display: block;
+        width: 4px;
+        height: 14px;
+        background: var(--blue-primary);
+        border-radius: 2px;
+    }
+
+/* ==========================================
+   FORM LAYOUT (3 columns for Vehicle tab)
+========================================== */
+.vehicle-form-row,
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.vehicle-form-group,
+.form-group {
+    display: flex;
+    flex-direction: column;
+}
+
+    .vehicle-form-group.vehicle-double-width,
+    .form-group.double-width {
+        grid-column: span 2;
+    }
+
+/* ==========================================
+   LABELS
+========================================== */
+.vehicle-form-label,
+.form-label {
+    font-size: var(--font-small);
+    font-weight: 600;
+    margin-bottom: 2px;
+    color: #2c3e50;
+}
+
+.vehicle-form-row.audit-info .vehicle-form-label {
+    font-size: var(--font-small);
+    color: #555;
+}
+
+.required-label::after,
+.required-header::after {
+    content: " *";
+    color: #e74c3c;
+}
+
+/* ==========================================
+   INPUT CONTROLS (Compact like Stock Coded Parts)
+========================================== */
+.vehicle-form-control,
+.k-input-inner,
+.k-combobox .k-input-inner,
+.k-numerictextbox input.k-input-inner,
+.k-datepicker .k-input-inner,
+.k-textbox {
+    height: 20px !important; /* 50% less height */
+    line-height: 18px !important;
+    font-size: var(--font-normal) !important;
+    padding: 2px 4px !important;
+}
+
+.k-combobox,
+.k-numerictextbox,
+.k-datepicker,
+.k-textbox {
+    height: 24px !important;
+    font-size: var(--font-normal);
+}
+
+/* Readonly fields */
+.read-only,
+.k-state-disabled {
+    background-color: var(--grey-light) !important;
+    color: #4b5563 !important;
+}
+
+/* Combobox dropdown */
+.k-list-container {
+    background: #fff !important;
+    border: 1px solid var(--blue-secondary) !important;
+}
+
+    .k-list-container .k-list-item {
+        font-size: var(--font-normal);
+        padding: 4px 8px;
+    }
+
+        .k-list-container .k-list-item:hover,
+        .k-list-container .k-list-item.k-state-selected {
+            background: var(--blue-light) !important;
+        }
+
+/* ==========================================
+   TABS
+========================================== */
+#estimateTabs {
+    height: 50% !important; /* reduce height */
+}
+
+    #estimateTabs .k-tabstrip-items .k-link {
+        font-weight: 600 !important;
+        font-size: var(--font-normal);
+        color: #000 !important;
+    }
+
+    #estimateTabs .k-tabstrip-items .k-state-active .k-link {
+        background-color: var(--blue-light) !important;
+        color: #000 !important;
+    }
+
+    #estimateTabs .k-tabstrip-items .k-link:hover {
+        background: var(--blue-secondary) !important;
+        color: #000;
+    }
+
+/* ==========================================
+   GRIDS
+========================================== */
+.k-grid {
+    font-size: var(--font-normal);
+}
+
+.k-grid-toolbar {
+    background: var(--blue-light) !important;
+    padding: 4px 8px;
+}
+
+    .k-grid-toolbar .k-button {
+        background: var(--blue-primary);
+        border: 1px solid var(--blue-dark);
+        color: #fff !important;
+        font-size: var(--font-normal);
+        height: 28px;
+        padding: 2px 10px;
+    }
+
+.k-grid-content .k-button {
+    font-size: var(--font-small);
+    padding: 2px 6px;
+    height: 24px;
+    background: #f0f6ff;
+    border: 1px solid var(--blue-secondary);
+}
+
+    .k-grid-content .k-button:hover {
+        background: var(--blue-light);
+    }
+
+/* ==========================================
+   CONFIRMATION / COPY DIALOGS
+========================================== */
+.k-window[aria-label="Confirm Delete"],
+.k-window[aria-label="Copy Estimate"] {
+    background: #f9fbff !important;
+    border: 1px solid var(--blue-secondary);
+}
+
+.confirmation-title {
+    font-size: var(--font-normal);
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.k-window .k-button.k-primary {
+    background: var(--blue-primary);
+    border-color: var(--blue-dark);
+    color: #fff;
+}
+
+    .k-window .k-button.k-primary:hover {
+        background: var(--blue-dark);
+    }
+
+.k-window .k-button:not(.k-primary) {
+    background: #f0f0f0;
+    color: #000;
+}
+/* ==========================================
+   POPUP WINDOWS (all modals unified)
+========================================== */
+.k-window {
+    background-color: #ffffff !important; /* white background */
+    border: 1px solid #b3d1ff !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+/* Ensure popup content is white, no transparency */
+#estimatePopup,
+.popup-container,
+.k-window-content {
+    background-color: #ffffff !important;
+}
+
+/* ==========================================
+   TAB HEADERS (reduce height to 50%)
+========================================== */
+#estimateTabs .k-tabstrip-items .k-link {
+    min-height: 20px !important; /* reduce default ~40px */
+    line-height: 18px !important;
+    padding: 2px 8px !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    color: #000 !important;
+}
+
+/* Active tab */
+#estimateTabs .k-tabstrip-items .k-state-active .k-link {
+    background-color: #e6f2ff !important; /* light blue */
+    border-radius: 3px 3px 0 0;
+}
+
+/* Hover effect */
+#estimateTabs .k-tabstrip-items .k-link:hover {
+    background-color: #cce0ff !important;
+}
+
+/* ==========================================
+   TAB CONTENT AREA
+========================================== */
+#estimateTabs .k-content {
+    background-color: #ffffff !important; /* white body */
+    padding: 10px;
+    border: 1px solid #b3d1ff;
+    border-top: none;
+}
+/* ==========================================
+   TABS → Sleek Ribbon Style
+========================================== */
+#estimateTabs .k-tabstrip-items {
+    display: flex;
+    background: #f5faff; /* very light blue ribbon */
+    border-bottom: 1px solid #b3d1ff;
+    padding: 0;
+    margin: 0;
+}
+
+    #estimateTabs .k-tabstrip-items .k-item {
+        margin: 0;
+        padding: 0;
+        border: none;
+    }
+
+    #estimateTabs .k-tabstrip-items .k-link {
+        font-size: 12px;
+        font-weight: 600;
+        color: #000;
+        padding: 4px 12px !important; /* sleek padding */
+        min-height: 18px !important; /* slim height */
+        line-height: 16px !important;
+        border-radius: 0;
+        transition: background 0.2s ease-in-out;
+    }
+
+        /* Hover */
+        #estimateTabs .k-tabstrip-items .k-link:hover {
+            background: #e6f2ff !important;
+            color: #000;
+        }
+
+    /* Active tab */
+    #estimateTabs .k-tabstrip-items .k-state-active .k-link {
+        background: #cce0ff !important;
+        border-bottom: 2px solid #1e88e5;
+        font-weight: 700;
+    }
+/* Stock Coded Parts popup */
+.scparts-popup-style .k-window-content {
+    padding: 15px !important;
+    max-height: 75vh;
+    overflow-y: auto;
+}
+
+/* Stock Coded Parts popup */
+.scparts-popup-style .k-window-content {
+    padding: 15px !important;
+    max-height: 75vh;
+    overflow-y: auto;
+}
+
+/* Stock Coded Parts popup → 3 columns per row */
+.scparts-popup-style .form-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr); /* ✅ 3 columns */
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.scparts-popup-style .form-group {
+    display: flex;
+    flex-direction: column;
+}
+/* Popup form section layout */
+.scparts-popup-style .form-row {
+    display: grid;
+    grid-template-columns: repeat(4, 4fr); /* 3 columns */
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+/* All inputs same width */
+
+
+/* For big fields like Description or Supplier Name */
+.scparts-popup-style .double-width {
+    grid-column: span 2;
+}
+
+.scparts-popup-style .triple-width {
+    grid-column: span 2;
+}
+
+.scparts-popup-style .full-width {
+    grid-column: span 4;
+}
+.scparts-popup-style .section-title {
+    grid-column: span 8; /* ✅ force to take full width */
+    font-size: 14px;
+    font-weight: bold;
+    margin: 16px 0 8px;
+}
+.section-title {
+    font-size: 13px;
+    color: #2c3e50;
+    border-bottom: 1px solid var(--blue-primary);
+    padding-bottom: 4px;
+    font-weight: 600;
+}
+.scparts-popup-style .form-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr); /* 6 equal slots */
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.scparts-popup-style .form-group.double-width {
+    grid-column: span 2; /* each control = 2 slots */
+}
+
+.scparts-popup-style .form-group.full-width {
+    grid-column: span 6; /* description full row */
+}
+
+.scparts-popup-style .section-title {
+    grid-column: span 6;
+    font-size: 12px;
+    font-weight: bold;
+    margin: 16px 0 8px;
+    border-bottom: 1px solid var(--blue-primary);
+}
+
+.popup-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+.scparts-popup-style .k-edit-buttons {
+    display: none !important;
+}
+/* Stop forcing 7500px width on every popup container */
+#estimatePopup {
+    width: 650px !important;
+    max-width: 95%;
+    max-height: 80vh;
+    overflow: hidden;
+    background: #fff;
+    border-radius: 4px;
+}
+
+/* Let Stock Coded Parts popup be sized by JS */
+.scparts-popup-style.popup-container {
+    width: auto !important;
+    max-width: 90vw;
+    max-height: 80vh;
+}
+#VehicleGrid .k-grid-content {
+    max-height: calc(100vh - 280px); /* adjust header/toolbar footprint */
+    overflow-y: auto;
+}
+
+
