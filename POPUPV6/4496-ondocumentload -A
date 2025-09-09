@@ -1,28 +1,134 @@
-$("#estimatePopup").kendoWindow({
-    modal: true,
-    width: "1100px",
-    height: "570px",
-    resizable: false,
-    scrollable: false,
-    title: "Estimate",
-    visible: false,
-    actions: ["Close"],
-    open: function () {
-        var ts = $("#estimateTabs").data("kendoTabStrip");
-        if (ts) {
-            ts.select(0); // ✅ always reset to first tab
+<script>
+    var currentVehicleId = 0;
+
+    $(document).ready(function () {
+        // ===== Vehicle TabStrip on main page =====
+        var tabStrip = $("#vehicleTabStrip").data("kendoTabStrip");
+        if (tabStrip) {
+            tabStrip.select(0); // Select the Vehicles tab initially
         }
 
-        // ✅ Clear previous tab content to avoid stale grids
-        $("#vehicleTabContent, #partsTabContent, #labourTabContent, #labourDetailsTabContent, #stockCodedPartsTabContent, #nonStockCodedPartsTabContent, #rebuiltPartsTabContent, #finalEstimateTabContent").empty();
+        // ===== Notifications =====
+        $("#notification").kendoNotification();
 
-        // ✅ Load vehicle form fresh
-        loadVehicleForm(currentVehicleId);
-    },
-    close: function (e) {
-        if (pendingChanges) {
-            e.preventDefault();
-            showCloseConfirmation();
+        // ===== Vehicle Estimate Popup =====
+        $("#estimatePopup").kendoWindow({
+            modal: true,
+            width: "1100px",
+            height: "570px",
+            resizable: false,
+            scrollable: false,
+            title: "Estimate",
+            visible: false,
+            actions: ["Close"],
+            open: function () {
+                var ts = $("#estimateTabs").data("kendoTabStrip");
+                if (ts) {
+                    ts.select(0); // ✅ reset to Vehicle tab every time
+                }
+
+                // ✅ clear all tab contents to avoid stale grids
+                $("#vehicleTabContent, #partsTabContent, #labourTabContent, #labourDetailsTabContent, #stockCodedPartsTabContent, #nonStockCodedPartsTabContent, #rebuiltPartsTabContent, #finalEstimateTabContent").empty();
+
+                // ✅ load vehicle form fresh
+                loadVehicleForm(currentVehicleId);
+            },
+            close: function (e) {
+                if (pendingChanges) {
+                    e.preventDefault();
+                    showCloseConfirmation();
+                }
+            }
+        });
+
+        // ===== TabStrip inside popup =====
+        $("#estimateTabs").kendoTabStrip({
+            animation: { open: { effects: "fadeIn" } },
+            select: onTabSelect
+        });
+
+        // Disable all tabs except Vehicle initially
+        disableOtherTabs();
+
+        // ===== Vehicle Grid requestEnd hook =====
+        var vehicleGrid = $("#VehicleGrid").data("kendoGrid");
+        if (vehicleGrid) {
+            vehicleGrid.dataSource.bind("requestEnd", function (e) {
+                if (e.type === "create" && e.response && !e.response.Errors) {
+                    enableAllTabs();
+                }
+            });
+        }
+
+        // ===== Make grid cells clickable for editing =====
+        $(document).on("click", ".stock-code-cell", function () {
+            var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+            if (grid) {
+                var row = $(this).closest("tr");
+                grid.editRow(row);
+            }
+        });
+
+        $(document).on("click", ".non-stock-code-cell", function () {
+            var grid = $("#" + nscInEstimateGridName).data("kendoGrid");
+            if (grid) {
+                var row = $(this).closest("tr");
+                grid.editRow(row);
+            }
+        });
+
+        $(document).on("click", ".rb-code-cell", function () {
+            var grid = $("#" + rbInEstimateGridName).data("kendoGrid");
+            if (grid) {
+                var row = $(this).closest("tr");
+                grid.editRow(row);
+            }
+        });
+
+        $(document).on("click", ".labour-cell", function () {
+            var grid = $("#" + labourInEstimateGridName).data("kendoGrid");
+            if (grid) {
+                var row = $(this).closest("tr");
+                grid.editRow(row);
+            }
+        });
+    });
+
+    // ===== Tab Select Handler (always fetch fresh from server) =====
+    function onTabSelect(e) {
+        var index = $(e.item).index();
+
+        var tabsConfig = [
+            { id: "vehicleTabContent", url: '@Url.Action("GetVehicleById", "Vehicles")' },
+            { id: "partsTabContent", url: "/Vehicles/MaterialCostSummaryPartial" },
+            { id: "labourTabContent", url: "/Vehicles/LabourHourSummaryPartial" },
+            { id: "labourDetailsTabContent", url: "/Vehicles/LabourDetailsPartial" },
+            { id: "stockCodedPartsTabContent", url: "/Vehicles/ScDetailsPartial" },
+            { id: "nonStockCodedPartsTabContent", url: "/Vehicles/NonStockPartsPartial" },
+            { id: "rebuiltPartsTabContent", url: "/Vehicles/RebuiltPartsPartial" },
+            { id: "finalEstimateTabContent", url: "/Vehicles/TotalCostPartial" }
+        ];
+
+        var tab = tabsConfig[index];
+        if (!tab) return;
+
+        // ✅ Always clear and reload content from server
+        $("#" + tab.id).empty();
+        loadTabContent(tab.id, tab.url, { id: currentVehicleId, gridType: "VehicleGrid" });
+    }
+
+    // ===== Enable/Disable Tabs =====
+    function disableOtherTabs() {
+        var ts = $("#estimateTabs").data("kendoTabStrip");
+        for (var i = 1; i <= 7; i++) {
+            ts.enable(ts.tabGroup.children().eq(i), false);
         }
     }
-});
+
+    function enableAllTabs() {
+        var ts = $("#estimateTabs").data("kendoTabStrip");
+        for (var i = 1; i <= 7; i++) {
+            ts.enable(ts.tabGroup.children().eq(i), true);
+        }
+    }
+</script>
