@@ -1,0 +1,408 @@
+Update the Grid Command
+Replace <add changes> with a JavaScript function name, e.g. showArchiveDetails:
+
+csharp
+columns.Command(command =>
+{
+    command.Custom("Show Archive Details")
+           .Text(" ")
+           .IconClass("k-icon k-i-file-excel")
+           .Click("showArchiveDetails")
+           .HtmlAttributes(new { title = "Archive Details" });
+}).Title("Actions").Width(200).HtmlAttributes(new { @class = "action-buttons" });
+2. Add JavaScript Handler
+This function will grab the selected row’s VehicleListId and open a Kendo Window (popup):
+
+html
+@section scripts {
+<script>
+    function showArchiveDetails(e) {
+        e.preventDefault();
+
+        var grid = $("#ArchivedVehicleGrid").data("kendoGrid");
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        var vehicleListId = dataItem.VehicleListId;
+
+        // Open popup window
+        $("<div/>").kendoWindow({
+            title: "Archive Vehicle Details",
+            modal: true,
+            width: "950px",
+            height: "650px",
+            resizable: false,
+            actions: ["Close"],
+            content: {
+                url: '@Url.Action("ArchiveDetails", "ArchVehicle")',
+                data: { id: vehicleListId }
+            },
+            close: function () {
+                this.destroy(); // cleanup DOM
+            }
+        }).data("kendoWindow").center().open();
+    }
+</script>
+}
+=============================================
+Models (ViewModels for Popup)
+📄 ArchVehiclePopupViewModel.cs
+
+csharp
+using System;
+using System.Collections.Generic;
+
+namespace BCES.Models.ArchVehicle
+{
+    public class ArchVehiclePopupViewModel
+    {
+        // Master
+        public int ArchVehicleListId { get; set; }
+        public string Make { get; set; }
+        public string Model { get; set; }
+        public string Year { get; set; }
+        public string Engine { get; set; }
+        public string Transmission { get; set; }
+        public string Differential { get; set; }
+
+        // Costs
+        public decimal LabourTotal { get; set; }
+        public decimal MaterialsTotal { get; set; }
+        public decimal TotalBusEstimateCost { get; set; }
+
+        // Collections
+        public IEnumerable<ScPartUsedViewModel> ScPartsUsed { get; set; } = new List<ScPartUsedViewModel>();
+        public IEnumerable<NscPartUsedViewModel> NscPartsUsed { get; set; } = new List<NscPartUsedViewModel>();
+        public IEnumerable<EmployeeLabourViewModel> EmployeeLabours { get; set; } = new List<EmployeeLabourViewModel>();
+        public IEnumerable<LabourCcTotalViewModel> LabourCcTotals { get; set; } = new List<LabourCcTotalViewModel>();
+    }
+
+    public class ScPartUsedViewModel
+    {
+        public string MmsStockCode { get; set; }
+        public string ScDescription { get; set; }
+        public string QtyReqd { get; set; }
+        public decimal? TotalCost { get; set; }
+        public string RebuiltPart { get; set; }
+    }
+
+    public class NscPartUsedViewModel
+    {
+        public string OrigSuppNum { get; set; }
+        public string OrigSupplierName { get; set; }
+        public string QtyReqd { get; set; }
+        public decimal? TotalCost { get; set; }
+    }
+
+    public class EmployeeLabourViewModel
+    {
+        public string LabourDefn { get; set; }
+        public string Task { get; set; }
+        public string HrsReqd { get; set; }
+        public string AdjHrs { get; set; }
+        public decimal? TimeAddition { get; set; }
+    }
+
+    public class LabourCcTotalViewModel
+    {
+        public string CostCentre { get; set; }
+        public decimal? TotalHours { get; set; }
+    }
+}
+2. Repository (Dapper with SQL)
+📄 ArchVehicleRepository.cs
+
+csharp
+using System.Data;
+using System.Linq;
+using Dapper;
+using Oracle.ManagedDataAccess.Client;
+using BCES.Models.ArchVehicle;
+
+namespace BCES.Data
+{
+    public interface IArchVehicleRepository
+    {
+        ArchVehiclePopupViewModel GetArchVehiclePopup(int id);
+    }
+
+    public class ArchVehicleRepository : IArchVehicleRepository
+    {
+        private readonly string _connectionString;
+        public ArchVehicleRepository(string connectionString)
+        {
+            _connectionString = connectionString;
+        }
+
+        public ArchVehiclePopupViewModel GetArchVehiclePopup(int id)
+        {
+            using var conn = new OracleConnection(_connectionString);
+
+            var master = conn.QueryFirstOrDefault<dynamic>(
+                @"SELECT * FROM ARCH_VEHICLE_LIST WHERE arch_vehicle_list_id = :id",
+                new { id });
+
+            var scParts = conn.Query<ScPartUsedViewModel>(
+                @"SELECT * FROM ARCH_VEH_SC_PARTS_USED 
+                  WHERE arch_vehicle_list_id = :id",
+                new { id });
+
+            var nscParts = conn.Query<NscPartUsedViewModel>(
+                @"SELECT * FROM ARCH_VEH_NSC_PARTS_USED 
+                  WHERE arch_vehicle_list_id = :id",
+                new { id });
+
+            var labour = conn.Query<EmployeeLabourViewModel>(
+                @"SELECT labour_defn, task, hrs_reqd, adj_hrs, time_addition 
+                  FROM ARCH_VEH_EMPLOYEE_LABOUR 
+                  WHERE arch_vehicle_list_id = :id",
+                new { id });
+
+            var labourTotals = conn.Query<LabourCcTotalViewModel>(
+                @"SELECT costcentre AS CostCentre, total_hours AS TotalHours 
+                  FROM ARCH_VEH_LABOUR_CC_TOTAL 
+                  WHERE arch_vehicle_list_id = :id",
+                new { id });
+
+            return new ArchVehiclePopupViewModel
+            {
+                ArchVehicleListId = master.ARCH_VEHICLE_LIST_ID,
+                Make = master.MAKE,
+                Model = master.MODEL,
+                Year = master.YEAR,
+                Engine = master.ENGINE,
+                Transmission = master.TRANSMISSION,
+                Differential = master.DIFFERENTIAL,
+                LabourTotal = master.LABOURTOTAL,
+                MaterialsTotal = master.MATERIALSTOTAL,
+                TotalBusEstimateCost = master.TOTALBUSESTIMATECOST,
+                ScPartsUsed = scParts,
+                NscPartsUsed = nscParts,
+                EmployeeLabours = labour,
+                LabourCcTotals = labourTotals
+            };
+        }
+    }
+}
+3. Controller
+📄 ArchVehicleController.cs
+
+csharp
+using Microsoft.AspNetCore.Mvc;
+using BCES.Data;
+
+namespace BCES.Controllers
+{
+    public class ArchVehicleController : Controller
+    {
+        private readonly IArchVehicleRepository _repo;
+        public ArchVehicleController(IArchVehicleRepository repo)
+        {
+            _repo = repo;
+        }
+
+        public IActionResult ArchiveDetails(int id)
+        {
+            var vm = _repo.GetArchVehiclePopup(id);
+            return PartialView("_ArchVehiclePopup", vm);
+        }
+    }
+}
+4. Partial View (Popup)
+📄 _ArchVehiclePopup.cshtml
+
+csharp
+@model BCES.Models.ArchVehicle.ArchVehiclePopupViewModel
+
+<div class="archvehicle-popup-style">
+    <div class="popup-close">
+        <button type="button" class="k-button k-button-icon" onclick="closeArchVehiclePopup()">
+            <span class="k-icon k-i-close"></span>
+        </button>
+    </div>
+
+    <div class="section-title">Vehicle Information</div>
+    <div class="form-row">
+        <div class="form-group double-width">
+            @Html.LabelFor(m => m.Make)
+            @(Html.Kendo().TextBoxFor(m => m.Make).HtmlAttributes(new { @readonly = "readonly" }))
+        </div>
+        <div class="form-group double-width">
+            @Html.LabelFor(m => m.Model)
+            @(Html.Kendo().TextBoxFor(m => m.Model).HtmlAttributes(new { @readonly = "readonly" }))
+        </div>
+        <div class="form-group double-width">
+            @Html.LabelFor(m => m.Year)
+            @(Html.Kendo().TextBoxFor(m => m.Year).HtmlAttributes(new { @readonly = "readonly" }))
+        </div>
+    </div>
+
+    <div class="section-title">Cost Summary</div>
+    <div class="form-row">
+        <div class="form-group double-width">
+            @Html.LabelFor(m => m.LabourTotal)
+            @(Html.Kendo().NumericTextBoxFor(m => m.LabourTotal).Format("c2").HtmlAttributes(new { @readonly = "readonly" }))
+        </div>
+        <div class="form-group double-width">
+            @Html.LabelFor(m => m.MaterialsTotal)
+            @(Html.Kendo().NumericTextBoxFor(m => m.MaterialsTotal).Format("c2").HtmlAttributes(new { @readonly = "readonly" }))
+        </div>
+        <div class="form-group double-width">
+            @Html.LabelFor(m => m.TotalBusEstimateCost)
+            @(Html.Kendo().NumericTextBoxFor(m => m.TotalBusEstimateCost).Format("c2").HtmlAttributes(new { @readonly = "readonly" }))
+        </div>
+    </div>
+
+    <div class="section-title">SC Parts Used</div>
+    @(Html.Kendo().Grid(Model.ScPartsUsed)
+        .Name("scPartsGrid")
+        .Columns(columns =>
+        {
+            columns.Bound(p => p.MmsStockCode).Title("Stock Code");
+            columns.Bound(p => p.ScDescription).Title("Description");
+            columns.Bound(p => p.QtyReqd).Title("Qty");
+            columns.Bound(p => p.TotalCost).Title("Cost").Format("{0:c2}");
+        })
+        .Scrollable()
+        .HtmlAttributes(new { style = "height:200px;" })
+    )
+
+    <div class="section-title">NSC Parts Used</div>
+    @(Html.Kendo().Grid(Model.NscPartsUsed)
+        .Name("nscPartsGrid")
+        .Columns(columns =>
+        {
+            columns.Bound(p => p.OrigSuppNum).Title("Supplier #");
+            columns.Bound(p => p.OrigSupplierName).Title("Supplier Name");
+            columns.Bound(p => p.QtyReqd).Title("Qty");
+            columns.Bound(p => p.TotalCost).Title("Cost").Format("{0:c2}");
+        })
+        .Scrollable()
+        .HtmlAttributes(new { style = "height:200px;" })
+    )
+
+    <div class="section-title">Employee Labour</div>
+    @(Html.Kendo().Grid(Model.EmployeeLabours)
+        .Name("labourGrid")
+        .Columns(columns =>
+        {
+            columns.Bound(l => l.LabourDefn).
+continue
+Got it — let’s finish the popup partial view and then recap the full wiring (grid → JS → controller → repository → popup).
+
+📄 _ArchVehiclePopup.cshtml (continued)
+csharp
+    <div class="section-title">Employee Labour</div>
+    @(Html.Kendo().Grid(Model.EmployeeLabours)
+        .Name("labourGrid")
+        .Columns(columns =>
+        {
+            columns.Bound(l => l.LabourDefn).Title("Labour Type");
+            columns.Bound(l => l.Task).Title("Task");
+            columns.Bound(l => l.HrsReqd).Title("Time");
+            columns.Bound(l => l.AdjHrs).Title("Actual Time");
+            columns.Bound(l => l.TimeAddition).Title("Time Addition").Format("{0:n2}");
+        })
+        .Scrollable()
+        .HtmlAttributes(new { style = "height:200px;" })
+    )
+
+    <div class="section-title">Labour Totals</div>
+    @(Html.Kendo().Grid(Model.LabourCcTotals)
+        .Name("labourTotalsGrid")
+        .Columns(columns =>
+        {
+            columns.Bound(t => t.CostCentre).Title("Cost Centre");
+            columns.Bound(t => t.TotalHours).Title("Total Hours").Format("{0:n2}");
+        })
+        .Scrollable()
+        .HtmlAttributes(new { style = "height:150px;" })
+    )
+</div>
+
+@section styles {
+    <style>
+        .archvehicle-popup-style {
+            width: 900px;
+            height: 600px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 20px;
+            position: relative;
+        }
+        .popup-close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+        .section-title {
+            font-weight: bold;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        .form-row {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+        }
+        .form-group {
+            margin-right: 15px;
+            margin-bottom: 10px;
+        }
+        .double-width {
+            flex: 0 0 45%;
+        }
+        .full-width {
+            flex: 0 0 100%;
+        }
+    </style>
+}
+
+@section scripts {
+    <script>
+        function closeArchVehiclePopup() {
+            var wnd = $(".k-window-content:visible").data("kendoWindow");
+            if (wnd) wnd.close();
+        }
+    </script>
+}
+5. Grid Button Wiring
+In your ArchivedVehicleGrid view:
+
+csharp
+columns.Command(command =>
+{
+    command.Custom("Show Archive Details")
+           .Text(" ")
+           .IconClass("k-icon k-i-file-excel")
+           .Click("showArchiveDetails")
+           .HtmlAttributes(new { title = "Archive Details" });
+}).Title("Actions").Width(200).HtmlAttributes(new { @class = "action-buttons" });
+6. JavaScript Handler
+html
+@section scripts {
+<script>
+    function showArchiveDetails(e) {
+        e.preventDefault();
+
+        var grid = $("#ArchivedVehicleGrid").data("kendoGrid");
+        var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+        var vehicleListId = dataItem.VehicleListId;
+
+        $("<div/>").kendoWindow({
+            title: "Archive Vehicle Details",
+            modal: true,
+            width: "950px",
+            height: "650px",
+            resizable: false,
+            actions: ["Close"],
+            content: {
+                url: '@Url.Action("ArchiveDetails", "ArchVehicle")',
+                data: { id: vehicleListId }
+            },
+            close: function () {
+                this.destroy();
+            }
+        }).data("kendoWindow").center().open();
+    }
+</script>
+}
+✅ End-to-End Flow
