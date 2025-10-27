@@ -1,0 +1,74 @@
+1. Add the ID to the Delete button
+
+You can’t directly reference #= Id # inside the command.Custom() helper,
+so instead, use a Template column for the delete button.
+
+Replace this:
+
+columns.Command(command =>
+{
+    command.Custom("Delete")
+        .Click("onRbDelete")
+        .Text("Delete")
+        .IconClass("k-icon k-i-delete")
+        .HtmlAttributes(new
+        {
+            @class = "scparts-action-btn k-button k-grid-delete",
+            title = "Delete",
+            data_grid = $"RbPartsMaterialDetailsRebuiltPartsGrid",
+            data_url = Url.Action("DeleteRbPartsUsedInEstimates", "RbPartsUsedInEstimates"),
+            data_id_field = "Id",
+            data_rebuiltstocknum_field = "RebuiltStockNum",
+            data_grid_type = "RbPartGrid"
+        });
+}).Width(100);
+
+
+with this template column:
+
+columns.Template(@<text>
+    <button class="k-button k-button-icontext k-grid-delete scparts-action-btn"
+            onclick="onRbDelete('#= Id #', '#= RebuiltStockNum #')"
+            title="Delete">
+        <span class="k-icon k-i-delete"></span> Delete
+    </button>
+</text>).Title("Actions").Width(100);
+
+
+🔸 You can still keep the same CSS classes for styling.
+🔸 The #= Id # syntax injects the current row’s ID at render time.
+
+2. Update your JavaScript function
+
+Now onRbDelete gets the ID directly — no need to look up the row.
+
+function onRbDelete(id, rebuiltStockNum) {
+    var grid = $("#RbPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+
+    if (!id) {
+        console.warn("No ID provided for delete action");
+        return;
+    }
+
+    var dataItem = grid.dataSource.get(id);
+    if (!dataItem) {
+        console.warn("Data item not found in grid datasource for ID:", id);
+        return;
+    }
+
+    // Confirm and perform delete
+    if (confirm(`Are you sure you want to delete item ${rebuiltStockNum || id}?`)) {
+        $.ajax({
+            url: '@Url.Action("DeleteRbPartsUsedInEstimates", "RbPartsUsedInEstimates")',
+            type: 'POST',
+            data: { id: id },
+            success: function (result) {
+                grid.dataSource.read(); // refresh grid
+                kendo.alert("Item deleted successfully.");
+            },
+            error: function (xhr) {
+                kendo.alert("Error deleting item: " + xhr.statusText);
+            }
+        });
+    }
+}
