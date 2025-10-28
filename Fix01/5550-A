@@ -1,0 +1,137 @@
+THE CORRECT FIX – ONE PLACE TO CONTROL READONLY STATE
+
+Here’s how you fix it permanently and cleanly.
+
+1️⃣ Enhance initVehiclePopupForm() to apply readonly after DOM + widgets settle
+
+Instead of calling setPopupReadonly() directly, wait until widgets are fully built — use a short delay or check loop.
+
+Replace your existing function with this:
+
+window.initVehiclePopupForm = function () {
+    console.warn('inside window.initVehiclePopupForm');
+    var mode = $("#formMode").val();
+    console.warn('mode : ', mode);
+    if (!mode) return;
+
+    // Wait for widgets to be fully initialized before applying readonly
+    setTimeout(function () {
+        if (mode === "Add") {
+            console.warn('Add mode - enabling edit controls');
+            setPopupEditable([
+                "VehSeriesCode", "NumOfVehicles", "ProjDesc",
+                "Make", "VehModel", "Year",
+                "Engine", "Transmission", "Differential", "Sopnumber"
+            ]);
+            setPopupReadonly(["VehicleListId", "ModifiedLastBy", "ModifiedLastDate"]);
+        } else {
+            console.warn('Edit mode - making everything readonly except NumOfVehicles');
+            setPopupReadonly([
+                "VehicleListId", "VehSeriesCode", "ProjDesc", "Make", "VehModel", "Year",
+                "Engine", "Transmission", "Differential", "Sopnumber",
+                "ModifiedLastBy", "ModifiedLastDate"
+            ]);
+            setPopupEditable(["NumOfVehicles"]);
+        }
+    }, 300); // delay long enough for widgets to exist
+};
+
+
+Why this works:
+
+When you click the Vehicle tab, the tab content is replaced asynchronously.
+
+This short delay ensures widgets exist before enable(false) runs.
+
+It prevents racing with kendo.init() or any re-enable calls in the same tick.
+
+2️⃣ Update your setPopupReadonly() helper
+
+Make sure it fully disables Kendo widgets and their inputs. This solves the case where enable(false) alone doesn’t disable the underlying text input.
+
+window.setPopupReadonly = function (ids) {
+    ids.forEach(function (id) {
+        console.warn('setPopupReadonly →', id);
+        var widget = getKendoWidget(id);
+        if (widget && typeof widget.enable === "function") {
+            widget.enable(false);
+
+            // Extra hardening: visually and functionally disable the element
+            var wrapper = widget.wrapper || $("#" + id).closest(".k-widget");
+            wrapper.addClass("k-state-disabled");
+            wrapper.find("input, select, textarea").attr("readonly", true).attr("disabled", true);
+        } else {
+            $("#" + id)
+                .prop("readonly", true)
+                .prop("disabled", true)
+                .addClass("k-state-disabled");
+        }
+    });
+};
+
+
+💡 Why add both readonly and disabled?
+Because some Kendo widgets keep listening for events even when disabled visually — this ensures they are truly frozen.
+
+3️⃣ Ensure initVehiclePopupForm() is called after Vehicle tab reload
+
+In your tab select handler (onTabSelect):
+
+function onTabSelect(e) {
+    var index = $(e.item).index();
+
+    if (index === 0) {
+        console.warn("Vehicle tab selected → reloading form");
+        loadVehicleForm(window.currentVehicleId, function () {
+            // Always re-init mode logic after load
+            initVehiclePopupForm();
+        });
+        return;
+    }
+
+    // ... other tabs logic
+}
+
+
+This ensures that when you click back to Vehicle tab, the form reloads and then initVehiclePopupForm() runs with your readonly logic.
+
+4️⃣ (Optional but recommended): Prevent duplicate initializations
+
+In openEstimatePopup(), remove redundant calls to initVehiclePopupForm() (keep only the one inside loadVehicleForm()).
+
+// Remove this block:
+setTimeout(function () {
+    setComboBoxValues();
+    initVehiclePopupForm(); // ❌ remove
+    wireVehicleForm();      // ❌ remove
+}, 100);
+
+
+You already rewire everything inside loadVehicleForm() → wireVehicleForm().
+
+5️⃣ Test that #formMode has correct value
+
+In your partial view (_VehicleFormPartial.cshtml or similar), make sure this field is properly rendered:
+
+<input type="hidden" id="formMode" value="@Model.FormMode" />
+
+
+If this is missing or empty, mode will be undefined and your readonly logic will never trigger.
+
+✅ Quick Debug Checklist
+
+When you click Vehicle tab:
+
+You should see in Chrome console:
+
+inside window.initVehiclePopupForm
+mode : Edit
+Edit mode - making everything readonly except NumOfVehicles
+
+
+Then for each control:
+
+setPopupReadonly → VehSeriesCode
+
+
+And visually, all fields gray out except NumOfVehicles
