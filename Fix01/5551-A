@@ -1,116 +1,13 @@
-✅ Step 1 — Confirm who’s re-enabling
-Search your initVehiclePopupForm() function for something like:
-$(".k-widget").each(... widget.enable(true) ...)
+The clean and reliable pattern
 
-or a call that rebuilds widgets (e.g., reapplying .kendoComboBox() or .kendoTextBox()).
-That will explain why your readonly state doesn’t persist.
-You can test this by commenting out window.initVehiclePopupForm() temporarily — you’ll see your read-only state stick.
-
-✅ Step 2 — Make setPopupReadonly() run after the popup form initialization
-Since initVehiclePopupForm runs after you load the HTML, we’ll chain setPopupReadonly() after it completes.
-If initVehiclePopupForm() doesn’t have a callback, wrap it in a short timeout (it’s safe since widget setup is synchronous):
-loadVehicleForm(window.currentVehicleId, function () {
-    // wait for initVehiclePopupForm to finish its setup
-    setTimeout(function () {
-        console.warn('Applying readonly after initVehiclePopupForm');
-        setPopupReadonly([
-            "VehicleListId", "VehSeriesCode", "ProjDesc", "Make", "VehModel", "Year",
-            "Engine", "Transmission", "Differential", "Sopnumber",
-            "ModifiedLastBy", "ModifiedLastDate"
-        ]);
-        setPopupEditable(["NumOfVehicles"]);
-    }, 200);
-});
-
-✅ That ensures your readonly logic runs last, overriding whatever init logic happens earlier.
-
-✅ Step 3 — Harden setPopupReadonly() against ComboBox quirks
-Kendo ComboBoxes and DropDownLists sometimes need both widget.enable(false) and manual DOM disabling to fully prevent focus.
-Update your helper to handle that properly:
-window.setPopupReadonly = function (ids) {
-    ids.forEach(function (id) {
-        var widget = getKendoWidget(id);
-        if (widget && typeof widget.enable === "function") {
-            widget.enable(false);
-
-            // extra lock for ComboBox/DropDownList inputs
-            var wrapper = widget.wrapper || $("#" + id).closest(".k-widget");
-            wrapper.addClass("k-state-disabled");
-            wrapper.find("input").attr("readonly", true);
-        } else {
-            $("#" + id).prop("readonly", true)
-                       .addClass("k-state-disabled");
-        }
-    });
-};
-
-That extra wrapper logic ensures the control is truly locked visually and functionally — even if some other code rebinds events.
-
-✅ Step 4 — (Optional) Disable keyboard tabbing
-If you want users to see values but not navigate into them:
-$("#" + id).attr("tabindex", "-1");
-
-You can add that line inside the same loop.
-
-🔧 TL;DR
-ProblemFixControls not readonlyRun setPopupReadonly() after initVehiclePopupForm()Some widgets still editableAdd wrapper + input disable in setPopupReadonly()ReasoninitVehiclePopupForm re-enables or rebinds widgets
-
-✅ Final working pattern
-loadVehicleForm(window.currentVehicleId, function () {
-    setTimeout(function () {
-        setPopupReadonly([...]);
-        setPopupEditable(["NumOfVehicles"]);
-    }, 200);
-});
-
-
-If you paste your initVehiclePopupForm() function (or show its core lines), I can pinpoint exactly which part is resetting the state — and give you a cleaner hook instead of relying on a timeout.
-Would you like me to do that?ASP.NET Telerik Guru said:Perfect — now we can see everything working together:
-✅ openEstimatePopup() → loads the partial, initializes widgets
-✅ initVehiclePopupForm() → sets readonly/editable mode
-✅ wireVehicleForm() → wires up save/cancel
-✅ loadVehicleForm() → reloads Vehicle tab
-And the problem you described:
-
-“When I click Vehicle tab (after switching from another tab), controls are not readonly.”
-
-…makes total sense now, because initVehiclePopupForm() re-enables everything based on its mode logic.
-Let’s unpack this cleanly 👇
-
-💡 What’s really happening
-When you come back to the Vehicle tab, your flow is:
-
-
-loadVehicleForm(currentVehicleId) reloads the tab HTML.
-
-
-Inside that .get() callback, you call wireVehicleForm().
-
-
-openEstimatePopup() also calls initVehiclePopupForm() (with mode = “Edit”).
-
-
-Now — inside initVehiclePopupForm(), you have:
-if (mode === "Add") {
-    setPopupEditable([...]);
-    setPopupReadonly([...]);
-} else { // Edit
-    setPopupReadonly([...]);
-    setPopupEditable(["NumOfVehicles"]);
-}
-
-That looks good at first glance, but note — when the tab reloads later, your partial probably contains this hidden field:
-<input type="hidden" id="formMode" value="Edit" />
-
-So every time the form loads, initVehiclePopupForm() runs again and toggles controls fresh.
-But when you call it before widgets fully re-initialize (or call it multiple times), some controls end up half-initialized or re-enabled.
-
-✅ The clean and reliable pattern
 We’ll make three small changes to make this rock-solid:
 
 🟢 1. Run initVehiclePopupForm() inside loadVehicleForm() after the form HTML loads
+
 You want this to happen only after the partial content has been loaded and Kendo widgets exist.
+
 Modify your loadVehicleForm():
+
 window.loadVehicleForm = function (vehicleId, callback) {
     console.warn('window.loadVehicleForm :', vehicleId);
 
@@ -145,21 +42,27 @@ window.loadVehicleForm = function (vehicleId, callback) {
     });
 };
 
+
 Now you don’t need to manually call initVehiclePopupForm() after reload — it runs as part of the load sequence every time.
 
 🟢 2. Simplify your openEstimatePopup() (remove duplicate init logic)
+
 You currently do this:
+
 setTimeout(function () {
     setComboBoxValues();
     initVehiclePopupForm();
     wireVehicleForm();
 }, 100);
 
+
 Since loadVehicleForm() already handles wireVehicleForm() and initVehiclePopupForm(), remove those duplicate calls here.
 Only keep setComboBoxValues().
+
 setTimeout(function () {
     setComboBoxValues();
 }, 100);
+
 
 Otherwise, initVehiclePopupForm() runs twice — once before, and once after widgets exist — which causes exactly the mixed readonly/editable behavior you’re seeing.
 
@@ -174,9 +77,5 @@ window.getKendoWidget = function (id) {
            element.data("kendoMaskedTextBox");
 };
 
+
 Some of your form fields (Year, Sopnumber, etc.) might be regular inputs or masked boxes — this ensures they’re caught too.
-
-🧩 TL;DR
-ProblemCauseFixControls not readonly when switching backinitVehiclePopupForm() re-runs too early / twiceMove it inside loadVehicleForm() callbackSome fields not detectedMissing widget typesExpand getKendoWidget()Multiple rebinds causing inconsistent UIinitVehiclePopupForm() called in multiple placesRemove extra call from openEstimatePopup()
-
-✅ End Result
