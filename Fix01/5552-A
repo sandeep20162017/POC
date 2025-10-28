@@ -1,0 +1,107 @@
+Fix: Run setPopupReadonly() after the Vehicle tab has finished loading
+
+You should handle this inside your loadVehicleForm() callback — that’s the right place to hook UI initialization once the HTML is in the DOM.
+
+Here’s how to update your flow cleanly:
+
+1️⃣ Update loadVehicleForm to accept a callback
+function loadVehicleForm(id, callback) {
+    $.get('@Url.Action("GetVehicleById", "Vehicles")', { id: id }, function (html) {
+        $("#vehicleTabContent").html(html);
+        wireVehicleForm(); // rebind buttons etc.
+
+        // ✅ When done, call your callback
+        if (typeof callback === "function") {
+            callback();
+        }
+    });
+}
+
+2️⃣ Update your alert close handler to call readonly logic after form is loaded
+var alertWindow = kendo.alert("Estimate #: " + response.VehicleListId + " saved successfully!");
+if (alertWindow && alertWindow.bind) {
+    alertWindow.bind("close", function () {
+        console.warn('calling enableAllTabs');
+        
+        var ts = $("#estimateTabs").data("kendoTabStrip");
+        for (var i = 1; i <= 7; i++) {
+            ts.enable(ts.tabGroup.children().eq(i), true);
+        }
+
+        console.warn('loadVehicleForm - A');
+        console.warn('window.currentVehicleId :', window.currentVehicleId);
+
+        // ✅ Reload vehicle form, then set readonly/enable
+        loadVehicleForm(window.currentVehicleId, function () {
+            setPopupReadonly([
+                "VehicleListId", "VehSeriesCode", "ProjDesc", "Make", "VehModel", "Year",
+                "Engine", "Transmission", "Differential", "Sopnumber",
+                "ModifiedLastBy", "ModifiedLastDate"
+            ]);
+            setPopupEditable(["NumOfVehicles"]);
+        });
+    });
+}
+
+
+Now setPopupReadonly() runs after the DOM is ready, and widgets are initialized — so .enable(false) will work as intended.
+
+3️⃣ Define your helper functions robustly
+
+Make sure these helper functions are defined globally (once) and are compatible with all Kendo input types:
+
+function getKendoWidget(id) {
+    var element = $("#" + id);
+    return element.data("kendoComboBox")
+        || element.data("kendoDropDownList")
+        || element.data("kendoNumericTextBox")
+        || element.data("kendoDatePicker")
+        || element.data("kendoTextBox");
+}
+
+window.setPopupReadonly = function (ids) {
+    ids.forEach(function (id) {
+        var widget = getKendoWidget(id);
+        if (widget) {
+            widget.enable(false);
+        } else {
+            $("#" + id).prop("readonly", true).addClass("k-state-disabled");
+        }
+    });
+};
+
+window.setPopupEditable = function (ids) {
+    ids.forEach(function (id) {
+        var widget = getKendoWidget(id);
+        if (widget) {
+            widget.enable(true);
+        } else {
+            $("#" + id).prop("readonly", false).removeClass("k-state-disabled");
+        }
+    });
+};
+
+✅ Bonus Tip — When clicking the Vehicle tab manually
+
+Since you said “Vehicle tab gets refreshed when user clicks on it”, you can also call this logic inside your tab select handler for index 0:
+
+function onTabSelect(e) {
+    var index = $(e.item).index();
+
+    if (index === 0) {
+        loadVehicleForm(window.currentVehicleId, function () {
+            setPopupReadonly([
+                "VehicleListId", "VehSeriesCode", "ProjDesc", "Make", "VehModel", "Year",
+                "Engine", "Transmission", "Differential", "Sopnumber",
+                "ModifiedLastBy", "ModifiedLastDate"
+            ]);
+            setPopupEditable(["NumOfVehicles"]);
+        });
+        return; // avoid duplicate reload
+    }
+
+    // other tabs logic...
+}
+
+
+That ensures the Vehicle tab always loads in “read-only” mode (except NumOfVehicles) when revisited.
