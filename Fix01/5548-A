@@ -1,20 +1,96 @@
-function cancelScPartPopup() {
-    console.warn("Cancel clicked in ScParts popup...");
+🧩 The Correct Implementation
+function onNscPartsComboBoxSelect(e) {
+    console.log("onNscPartsComboBoxSelect triggered");
 
-    // Try to find the nearest active Kendo window
-    var wndElement = $("#ScPartsPopupWindow");
-    var wnd = wndElement.data("kendoWindow");
+    // Get selected item
+    var selected = this.dataItem(e.item.index());
+    var supplierName = selected ? selected.Text : "";
 
-    if (!wnd) {
-        // fallback: maybe the Cancel button is inside the popup form template
-        wndElement = $(event.target).closest(".k-window-content");
-        wnd = wndElement.data("kendoWindow");
+    // Access current editable model (if using Kendo Grid popup)
+    var model = window.currentNscPartsModel || null;
+
+    // Find the active popup window container
+    var popup = $(".k-window-content:visible");
+
+    // Clear dependent fields
+    clearNscPartDependentFields(popup, model);
+
+    // Proceed with your existing logic
+    var supplierNumber = $("input[name='OrigSuppNum']").val();
+    console.log("Supplier Number:", supplierNumber, "Supplier Name:", supplierName);
+
+    // Update model with supplier name (if available)
+    if (model && supplierName) {
+        model.set("OrigSupplierName", supplierName);
     }
 
-    if (wnd) {
-        // ✅ Simulate clicking the built-in X button
-        wnd.wrapper.find(".k-window-action .k-i-close").trigger("click");
-    } else {
-        console.warn("No Kendo window found for ScParts popup.");
+    // Fetch supplier details if needed
+    if (supplierNumber && supplierName) {
+        $.ajax({
+            url: '/AutoComplete/GetSupplierDetailsByName',
+            type: 'GET',
+            data: {
+                supplierNumber: supplierNumber,
+                supplierName: supplierName
+            },
+            success: function (result) {
+                if (result && model) {
+                    model.set("OemPartCost", result.PartCost);
+                    model.set("Description", result.Description);
+                    model.set("KeyWord", result.KeyWord);
+                }
+            },
+            error: function () {
+                console.error("Failed to fetch supplier details.");
+            }
+        });
+    }
+}
+
+🧹 Helper function: clear all dependent fields
+
+This clears both the UI and the model values (so the grid doesn’t retain old data):
+
+function clearNscPartDependentFields(container, model) {
+    console.log("Clearing dependent NSC part fields...");
+
+    // Clear ComboBoxes / TextBoxes
+    var fieldsToClear = [
+        "OrigSupplierName",
+        "KeyWord",
+        "Description"
+    ];
+
+    fieldsToClear.forEach(function (name) {
+        var combo = container.find("[name='" + name + "']").data("kendoComboBox");
+        var txt = container.find("[name='" + name + "']").data("kendoTextBox");
+        var el = container.find("[name='" + name + "']");
+
+        if (combo) combo.value("");
+        else if (txt) txt.value("");
+        else el.val("");
+
+        if (model) model.set(name, "");
+    });
+
+    // Clear numeric fields
+    var numericFields = [
+        "UnitCost",
+        "Qty",
+        "Percentage",
+        "TotalCost"
+    ];
+
+    numericFields.forEach(function (name) {
+        var num = container.find("[name='" + name + "']").data("kendoNumericTextBox");
+        if (num) num.value(0);
+        else container.find("[name='" + name + "']").val(0);
+
+        if (model) model.set(name, 0);
+    });
+
+    // Optional: trigger UI refresh (if fields are bound)
+    if (model && model.dirty) {
+        model.dirty = true;
     }
 }
