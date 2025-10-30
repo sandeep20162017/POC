@@ -1,35 +1,77 @@
-🧩 1️⃣ onNscPartsComboBoxSelect(e) — main event handler
+🧩 Full working implementation
+// =======================================================
+// 🔹 When Non-Stock Part ComboBox selection changes
+// =======================================================
 function onNscPartsComboBoxSelect(e) {
     console.log("🚀 onNscPartsComboBoxSelect triggered");
 
-    var selected = this.dataItem(e.item.index());
-    var selectedPartName = selected ? selected.Text : "";
+    // 1️⃣ Get the selected NSC Part
+    var selectedPart = this.dataItem(e.item.index());
+    var partCode = selectedPart ? selectedPart.Value : "";
+    var partText = selectedPart ? selectedPart.Text : "";
 
-    // Get the editable model and popup window
-    var model = window.currentNscPartsModel || null;
+    // 2️⃣ Get current editable popup container & model
     var popup = $(".k-window-content:visible");
+    var model = window.currentNscPartsModel || null;
 
-    // ✅ Clear previous supplier & cost-related fields
+    // 3️⃣ Clear all dependent fields (supplier name, cost, qty, etc.)
     clearNscPartDependentFields(popup, model);
 
-    // ✅ Now update the model with the new part name
-    if (model) {
-        model.set("NscPartNum", selectedPartName);
-    }
+    // 4️⃣ Now fetch the new supplier details for the selected part
+    if (partCode) {
+        $.ajax({
+            url: '/AutoComplete/GetSupplierDetailsByPartCode',
+            type: 'GET',
+            data: { partCode: partCode },
+            success: function (result) {
+                if (result && model) {
+                    console.log("Supplier details fetched:", result);
 
-    // Optional: if you also want to load part-specific defaults here, do it below
-    console.log("Selected NSC Part:", selectedPartName);
+                    // populate supplier combo
+                    var supplierCombo = popup.find("[name='OrigSupplierName']").data("kendoComboBox");
+                    if (supplierCombo) {
+                        supplierCombo.dataSource.data([{
+                            Value: result.SupplierNumber,
+                            Text: result.SupplierName
+                        }]);
+                        supplierCombo.select(0); // ✅ Set new selection
+                    }
+
+                    // set dependent fields
+                    model.set("OrigSupplierName", result.SupplierName || "");
+                    model.set("OrigSuppNum", result.SupplierNumber || "");
+                    model.set("KeyWord", result.KeyWord || "");
+                    model.set("Description", result.Description || "");
+                    model.set("UnitCost", result.UnitCost || 0);
+                    model.set("Qty", result.Qty || 0);
+                    model.set("Percentage", result.Percentage || 0);
+                    model.set("TotalCost", result.TotalCost || 0);
+
+                    // refresh UI
+                    popup.find("[name='KeyWord']").val(result.KeyWord || "");
+                    popup.find("[name='Description']").val(result.Description || "");
+                }
+            },
+            error: function () {
+                console.error("❌ Failed to fetch supplier details for part:", partCode);
+            }
+        });
+    }
 }
 
-🧹 2️⃣ clearNscPartDependentFields(container, model) — resets all dependent fields (including ComboBox)
-function clearNscPartDependentFields(container, model) {
-    console.log("🧹 Clearing dependent NSC part fields...");
+🧹 Helper function — Clears all dependent fields (including ComboBoxes)
 
-    // ComboBox/Text fields to clear
+This is an improved version of our previous helper, now clearing ComboBoxController-backed fields too:
+
+function clearNscPartDependentFields(container, model) {
+    console.log("🧹 Clearing dependent NSC fields...");
+
+    // 1️⃣ Fields to clear
     var textFields = [
-        "OrigSupplierName",  // ComboBox
-        "KeyWord",           // TextBox
-        "Description"        // TextBox
+        "OrigSupplierName",
+        "OrigSuppNum",
+        "KeyWord",
+        "Description"
     ];
 
     textFields.forEach(function (name) {
@@ -38,40 +80,51 @@ function clearNscPartDependentFields(container, model) {
         var input = container.find("[name='" + name + "']");
 
         if (combo) {
-            console.log("Clearing ComboBox:", name);
-            combo.select(-1);     // ✅ deselect current item
-            combo.value("");      // ✅ clear hidden value
-            combo.text("");       // ✅ clear visible text
-            combo.trigger("change"); // ✅ fire change so bindings update
+            // ✅ Properly reset ComboBoxController-backed combo
+            combo.dataSource.data([]); // clear data source
+            combo.select(-1);          // clear selection
+            combo.value("");           // clear value
+            combo.text("");            // clear display text
         } else if (txt) {
             txt.value("");
         } else {
             input.val("");
         }
 
-        if (model) model.set(name, ""); // clear data model too
+        if (model) model.set(name, "");
     });
 
-    // NumericTextBoxes to clear
-    var numericFields = [
-        "UnitCost",
-        "Qty",
-        "Percentage",
-        "TotalCost"
-    ];
-
-    numericFields.forEach(function (name) {
+    // 2️⃣ Numeric fields
+    ["UnitCost", "Qty", "Percentage", "TotalCost"].forEach(function (name) {
         var num = container.find("[name='" + name + "']").data("kendoNumericTextBox");
-        if (num) {
-            num.value(0);
-            num.trigger("change");
-        } else {
-            container.find("[name='" + name + "']").val(0);
-        }
-
+        if (num) num.value(0);
+        else container.find("[name='" + name + "']").val(0);
         if (model) model.set(name, 0);
     });
 
-    // Optional: mark dirty so Kendo refreshes UI bindings
     if (model) model.dirty = true;
+}
+
+✅ Example controller methods (for clarity)
+
+In your ComboBoxController.cs or AutoCompleteController.cs, you might have:
+
+public JsonResult GetSupplierDetailsByPartCode(string partCode)
+{
+    var details = _repo.GetSupplierDetails(partCode);
+    return Json(details, JsonRequestBehavior.AllowGet);
+}
+
+
+and the returned object:
+
+new {
+    SupplierNumber = "SUP123",
+    SupplierName = "ABC Parts Ltd",
+    KeyWord = "Brake Pad",
+    Description = "Premium ceramic brake pad",
+    UnitCost = 125.5,
+    Qty = 1,
+    Percentage = 100,
+    TotalCost = 125.5
 }
