@@ -1,130 +1,179 @@
-🧩 Full working implementation
-// =======================================================
-// 🔹 When Non-Stock Part ComboBox selection changes
-// =======================================================
-function onNscPartsComboBoxSelect(e) {
-    console.log("🚀 onNscPartsComboBoxSelect triggered");
+Core Script
+// ===========================
+// 🔹 When user changes Supplier Number
+// ===========================
+function onSupplierNumberChange(e) {
+    console.log("Supplier Number changed");
 
-    // 1️⃣ Get the selected NSC Part
-    var selectedPart = this.dataItem(e.item.index());
-    var partCode = selectedPart ? selectedPart.Value : "";
-    var partText = selectedPart ? selectedPart.Text : "";
-
-    // 2️⃣ Get current editable popup container & model
-    var popup = $(".k-window-content:visible");
+    var popup = $(".k-window-content:visible"); // active popup editor
     var model = window.currentNscPartsModel || null;
 
-    // 3️⃣ Clear all dependent fields (supplier name, cost, qty, etc.)
-    clearNscPartDependentFields(popup, model);
+    // Get entered Supplier Number
+    var supplierNumCombo = popup.find("[name='OrigSuppNum']").data("kendoComboBox");
+    var supplierNumber = supplierNumCombo ? supplierNumCombo.value() : "";
 
-    // 4️⃣ Now fetch the new supplier details for the selected part
-    if (partCode) {
+    // Get Supplier Name ComboBox
+    var supplierNameCombo = popup.find("[name='OrigSupplierName']").data("kendoComboBox");
+
+    // ✅ 1. Clear Supplier Name and dependent fields
+    clearDependentFields(popup, model);
+
+    if (supplierNameCombo) {
+        // Clear any old data and text
+        supplierNameCombo.dataSource.data([]);
+        supplierNameCombo.select(-1);
+        supplierNameCombo.text("");
+        supplierNameCombo.value("");
+    }
+
+    // ✅ 2. Load new supplier names for this supplier number
+    if (supplierNumber) {
         $.ajax({
-            url: '/AutoComplete/GetSupplierDetailsByPartCode',
+            url: '/ComboBox/GetSupplierNamesByNumber',
             type: 'GET',
-            data: { partCode: partCode },
+            data: { supplierNumber: supplierNumber },
             success: function (result) {
-                if (result && model) {
-                    console.log("Supplier details fetched:", result);
-
-                    // populate supplier combo
-                    var supplierCombo = popup.find("[name='OrigSupplierName']").data("kendoComboBox");
-                    if (supplierCombo) {
-                        supplierCombo.dataSource.data([{
-                            Value: result.SupplierNumber,
-                            Text: result.SupplierName
-                        }]);
-                        supplierCombo.select(0); // ✅ Set new selection
-                    }
-
-                    // set dependent fields
-                    model.set("OrigSupplierName", result.SupplierName || "");
-                    model.set("OrigSuppNum", result.SupplierNumber || "");
-                    model.set("KeyWord", result.KeyWord || "");
-                    model.set("Description", result.Description || "");
-                    model.set("UnitCost", result.UnitCost || 0);
-                    model.set("Qty", result.Qty || 0);
-                    model.set("Percentage", result.Percentage || 0);
-                    model.set("TotalCost", result.TotalCost || 0);
-
-                    // refresh UI
-                    popup.find("[name='KeyWord']").val(result.KeyWord || "");
-                    popup.find("[name='Description']").val(result.Description || "");
+                if (result && supplierNameCombo) {
+                    supplierNameCombo.setDataSource(new kendo.data.DataSource({ data: result }));
+                    supplierNameCombo.enable(true);
+                    console.log("Supplier names loaded:", result.length);
                 }
             },
             error: function () {
-                console.error("❌ Failed to fetch supplier details for part:", partCode);
+                console.error("❌ Failed to fetch supplier names for number:", supplierNumber);
             }
         });
     }
 }
 
-🧹 Helper function — Clears all dependent fields (including ComboBoxes)
 
-This is an improved version of our previous helper, now clearing ComboBoxController-backed fields too:
+// ===========================
+// 🔹 When user selects Supplier Name
+// ===========================
+function onSupplierNameSelect(e) {
+    console.log("Supplier Name selected");
 
-function clearNscPartDependentFields(container, model) {
-    console.log("🧹 Clearing dependent NSC fields...");
+    var popup = $(".k-window-content:visible");
+    var model = window.currentNscPartsModel || null;
 
-    // 1️⃣ Fields to clear
-    var textFields = [
-        "OrigSupplierName",
-        "OrigSuppNum",
-        "KeyWord",
-        "Description"
-    ];
+    // Get selected supplier name
+    var combo = this;
+    var selected = combo.dataItem(e.item.index());
+    var supplierName = selected ? selected.Text : "";
+    var supplierNumber = popup.find("[name='OrigSuppNum']").val();
 
-    textFields.forEach(function (name) {
-        var combo = container.find("[name='" + name + "']").data("kendoComboBox");
-        var txt = container.find("[name='" + name + "']").data("kendoTextBox");
-        var input = container.find("[name='" + name + "']");
+    console.log("Supplier Name:", supplierName, "Supplier Number:", supplierNumber);
 
-        if (combo) {
-            // ✅ Properly reset ComboBoxController-backed combo
-            combo.dataSource.data([]); // clear data source
-            combo.select(-1);          // clear selection
-            combo.value("");           // clear value
-            combo.text("");            // clear display text
-        } else if (txt) {
-            txt.value("");
-        } else {
-            input.val("");
+    if (!supplierName || !supplierNumber) {
+        console.warn("Missing supplier number or name");
+        return;
+    }
+
+    // ✅ Call backend to get supplier details
+    $.ajax({
+        url: '/AutoComplete/GetSupplierDetailsByName',
+        type: 'GET',
+        data: {
+            supplierNumber: supplierNumber,
+            supplierName: supplierName
+        },
+        success: function (result) {
+            if (result && model) {
+                console.log("Fetched details:", result);
+
+                // Populate model fields
+                model.set("KeyWord", result.KeyWord || "");
+                model.set("Description", result.Description || "");
+                model.set("UnitCost", result.PartCost || 0);
+
+                // Reflect in UI
+                popup.find("[name='KeyWord']").val(result.KeyWord || "");
+                popup.find("[name='Description']").val(result.Description || "");
+
+                var unitCostBox = popup.find("[name='UnitCost']").data("kendoNumericTextBox");
+                if (unitCostBox) unitCostBox.value(result.PartCost || 0);
+            }
+        },
+        error: function () {
+            console.error("❌ Failed to fetch supplier details by name.");
         }
-
-        if (model) model.set(name, "");
     });
+}
 
-    // 2️⃣ Numeric fields
-    ["UnitCost", "Qty", "Percentage", "TotalCost"].forEach(function (name) {
+
+// ===========================
+// 🔹 Helper: clear dependent fields
+// ===========================
+function clearDependentFields(container, model) {
+    console.log("🧹 Clearing dependent fields (supplier name, cost, qty, etc.)");
+
+    var numericFields = ["UnitCost", "Qty", "Percentage", "TotalCost"];
+    numericFields.forEach(function (name) {
         var num = container.find("[name='" + name + "']").data("kendoNumericTextBox");
         if (num) num.value(0);
         else container.find("[name='" + name + "']").val(0);
         if (model) model.set(name, 0);
     });
 
-    if (model) model.dirty = true;
+    // Clear keyword and description
+    ["KeyWord", "Description"].forEach(function (name) {
+        container.find("[name='" + name + "']").val("");
+        if (model) model.set(name, "");
+    });
 }
 
-✅ Example controller methods (for clarity)
+✅ Example ComboBox setup in Razor
+<div class="form-group">
+    @Html.LabelFor(m => m.OrigSuppNum, "Supplier Number", new { @class = "form-label" })
+    @(Html.Kendo().ComboBoxFor(m => m.OrigSuppNum)
+        .Name("OrigSuppNum")
+        .DataTextField("Text")
+        .DataValueField("Value")
+        .Filter("contains")
+        .AutoBind(true)
+        .Suggest(true)
+        .Events(e => e.Change("onSupplierNumberChange"))
+        .HtmlAttributes(new { style = "width:100%" })
+    )
+</div>
 
-In your ComboBoxController.cs or AutoCompleteController.cs, you might have:
+<div class="form-group">
+    @Html.LabelFor(m => m.OrigSupplierName, "Supplier Name", new { @class = "form-label" })
+    @(Html.Kendo().ComboBoxFor(m => m.OrigSupplierName)
+        .Name("OrigSupplierName")
+        .DataTextField("Text")
+        .DataValueField("Value")
+        .Filter("contains")
+        .AutoBind(false)
+        .Enable(false)
+        .Suggest(true)
+        .Events(e => e.Select("onSupplierNameSelect"))
+        .HtmlAttributes(new { style = "width:100%" })
+    )
+</div>
 
-public JsonResult GetSupplierDetailsByPartCode(string partCode)
+✅ Example Controller (for clarity)
+
+In ComboBoxController.cs:
+
+public JsonResult GetSupplierNamesByNumber(string supplierNumber)
 {
-    var details = _repo.GetSupplierDetails(partCode);
-    return Json(details, JsonRequestBehavior.AllowGet);
+    // Simulate fetching supplier names
+    var list = _supplierRepo.GetNamesByNumber(supplierNumber)
+        .Select(x => new { Text = x.SupplierName, Value = x.SupplierName });
+
+    return Json(list, JsonRequestBehavior.AllowGet);
 }
 
 
-and the returned object:
+and in AutoCompleteController.cs:
 
-new {
-    SupplierNumber = "SUP123",
-    SupplierName = "ABC Parts Ltd",
-    KeyWord = "Brake Pad",
-    Description = "Premium ceramic brake pad",
-    UnitCost = 125.5,
-    Qty = 1,
-    Percentage = 100,
-    TotalCost = 125.5
+public JsonResult GetSupplierDetailsByName(string supplierNumber, string supplierName)
+{
+    var details = _supplierRepo.GetSupplierDetails(supplierNumber, supplierName);
+    return Json(new {
+        KeyWord = details.KeyWord,
+        Description = details.Description,
+        PartCost = details.UnitCost
+    }, JsonRequestBehavior.AllowGet);
 }
