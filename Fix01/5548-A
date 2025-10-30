@@ -1,68 +1,35 @@
-Full working code
-// ==========================
-// 🔹 When user selects a new NSC part
-// ==========================
+🧩 1️⃣ onNscPartsComboBoxSelect(e) — main event handler
 function onNscPartsComboBoxSelect(e) {
     console.log("🚀 onNscPartsComboBoxSelect triggered");
 
-    // The selected data item from the dropdown
     var selected = this.dataItem(e.item.index());
-    var supplierName = selected ? selected.Text : "";
+    var selectedPartName = selected ? selected.Text : "";
 
-    // Find the current Kendo editable model (the row in popup)
+    // Get the editable model and popup window
     var model = window.currentNscPartsModel || null;
-
-    // The active Kendo popup editor container
     var popup = $(".k-window-content:visible");
 
-    // ✅ Clear all dependent fields first
+    // ✅ Clear previous supplier & cost-related fields
     clearNscPartDependentFields(popup, model);
 
-    // Optional: get supplier number (if already chosen)
-    var supplierNumber = $("input[name='OrigSuppNum']").val();
-    console.log("Supplier Number:", supplierNumber, "Supplier Name:", supplierName);
-
-    // ✅ Update model with supplier name if available
-    if (model && supplierName) {
-        model.set("OrigSupplierName", supplierName);
+    // ✅ Now update the model with the new part name
+    if (model) {
+        model.set("NscPartNum", selectedPartName);
     }
 
-    // ✅ Fetch supplier details and update fields if both supplier & part selected
-    if (supplierNumber && supplierName) {
-        $.ajax({
-            url: '/AutoComplete/GetSupplierDetailsByName',
-            type: 'GET',
-            data: {
-                supplierNumber: supplierNumber,
-                supplierName: supplierName
-            },
-            success: function (result) {
-                if (result && model) {
-                    model.set("OemPartCost", result.PartCost || 0);
-                    model.set("Description", result.Description || "");
-                    model.set("KeyWord", result.KeyWord || "");
-                }
-            },
-            error: function () {
-                console.error("Failed to fetch supplier details.");
-            }
-        });
-    }
+    // Optional: if you also want to load part-specific defaults here, do it below
+    console.log("Selected NSC Part:", selectedPartName);
 }
 
-🧹 Helper: Clear dependent fields
-
-This function safely clears all related fields (textboxes, comboboxes, numeric textboxes),
-including resetting comboboxes to a “no selection” state (index = -1).
-
+🧹 2️⃣ clearNscPartDependentFields(container, model) — resets all dependent fields (including ComboBox)
 function clearNscPartDependentFields(container, model) {
     console.log("🧹 Clearing dependent NSC part fields...");
 
-    // 1️⃣ Clear ComboBoxes / TextBoxes
+    // ComboBox/Text fields to clear
     var textFields = [
-        "OrigSupplierName",
-        "KeyWord",
-        "Description"
+        "OrigSupplierName",  // ComboBox
+        "KeyWord",           // TextBox
+        "Description"        // TextBox
     ];
 
     textFields.forEach(function (name) {
@@ -71,19 +38,21 @@ function clearNscPartDependentFields(container, model) {
         var input = container.find("[name='" + name + "']");
 
         if (combo) {
-            combo.select(-1);       // ✅ deselect any previous selection
-            combo.text("");         // ✅ clear display text
-            combo.value("");        // ✅ clear actual value
+            console.log("Clearing ComboBox:", name);
+            combo.select(-1);     // ✅ deselect current item
+            combo.value("");      // ✅ clear hidden value
+            combo.text("");       // ✅ clear visible text
+            combo.trigger("change"); // ✅ fire change so bindings update
         } else if (txt) {
             txt.value("");
         } else {
             input.val("");
         }
 
-        if (model) model.set(name, ""); // keep Kendo model in sync
+        if (model) model.set(name, ""); // clear data model too
     });
 
-    // 2️⃣ Clear NumericTextBoxes
+    // NumericTextBoxes to clear
     var numericFields = [
         "UnitCost",
         "Qty",
@@ -103,6 +72,6 @@ function clearNscPartDependentFields(container, model) {
         if (model) model.set(name, 0);
     });
 
-    // Optional: mark the model as dirty so Kendo refreshes UI if needed
+    // Optional: mark dirty so Kendo refreshes UI bindings
     if (model) model.dirty = true;
 }
