@@ -1,0 +1,85 @@
+✅ The Safe, Stable Fix
+1. Defer your logic slightly — allow bindings to finish
+
+Wrap the heavy logic (especially widget manipulation and event bindings) inside a small delay using setTimeout(..., 0) or kendo.ui.progress() callbacks.
+
+Update your function like this:
+
+function onScPartsEdit(e) {
+    // Cache model immediately
+    currentScPartsModel = e.model;
+
+    // Popup setup
+    const wnd = e.container.data("kendoWindow");
+    wnd.setOptions({
+        width: "450px",
+        height: "600px",
+        scrollable: false,
+        title: e.model.isNew() ? "Add New Stock Coded Part" : "Edit Stock Coded Part",
+        modal: true,
+        resizable: false
+    });
+
+    e.container.closest(".k-window").addClass("scparts-popup-style");
+
+    // Defer all UI logic slightly
+    setTimeout(function () {
+        const container = e.container;
+
+        // Make Stock Code readonly in edit mode
+        const combo = container.find("[name='MMSStockCode']").closest("[data-role='combobox']").data("kendoComboBox");
+        if (combo) combo.readonly(!e.model.isNew());
+
+        // NumericTextBoxes
+        const unitCost = container.find("[name='UnitCost']").data("kendoNumericTextBox");
+        const qty = container.find("[name='Qty']").data("kendoNumericTextBox");
+        const percentage = container.find("[name='Percentage']").data("kendoNumericTextBox");
+        const totalCost = container.find("[name='TotalCost']").data("kendoNumericTextBox");
+
+        function calculateTotal() {
+            const u = unitCost?.value() || 0;
+            const q = qty?.value() || 0;
+            const p = percentage?.value() || 0;
+            totalCost?.value(u * q * (p / 100));
+        }
+
+        // Hook change events safely
+        if (unitCost && qty && percentage) {
+            unitCost.unbind("change").bind("change", calculateTotal);
+            qty.unbind("change").bind("change", calculateTotal);
+            percentage.unbind("change").bind("change", calculateTotal);
+            calculateTotal();
+        }
+    }, 0);
+}
+
+2. Protect currentScPartsModel in your other code
+
+In your onScPartNumSelect, you’re already doing this check:
+
+if (!model || !selectedValue) { ... }
+
+
+✅ Keep that — it’s good defensive coding.
+
+If you want to be extra safe, also check that the model has a UID:
+
+if (!model || !model.uid) {
+    console.warn("Model not yet tracked by Kendo.");
+    return;
+}
+
+3. Check your field names
+
+Small but important detail — in your onEdit you reference:
+
+$("input[name='MMSStockCode']")
+
+
+but in your AJAX handler you set:
+
+model.set("MmsStockCode", result.MmsStockCode || "");
+
+
+Case sensitivity mismatch can sometimes cause Kendo binding hiccups (since MMSStockCode ≠ MmsStockCode in JavaScript).
+Make sure your model field names match your ViewModel’s property names exactly.
