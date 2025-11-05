@@ -1,0 +1,119 @@
+ASP.NET Telerik Guru said:
+
+Perfect — that clears things up nicely 👍
+
+So you’re using the built-in Kendo Grid DataSource transport.create()` (no custom AJAX).
+That means we’ll handle notifications and blocking changes using grid events, not manual AJAX calls.
+
+Let’s walk through how to wire this up properly.
+
+🧩 Server-Side (Controller)
+
+Your controller already looks good — just make sure you return proper HTTP status codes.
+Kendo automatically calls the grid’s error event if the server returns a non-200 status code.
+
+Here’s the clean version:
+
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> CreateScPartsUsedInEstimates(
+    [FromForm] StockCodedPartsViewModel model,
+    [FromQuery] string id,
+    [FromQuery] string gridType)
+{
+    var duplicateCount = await _dbConnection.ExecuteScalarAsync<int>(
+        duplicateCheckSql,
+        new { MMSStockCode = model.MMSStockCode, LinkCode = model.LinkCode.ToUpper(), LinkType = model.LinkType },
+        transaction
+    );
+
+    if (duplicateCount > 0)
+    {
+        var msg = $"MMSStockCode '{model.MMSStockCode}' already exists for this estimate.";
+        ModelState.AddModelError("MMSStockCode", msg);
+        return BadRequest(msg); // triggers grid error event
+    }
+
+    // Save logic here...
+    return Ok(new { Message = "Record created successfully." });
+}
+
+
+That’s all that’s needed on the backend.
+
+💡 Front-End (Grid Configuration)
+
+Now, you’ll handle both success and failure inside the grid events:
+requestEnd → success handler
+error → failure handler
+
+Here’s the setup:
+
+@(Html.Kendo().Grid<StockCodedPartsViewModel>()
+    .Name("ScPartsGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(p => p.MMSStockCode);
+        columns.Bound(p => p.LinkCode);
+        columns.Bound(p => p.LinkType);
+        columns.Command(command => command.Destroy());
+    })
+    .ToolBar(toolbar => toolbar.Create())
+    .Editable(editable => editable.Mode(GridEditMode.InLine))
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .PageSize(10)
+        .Model(model =>
+        {
+            model.Id(p => p.Id);
+        })
+        .Events(events => events
+            .Error("onGridError")
+            .RequestEnd("onGridRequestEnd")
+        )
+        .Create(create => create.Action("CreateScPartsUsedInEstimates", "YourController"))
+    )
+)
+
+🧠 JavaScript for Notification + Blocking Changes
+
+Here’s where the Kendo Notification and logic to stop user actions live:
+
+<div id="notification"></div>
+
+<script>
+    var notification;
+
+    $(function () {
+        notification = $("#notification").kendoNotification({
+            stacking: "down",
+            autoHideAfter: 4000,
+            templates: [{
+                type: "error",
+                template: "<div class='k-notification-error'>#= message #</div>"
+            }, {
+                type: "success",
+                template: "<div class='k-notification-success'>#= message #</div>"
+            }]
+        }).data("kendoNotification");
+    });
+
+    function onGridRequestEnd(e) {
+        // fires after successful create/update/delete
+        if (e.type === "create" && e.response) {
+            notification.show(e.response.Message || "Created successfully!", "success");
+        }
+    }
+
+    function onGridError(e) {
+        // fired when controller returns BadRequest or error
+        if (e.xhr && e.xhr.responseText) {
+            notification.show(e.xhr.responseText, "error");
+
+            // Optionally prevent edits / disables toolbar
+            var grid = $("#ScPartsGrid").data("kendoGrid");
+            grid.cancelChanges(); // rollback the unsaved record
+            $(".k-grid-add").prop("disabled", true);
+        }
+    }
+</script>
