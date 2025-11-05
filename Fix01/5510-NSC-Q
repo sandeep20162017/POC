@@ -1,0 +1,227 @@
+Grid uses popup (client template).  function onSupplierNumChange(e) BELOW WAS INITIALLY WRITTEN FOR INLINE EDIT. It needs tobe rewritten
+I want to clear intial selection in OrigSupplierName when OrigSuppNum is changed.
+Grid :
+@(
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()    
+                
+                .Name($"NscPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}")
+                 .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "NscGrid" }) //lockcols
+               
+                .Columns(columns =>
+                {
+                    columns.Bound(c => c.Oid).Title("Oid").Hidden(true);
+                    columns.Bound(c => c.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("Contains")))
+                    .EditorTemplateName("NscComboBox")
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" })ir
+                    .Width(140)
+                     .ClientTemplate("<a href='javascript:void(0)' class='non-stock-code-cell'>#= OrigSuppNum #</a>");
+                   @*  columns.Command(command =>
+                   {
+                       command.Custom("Populate Details").Click("refreshNscPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+                   }).Width(60); *@
+
+                    columns.Bound(c => c.OrigSupplierName)
+                    .Title("Supplier Name")
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell" })
+                    .Filterable(ftb => ftb.Cell(cell => cell.Operator("Contains")
+                    .SuggestionOperator(FilterType.Contains)))
+                    
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:notNew" } //lockcols
+                    })
+                    .EditorTemplateName("NscSupplierComboBox").Width(120);
+
+....
+.Events(events =>
+{
+              
+    events.RequestEnd("onNScRequestEnd");
+    events.Error("onDataSourceError");
+})
+ .Events(e => e.Edit("onNscPartsEdit"))
+ ..
+  <script>
+     function onNscPartsEdit(e) {
+         console.log('VEH Index onNscPartsEdit');
+         var wnd = e.container.data("kendoWindow"); //outer popupsize
+         wnd.setOptions({
+             width: "450px",
+             height: "600px",
+
+             scrollable: false,     //
+             title: e.model.isNew() ? "Add New Non Stock Coded Part" : "Edit Non Stock Coded Part",
+             modal: true,
+             resizable: false
+         });
+
+         e.container.closest(".k-window").addClass("scparts-popup-style");
+
+         // track current model for combobox select logic
+         currentNscPartsModel = e.model;
+
+         // Make OrigSuppNum read-only in Edit mode
+         setTimeout(function () {
+             const combo = $("input[name='OrigSuppNum']").closest("[data-role='combobox']").data("kendoComboBox");
+             if (combo) {
+                 combo.readonly(!e.model.isNew());
+             }
+         }, 200);
+
+         ////////////////////////////////
+         var container = e.container; // this is the popup window’s form
+
+         // Get Kendo NumericTextBoxes using the [name] attribute
+         var unitCost = container.find("[name='UnitCost']").data("kendoNumericTextBox");
+         var qty = container.find("[name='Qty']").data("kendoNumericTextBox");
+         var percentage = container.find("[name='Percentage']").data("kendoNumericTextBox");
+         var totalCost = container.find("[name='TotalCost']").data("kendoNumericTextBox");
+
+         function calculateNscTotal() {
+             var u = unitCost.value() || 0;
+             var q = qty.value() || 0;
+             var p = percentage.value() || 0;
+
+             totalCost.value(u * q * (p / 100));
+         }
+
+         // Hook into change events
+         unitCost.bind("change", calculateNscTotal);
+         qty.bind("change", calculateNscTotal);
+         percentage.bind("change", calculateNscTotal);
+
+         // Run once on popup load (for editing existing records)
+         calculateNscTotal();
+
+         ///////////////////////////////
+     }
+
+ </script>
+     function onNScRequestEnd(e) {
+
+
+        //const grid = $("#NscPartsMaterialDetailsRebuiltPartsGrid").data("kendoGrid");
+        //var grid = e.sender;
+        var grid = $("#" + nscInEstimateGridName).data("kendoGrid");
+        var notification = $("#notification").data("kendoNotification");
+        // notification.success("onRequestEnd called - check grid name");
+
+        // console.warn('Grid name from hidden field:', gridName);
+        console.warn('onScRequestEnd : grid:', grid);
+        //console.warn('Resolved grid:', grid);
+
+        if (!grid || !grid.dataSource) {
+            console.error('Grid or its dataSource is undefined. Skipping data reload.');
+            return;
+        }
+
+
+        const reloadGrid = () => grid.dataSource.read();
+
+
+        if (e.type === "create" && !e.response.Errors) {
+            console.warn('onNScRequestEnd - create');
+            setTimeout(reloadGrid, 50);
+            notification.success("Record created successfully.");
+        } else if (e.type === "update") {
+            console.warn('onNScRequestEnd - update');
+            setTimeout(reloadGrid, 50);
+            notification.success("Record updated.");
+        } else if (e.type === "destroy") {
+            console.warn('onNScRequestEnd - destroy');
+            setTimeout(reloadGrid, 50);
+            notification.success("Record deleted.");
+        }
+    }
+
+    //start original request end
+    ..
+    NscSupplierComboBox :
+    @model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().ComboBox()
+    .Name("OrigSupplierName")
+    .DataTextField("Text")
+    .DataValueField("Text")
+    .Filter(FilterType.Contains)
+    .ClearButton(false)
+    .AutoBind(false)
+    //.MinLength(1)
+    .Placeholder("Select supplier name...")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "data-column", fieldName }
+    })
+    .Events(e => e.Select("onNscPartsComboBoxSelect"))
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetSupplierNames", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getSupplierNameParams");
+        })
+        .ServerFiltering(true);
+    })
+)
+NscComboBox:
+@model string
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Text")
+    .Filter("contains")
+    .ClearButton(false)
+    
+    .Placeholder("Enter Supplier Number...")
+    .AutoBind(false)
+    .Events(events =>
+    {
+        events.Change("onSupplierNumChange"); //auto fill columns
+       // events.DataBound("onComboBoxDataBound");
+       // events.Change("onScPartChange"); // ssk9 pop up duplicate rebuilt part
+    })
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName }, //ssk7 Disable columns on edit
+        { "data-column", fieldName }, //ssk7 Disable columns on edit
+        { "class", " required-cell"},
+        {"required", "required"}
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+@* .Template("#= Text #") *@
+
+)
+<script>
+    function onSupplierNumChange(e) {
+        var row = $(e.sender.element).closest("tr");
+        var supplierNameCombo = row.find("[data-role='combobox'][name='OrigSupplierName']").data("kendoComboBox");
+
+        if (supplierNameCombo) {
+            supplierNameCombo.value("");
+            supplierNameCombo.text("");
+        }
+    }
+</script>
+
+
+
+</script>
