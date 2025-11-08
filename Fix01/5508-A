@@ -1,0 +1,91 @@
+🧩 1. Replace the textbox in your view (or editor template)
+
+Change this line:
+
+<input id="newVehSeriesCode" class="k-textbox" required />
+
+
+to this:
+
+@(Html.Kendo().DropDownList()
+    .Name("newVehSeriesCode")
+    .DataTextField("Text")        // display text
+    .DataValueField("Value")      // actual value posted
+    .OptionLabel("-- Select Vehicle Series --")
+    .Filter("contains")
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Action("GetVehSeries", "AutoComplete"); // Controller action
+        })
+        .ServerFiltering(false);
+    })
+    .HtmlAttributes(new { required = "required", style = "width:100%" })
+)
+
+
+💡 Tip:
+Use .OptionLabel() to show a friendly default option, and .Filter("contains") if you want client-side filtering while typing.
+
+🧠 2. Controller Action (AutoCompleteController.cs)
+
+Your action should return a JSON list of items with Text and Value fields:
+
+public IActionResult GetVehSeries()
+{
+    var seriesList = _vehicleService.GetAllSeries() // Example service call
+        .Select(s => new 
+        {
+            Text = s.SeriesName,
+            Value = s.SeriesCode
+        });
+
+    return Json(seriesList);
+}
+
+
+You can also use async if it’s pulling from a DB:
+
+public async Task<IActionResult> GetVehSeries()
+{
+    var seriesList = await _vehicleService.GetAllSeriesAsync();
+    return Json(seriesList.Select(s => new { Text = s.SeriesName, Value = s.SeriesCode }));
+}
+
+🧱 3. Move to a Shared Editor Template
+
+If you want this dropdown reusable across views:
+
+Create:
+📁 /Views/Shared/EditorTemplates/VehicleSeriesDropDown.cshtml
+
+Content:
+
+@model string
+
+@(Html.Kendo().DropDownListFor(m => m)
+    .DataTextField("Text")
+    .DataValueField("Value")
+    .OptionLabel("-- Select Vehicle Series --")
+    .Filter("contains")
+    .DataSource(source =>
+    {
+        source.Read(read => read.Action("GetVehSeries", "AutoComplete"));
+    })
+    .HtmlAttributes(new { style = "width:100%", required = "required" })
+)
+
+
+Usage in any view:
+
+@Html.EditorFor(model => model.NewVehSeriesCode, "VehicleSeriesDropDown")
+
+🧾 4. (Optional) Handle change event
+
+If you want to auto-fill “New Description” after a series is chosen:
+
+$("#newVehSeriesCode").data("kendoDropDownList").bind("change", function (e) {
+    var dataItem = this.dataItem();
+    $("#newprojDesc").val(dataItem ? dataItem.Text : "");
+});
