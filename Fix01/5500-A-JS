@@ -1,0 +1,67 @@
+function onSupplierNumChange(e) {
+    console.warn("onSupplierNumChange");
+
+    var supplierNumCombo = e.sender; // The OrigSuppNum ComboBox
+    var supplierNumber = supplierNumCombo.value(); // selected supplier number
+
+    // Locate the popup editor context (the Grid popup)
+    var popup = supplierNumCombo.wrapper.closest(".k-window-content");
+
+    // Locate the OrigSupplierName ComboBox
+    var supplierNameCombo = popup.find("[data-role='combobox']")
+        .filter(function () {
+            var n = $(this).attr("name") || "";
+            var i = $(this).attr("id") || "";
+            return n.indexOf("OrigSupplierName") > -1 || i.indexOf("OrigSupplierName") > -1;
+        })
+        .data("kendoComboBox");
+
+    console.warn("Found OrigSupplierName combo:", supplierNameCombo);
+
+    if (!supplierNameCombo) {
+        console.error("OrigSupplierName ComboBox not found in popup!");
+        return;
+    }
+
+    // Clear the supplier name field first
+    supplierNameCombo.value("");
+    supplierNameCombo.text("");
+
+    if (!supplierNumber) {
+        console.warn("No supplier number selected, skipping lookup.");
+        return;
+    }
+
+    console.warn("Fetching supplier name for number:", supplierNumber);
+
+    // --- Call Controller Action ---
+    $.ajax({
+        url: "/AutoComplete/GetSupplierNames",
+        type: "GET",
+        data: { supplierNumber: supplierNumber },
+        success: function (data) {
+            console.log("Supplier name data:", data);
+
+            if (data && data.length > 0) {
+                // Assume controller returns [{ Text: "ABC Corp" }]
+                var supplierName = data[0].Text || data[0];
+
+                // Set value in ComboBox
+                supplierNameCombo.value(supplierName);
+                supplierNameCombo.text(supplierName);
+
+                // Update the current model (if bound)
+                if (typeof currentNscPartsModel !== "undefined" && currentNscPartsModel) {
+                    currentNscPartsModel.set("OrigSupplierName", supplierName);
+                }
+            } else {
+                console.warn("No supplier names found for supplier number:", supplierNumber);
+            }
+        },
+        error: function (xhr, status, error) {
+            console.error("Error fetching supplier names:", error);
+        }
+    });
+
+    console.warn("currentNscPartsModel:", currentNscPartsModel);
+}
