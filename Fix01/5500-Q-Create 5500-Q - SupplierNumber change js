@@ -1,0 +1,143 @@
+Telrik ASP.NET core has grid, edit mode pop-up, using client template.
+Grid has 2 columns. Supplier Number and Supplier Name
+Both of these coums use Telerik comboboxes
+Supplier Number -> combobox name NscComboBox
+Supplier Name -> combobox name NscSupplierComboBox
+When Supplier Number is selected onNscPartsComboBoxSelect gets called. This pupulates NscSupplierComboBox. This is implemented and working fine.
+I need your assitance to implement onSupplierNumChange JS function. Sample implementation is below.
+onSupplierNumChange
+ Should clear OrigSupplierName and call Controller action , this will populate OrigSupplierName from selected supplierNumber
+in NscComboBox.
+AutoComplete.cs
+[HttpGet]
+ public IActionResult GetSupplierNames(string supplierNumber)
+ {
+ ..
+NscComboBox.cshtml :
+@model string
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+@(Html.Kendo().ComboBox()
+    .Name(fieldName)
+    .DataTextField("Text")
+    .DataValueField("Text")
+    .Filter("contains")
+    .ClearButton(false)
+    
+    .Placeholder("Enter Supplier Number...")
+    .AutoBind(false)
+    .Events(events =>
+    {
+        events.Change("onSupplierNumChange"); //auto fill columns
+        //events.Select("onNscChange");
+        events.Select("onNscPartsComboBoxSelect");
+       // events.DataBound("onComboBoxDataBound");
+       // events.Change("onScPartChange"); // ssk9 pop up duplicate rebuilt part
+    })
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        { "name", fieldName }, //ssk7 Disable columns on edit
+        { "data-column", fieldName }, //ssk7 Disable columns on edit
+        { "class", " required-cell"},
+        {"required", "required"}
+    })
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetAutoCompleteData", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getComboBoxParams");
+        })
+        .ServerFiltering(true);
+    })
+@* .Template("#= Text #") *@
+
+)
+NscSupplierComboBox:
+@model object
+
+@{
+    var fieldName = ViewData.TemplateInfo.GetFullHtmlFieldName("");
+}
+
+@(Html.Kendo().ComboBox()
+    .Name("OrigSupplierName")
+    .DataTextField("Text")
+    .DataValueField("Text")
+    .Filter(FilterType.Contains)
+    .ClearButton(false)
+    .AutoBind(false)
+    //.MinLength(1)
+    .Placeholder("Select supplier name...")
+    .HtmlAttributes(new Dictionary<string, object>
+    {
+        
+         { "name", fieldName }, //ssk7 Disable columns on edit
+        { "data-column", fieldName }, //ssk7 Disable columns on edit
+         {"required", "required"},
+    })
+    .Events(e => e.Select("onNscPartsComboBoxSelect"))
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Url(Url.Action("GetSupplierNames", "AutoComplete"))
+                .Type(HttpVerbs.Get)
+                .Data("getSupplierNameParams");
+        })
+        .ServerFiltering(true);
+    })
+)
+..
+ <script>
+     function onSupplierNumChange(e) {
+             console.warn("onSupplierNumChange");
+         var combo = e.sender; // The OrigSuppNum ComboBox
+         var popup = combo.wrapper.closest(".k-window-content");
+
+         // More tolerant selector: look for any input related to OrigSupplierName
+             var supplierNumberCombo = popup.find("[data-role='combobox']")
+                 .filter(function () {
+                     // Check if its 'name' or 'id' attribute contains OrigSupplierName
+                     var n = $(this).attr("name") || "";
+                     var i = $(this).attr("id") || "";
+                     return n.indexOf("OrigSuppNum") > -1 || i.indexOf("OrigSuppNum") > -1;
+                 })
+                 .data("kendoComboBox");
+
+             var supplierNameCombo = popup.find("[data-role='combobox']")
+                 .filter(function () {
+                     // Check if its 'name' or 'id' attribute contains OrigSupplierName
+                     var n = $(this).attr("name") || "";
+                     var i = $(this).attr("id") || "";
+                     return n.indexOf("OrigSupplierName") > -1 || i.indexOf("OrigSupplierName") > -1;
+                 })
+                 .data("kendoComboBox");
+
+             console.warn("Found supplierNumberCombo combo:", supplierNumberCombo);
+             console.warn("Found OrigSupplierName combo:", supplierNameCombo);
+
+             if (supplierNumberCombo) {
+                 console.warn("Setting supplierNameCombo value");
+             supplierNameCombo.value("");
+             supplierNameCombo.text("");
+             const model = currentNscPartsModel;
+                 // model.set("OrigSupplierName", "");                    
+                 // model.set("Description", "");
+                 // model.set("KeyWord", "");
+                 // model.set("Qty", "");
+                 // model.set("UnitCost", "");
+                 // model.set("Percentage", "");
+                 // model.set("TotalCost", "");
+
+               //add logic here
+
+         }
+             console.warn('currentNscPartsModel :');
+          console.warn(currentNscPartsModel);
+         
+     }
+     
+ </script>
