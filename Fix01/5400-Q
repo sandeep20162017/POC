@@ -1,0 +1,321 @@
+jQuery.Deferred exception: Cannot read properties of undefined (reading 'uid') TypeError: Cannot read properties of undefined (reading 'uid'
+Is it possible to ignore uid and continue  update or add?
+
+    function onScPartsEdit(e) {
+        var wnd = e.container.data("kendoWindow"); //outer popupsize
+        wnd.setOptions({
+           width : "450px",
+           height : "600px",
+
+            scrollable: false,     // 
+            title: e.model.isNew() ? "Add New Stock Coded Part" : "Edit Stock Coded Part",
+            modal: true,
+            resizable: false
+        });
+
+        e.container.closest(".k-window").addClass("scparts-popup-style");
+
+        // track current model for combobox select logic
+        currentScPartsModel = e.model;
+
+        // Make Stock Code read-only in Edit mode
+        setTimeout(function () {
+            const combo = $("input[name='MMSStockCode']").closest("[data-role='combobox']").data("kendoComboBox");
+            if (combo) {
+                combo.readonly(!e.model.isNew());
+            }
+        }, 200);
+
+        ////////////////////////////////
+        var container = e.container; // this is the popup window’s form
+
+        // Get Kendo NumericTextBoxes using the [name] attribute
+        var unitCost = container.find("[name='UnitCost']").data("kendoNumericTextBox");
+        var qty = container.find("[name='Qty']").data("kendoNumericTextBox");
+        var percentage = container.find("[name='Percentage']").data("kendoNumericTextBox");
+        var totalCost = container.find("[name='TotalCost']").data("kendoNumericTextBox");
+
+        function calculateTotal() {
+            var u = unitCost.value() || 0;
+            var q = qty.value() || 0;
+            var p = percentage.value() || 0;
+
+            totalCost.value(u * q * (p / 100));
+        }
+
+        // Hook into change events
+        unitCost.bind("change", calculateTotal);
+        qty.bind("change", calculateTotal);
+        percentage.bind("change", calculateTotal);
+
+        // Run once on popup load (for editing existing records)
+        calculateTotal();
+
+        ///////////////////////////////
+    }
+
+</script>
+  @(
+Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()    
+     .Name($"ScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}") 
+     .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "RbGrid" }) //lockcols
+      
+    .Columns(columns =>
+    {
+    ..
+    .Resizable(r => r.Columns(true))
+.Events(e => e.Edit("onScPartsEdit"))
+    
+    //.Editable(editable => editable.Mode(GridEditMode.InCell))
+.Editable(editable => editable.Mode(GridEditMode.PopUp)
+    .Window(w => w.Width("600px").Title("Edit Stock Coded Part")))
+.Pageable(p => p
+.Numeric(true)       // Show numeric page buttons
+.Input(false)        // Hide input box
+.PreviousNext(true)  // Show next/prev arrows
+)
+.Scrollable(s => s.Virtual(true).Height("200px"))
+
+.Resizable(r => r.Columns(true))
+.Events(e => e.Edit("onScPartsEdit"))
+  .Read(read => read.Url(Url.Action("GetScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+  .Create(create => create.Url(Url.Action("CreateScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+  .Update(update => update.Url(Url.Action("UpdateScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+  .Destroy(delete => delete.Url(Url.Action("DeleteScPartsUsedInEstimates", "ScPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post)
+  ...
+     [HttpPost]
+   [AllowAnonymous]
+
+   public async Task<IActionResult> CreateScPartsUsedInEstimates(
+       [FromForm] StockCodedPartsViewModel model,
+         [FromQuery] string id,
+         [FromQuery] string gridType)
+   {
+       //if (!ModelState.IsValid)
+       //{
+       //    var errors = ModelState.Values
+       //        .SelectMany(v => v.Errors)
+       //        .Select(e => e.ErrorMessage);
+       //    return BadRequest(new { Errors = errors });
+       //}
+       _dbConnection.Open();
+       using var transaction = _dbConnection.BeginTransaction();
+
+       try
+       {
+           var enteredBy = ViewBag.UserName?.ToString().ToUpper() ?? "SYSTEM";
+           var dateEntered = DateTime.Now;
+           var linkCode = id;
+           string linkType = gridType == "RbGrid" ? "RB" : "BUS";
+           var isRebuiltPart = 'N';
+           // Change in AJAX call parameters:
+           var partData = new
+           {
+               id,
+               gridType,
+               model = new
+               {
+                   MMSStockCode = model.MMSStockCode,
+                   CC = model.CC,
+                   Qty = model.Qty,
+                   Percentage = model.Percentage,
+                   UnitCost = model.UnitCost,
+                   CoreCost = model.CoreCost,
+                   LinkType = linkType,
+                   LinkCode = id
+               }
+           };
+
+           //  var model = models.FirstOrDefault(); // only one model expected when Batch(false)
+           if (model == null)
+           {
+               ModelState.AddModelError("", "No data submitted.");
+               return null; ;
+           }
+
+           var mmsStockCode = model.MMSStockCode?.ToUpperInvariant();
+
+           //  Duplicate check
+           var duplicateCheckSql = @"
+                           SELECT COUNT(*) 
+                           FROM SBCES.SCPartsUsed 
+                           WHERE UPPER(MMSStockCode) = @MMSStockCode
+                             AND UPPER(LinkCode) = @LinkCode
+                             AND UPPER(LinkType) = @LinkType";
+
+           var duplicateCount = await _dbConnection.ExecuteScalarAsync<int>(
+               duplicateCheckSql,
+               new { MMSStockCode = mmsStockCode, LinkCode = linkCode.ToUpper(), LinkType = linkType },
+               transaction
+           );
+
+           if (duplicateCount > 0)
+           {
+               //ModelState.AddModelError("MMSStockCode", $"MMSStockCode '{mmsStockCode}' already exists for this estimate.");
+               //return BadRequest($"MMSStockCode '{mmsStockCode}' already exists for this estimate.");
+               var msg = $"MMSStockCode '{model.MMSStockCode}' already exists for this estimate.";
+               ModelState.AddModelError("MMSStockCode", msg);
+               return BadRequest(msg); // triggers grid error event
+           }
+
+           var parameters = new DynamicParameters();
+           parameters.Add("MMSStockCode", mmsStockCode);
+           parameters.Add("CC", model.CC?.ToUpperInvariant() ?? " ");
+           parameters.Add("CorePartNumber", model.CorePartNumber?.ToUpperInvariant() ?? " ");
+           parameters.Add("EnteredBy", enteredBy);
+           parameters.Add("DateEntered", dateEntered);
+           parameters.Add("LinkCode", linkCode.ToUpper());
+           parameters.Add("LinkType", linkType);
+           parameters.Add("RebuiltPartNum", id);
+           parameters.Add("IsRebuiltPart", isRebuiltPart);
+           parameters.Add("UnitCost", model.UnitCost ?? 0m);
+           parameters.Add("MmsNewCost", model.MmsNewCost ?? 0m);
+           parameters.Add("CoreCost", model.CoreCost ?? 0m);
+           parameters.Add("RebPartCost", model.PartCost ?? 0m);
+           parameters.Add("LastModifiedBy", enteredBy);
+           parameters.Add("LastModifiedDate", dateEntered);
+           parameters.Add("Qty", (model.Qty));
+           parameters.Add("Percentage", (model.Percentage));
+           parameters.Add("OrigSupplierNum", (model.OrigSupplierNum ?? "0").ToUpperInvariant());
+           parameters.Add("OrigSupplierName", (model.OrigSupplierName ?? "").ToUpperInvariant());
+           parameters.Add("DetailedDesc", (model.DetailedDesc ?? "").ToUpperInvariant());
+           parameters.Add("PartType", (model.PartType ?? "").ToUpperInvariant());
+
+           var sql = @"
+       INSERT INTO SBCES.SCPartsUsed (
+           MMSStockCode, DateEntered, EnteredBy, MMSCost, OEMCost,
+           LastModifiedBy, LastModifiedDate, CostCentre, QtyReqd,
+           PercentUsage, LinkCode, RebuiltPart, LinkType, MMSRebuiltCode,
+           CoreCost, RebPartCost, OrigSupplierName, OrigSupNum
+       ) VALUES (
+           UPPER(@MMSStockCode), 
+           @LastModifiedDate, 
+           UPPER(@EnteredBy),
+           @UnitCost, 
+           @MmsNewCost,
+           UPPER(@LastModifiedBy), 
+           @LastModifiedDate, 
+           UPPER(@CC),
+           UPPER(@Qty), 
+           UPPER(@Percentage),
+           UPPER(@LinkCode), 
+           UPPER(@IsRebuiltPart), 
+           UPPER(@LinkType),
+           UPPER(@RebuiltPartNum), 
+           @CoreCost,
+           @RebPartCost,
+           UPPER(@OrigSupplierName),
+           UPPER(@OrigSupplierNum)                               
+       )";
+
+           await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+           transaction.Commit();
+
+           if (gridType == "VehicleGrid")
+           {
+               await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, id);
+           }
+
+           return StatusCode(200, $"success");
+       }
+       catch (SqlException sqlEx)
+       {
+           transaction.Rollback();
+           ModelState.AddModelError("", $"Database error: {sqlEx.Message}");
+           // return Json(models.ToDataSourceResult(request, ModelState));
+           return StatusCode(500, $"failed");
+       }
+       catch (Exception ex)
+       {
+           transaction.Rollback();
+           ModelState.AddModelError("", $"Unexpected error: {ex.Message}");
+           //return Json(models.ToDataSourceResult(request, ModelState));
+           return StatusCode(500, $"Action failed: {ex.Message}");
+       }
+   }
+
+   [AcceptVerbs("Post")]
+   [AllowAnonymous]
+   public async Task<IActionResult> UpdateScPartsUsedInEstimates(
+       [FromForm] StockCodedPartsViewModel model,
+       [FromQuery] string id,
+       [FromQuery] string gridType)
+   {
+
+       string linkType = string.Empty;
+       if (gridType == "RbGrid")
+       {
+           linkType = "RB";
+       }
+       if (gridType == "VehicleGrid")
+       {
+           linkType = "BUS";
+       }
+       if (!ModelState.IsValid)
+       {
+           return StatusCode(500, $"failed");
+           // return Json(models.ToDataSourceResult(request, ModelState));
+       }
+       _dbConnection.Open();
+       using var transaction = _dbConnection.BeginTransaction();
+       try
+       {
+           var enteredBy = ViewBag.UserADId?.ToString().ToUpper() ?? "SYSTEM";
+           var dateModified = DateTime.Now;
+
+           //foreach (var model in models)
+           {
+               var parameters = new DynamicParameters();
+               parameters.Add("MMSStockCode", model.MMSStockCode?.ToUpperInvariant());
+               parameters.Add("CC", model.CC?.ToUpperInvariant() ?? " ");
+               parameters.Add("UnitCost", model.UnitCost ?? 0m);
+               parameters.Add("Qty", (model.Qty));
+               parameters.Add("Percentage", (model.Percentage));
+               parameters.Add("CoreCost", model.CoreCost ?? 0m);
+               parameters.Add("RebuiltPartNum", id?.ToUpperInvariant());
+               parameters.Add("LastModifiedBy", ViewBag.UserName);
+               parameters.Add("LastModifiedDate", DateTime.Now);
+               parameters.Add("LinkType", linkType);
+               parameters.Add("LinkCode", model.LinkCode);
+
+               var sql = @"
+                           UPDATE SBCES.SCPartsUsed 
+                           SET 
+                               CostCentre = UPPER(@CC),
+                               MMSCost = @UnitCost,
+                               QtyReqd = UPPER(@Qty),
+                               PercentUsage = UPPER(@Percentage),
+                               CoreCost = @CoreCost,
+                               LastModifiedBy = @LastModifiedBy,
+                               LastModifiedDate = @LastModifiedDate
+                           WHERE 
+                               MMSStockCode = @MMSStockCode
+                               AND LinkCode = @LinkCode
+                               AND LinkType = @LinkType
+                               
+                               ";
+
+               await _dbConnection.ExecuteAsync(sql, parameters, transaction);
+           }
+
+
+           transaction.Commit();
+
+           if (gridType == "VehicleGrid")
+           {
+               //update estimates
+               await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, id);
+           }
+           return StatusCode(200, $"success");
+           // return Json(models.ToDataSourceResult(request));
+       }
+       catch (Exception ex)
+       {
+           transaction.Rollback();
+           ModelState.AddModelError("", $"Error updating record: {ex.Message}");
+           //return Json(models.ToDataSourceResult(request, ModelState));
+           return StatusCode(500, $"failed");
+       }
+   }
+
+  
