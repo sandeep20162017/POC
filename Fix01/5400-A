@@ -1,0 +1,113 @@
+Alright bud, this one’s a classic Telerik Grid “something in the edit cycle blew up before Kendo had a model” situation.
+Your error:
+
+Cannot read properties of undefined (reading 'uid')
+
+
+means your edit event (onScPartsEdit) is firing, but e.model is undefined — so Telerik can’t find the row or DataSource item behind that popup.
+
+And no — you can’t “ignore uid and continue” because the UID is how Telerik identifies which model is being edited. If it’s missing, the grid literally doesn’t know what row is being edited.
+
+But the good news: this is almost always caused by one of these issues, and they’re fixable.
+
+✅ Top 3 Real-World Causes (and fixes)
+1. You wired .Events(e => e.Edit("onScPartsEdit")) twice
+
+I see this in your markup:
+
+.Resizable(r => r.Columns(true))
+.Events(e => e.Edit("onScPartsEdit"))
+...
+.Resizable(r => r.Columns(true))
+.Events(e => e.Edit("onScPartsEdit"))
+
+
+You’re binding the edit event twice.
+This causes the edit event to fire twice, and the 2nd time → the UID is missing → boom.
+
+✔ Fix
+
+Remove one of the .Events(e => e.Edit("onScPartsEdit")) blocks.
+
+2. Virtual scrolling + popup editing + missing model ID
+
+You're using:
+
+.Scrollable(s => s.Virtual(true).Height("200px"))
+
+
+Virtual scrolling can break popup editing unless the model has a correct primary key defined using:
+
+.DataSource(ds => ds
+    .Model(m => m.Id(x => x.Id))   // <— critical!
+)
+
+
+If you do not define .Id(), Kendo can’t generate a UID for the model.
+
+✔ Fix
+
+Add:
+
+.DataSource(ds => ds
+    .Model(m =>
+    {
+        m.Id(x => x.Id);  // use your real PK field here
+    })
+)
+
+
+If your view model does not have a key field → add one.
+Telerik popup editing genuinely needs it.
+
+3. One of your widgets is being loaded before the popup is fully built
+
+This part:
+
+setTimeout(function () {
+    const combo = $("input[name='MMSStockCode']")
+         .closest("[data-role='combobox']")
+         .data("kendoComboBox");
+    if (combo) {
+        combo.readonly(!e.model.isNew());
+    }
+}, 200);
+
+
+If this code runs before the widget exists, it can cause Kendo to bail out of the edit initialization → e.model becomes undefined on the next cycle.
+
+✔ Fix
+
+Wrap your entire edit logic in a guard:
+
+function onScPartsEdit(e) {
+
+    if (!e.model) {
+        console.warn("Edit event fired without a model. Ignoring.");
+        return;
+    }
+
+    // your popup logic...
+}
+
+
+This prevents crashes, but still doesn’t fix the root cause.
+
+💡 Bonus cause: Returning plain text "success" inside Create/Update
+
+Your Create/Update actions return:
+
+return StatusCode(200, "success");
+
+
+But Telerik DataSource expects a JSON object containing the updated model + errors.
+Returning a string often breaks the grid’s internal sync and causes the edit popup to misbehave.
+
+✔ Fix: return DataSourceResult
+
+The safe option:
+
+return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+
+
+Even if you manually handle DB errors, Telerik still expects that shape.
