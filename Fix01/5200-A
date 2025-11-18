@@ -1,0 +1,103 @@
+✅ 1. Add the Custom Command in Your Telerik Grid
+c.Command(cmd =>
+{
+    cmd.Custom("Show All Labour")
+        .IconClass("k-icon k-i-eye")
+        .Click("window.onShowAllLabour");
+
+    cmd.Custom("Copy").IconClass("k-icon k-i-copy").Click("window.onCopyEstimate");
+    cmd.Custom("Archive").IconClass("k-icon k-i-folder").Click("window.onArchiveClick");
+    cmd.Custom("Delete").IconClass("k-icon k-i-delete").Click("window.showDeleteConfirmation");
+}).Width(220);
+
+✅ 2. JavaScript: onShowAllLabour Handler
+
+This one gets the row, sends the ID to your controller via GET, and loads the results into a popup.
+
+✔ Option A — Use a Telerik Window + read-only grid (nice UI)
+window.onShowAllLabour = function (e) {
+    e.preventDefault();
+
+    var grid = $("#VehicleGrid").data("kendoGrid");
+    var item = grid.dataItem($(e.currentTarget).closest("tr"));
+
+    // Open window and bind data
+    $("#LabourWindow").data("kendoWindow")
+        .refresh({
+            url: '@Url.Action("ShowAllLabour", "Vehicles")',
+            type: "GET",
+            data: { vehicleListId: item.VehicleListId }
+        })
+        .center()
+        .open();
+};
+
+✅ 3. Add the Telerik Window to Your View
+@(Html.Kendo().Window()
+    .Name("LabourWindow")
+    .Title("All Labour Items")
+    .Visible(false)
+    .Modal(true)
+    .Draggable(true)
+    .Width(800)
+    .Height(500)
+    .Actions(a => a.Close())
+)
+
+
+The Window will load a partial view.
+
+✅ 4. Controller Action (GET)
+
+Uses Dapper to fetch labour items.
+
+[HttpGet]
+public IActionResult ShowAllLabour(int vehicleListId)
+{
+    using (var conn = new SqlConnection(_config.GetConnectionString("Default")))
+    {
+        var labourItems = conn.Query<LabourDto>(
+            @"SELECT * FROM Labour WHERE VehicleListId = @Id",
+            new { Id = vehicleListId }
+        ).ToList();
+
+        return PartialView("_LabourGrid", labourItems);
+    }
+}
+
+✅ 5. Partial View: _LabourGrid.cshtml
+
+A simple read-only Kendo Grid:
+
+@(Html.Kendo().Grid<LabourDto>()
+    .Name("LabourGrid")
+    .Columns(c =>
+    {
+        c.Bound(x => x.LabourCode).Title("Code");
+        c.Bound(x => x.Description);
+        c.Bound(x => x.Hours);
+        c.Bound(x => x.Rate);
+    })
+    .Pageable()
+    .Sortable()
+    .Scrollable()
+    .DataSource(ds => ds.Ajax().Read(r => r.Action("ShowAllLabour", "Vehicles")))
+    .Editable(e => e.Enabled(false))
+)
+
+✔ Option B — SUPER SIMPLE popup (no Telerik Window)
+JS:
+window.onShowAllLabour = function (e) {
+    e.preventDefault();
+
+    var grid = $("#VehicleGrid").data("kendoGrid");
+    var item = grid.dataItem($(e.currentTarget).closest("tr"));
+
+    $.get('@Url.Action("ShowAllLabour", "Vehicles")', { vehicleListId: item.VehicleListId }, function (html) {
+        $("#simplePopup").html(html).show();
+    });
+};
+
+HTML popup:
+<div id="simplePopup" style="display:none; padding:20px; border:1px solid #ccc; background:white;">
+</div>
