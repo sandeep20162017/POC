@@ -1,0 +1,86 @@
+cONTROLLER action ReadBuses did get called with above changes.
+For the existing records, BusNames should  be popuated. It is not populating now.
+In database populated as :
+BusId : 7,8,9,10,11
+BusName : GMC T6H (2000-2499),GMC T6H (2700-2858),GMC T6H (8010-8117) 8058,GMC T6H (8740-8985),GMC T6H (MTL) (2600-2619)
+
+PopUp is populated using below
+public ActionResult GetRbById(int rebuiltId, bool readOnly = false)
+{
+
+    var rebuiltPart = rebuiltId == 0
+        ? new RebuiltPartsViewModel() // Add mode
+        : _dbConnection.QueryFirstOrDefault<RebuiltPartsViewModel>(@"
+        SELECT rbm.RbMasterlistId as RebuiltId,
+                                    rbm.[RebuiltStockNum],
+                                    rbm.[MmsStockCode],
+                                    rbm.[Keyword],
+                                    rbm.JobNumber,
+                                    rbm.[CorePartNum],
+                                    rbm.[DetailedDesc] AS Description,
+                                    rbm.[CoreCharge],
+                                    rbm.[EstimatedCost],
+                                    rbm.[BuyNewCost],
+                                    rbm.[RemanCost],
+                                    rbm.[ExternalCost],
+                                    --rbl.listid,
+                                    STRING_AGG(CAST(lb.listid AS VARCHAR), ',') AS BusId,
+                                    STRING_AGG(lb.description, ',') AS BusName
+                                    FROM 
+                                        SBCES.RbMasterlist rbm
+                                    LEFT JOIN 
+                                        SBCES.RBLISTOFBUSES rbl ON rbm.RebuiltStockNum = rbl.RebuiltStockNum
+                                    LEFT JOIN 
+                                        SBCES.LISTOFBUSES lb ON rbl.listid = lb.listid
+                                        WHERE  rbl.listid is not null and 
+                                         rbm.RbMasterlistId = @Id
+                                         GROUP BY
+                                         rbm.RbMasterlistId,
+                                        rbm.[RebuiltStockNum],
+                                        rbm.[MmsStockCode],
+                                        rbm.[Keyword],
+                                        rbm.JobNumber,
+                                        rbm.[CorePartNum],
+                                        rbm.[DetailedDesc],
+                                        rbm.[CoreCharge],
+                                        rbm.[EstimatedCost],
+                                        rbm.[BuyNewCost],
+                                        rbm.[RemanCost],
+                                        rbm.[ExternalCost]
+                                        --rbl.listid
+        ", new { Id = rebuiltId });
+
+    if (rebuiltPart == null)
+        return Content("Rb not found");
+
+    ViewBag.ReadOnly = readOnly;
+    ViewBag.ParentId = rebuiltId;  /*save parent id*/
+    ViewBag.FormattedDate = rebuiltPart.LastModifiedDate;
+
+    return PartialView("~/Views/Shared/_RbPopUp.cshtml", rebuiltPart);
+}
+
+JS :
+ window.loadRebuiltForm = function (rebuiltId) {
+     console.log('loadRebuiltForm');
+      console.log(rebuiltId);
+     $.get('@Url.Action("GetRbById", "RebuiltParts")', { rebuiltId: rebuiltId }, function (html) {
+         $("#rebuiltTabContent").html(html);
+         window.tabContentLoaded[0] = true;
+         window.wireRebuiltForm(); // rebind save/cancel/edit/etc
+
+         var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+
+         // If it's an existing record, enable other tabs
+         if (rebuiltId !== 0 && tabStrip) {
+             for (var i = 1; i <= 7; i++) {
+                 tabStrip.enable(tabStrip.tabGroup.children().eq(i), true);
+             }
+         } else if (rebuiltId === 0 && tabStrip) {
+             // New record: disable all other tabs
+             for (var i = 1; i <= 7; i++) {
+                 tabStrip.enable(tabStrip.tabGroup.children().eq(i), false);
+             }
+         }
+     });
+ };
