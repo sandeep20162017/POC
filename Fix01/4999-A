@@ -1,0 +1,105 @@
+✅ 1. You are binding twice — client template + popup editor conflict
+
+Inside your popup editor you already have:
+
+@(Html.Kendo().MultiSelect()
+    .Name("VehicleSeriesEditor")
+    .Value(Model.BusId)
+)
+
+
+But then you inject your client template:
+
+VehicleSeriesEditor.cshtml
+
+Which ALSO creates:
+
+.Name("rbmultiselect")
+
+
+➡️ Now the widget that Kendo initializes is rbmultiselect, not VehicleSeriesEditor,
+and VehicleSeriesEditor never gets a Kendo widget attached → meaning no DataSource → no Read() call.
+
+This is a classic Telerik popup-template issue.
+
+✅ 2. Your popup template MultiSelect has no DataSource
+
+Your popup editor uses:
+
+@(Html.Kendo().MultiSelect()
+    .Name("VehicleSeriesEditor")
+    .Value(Model.BusId)
+)
+
+
+But it does not include:
+
+.DataSource(...)
+.DataTextField(...)
+.DataValueField(...)
+
+
+➡️ So when the popup shows, the MultiSelect exists, but it has no configuration → Kendo ignores it and instead uses the client template.
+
+✅ 3. .Value("BusId") in template is wrong
+
+This:
+
+.Value("BusId")
+
+
+Should only be used if you literally pass a list of IDs, like:
+
+.Value(new[] { 1, 2, 3 })
+
+
+Using "BusId" as a string makes Kendo think you're passing a preselected value "BusId" (literal text), not a field.
+
+🎯 BEST PRACTICE FIX — Only define the MultiSelect in ONE place
+Inside popup editor partial _RbPopUpEditor.cshtml
+
+Replace your MultiSelect with the full widget config:
+
+@(Html.Kendo().MultiSelect()
+    .Name("VehicleSeriesEditor")   // Name MUST match model binding
+    .DataTextField("BusName")
+    .DataValueField("BusId")
+    .Placeholder("Select Vehicle..")
+    .Filter("contains")
+    .AutoBind(true)
+    .Value(Model.BusId != null ? new[] { Model.BusId } : null)
+    .DataSource(ds =>
+    {
+        ds.Read(read => read.Action("ReadBuses", "RebuiltParts"));
+    })
+)
+
+And remove VehicleSeriesEditor.cshtml OR stop including it in the popup template.
+🎯 If you want to keep the client template, then remove the MultiSelect from _RbPopUpEditor.cshtml
+
+Your popup should contain ONLY:
+
+<div class="form-group double-width">
+    @Html.Label("BusId", "Vehicle Series")
+    @(Html.Partial("VehicleSeriesEditor"))
+</div>
+
+
+And inside VehicleSeriesEditor.cshtml:
+
+@(Html.Kendo().MultiSelect()
+    .Name("BusId")
+    .DataTextField("BusName")
+    .DataValueField("BusId")
+    .Placeholder("Select Vehicle..")
+    .Filter("contains")
+    .BindTo(Model)
+    .DataSource(ds =>
+    {
+        ds.Read(r => r.Action("ReadBuses", "RebuiltParts"));
+    })
+)
+
+
+IMPORTANT:
+The name must match your model property (BusId) so the Grid binds it correctly.
