@@ -1,0 +1,79 @@
+👉 FIX: Here is the correct project type you must create
+In Visual Studio:
+Create a new project →
+   "ASP.NET Web Application (.NET Framework)" →
+       Choose: "Web API"
+       Framework: .NET Framework 4.8
+
+📌 NEXT: Here is the corrected ReportsController.cs
+
+This 100% compiles under .NET Framework 4.8 Web API.
+
+using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Web.Http;
+using CrystalDecisions.CrystalReports.Engine;
+using CrystalDecisions.Shared;
+
+namespace CESReports.Controllers
+{
+    [RoutePrefix("api/reports")]
+    public class ReportsController : ApiController
+    {
+        [HttpGet]
+        [Route("pdf")]
+        public HttpResponseMessage GetPdf(string name, string param1 = null)
+        {
+            string path = System.Web.Hosting.HostingEnvironment.MapPath($"~/Reports/{name}.rpt");
+
+            if (!File.Exists(path))
+            {
+                return Request.CreateResponse(HttpStatusCode.NotFound, "Report file not found");
+            }
+
+            ReportDocument rpt = new ReportDocument();
+
+            try
+            {
+                rpt.Load(path);
+
+                // Configure DB connection
+                ConnectionInfo conn = new ConnectionInfo
+                {
+                    ServerName = System.Configuration.ConfigurationManager.AppSettings["DbServer"],
+                    DatabaseName = System.Configuration.ConfigurationManager.AppSettings["DbName"],
+                    UserID = System.Configuration.ConfigurationManager.AppSettings["DbUser"],
+                    Password = System.Configuration.ConfigurationManager.AppSettings["DbPassword"],
+                };
+
+                foreach (Table table in rpt.Database.Tables)
+                {
+                    TableLogOnInfo logOnInfo = table.LogOnInfo;
+                    logOnInfo.ConnectionInfo = conn;
+                    table.ApplyLogOnInfo(logOnInfo);
+                }
+
+                if (param1 != null)
+                {
+                    try { rpt.SetParameterValue("param1", param1); } catch { }
+                }
+
+                Stream pdf = rpt.ExportToStream(ExportFormatType.PortableDocFormat);
+                pdf.Position = 0;
+
+                HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK);
+                response.Content = new StreamContent(pdf);
+                response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+
+                return response;
+            }
+            finally
+            {
+                rpt.Close();
+                rpt.Dispose();
+            }
+        }
+    }
+}
