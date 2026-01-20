@@ -1,0 +1,728 @@
+Act as Css expert and developer.
+Below are _Layout.cshtml for 2 applications. Document Review Application and CES application.
+CES application is my application. Keep All the menu and submenu as it is.
+I need to have CES application same look and feel like Document Review Application.
+This includes same look and feel like Document Review Application, including header, footor and colors.c
+Pl let me know which files should I copy from Document Review Application
+Document Review Application :
+@using Microsoft.Extensions.Configuration
+@inject IConfiguration Configuration
+@{
+    string path = Context.Request.Path;
+    string controller = Context.Request.RouteValues["controller"].ToString();
+
+    int contextMenuType = 2; // grid
+    if (path.Contains("Help"))
+    {
+        contextMenuType = 0; // no menu
+    }
+    if (path.Contains("ViewReview") || path.Contains("CommentsAdmin"))
+    {
+        contextMenuType = 1; // page
+    }
+    bool isArchived = ViewData["IsArchived"] != null ? (bool)ViewData["IsArchived"] : false;
+
+    // User permissions - values stored in session object
+    List<ReviewType> reviewTypes = new List<ReviewType>();
+    bool showUserAdminTab = false;
+    string currentUserName = "";
+    int reviewTypeId = 0;
+    bool showAdminMenuOptions = false;
+    
+    ReviewUser currentUser = AuthorizationHelper.GetUserObjectFromSession(Context);
+    if (currentUser != null)
+    {
+        reviewTypes = AuthorizationHelper.GetAccessibleTypes(currentUser);
+        showUserAdminTab = AuthorizationHelper.HasUserAdminAuthorization(Context);
+        currentUserName = currentUser.FirstName + " " + currentUser.Name;
+
+        // review type
+        reviewTypeId = ViewData["ReviewTypeId"] != null ? (int)ViewData["ReviewTypeId"] : 0;
+        showAdminMenuOptions = AuthorizationHelper.HasReviewAdminAuthorization(currentUser, reviewTypeId);
+    }
+
+    string environmentName = Configuration.GetValue<string>("AppSettings:EnvironmentName");
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - @Constants.APPLICATION_NAME</title>
+
+    <environment names="Development">
+        <link rel="stylesheet" href="~/lib/bootstrap/css/bootstrap.css" asp-append-version="true" />
+        <link rel="stylesheet" href="~/lib/kendo-ui/styles/bootstrap-dataviz-v4.css" type="text/css" asp-append-version="true" />
+        <link rel="stylesheet" href="~/lib/kendo-ui/styles/font-icons/index.css" type="text/css" asp-append-version="true" />
+        <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    </environment>
+    <environment names="Staging,Production">
+        <link rel="stylesheet" href="~/lib/bootstrap/css/bootstrap.min.css" asp-append-version="true" />
+        <link rel="stylesheet" href="~/lib/kendo-ui/styles/bootstrap-dataviz-v4.css" type="text/css" asp-append-version="true" />
+        <link rel="stylesheet" href="~/lib/kendo-ui/styles/font-icons/index.css" type="text/css" asp-append-version="true" />
+        <link rel="stylesheet" href="~/css/site.min.css" asp-append-version="true" />
+    </environment>
+    <script src="~/lib/jquery/jquery-3.7.1.min.js"></script>
+    <script src="~/lib/kendo-ui/js/jszip.min.js"></script>
+    <script src="~/lib/kendo-ui/js/kendo.all.min.js" asp-append-version="true"></script>
+    <script src="~/lib/kendo-ui/js/kendo.aspnetmvc.min.js" asp-append-version="true"></script>
+    <script src="~/lib/jquery/jquery.validate.min.js"></script>
+    <script src="~/lib/jquery/jquery.validate.unobtrusive.min.js"></script>
+    <environment names="Development">
+        <script type="text/javascript" src="/js/site.js" asp-append-version="true"></script>
+    </environment>
+    <environment names="Staging,Production">
+        <script type="text/javascript" src="/js/site.min.js" asp-append-version="true"></script>
+    </environment>
+
+    <style>
+    </style>
+</head>
+<body class="k-content">
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid d-flex justify-content-between p-0">
+            <a class="navbar-brand d-flex align-items-center" asp-controller="Home" asp-action="Index"><img src="~/images/ttclogo.png" alt="TTC Logo" />@Constants.APPLICATION_NAME<span class="env-name">@(environmentName != null ? " (" + environmentName + ")" : "")</span></a>
+            <span class="navbar-text d-flex flex-column align-items-end">
+                <span><span class="k-icon k-font-icon k-i-user mr-2 pb-2"></span>@currentUserName</span>
+                <time>@DateTime.Now.ToString("dddd, MMM d, yyyy")</time>
+            </span>
+        </div>
+    </nav>
+
+    @if (!path.Contains("Error"))
+    {
+        <div id="menu-tabs" class="pl-2 pt-2" role="navigation">
+            <ul class="nav nav-tabs" id="myTab" role="tablist">
+                <li class="nav-item">
+                    <a class="nav-link @(path.Contains("Inbox") ? "active" : "")" id="inbox-tab" data-toggle="tab" href="#" role="tab" aria-controls="inbox" aria-selected="true">Inbox</a>
+                </li>
+                @if (showUserAdminTab)
+                {
+                    <li class="nav-item">
+                        <a class="nav-link @(path.Contains("UserAdmin") ? "active" : "")" id="user-admin-tab" data-toggle="tab" href="#" role="tab" aria-controls="user-admin" aria-selected="false">User Admin</a>
+                    </li>
+                }
+                @foreach (var reviewType in reviewTypes)
+                {
+                    <li class="nav-item">
+                        <a class="nav-link @(reviewType.TypeId == reviewTypeId ? "active" : "")" id="type-@(reviewType.TypeId)-tab" data-toggle="tab" href="#" role="tab" aria-controls="@(reviewType.SectionInitial.ToLower())-tab" aria-selected="false">@(reviewType.SectionName)</a>
+                    </li>
+                }
+                <li class="nav-item">
+                    <a class="nav-link" id="help-link" data-toggle="tab" href="#" role="tab" aria-controls="help" aria-selected="false">Help</a>
+                </li>
+            </ul>
+        </div>
+
+        <script>
+            $(document).ready(function () {
+                $("#inbox-tab").on("click", function (e) {
+                    e.preventDefault();
+                    location.href = "/Grid/Inbox";
+                });
+                $("#user-admin-tab").on("click", function (e) {
+                    e.preventDefault();
+                    location.href = "/Home/UserAdmin";
+                })
+                @foreach (var reviewType in reviewTypes)
+                {
+                    <text>
+                    $("#type-@(reviewType.TypeId)-tab").on("click", function (e) {
+                        e.preventDefault();
+                        location.href = "/ShowReviewGrid/@(reviewType.TypeId)";
+                    });
+                    </text>
+                }
+                $("#help-link").on("click", function (e) {
+                    openModal("/Home/Help", @User.Identity.IsAuthenticated.ToString().ToLower());
+                });
+
+                // To support nested Bootstrap Modals
+                // https://stackoverflow.com/questions/19305821/multiple-modals-overlay/19321341
+                $(document).on({
+                    'show.bs.modal': function () {
+                        var zIndex = 1040 + (10 * $('.modal:visible').length);
+                        $(this).css('z-index', zIndex);
+                        setTimeout(function () {
+                            $('.modal-backdrop').not('.modal-stack').css('z-index', zIndex - 1).addClass('modal-stack');
+                        }, 0);
+                    },
+                    'hidden.bs.modal': function () {
+                        if ($('.modal:visible').length > 0) {
+                            // restore the modal-open class to the body element, so that scrolling works
+                            // properly after de-stacking a modal.
+                            setTimeout(function () {
+                                $(document.body).addClass('modal-open');
+                            }, 0);
+                        }
+                    }
+                }, '.modal');
+            });
+        </script>
+    }
+    <main>
+        <div id="main-content" class="container-fluid">
+            <div id="modalContainer"></div>
+            <div id="modalContainer2"></div>
+            @RenderBody()
+        </div>
+    </main>
+    @if (contextMenuType == 2)
+    {
+        @(Html.Kendo().ContextMenu()
+            .Name("review-menu")
+            .Target("#main-content")
+            //.AlignToAnchor(true)
+            .Filter("tr[role='row']") // to get selected row in the grid
+            .Animation(animation =>
+            {
+                animation.Open(open =>
+                {
+                    open.Fade(FadeDirection.In);
+                    open.Duration(500);
+                });
+            })
+            .Items(items =>
+            {
+                items.Add()
+                    .Text("View Review")
+                    .ImageUrl(Url.Content("/images/det.gif"));
+                items.Add()
+                    .Text("Comments").Visible(showAdminMenuOptions)
+                    .ImageUrl(Url.Content("/images/admin.gif"));
+                items.Add()
+                    .Text("Edit Review").Visible(showAdminMenuOptions)
+                    .ImageUrl(Url.Content("/images/editrev.gif"));
+                items.Add()
+                    .Text("Create Template").Visible(showAdminMenuOptions)
+                    .ImageUrl(Url.Content("/images/template21.gif"));
+                items.Add()
+                    .Text("Reviewers").Visible(showAdminMenuOptions)
+                    .ImageUrl(Url.Content("/images/revs.gif"));
+                items.Add()
+                    .Text("Attachments").Visible(showAdminMenuOptions)
+                    .ImageUrl(Url.Content("/images/attach.gif"));
+                items.Add()
+                    .Text("Send Email").Visible(showAdminMenuOptions)
+                    .ImageUrl(Url.Content("/images/webmail.gif"));
+                items.Add()
+                    .Text("Archive Review").Visible(showAdminMenuOptions && !isArchived)
+                    .ImageUrl(Url.Content("/images/lock.gif"));
+                items.Add()
+                    .Text("Un-Archive Review").Visible(showAdminMenuOptions && isArchived)
+                    .ImageUrl(Url.Content("/images/lock.gif"));
+                items.Add()
+                    .Text("Re-issue Review").Visible(showAdminMenuOptions)
+                    .ImageUrl(Url.Content("/images/refresh.gif"));
+                items.Add()
+                    .Text("Delete Review").Visible(showAdminMenuOptions)
+                    .ImageUrl(Url.Content("/images/del.gif"));
+            })
+            .Events(e => e
+                .Select("onGridContextMenuSelectHelper")
+            )
+        )
+    }
+    <script>
+            function onGridContextMenuSelectHelper(e) {
+                onGridContextMenuSelect(e, @showAdminMenuOptions.ToString().ToLower());
+            }
+    </script>
+    @if (contextMenuType == 1)
+    {
+      @(Html.Kendo().Menu()
+         .Name("Menu")
+     
+         .Items(items =>
+         {
+                 items.Add().Text("Home").Action("Index", "Home", new { area = "" }).ImageUrl(Url.Content("~/images/home.png"));
+                 items.Add().Text("Material Parts")
+                .ImageUrl(Url.Content("~/images/part.png"))
+
+
+                 .Items(children =>
+                 {
+                     children.Add().Text("Stock Coded Parts")
+                 .Action("Index", "StockCodedParts", new { area = "" })
+                     .ImageUrl(Url.Content("~/images/part.png"));
+
+
+                     children.Add().Text(" Non Stock Coded Parts")
+                           .Action("NscPartsUsedIndex", "NscPartsUsed")
+                         .ImageUrl(Url.Content("~/images/part.png"));
+
+                     children.Add().Text(" Rebuilt Parts")
+             @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                     .Action("RebuiltPartsIndex", "RebuiltParts", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); 
+                 });
+
+                 items.Add().Text("Vehicle Estimate").ImageUrl(Url.Content("~/images/vehicle.png"))
+                   .Items(children =>
+              {
+                  children.Add().Text("Vehicles")
+                  .Action("VehiclesIndex", "Vehicles", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+             children.Add().Text("Archived Estimates")
+         .Action("ArchivedIndex", "Vehicles", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+               });
+         items.Add().Text("Make Vs Buy").ImageUrl(Url.Content("~/images/part.png"))
+         .Items(children =>
+         {
+             children.Add().Text("Make vs Buy")
+         .Action("MakeVsBuyIndex", "MakeVsBuy", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+             children.Add().Text("Archived Estimates")
+         .Action("ArchivedIndex", "MakeVsBuy", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+         });
+                 @* items.Add().Text("Make Or Buy") *@
+         @*   .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+         @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/buy.png")); *@
+                 @* .Action("MakeVsBuyIndex", "MakeVsBuy", new { area = "" }).ImageUrl(Url.Content("~/images/buy.png")); *@
+                 items.Add().Text("Reports").Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/home.png"));
+                 @*  if(@ViewBag.RoleId == 1) *@ 
+                 {
+                     @*  items.Add().Text("Administration").Action("Index", "UserManagementGrid", new { area = "" }).ImageUrl(Url.Content("~/images/admin.png")) *@
+                     items.Add().Text("Administration").ImageUrl(Url.Content("~/images/part.png"))
+                    .Items(children =>
+                     {
+                         children.Add().Text("User Management")
+                 .Action("Index", "UserManagementGrid", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                         @*     children.Add().Text("Role Management")
+         .Action("Index", "Role", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                         @* 
+                 children.Add().Text("Site Management")
+         .Action("Index", "Site", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+
+                         children.Add().Text("Labour Task Management")
+                    @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                    .Action("Index", "Task", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                         children.Add().Text("Differential Management")
+             @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+             .Action("DifferentialIndex", "Differential", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                         children.Add().Text("Engine Management")
+             @*  .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+             .Action("EngineIndex", "Engine", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                         children.Add().Text("Make Model Year Management")
+             @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+             .Action("MakeModelYearIndex", "MakeModelYear", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                         children.Add().Text("Transmission Management")
+             @*  .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+             .Action("TransmissionIndex", "Transmission", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                         children.Add().Text("Employee Salary Management")
+             @*  .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+             .Action("EmpSalaryIndex", "EmpSalary", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                         children.Add().Text("Labour Type Management")
+             @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+             .Action("LabourTypeIndex", "LabourType", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                         children.Add().Text(" List Of Vehicles")
+             @*  .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+             .Action("Index", "Bus").ImageUrl(Url.Content("~/images/part.png"));
+
+                         children.Add().Text("Change Settings")
+             @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+             .Action("SettingIndex", "Setting", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                         children.Add().Text("Announcement Settings")
+             @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+             .Action("Index", "Content", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+                     });
+                 }
+
+                 items.Add().Text("Help").Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+         })
+         .HtmlAttributes(new { @class = "rounded-menu" })
+     )  
+    }
+    @(Html.Kendo()
+            .Dialog()
+            .Name("DeleteConfirmation")
+            .Modal(true)
+            .Title("Confirm Delete")
+            .Content("Are you sure you want to delete this item?")
+            .Visible(false)
+            .Actions(a =>
+            {
+                a.Add().Text("Yes").Action("confirmDelete").Primary(true);
+                a.Add().Text("No").Action("cancelDelete");
+            })
+        )
+    <script>
+        function onContextMenuSelectHelper(e) {
+            onContextMenuSelect(e, @showAdminMenuOptions.ToString().ToLower());
+        }
+    </script>
+    <footer class="footer text-center d-flex align-items-center">
+        <div class="container-fluid" style="text-align:left">
+            <p class="text-muted">
+                System Number: 0256
+            </p>
+        </div>
+        <div class="container-fluid">
+            <p class="text-muted">
+                Copyright © @DateTime.Now.Year Toronto Transit Commission. All rights reserved.
+            </p>
+        </div>
+        <div class="container-fluid" style="text-align:right">
+            <p class="text-muted">
+                Build Number: 1.0.0.15
+            </p>
+        </div>
+    </footer>
+
+    <environment names="Development">
+        <script src="~/lib/bootstrap/js/bootstrap.js"></script>
+    </environment>
+    <environment names="Staging,Production">
+        <script src="~/lib/bootstrap/js/bootstrap.min.js"></script>
+    </environment>
+
+    @RenderSection("scripts", required: false)
+</body>
+=======================
+CES Application :
+<!DOCTYPE html>
+@{
+    string version = "";
+    string filePath = "_Version.cshtml";
+    Console.WriteLine(filePath);
+    if (File.Exists(filePath))
+    {
+        string readText = File.ReadAllText(filePath);
+        version = readText.Substring(47, 16);
+        if (version.Contains("0.0.0.0"))
+        {
+            version = "By Label";
+        }
+    }
+    else
+    {
+        version = "0.0.0.1";
+    }
+}
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] Cost Estimation System</title>
+    @using System.IO
+    @using Microsoft.AspNetCore.Hosting
+    @inject IWebHostEnvironment HostEnvironment
+
+    <environment names="Development">
+        <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.css" />
+    </environment>
+    <environment names="Staging,Production">
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css"
+              asp-fallback-href="~/lib/bootstrap/dist/css/bootstrap.min.css"
+              asp-fallback-test-class="sr-only" asp-fallback-test-property="position" asp-fallback-test-value="absolute" crossorigin="anonymous" />
+    </environment>
+
+    <!-- Updated Kendo UI CSS with Ocean Blue theme -->
+    <link rel="stylesheet" href="https://kendo.cdn.telerik.com/2025.1.130/styles/kendo.default-v2.min.css" />
+    <link href="https://kendo.cdn.telerik.com/2021.2.511/styles/kendo.common.min.css" rel="stylesheet" crossorigin="anonymous" />
+    @* <link href="https://kendo.cdn.telerik.com/2021.2.511/styles/kendo.ocean-blue.min.css" rel="stylesheet" crossorigin="anonymous" /> *@
+    <link rel="stylesheet" href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css">
+  
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+    <script src="https://kendo.cdn.telerik.com/2021.2.511/js/jszip.min.js"></script>
+    <script src="https://kendo.cdn.telerik.com/2021.2.511/js/kendo.all.min.js"></script>
+    <script src="https://kendo.cdn.telerik.com/2021.2.511/js/kendo.aspnetmvc.min.js"></script>
+    <script src="~/lib/bootstrap/dist/js/bootstrap.js"></script>
+    <script src="@Url.Content("~/js/site.js")"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validate/1.19.5/jquery.validate.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validation-unobtrusive/3.2.12/jquery.validate.unobtrusive.min.js"></script>
+
+    <link rel="stylesheet" href="~/css/header-footer.css" />
+    <link rel="stylesheet" href="~/css/telerik-min.css" /> 
+    <link rel="stylesheet" href="~/css/material-grey.css" />
+    <link rel="stylesheet" href="~/css/vehicle-estimate.css" asp-append-version="true" />
+   
+    <style>
+        /* Base font size for entire application */
+        body, .k-widget, .k-grid, .k-menu, .k-button {
+            font-size: 10px !important;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header_container-new">
+            <div class="logo">
+                <img src="~/images/ttc-main-logo.png" alt="Logo" />
+            </div>
+            <div class="app-name">
+                <h4>Cost Estimate System</h4>
+            </div>
+            <div class="user-info-new">
+                <img src="~/images/user.jpg" alt="User" class="user-image" />
+                <span class="user-name"> | User : </span>
+                <span class="user-name">@ViewBag.UserName | </span>
+                <span class="user-name">Role: </span>
+                <span class="user-name">@ViewBag.RoleName</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Removed mb-4 class to eliminate gap -->
+    <div id="responsive-panel" class="navbar navbar-dark bg-light">
+        <kendo-responsivepanel name="responsive-panel" auto-close="false" breakpoint="768" orientation="top">
+          <div class="A.tab">
+            @(Html.Kendo().Menu()
+                    .Name("Menu")
+                
+                    .Items(items =>
+                    {
+                            items.Add().Text("Home").Action("Index", "Home", new { area = "" }).ImageUrl(Url.Content("~/images/home.png"));
+                            items.Add().Text("Material Parts")
+                           .ImageUrl(Url.Content("~/images/part.png"))
+
+
+                            .Items(children =>
+                            {
+                                children.Add().Text("Stock Coded Parts")
+                            .Action("Index", "StockCodedParts", new { area = "" })
+                                .ImageUrl(Url.Content("~/images/part.png"));
+
+
+                                children.Add().Text(" Non Stock Coded Parts")
+                                      .Action("NscPartsUsedIndex", "NscPartsUsed")
+                                    .ImageUrl(Url.Content("~/images/part.png"));
+
+                                children.Add().Text(" Rebuilt Parts")
+                        @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                                .Action("RebuiltPartsIndex", "RebuiltParts", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); 
+                            });
+
+                            items.Add().Text("Vehicle Estimate").ImageUrl(Url.Content("~/images/vehicle.png"))
+                              .Items(children =>
+                         {
+                             children.Add().Text("Vehicles")
+                             .Action("VehiclesIndex", "Vehicles", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                        children.Add().Text("Archived Estimates")
+                    .Action("ArchivedIndex", "Vehicles", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                          });
+                    items.Add().Text("Make Vs Buy").ImageUrl(Url.Content("~/images/part.png"))
+                    .Items(children =>
+                    {
+                        children.Add().Text("Make vs Buy")
+                    .Action("MakeVsBuyIndex", "MakeVsBuy", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                        children.Add().Text("Archived Estimates")
+                    .Action("ArchivedIndex", "MakeVsBuy", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                    });
+                            @* items.Add().Text("Make Or Buy") *@
+                    @*   .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                    @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/buy.png")); *@
+                            @* .Action("MakeVsBuyIndex", "MakeVsBuy", new { area = "" }).ImageUrl(Url.Content("~/images/buy.png")); *@
+                            items.Add().Text("Reports").Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/home.png"));
+                            @*  if(@ViewBag.RoleId == 1) *@ 
+                            {
+                                @*  items.Add().Text("Administration").Action("Index", "UserManagementGrid", new { area = "" }).ImageUrl(Url.Content("~/images/admin.png")) *@
+                                items.Add().Text("Administration").ImageUrl(Url.Content("~/images/part.png"))
+                               .Items(children =>
+                                {
+                                    children.Add().Text("User Management")
+                            .Action("Index", "UserManagementGrid", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                                    @*     children.Add().Text("Role Management")
+                    .Action("Index", "Role", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                                    @* 
+                            children.Add().Text("Site Management")
+                    .Action("Index", "Site", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+
+                                    children.Add().Text("Labour Task Management")
+                               @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                               .Action("Index", "Task", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                                    children.Add().Text("Differential Management")
+                        @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                        .Action("DifferentialIndex", "Differential", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                                    children.Add().Text("Engine Management")
+                        @*  .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                        .Action("EngineIndex", "Engine", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                                    children.Add().Text("Make Model Year Management")
+                        @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                        .Action("MakeModelYearIndex", "MakeModelYear", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                                    children.Add().Text("Transmission Management")
+                        @*  .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                        .Action("TransmissionIndex", "Transmission", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                                    children.Add().Text("Employee Salary Management")
+                        @*  .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                        .Action("EmpSalaryIndex", "EmpSalary", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                                    children.Add().Text("Labour Type Management")
+                        @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                        .Action("LabourTypeIndex", "LabourType", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                                    children.Add().Text(" List Of Vehicles")
+                        @*  .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                        .Action("Index", "Bus").ImageUrl(Url.Content("~/images/part.png"));
+
+                                    children.Add().Text("Change Settings")
+                        @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                        .Action("SettingIndex", "Setting", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+
+                                    children.Add().Text("Announcement Settings")
+                        @* .Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png")); *@
+                        .Action("Index", "Content", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+                                });
+                            }
+
+                            items.Add().Text("Help").Action("Index", "Common", new { area = "" }).ImageUrl(Url.Content("~/images/part.png"));
+                    })
+                    .HtmlAttributes(new { @class = "rounded-menu" })
+                )
+            </div>
+        </kendo-responsivepanel>
+    </div>
+   
+    <main>
+        <div class="container-fluid">
+            @RenderBody()
+        </div>
+    </main>
+
+    <footer class="border-top footer text-muted">
+        <div class="footer-container">
+            <div class="footer-left">
+                &copy; TTC 2025 - Cost Estimate System | System No.: 0105
+            </div>
+            <div class="footer-right">              
+                Build Version:@version | Build Date: Jan 19, 2026
+            </div>
+        </div>
+    </footer>
+
+    @RenderSection("scripts", required: false)
+    <script>
+        $(document).ready(function () {
+            console.log("layout.cshtml docready called");
+            //Remove double arrow in the menu
+            setTimeout(function () {
+                    // Find and remove the extra expand arrow
+                    $(".k-menu .k-menu-expand-arrow.k-icon.k-i-arrow-60-down").remove();
+
+                }, 100);
+            //session
+            startSessionTimer();
+
+            // Reset timer on Telerik Grid interactions
+            $(document).on("click", ".k-grid", resetSession);
+            $(document).on("keydown", ".k-grid", resetSession);
+
+      });
+    </script>
+    <div id="timeoutDialog" style="display: none;">
+        <div style="padding: 20px;">
+            <h4>Session Expiration Warning</h4>
+            <p>Your session will expire in <span id="countdown">2:00</span>.</p>
+            <p>Any unsaved changes will be lost.</p>
+            <button class="k-button" id="continueSession">Continue Working</button>
+        </div>
+    </div>
+
+    <script>
+        let idleTimer;
+        let countdownTimer;
+        const timeoutMinutes = @ViewBag.SessionTimeoutMinutes;
+        const warningMinutes = @ViewBag.SessionTimeoutWarningMinutes;
+        let warningActive = false;
+
+        function startSessionTimer() {
+            clearTimeout(idleTimer);
+            idleTimer = setTimeout(showTimeoutWarning, (timeoutMinutes - warningMinutes) * 60 * 1000);
+        }
+
+        function showTimeoutWarning() {
+            warningActive = true;
+            const dialog = $("#timeoutDialog").data("kendoDialog") ||
+                $("#timeoutDialog").kendoDialog({
+                    width: "400px",
+                    title: "This session will be closed due to inactivity. All the unsaved changes will be lost.",
+                    closable: false,
+                    modal: true,
+                    actions: []
+                }).data("kendoDialog");
+
+            let seconds = warningMinutes * 60;
+
+            function updateCountdown() {
+                const minutes = Math.floor(seconds / 60);
+                const remainingSeconds = seconds % 60;
+                $("#countdown").text(`${minutes}:${remainingSeconds.toString().padStart(2, '0')}`);
+
+                if (seconds <= 0) {
+                    clearInterval(countdownTimer);
+                    dialog.close();
+                    window.location.href = '/Home/SessionExpired';
+                }
+                seconds--;
+            }
+
+            countdownTimer = setInterval(updateCountdown, 1000);
+            updateCountdown();
+            dialog.open();
+
+            // Handle continue button
+            $("#continueSession").off("click").on("click", function () {
+                resetSession();
+                dialog.close();
+            });
+
+            // Reset on any user activity
+            $(document).one("mousemove keydown click", function () {
+                resetSession();
+                dialog.close();
+            });
+        }
+
+        function resetSession() {
+            warningActive = false;
+            clearTimeout(idleTimer);
+            clearInterval(countdownTimer);
+
+            // Add proper POST headers
+            fetch('/Account/KeepAlive', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+                },
+                credentials: 'same-origin'
+            })
+                .then(response => {
+                    if (!response.ok) throw new Error('Keep-alive failed');
+                    startSessionTimer();
+                })
+                .catch(() => window.location.reload());
+        }
+
+        // // Initial setup
+        // $(document).ready(function () {
+        //     startSessionTimer();
+
+        //     // Reset timer on Telerik Grid interactions
+        //     $(document).on("click", ".k-grid", resetSession);
+        //     $(document).on("keydown", ".k-grid", resetSession);
+        // });
+    </script>
+</body>
+</html>
+</html>
