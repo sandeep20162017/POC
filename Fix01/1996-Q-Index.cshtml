@@ -1,0 +1,1510 @@
+
+Act like expert software, UI/UX developer. You are css expert aswell. Appliction is using ASP.NET core v8.0.
+RebuiltParts/Index.cshtml
+When user clicks on "Add New Rebuilt Parts Estimate", POPUP shown.
+What is the name of this PopUp cshtml? After you have told me the file name, I can provide it to you.
+I need your assistance to hav same look and feel (color code) for tabls as in the main (below) grid header back ground color and font color.
+RebuiltPartsIndex.cshtml :
+@using BCES.Models.Vehicle
+@using BCES.Models.Parts
+@model IEnumerable<RebuiltPartsViewModel>
+
+@{
+    ViewData["Title"] = "Rebuilt Parts Estimate";
+    string scGridName = $"ScPartsMaterialDetailsRebuiltPartsGrid_";
+}
+
+<h6 class="vehicle-estimate-header">Rebuilt Parts Estimate</h6>
+
+
+<div id="notification"></div>
+<script>
+    let currentScPartsModel = null;
+    let currentNscPartsModel = null;
+    let currentRbPartsModel = null;
+    let currentLabourModel = null;
+    let currentPopupMdodel = null;
+
+</script>
+
+<script>
+    let popupHasChanges = false; /* closing x */
+    let originalData = {}; /* closing x */
+
+    // ====== GLOBAL STATE DECLARATIONS ======
+    window.pendingChanges = false;
+    window.currentRebuiltId = 0;
+    window.tabContentLoaded = [false, false, false, false, false, false, false, false, false]; // For 8 tabs
+    window.currentlyLoadingTab = null;
+
+    // ====== CORE FUNCTION DEFINITIONS ======
+    window.setPopupReadonly = function (ids) {
+        console.warn('setPopupReadonly');
+        ids.forEach(function (id) {
+            var widget = getKendoWidget(id);
+            console.warn('setPopupReadonly widget:');
+            console.warn(widget);
+
+
+            if (widget) {
+                widget.enable(false);
+            } else {
+                $("#" + id).prop("readonly", true).addClass("k-state-disabled");
+            }
+        });
+    };
+
+    window.initRebuiltPopupForm = function () {
+        console.warn('inside window.initRebuiltPopupForm');
+        var mode = $("#formMode").val();
+        console.warn('mode', mode);
+        if (!mode) return;
+
+        if (mode === "Add") {
+            console.warn('Add');
+            setPopupEditable([
+                "RebuiltId", "MmsStockCode", "MmsBuyCode", "KeyWord",
+                "Description", "JobNumber", "CorePartNum", "CoreCharge",
+                "BuyNewCost", "RemanCost"
+            ]);
+            setPopupReadonly(["LastModifiedBy", "LastModifiedDate"]);
+        } else {
+            console.warn('Edit');
+            setPopupReadonly([
+                "RebuiltId", "MmsStockCode", "MmsBuyCode",
+                "LastModifiedBy", "LastModifiedDate", "KeyWord",
+                "Description", "JobNumber", "CorePartNum", "CoreCharge",
+                "BuyNewCost", "RemanCost"
+            ]);
+            // setPopupEditable(["KeyWord",
+            //     "Description", "JobNumber", "CorePartNum","CoreCharge",
+            //     "BuyNewCost", "RemanCost",]);
+        }
+    };
+
+    window.setPopupEditable = function (ids) {
+        console.warn('setPopupEditable');
+        console.warn(ids);
+       
+
+        ids.forEach(function (id) {
+            var widget = getKendoWidget(id);
+            console.warn(id);
+            console.warn('widget:');
+             console.warn(widget);
+
+            if (widget) {
+                widget.enable(true);
+            } else {
+                $("#" + id).prop("readonly", false).removeClass("k-state-disabled");
+            }
+        });
+    };
+
+    window.getKendoWidget = function (id) {
+        var element = $("#" + id);
+        return element.data("kendoComboBox") ||
+            element.data("kendoNumericTextBox") ||
+            element.data("kendoDatePicker");
+    };
+    // ── Load the form into the first tab
+    window.loadRebuiltForm = function (rebuiltId) {
+        console.log('loadRebuiltForm');
+         console.log(rebuiltId);
+        $.get('@Url.Action("GetRbById", "RebuiltParts")', { rebuiltId: rebuiltId }, function (html) {
+            $("#rebuiltTabContent").html(html);
+            window.tabContentLoaded[0] = true;
+            window.wireRebuiltForm(); // rebind save/cancel/edit/etc
+
+            var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+
+            // If it's an existing record, enable other tabs
+            if (rebuiltId !== 0 && tabStrip) {
+                for (var i = 1; i <= 8; i++) {
+                    tabStrip.enable(tabStrip.tabGroup.children().eq(i), true);
+                }
+            } else if (rebuiltId === 0 && tabStrip) {
+                // New record: disable all other tabs
+                for (var i = 1; i <= 8; i++) {
+                    tabStrip.enable(tabStrip.tabGroup.children().eq(i), false);
+                }
+            }
+        });
+    };
+
+    // ── Wire up form submit and cancel actions
+    window.wireRebuiltForm = function () {
+        $("#btnCancelRebuilt").off("click").on("click", function () {
+            if (pendingChanges) {
+                showCloseConfirmation();
+            } else {
+                $("#estimatePopup").data("kendoWindow").close();
+            }
+        });
+
+        $("#btnSaveRebuilt").off("click").on("click", function (e) {
+            console.log('btnSaveRebuilt clicked');
+            e.preventDefault('btnSaveRebuilt clicked');
+            $("#rebuiltForm").submit();
+        });
+
+        $("#rebuiltForm").off("submit").on("submit", function (e) {
+            console.log('submit Rebuilt clicked');
+            e.preventDefault();
+
+            // Validate form here if needed
+          //  console.warn('RebuiltStockNum :', RebuiltStockNum);
+            console.warn($("#RebuiltStockNum").val());
+
+            console.warn('RebuiltId :');
+            console.warn($("#RebuiltId").val());
+
+            var vm = {
+                rebuiltId: $("#RebuiltId").val(),
+                RebuiltStockNum: $("#RebuiltId").val(),
+                MmsStockCode: $("#MmsStockCode").val(),
+                KeyWord: $("#KeyWord").val(),
+                Description: $("#Description").val(),
+                JobNumber: $("#JobNumber").val(),
+                CorePartNum: $("#CorePartNum").val(),
+                CoreCharge: $("#CoreCharge").val(),
+                BuyNewCost: $("#BuyNewCost").val(),
+                RemanCost: $("#RemanCost").val(),
+                Sopnumber: $("#Sopnumber").val()
+            };
+
+            var url = window.currentRebuiltId === 0
+                ? '@Url.Action("AddRebuiltPartsView", "RebuiltParts")'
+                : '@Url.Action("UpdateRebuiltPartsView", "RebuiltParts")';
+
+            $.ajax({
+                url: url,
+                type: 'POST',
+                contentType: "application/json",
+                data: JSON.stringify(vm),
+                success: function (response) {
+                    if (response && response.RebuiltId) {
+                        pendingChanges = false;
+                        $("#estimatePopup").data("kendoWindow").unbind("close");
+                        window.currentRebuiltId = response.RebuiltId;
+                        $("#RebuiltGrid").data("kendoGrid").dataSource.read();
+
+                        // Update window title with new ID
+                        var win = $("#estimatePopup").data("kendoWindow");
+                        win.title("Rebuilt Parts Estimate #" + response.RebuiltId);
+
+                        kendo.alert(" Estimate #: " + response.RebuiltId + " Saved successfully!");
+                       // $("#ScPartsPopupWindow").data("kendoWindow").close();
+                    } else {
+                        kendo.alert("Save succeeded but no Estimate ID was returned.");
+                        $("#ScPartsPopupWindow").data("kendoWindow").close();
+                    }
+                },
+                error: function () {
+                    kendo.alert("Error saving data.");
+                }
+            });
+        });
+
+        // Track form changes
+        $("#rebuiltForm input, #rebuiltForm select").off("change input").on("input change", function () {
+            pendingChanges = true;
+        });
+    }
+
+    // ── Open vehicle popup and load form partial
+    window.openEstimatePopup = function (rebuiltId) {
+        console.warn('inside window.openEstimatePopup');
+        console.warn(rebuiltId);
+
+        var win = $("#estimatePopup").data("kendoWindow");
+        window.currentRebuiltId = rebuiltId;
+        pendingChanges = false; // Reset changes flag
+
+        win.title(rebuiltId === 0 ? "Add New Estimate" : "Rebuilt Part Estimate #" + rebuiltId);
+        win.center().open();
+
+        // Load vehicle tab first
+        $("#rebuiltTabContent").load('@Url.Action("GetRbById", "RebuiltParts")', { rebuiltId: rebuiltId }, function () {
+            // Initialize Kendo UI widgets in the loaded content
+            kendo.init($("#rebuiltTabContent"));
+
+            // Set values for Kendo widgets after initialization
+            setTimeout(function () {
+                // Set values for ComboBoxEditor fields
+                setComboBoxValues();
+                initRebuiltPopupForm();
+                wireRebuiltForm();
+            }, 100);
+
+            if (rebuiltId !== 0) {
+                enableAllTabs();
+            }
+        });
+    };
+
+ window.showDeleteConfirmation = function (e) {
+    e.preventDefault();
+    var grid = this; // Kendo Grid instance
+    var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+    if (!dataItem) {
+        console.error("No dataItem found for delete action");
+        return;
+    }
+
+    var dlg = $("#deleteConfirmationDialog").data("kendoWindow");
+    dlg.center().open();
+
+    $("#confirmDeleteBtn").off("click").on("click", function () {
+        $.ajax({
+            type: "POST",
+            url: "/RebuiltParts/DeleteRebuiltPart",
+            data: { RebuiltId: dataItem.RebuiltId },
+            success: function (response) {
+                //  Always close dialog once user confirms
+                dlg.close();
+
+                if (response.success) {
+                    grid.dataSource.read();
+                } else {
+                    // Show alert if API returned success:false
+                    kendo.alert("Unable to delete part.");
+                }
+            },
+            error: function (xhr) {
+                //  Close dialog even when error occurs
+                dlg.close();
+
+                // Extract message from response (if provided by backend)
+                var msg = xhr.responseText || "Unable to delete, part is used in archived estimates.";
+                kendo.alert(msg);
+
+                // Optionally refresh grid if needed (to reset any partial UI state)
+                grid.dataSource.read();
+            }
+        });
+    });
+
+    $("#cancelDeleteBtn").off("click").on("click", function () {
+        dlg.close();
+    });
+};
+    // ── Load partial tabs
+    // window.loadTabContent = function (elementId, url, data, callback) {
+    //     $("#" + elementId).load(url, data, function () {
+    //         if (typeof callback === "function") callback();
+    //     });
+    // };
+    // ── Copy estimate handler
+    window.onCopyEstimate = function (e) {
+        e.preventDefault();
+        var grid = $("#RebuiltGrid").data("kendoGrid");
+        var item = grid.dataItem($(e.currentTarget).closest("tr"));
+        console.log('grid :', grid);
+        console.log('item :', item);
+        var win = $("#copyEstimateDialog").kendoWindow({
+            title: "Copy Estimate",
+            modal: true,
+            width: 400,
+            visible: false
+        }).data("kendoWindow");
+        console.log('win :', win);
+
+        // $("#rebuiltId").val(item.RebuiltId);
+        // $("#oldMmsBuyCode").val(item.MmsBuyCode);
+        // $("#oldKeyWord").val(item.KeyWord);
+        // $("#newMmsBuyCode, #newKeyWord").val("");
+
+        win.center().open();
+
+        // Wire up copy button
+        $("#copyEstimateBtn").off("click").on("click", function () {
+            var payload = {
+                RebuiltId: $("#RebuiltId").val(),
+                oldMmsBuyCode: $("#oldMmsBuyCode").val(),
+                newMmsBuyCode: $("#newMmsBuyCode").val(),
+                oldKeyWord: $("#oldKeyWord").val(),
+                newKeyWord: $("#newKeyWord").val()
+            };
+
+            if (!payload.newMmsBuyCode || !payload.newKeyWord) {
+                return kendo.alert("Please fill required fields.");
+            }
+
+            $.ajax({
+                url: '@Url.Action("CopyEstimate", "Vehicles")',
+                type: 'POST',
+                contentType: "application/json",
+                data: JSON.stringify(payload),
+                success: function (response) {
+                    if (response.success) {
+                        kendo.alert("Estimate copied successfully! New ID: " + response.newRebuiltId);
+                        $("#RebuiltGrid").data("kendoGrid").dataSource.read();
+                        win.close();
+                    } else {
+                        kendo.alert("Copy failed: " + response.message);
+                    }
+                }
+            });
+        });
+
+        $("#cancelCopyBtn").off("click").on("click", function () {
+            win.close();
+        });
+    };
+
+    ////
+
+    // ── Archive handler
+    window.onArchiveClick = function (e) {
+        e.preventDefault();
+        var grid = $("#RebuiltGrid").data("kendoGrid");
+        var item = grid.dataItem($(e.currentTarget).closest("tr"));
+
+        kendo.confirm("Archive estimate #" + item.RebuiltId + "?").then(function () {
+            $.ajax({
+                url: '@Url.Action("ArchiveVehicleDetails", "Vehicles")',
+                type: 'POST',
+                contentType: "application/json",
+                data: JSON.stringify({
+                    RebuiltId: item.RebuiltId,
+                    MmsBuyCode: item.MmsBuyCode,
+                    TypeId: "RB",
+                    Username: "@ViewBag.UserName".toUpperCase()
+                }),
+                success: function (r) {
+                    if (r.success) {
+                        grid.dataSource.read();
+                        kendo.alert(r.message);
+                    } else {
+                        kendo.alert("Archive failed: " + r.message);
+                    }
+                }
+            });
+        });
+    };
+
+    window.loadTabContent = function (elementId, url, data, callback) {
+        // Build query string manually
+        const params = new URLSearchParams(data).toString();
+        const fullUrl = url + "?" + params;
+
+        $("#" + elementId).load(fullUrl, function () {
+            if (typeof callback === "function") callback();
+        });
+    };
+
+    // ── Tab selection handler
+    window.onTabSelect = function (e) {
+        var index = $(e.item).index();
+
+        var tabsConfig = [
+            { id: "rebuiltTabContent", url: '@Url.Action("GetRbById", "RebuiltParts")' },
+            { id: "partsTabContent", url: "/RebuiltParts/MaterialCostSummaryPartial" },
+            { id: "labourTabContent", url: "/RebuiltParts/LabourHourSummaryPartial" },
+            { id: "allLabourTabContent", url: "/RebuiltParts/AllLabourInRBPartial" },
+            { id: "labourDetailsTabContent", url: "/RebuiltParts/LabourDetailsPartial" },
+            { id: "stockCodedPartsTabContent", url: "/RebuiltParts/ScDetailsPartial" },
+            { id: "nonStockCodedPartsTabContent", url: "/RebuiltParts/NonStockPartsPartial" },
+            { id: "rebuiltPartsTabContent", url: "/RebuiltParts/RebuiltPartsPartial" },
+            { id: "finalEstimateTabContent", url: "/RebuiltParts/TotalCostPartial" }
+        ];
+
+        var tab = tabsConfig[index];
+        if (!tab) return;
+
+        //  Always reload tab content from server
+        $("#" + tab.id).empty();
+        loadTabContent(
+            tab.id,
+            tab.url,
+            { id: window.currentRebuiltId, gridType: "RebuiltGrid" }
+        );
+    };
+
+    window.setFormReadOnly = function (readOnly) {
+        $("#rebuiltForm :input").each(function () {
+            var input = $(this);
+            var widget = kendo.widgetInstance(input, kendo.ui);
+
+            if (widget) {
+                if (typeof widget.readonly === 'function') {
+                    widget.readonly(readOnly);
+                } else if (widget.element && widget.element.is("input")) {
+                    input.prop("readonly", readOnly);
+                }
+            } else {
+                input.prop("readonly", readOnly);
+            }
+        });
+
+        $("[data-role='combobox']").each(function () {
+            var combo = $(this).data("kendoComboBox");
+            if (combo) {
+                combo.readonly(readOnly);
+            }
+        });
+    };
+
+    window.onComboBoxChange = function (e) {
+        var combo = e.sender;
+        if (combo.selectedIndex === -1) {
+            combo.value(null);
+            combo.input.val("");
+            combo.trigger("change");
+            $("#validationMessage").text("Invalid selection!").css("color", "red");
+        } else {
+            $("#validationMessage").text("");
+        }
+    }
+
+    window.getComboBoxParams = function () {
+        var input = $(".k-combobox input.k-input:focus");
+        return {
+            columnName: input.attr("name")?.replace("_input", "").split('.').pop(),
+            searchText: input.val() || ""
+        };
+    }
+
+    
+
+    window.onComboBoxDataBound = function (e) {
+        var notification = $("#notification").data("kendoNotification");
+        if (e.sender.dataSource.total() === 0) {
+            e.sender.value(null);
+            e.sender.input.val("");
+            setTimeout(function () {
+                notification.show("No results found.", "error");
+            }, 100);
+        }
+    }
+</script>
+
+<!-- Kendo main grid -->
+@(Html.Kendo().TabStrip()
+    .Name("rebuiltTabStrip")
+    .Items(ts =>
+    {
+        ts.Add()
+            .Content(@<text>
+    @(Html.Kendo().Grid<RebuiltPartsViewModel>()
+    .Name("RebuiltGrid")
+
+    .Columns(c =>
+    {
+    c.Bound(v => v.RebuiltId).Title("Rebuilt Part #")
+    .ClientTemplate("<a class='estimate-link' onclick='window.openEstimatePopup(#=RebuiltId#)'>#=RebuiltId#</a>").Width(60);
+    c.Bound(v => v.MmsStockCode).Title("Mms Stock Code").HeaderHtmlAttributes(new { @class = "required-header" }).EditorTemplateName("ComboBoxEditor").Width(120);
+    c.Bound(v => v.KeyWord).Title("Keyword").HeaderHtmlAttributes(new { @class = "required-header" }).Width(60);
+    c.Bound(v => v.JobNumber).Title("JobNumber").HeaderHtmlAttributes(new { @class = "required-header" }).Width(60);
+    c.Bound(v => v.BusName).Title("Vehicle Series").HeaderHtmlAttributes(new { @class = "required-header" }).Width(200);
+    
+    c.Bound(v => v.BuyNewCost).Title("Buy New").HeaderHtmlAttributes(new { @class = "required-header" }).Width(60);
+    c.Bound(v => v.RemanCost).Title("Reman").HeaderHtmlAttributes(new { @class = "required-header" }).Width(60);
+    
+    c.Command(cmd =>
+    {
+    //cmd.Custom("All Labour").IconClass("k-icon k-i-copy").Click("window.onShowAllLabour");
+    cmd.Custom("Copy").IconClass("k-icon k-i-copy").Click("window.onCopyEstimate");
+    cmd.Custom("Archive").IconClass("k-icon k-i-folder").Click("window.onArchiveClick");
+    cmd.Custom("Delete").IconClass("k-icon k-i-delete").Click("window.showDeleteConfirmation");
+    }).Width(180);
+    })
+    .ToolBar(tb => tb.ClientTemplate("<button class='k-button k-button-icontext' onclick='window.openEstimatePopup(0)'><span class='k-icon k-i-plus'></span>Add New Rebuilt Parts Estimate</button>"))
+    .Pageable(p => p
+    .Numeric(true)       // Show numeric page buttons
+    .Input(false)        // Hide input box
+    .PreviousNext(true)  // Show next/prev arrows
+    )
+    .Sortable()
+    .Filterable()
+    
+    .Scrollable(s => s.Virtual(true).Height("200px"))
+    .DataSource(ds => ds.Ajax()
+    .PageSize(5)
+    .ServerOperation(true)
+    .Model(model =>
+    {
+        model.Id(c => c.RebuiltId) ;
+        model.Field(c => c.RebuiltId).Editable(true);
+        model.Field(c => c.CostCentre).Editable(false);
+        model.Field(c => c.MmsBuyCode).Editable(false);
+        model.Field(c => c.KeyWord).Editable(false);
+        model.Field(c => c.Description).Editable(false);
+        model.Field(c => c.SopNumber).Editable(false);
+        model.Field(c => c.CoreCode).Editable(false);
+        model.Field(c => c.SopNumber).Editable(false);
+        model.Field(c => c.BuyNewCost).Editable(false);
+        model.Field(c => c.RemanCost).Editable(false);
+        model.Field(c => c.LastModifiedDate).Editable(false);
+        model.Field(c => c.LastModifiedBy).Editable(false);
+
+    })
+    .Read(r => r.Action("GetRebuiltPartsView", "RebuiltParts").Type(HttpVerbs.Get))
+    .Create(c => c.Action("AddRebuiltPartsView", "RebuiltParts").Type(HttpVerbs.Post))
+    .Update(u => u.Action("UpdateRebuiltPartsView", "RebuiltParts").Type(HttpVerbs.Post))
+    .Destroy(d => d.Action("DeleteRebuiltPartsView", "RebuiltParts").Type(HttpVerbs.Post))
+    )
+
+    )
+</text>);
+    })
+
+)
+<div class="vehicle-estimate-container">
+    <!-- Popup tabs for vehicle details -->
+    <div id="estimatePopup" style="display:none;">
+        <div id="estimateTabs">
+            <ul>
+                <li class="k-state-active">Rebuilt Part</li>
+                <li>Parts Summary</li>
+                <li>Labour Summary</li>
+                <li>All Labour</li>
+                <li>Labour Details</li>
+                
+                <li>Stock Coded Parts</li>
+                <li>Non Stock Coded Parts</li>
+                <li>Rebuilt Parts</li>
+                <li>Final Estimate</li>
+            </ul>
+
+            <div id="rebuiltTabContent"></div>
+            <div id="partsTabContent"></div>
+            <div id="labourTabContent"></div>
+            <div id="allLabourTabContent"></div>
+            <div id="labourDetailsTabContent"></div>
+            <div id="stockCodedPartsTabContent"></div>
+            <div id="nonStockCodedPartsTabContent"></div>
+            <div id="rebuiltPartsTabContent"></div>
+            <div id="finalEstimateTabContent"></div>
+        </div>
+    </div>
+
+    <!-- Delete confirmation dialog -->
+    <div id="deleteConfirmationDialog" style="display:none;">
+        <div class="confirmation-message"><span class="k-icon k-i-warning" style="font-size:24px;color:#f0ad4e;"></span><span style="margin-left:10px;">Are you sure you'd like to delete?</span></div>
+        <div class="confirmation-buttons"><button class="k-button" id="cancelDeleteBtn">Cancel</button><button class="k-button k-primary" id="confirmDeleteBtn" style="margin-left:10px;">Delete</button></div>
+    </div>
+
+    <!-- Copy estimate dialog -->
+    <div id="copyEstimateDialog" style="display:none;">
+        <div class="k-form">
+            <div class="k-form-field"><label>Rebuilt #</label><input id="rebuiltId" class="k-textbox" readonly /></div>
+            <div class="k-form-field"><label>MMSStockCode</label><input id="oldMMSBuyCode" class="k-textbox" readonly /></div>
+            <div class="k-form-field"><label>Keyword</label><input id="oldKeyword" class="k-textbox" readonly /></div>
+            <div class="k-form-field">
+                <label>New Vehicle Series<span style="color:red">*</span></label>@* <input id="newVehSeriesCode" class="k-textbox" required /></div> *@
+                @(Html.Kendo().DropDownList()
+                    .Name("newVehSeriesCode")
+                    .DataTextField("VehSeriesCode")        // display text
+                    .DataValueField("VehSeriesCode")      // actual value posted
+                    .OptionLabel("-- Select Vehicle Series --")
+                    .Filter("contains")
+                    .DataSource(source =>
+                    {
+                        source.Read(read =>
+                        {
+                            read.Url("/AutoComplete/GetVehSeries").Type(HttpVerbs.Get); // leading slash
+                        })
+                        .ServerFiltering(false);
+                    })
+                    .HtmlAttributes(new { required = "required", style = "width:100%" })
+                    )
+
+
+                <div class="k-form-field"><label>New Description<span style="color:red">*</span></label><input id="newprojDesc" class="k-textbox" required /></div>
+                <div class="k-form-buttons">
+                    <button type="button" class="k-button k-primary" id="copyEstimateBtn">Copy</button>
+                    <button type="button" class="k-button" id="cancelCopyBtn">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    @section Scripts {
+
+        <script>
+            //var currentRebuiltId = 0;
+
+            $(document).ready(function () {
+                // ===== Vehicle TabStrip on main page =====
+                var tabStrip = $("#rebuiltTabStrip").data("kendoTabStrip");
+                if (tabStrip) {
+                    tabStrip.select(0); // Select the Vehicles tab initially
+                }
+
+                // ===== Notifications =====
+                $("#notification").kendoNotification();
+
+                // ===== Vehicle Estimate Popup =====
+                $("#estimatePopup").kendoWindow({
+                    modal: true,
+                    width: "1100px",
+                    height: "540px",
+                    resizable: false,
+                    scrollable: false,
+                    title: "Estimate",
+                    visible: false,
+                    actions: ["Close"],
+                    open: function () {
+                        var ts = $("#estimateTabs").data("kendoTabStrip");
+                        if (ts) {
+                            ts.select(0); //  reset to Vehicle tab every time
+                        }
+
+                        //  clear all tab contents to avoid stale grids
+                        $("#rebuiltTabContent, #partsTabContent, #labourTabContent, #labourDetailsTabContent, #stockCodedPartsTabContent, #nonStockCodedPartsTabContent, #rebuiltPartsTabContent, #finalEstimateTabContent").empty();
+
+                        //  load vehicle form fresh
+                        loadRebuiltForm(window.currentRebuiltId);
+                    },
+                    close: function (e) {
+                        if (pendingChanges) {
+                            e.preventDefault();
+                            showCloseConfirmation();
+                        }
+                    }
+                });
+
+                // ===== TabStrip inside popup =====
+                $("#estimateTabs").kendoTabStrip({
+                    animation: { open: { effects: "fadeIn" } },
+                    select: onTabSelect
+                });
+
+                // Disable all tabs except Vehicle initially
+                disableOtherTabs();
+
+                // ===== Vehicle Grid requestEnd hook =====
+                var rebuiltGrid = $("#RebuiltGrid").data("kendoGrid");
+                if (rebuiltGrid) {
+                    rebuiltGrid.dataSource.bind("requestEnd", function (e) {
+                        if (e.type === "create" && e.response && !e.response.Errors) {
+                            enableAllTabs();
+                        }
+                    });
+                }
+
+                // ===== Make grid cells clickable for editing =====
+                $(document).on("click", ".stock-code-cell", function () {
+                    var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+                    if (grid) {
+                        var row = $(this).closest("tr");
+                        grid.editRow(row);
+                    }
+                });
+
+                $(document).on("click", ".non-stock-code-cell", function () {
+                    var grid = $("#" + nscInEstimateGridName).data("kendoGrid");
+                    if (grid) {
+                        var row = $(this).closest("tr");
+                        grid.editRow(row);
+                    }
+                });
+
+                $(document).on("click", ".rb-code-cell", function () {
+                    var grid = $("#" + rbInEstimateGridName).data("kendoGrid");
+                    if (grid) {
+                        var row = $(this).closest("tr");
+                        grid.editRow(row);
+                    }
+                });
+
+                $(document).on("click", ".labour-cell", function () {
+                    var grid = $("#" + labourInEstimateGridName).data("kendoGrid");
+                    if (grid) {
+                        var row = $(this).closest("tr");
+                        grid.editRow(row);
+                    }
+                });
+            });
+
+            // // ===== Tab Select Handler (always fetch fresh from server) =====
+            // function onTabSelect(e) {
+            //     var index = $(e.item).index();
+
+            //     var tabsConfig = [
+            //         { id: "rebuiltTabContent", url: '@Url.Action("GetRbById", "RebuiltParts")' },
+            //         { id: "partsTabContent", url: "/Vehicles/MaterialCostSummaryPartial" },
+            //         { id: "labourTabContent", url: "/Vehicles/LabourHourSummaryPartial" },
+            //         { id: "labourDetailsTabContent", url: "/Vehicles/LabourDetailsPartial" },
+            //         { id: "stockCodedPartsTabContent", url: "/Vehicles/ScDetailsPartial" },
+            //         { id: "nonStockCodedPartsTabContent", url: "/Vehicles/NonStockPartsPartial" },
+            //         { id: "rebuiltPartsTabContent", url: "/Vehicles/RebuiltPartsPartial" },
+            //         { id: "finalEstimateTabContent", url: "/Vehicles/TotalCostPartial" }
+            //     ];
+
+            //     var tab = tabsConfig[index];
+            //     if (!tab) return;
+
+            //     //  Always clear and reload content from server
+            //     $("#" + tab.id).empty();
+            //     loadTabContent(tab.id, tab.url, { id: currentRebuiltId, gridType: "RebuiltGrid" });
+            // }
+
+            // ===== Enable/Disable Tabs =====
+            function disableOtherTabs() {
+                var ts = $("#estimateTabs").data("kendoTabStrip");
+                for (var i = 1; i <= 8; i++) {
+                    ts.enable(ts.tabGroup.children().eq(i), false);
+                }
+            }
+
+            function enableAllTabs() {
+                var ts = $("#estimateTabs").data("kendoTabStrip");
+                for (var i = 1; i <= 8; i++) {
+                    ts.enable(ts.tabGroup.children().eq(i), true);
+                }
+            }
+        </script>
+
+        <script>
+
+            $(document).ready(function () {
+
+
+
+            // Function to set values for ComboBoxEditor fields
+            function setComboBoxValues() {
+                // Get the model data from hidden fields or data attributes
+                var modelData = @Html.Raw(Json.Serialize(Model));
+
+                // Set values for each ComboBoxEditor field
+                if (modelData) {
+                    if (modelData.RebuiltId) {
+                            setComboBoxValue("RebuiltId", modelData.RebuiltId);
+                    }
+                    if (modelData.MmsBuyCode) {
+                            setComboBoxValue("MmsBuyCode", modelData.MmsBuyCode);
+                    }
+                        if (modelData.RebuiltStockNum) {
+                            setComboBoxValue("RebuiltStockNum", modelData.RebuiltStockNum);
+                        }
+                        if (modelData.MmsStockCode) {
+                            setComboBoxValue("MmsStockCode", modelData.MmsStockCode);
+                        }
+                       
+                    if (modelData.KeyWord) {
+                        setComboBoxValue("KeyWord", modelData.KeyWord);
+                    }
+                    if (modelData.Description) {
+                        setComboBoxValue("Description", modelData.Description);
+                    }
+                    if (modelData.JobNumber) {
+                        setComboBoxValue("JobNumber", modelData.JobNumber);
+                    }
+                    if (modelData.CorePartNum) {
+                        setComboBoxValue("CorePartNum", modelData.CorePartNum);
+                    }
+                    if (modelData.BuyNewCost) {
+                        setComboBoxValue("BuyNewCost", modelData.BuyNewCost);
+                    }
+                     if (modelData.RemanCost) {
+                        setComboBoxValue("RemanCost", modelData.RemanCost);
+                    }
+
+                }
+            }
+
+            // Helper function to set ComboBox value
+            function setComboBoxValue(fieldName, value) {
+                var comboBox = $("#" + fieldName).data("kendoComboBox");
+                if (comboBox) {
+                    comboBox.value(value);
+                    comboBox.text(value);
+                }
+            }
+          })
+        </script>
+
+        <script id="template" type="text/x-kendo-template">
+            <div id="detail-template-#=RebuiltId#"></div>
+        </script>
+
+
+
+
+        <script>
+
+            function onDataSourceError(e) {
+
+            }
+
+            function onVehRequestEnd(e) {
+            }
+
+
+            function onRequestEnd(e) {
+
+
+            }
+
+            function onLabourRequestEnd(e) {
+
+            }
+
+            function onNScRequestEnd(e) {
+
+            }
+
+            //start original request end
+
+            function setComboBoxValues() { }
+
+        </script>
+        <script>
+            function getAutoCompleteParams() {
+                var input = $("input[data-role='autocomplete']:focus");
+                return {
+                    columnName: input.attr("name"),
+                    searchText: input.val() || "" // Handle empty search text
+                };
+            }
+
+            // function getComboBoxParams() {
+            //     var input = $(".k-combobox input.k-input:focus");
+            //     return {
+            //         columnName: input.attr("name")?.replace("_input", "").split('.').pop(),
+            //         searchText: input.val() || ""
+            //     };
+            // }
+
+        </script>
+
+
+
+
+        <script>
+            function refreshNscPartDetails(e) {
+
+            }
+        </script>
+
+        <script>
+
+            function onSaveChanges(e) {
+
+            }
+
+            function recalculateTotalCost(e) {
+
+            }
+
+            function showNotification(type, message) {
+
+            }
+        </script>
+
+        <script>
+            function refreshRbPartDetails(e) {
+
+            }
+        </script>
+
+
+
+        <script>
+            // Initialize custom confirmation dialog
+            var deleteDialog = $("#deleteConfirmationDialog").kendoWindow({
+                width: "400px",
+                title: "Confirm Delete",
+                modal: true,
+                visible: false,
+                actions: ["Close"]
+            }).data("kendoWindow");
+
+
+            $(document).on("click", "#deleteConfirmationDialog .confirm-btn", function () {
+                console.log("inside deleteConfirmationDialog - 1");
+                var $dialog = $("#deleteConfirmationDialog");
+                var grid = $dialog.data("grid");
+                var dataItem = $dialog.data("dataItem");
+                console.warn('dataItem :', dataItem);
+                var deleteUrl = $dialog.data("url");
+                console.log("deleteUrl=", deleteUrl);
+                var idField = $dialog.data("idField");
+                //  var parentPartId = $dialog.data("parentGridId");
+                // var mmsstockcodeField = $dialog.data("mmsstockcodeField");
+                var gridType = $dialog.data("gridType");
+                var notification = $("#notification").data("kendoNotification");
+                console.log("******* inside deleteConfirmationDialog - 2");
+                console.log("idField : ", idField);
+                console.log("idField : ", idField);
+                //   console.log("***mmsstockcodeField : ", mmsstockcodeField);
+                console.log("gridType :", gridType);
+                // console.log("DEBUG >>>", {
+                //     mmsstockcodeField,
+                //     value: dataItem[mmsstockcodeField],
+                //     dataItem
+                // });
+                var dataToSend = {};
+                //  var mmsValue = dataItem[mmsstockcodeField] || "";
+                dataToSend[idField] = dataItem[idField];
+                // console.log("***** parentGridId :", parentGridId);
+                //  dataToSend[parentPartId] = dataItem[parentGridId];
+                dataToSend["parentPartId"] = parentGridId; //dataItem["VehicleListId"];;// dataItem[mmsValue];
+                dataToSend["gridType"] = gridType; // static param
+                var rebuiltStockNumField = $dialog.data("rebuiltStockNumField"); // ssk4
+                dataToSend["rebuiltStockNum"] = dataItem[rebuiltStockNumField]; // ssk4
+
+                $.ajax({
+                    url: deleteUrl,
+                    type: 'POST',
+                    data: dataToSend,
+                    success: function () {
+                        // grid.dataSource.remove(dataItem);
+                        grid.dataSource.read(); //force refresh grid
+                        notification.success("Record deleted successfully");
+                        deleteDialog.close();
+                    },
+                    error: function (xhr) {
+                        notification.error("Delete failed: " + xhr.responseText);
+                        deleteDialog.close();
+                    }
+                });
+            });
+            // $(document).on("click", "#deleteConfirmationDialog .cancel-btn", function () {
+            //     deleteDialog.close();
+            // });
+        </script>
+
+
+        <script>
+
+            function cancelScPartPopup() {
+                $("#ScPartsPopupWindow").data("kendoWindow").close();
+            }
+
+            function onScPartsEdit(e) {
+                var wnd = e.container.data("kendoWindow"); //outer popupsize
+                wnd.setOptions({
+                   width : "450px",
+                   height : "600px",
+
+                    scrollable: false,     // 
+                    title: e.model.isNew() ? "Add New Stock Coded Part" : "Edit Stock Coded Part",
+                    modal: true,
+                    resizable: false
+                });
+
+                e.container.closest(".k-window").addClass("scparts-popup-style");
+
+                // track current model for combobox select logic
+                currentScPartsModel = e.model;
+
+                // Make Stock Code read-only in Edit mode
+                setTimeout(function () {
+                    const combo = $("input[name='MMSStockCode']").closest("[data-role='combobox']").data("kendoComboBox");
+                    if (combo) {
+                        combo.readonly(!e.model.isNew());
+                    }
+                }, 200);
+            }
+
+        </script>
+        <script>
+            function onScPartNumSelect(e) {
+                // onScPartChange(e);
+
+                console.warn('inside onScPartNumSelect');
+                const selectedValue = e.sender.value();
+                console.warn('selectedValue', selectedValue);
+
+                // In Popup mode, use the stored model
+                const model = currentScPartsModel;
+
+                if (!model || !selectedValue) {
+                    console.warn("No selected value or model.");
+                    return;
+                }
+
+                // Clear existing values
+                model.set("MmsStockCode", "");
+                model.set("Description", "");
+                model.set("KeyWord", "");
+                model.set("CoreCharge", "");
+                model.set("UnitCost", "");
+
+                $.ajax({
+                    url: "/AutoComplete/GetScPartDetails",
+                    type: "GET",
+                    data: { mmsStockCode: selectedValue },
+                    success: function (result) {
+                        if (result) {
+                            model.set("MmsStockCode", result.MmsStockCode || "");
+                            model.set("DetailedDesc", result.DetailedDesc || "");
+                            model.set("PartType", result.PartType || "");
+                            model.set("OrigSupplierNum", result.OrigSupplierNum || "");
+                            model.set("OrigSupplierName", result.OrigSupplierName || "");
+                            model.set("CoreCost", result.PartCost || "");
+                            model.set("UnitCost", result.UnitCost || "");
+                        }
+                        console.warn(" AJAX result:", result);
+                    },
+                    error: function (xhr) {
+                        console.error("Failed to fetch part details:", xhr.responseText);
+                    }
+                });
+            }
+        </script>
+        <script>
+            function showCloseConfirmation() {
+                kendo.confirm("You have unsaved changes. Are you sure you want to close?")
+                    .then(function () {
+                        // User clicked OK
+                        pendingChanges = false;
+                        $("#estimatePopup").data("kendoWindow").close();
+                    }, function () {
+                        // User clicked Cancel - do nothing
+                    });
+            }
+        </script>
+        <script>
+            function onLabourGridDataBound(e) { }
+        </script>
+        <script>
+            function saveScPartPopup() {
+                // Save the current popup row
+                var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+                if (grid) grid.saveRow();  // Triggers update/create
+            }
+            function cancelScPartPopup() {
+                var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+                if (grid) grid.cancelRow();
+                // Also close window if still open
+                var wnd = $(".k-window-content:visible").data("kendoWindow");
+                if (wnd) wnd.close();
+            }
+        </script>
+        <script>
+            $(window).on("resize", function () {
+                var grid = $("#RebuiltGrid").data("kendoGrid");
+                if (grid) grid.resize();
+            });
+        </script>
+        <script>
+            function onScDelete(e) {
+                e.preventDefault();
+
+                var grid = $("#" + scInEstimateGridName).data("kendoGrid");
+                var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+                var rbId = window.currentRebuiltId || $('#RebuiltId').val()
+                kendo.confirm("Do you want to delete this stock coded part?")
+                    .then(function () {
+                        // Call your existing endpoint; adjust route/ID as needed
+                        $.ajax({
+                            url: "/ScPartsUsedInEstimates/DeleteScPartsUsedInEstimates",  //  route
+                            type: "POST",
+                            data: { id: rbId, partNum: dataItem.MMSStockCode, gridType: 'RebuiltGrid' },              // MMSStockCode
+                            success: function () {
+                                grid.dataSource.read();               // refresh SC grid
+                                // Also refresh parent summary grid if required
+                                if (typeof materialSummaryGridName !== "undefined") {
+                                    var parent = $("#" + materialSummaryGridName).data("kendoGrid");
+                                    if (parent) parent.dataSource.read();
+                                }
+                                $("#notification").data("kendoNotification").success("Deleted successfully");
+                            },
+                            error: function (xhr) {
+                                $("#notification").data("kendoNotification").error("Delete failed: " + xhr.responseText);
+                            }
+                        });
+                    });
+            }
+        </script>
+        <script>
+            var prentId = '@ViewBag.ParentId'
+        </script>
+        @*     ---------------------- NscPartsUsed *@
+        <script>
+            function onNscPartNumSelect(e) { }
+        </script>
+        <script>
+
+            function getSupplierNameParams() {
+                var combo = $("input[name='OrigSuppNum']").data("kendoComboBox");
+                console.warn('combo :', combo);
+                return {
+                    supplierNumber: combo ? combo.value() : ""
+                };
+            }
+
+
+            function onNscPartsComboBoxSelect(e) {
+                // Get the selected item from ComboBox
+                var selected = this.dataItem(e.item.index());
+                var supplierName = selected ? selected.Text : "";
+
+                // Find the open popup editor window
+                var popup = $(".k-window-content:visible");
+
+                // Get the editable model bound to the popup
+                var editable = popup.data("kendoEditable");
+               // var model = editable ? editable.options.model : null;
+               // console.warn('model :', model);
+
+                var model = currentNscPartsModel;
+                console.warn('model :', model);
+
+
+                // Get supplier number from the popup input field (OrigSuppNum)
+                var supplierNumber = $("input[name='OrigSuppNum']").val();
+
+                console.log("**** onNscPartsComboBoxSelect - supplierNumber:", supplierNumber, " supplierName:", supplierName);
+
+                // Update model with supplier name
+                if (model && supplierName) {
+                    model.set("OrigSupplierName", supplierName);
+                }
+
+                // Fetch supplier details and update fields in popup
+                if (supplierNumber && supplierName) {
+                    $.ajax({
+                        url: '/AutoComplete/GetSupplierDetailsByName',
+                        type: 'GET',
+                        data: {
+                            supplierNumber: supplierNumber,
+                            supplierName: supplierName
+                        },
+                        success: function (result) {
+                            if (result && model) {
+                                model.set("OemPartCost", result.PartCost);
+                                model.set("Description", result.Description);
+                                model.set("KeyWord", result.KeyWord);
+                            }
+                        },
+                        error: function () {
+                            console.error("Failed to fetch supplier details.");
+                        }
+                    });
+                }
+            }
+        </script>
+        <script>
+            function onNscPartsEdit(e) {
+                var wnd = e.container.data("kendoWindow"); //outer popupsize
+                wnd.setOptions({
+                    width: "450px",
+                    height: "600px",
+
+                    scrollable: false,     //
+                    title: e.model.isNew() ? "Add New Non Stock Coded Part" : "Edit Non Stock Coded Part",
+                    modal: true,
+                    resizable: false
+                });
+
+                e.container.closest(".k-window").addClass("scparts-popup-style");
+
+                // track current model for combobox select logic
+                currentNscPartsModel = e.model;
+
+                // Make OrigSuppNum read-only in Edit mode
+                setTimeout(function () {
+                    const combo = $("input[name='OrigSuppNum']").closest("[data-role='combobox']").data("kendoComboBox");
+                    if (combo) {
+                        combo.readonly(!e.model.isNew());
+                    }
+                }, 200);
+            }
+
+        </script>
+        <script>
+            function saveNscPartPopup() {
+                // Save the current popup row
+                var grid = $("#" + nscInEstimateGridName).data("kendoGrid");
+                if (grid) grid.saveRow();  // Triggers update/create
+            }
+            function cancelNscPartPopup() {
+                var grid = $("#" + nscInEstimateGridName).data("kendoGrid");
+                if (grid) grid.cancelRow();
+                // Also close window if still open
+                var wnd = $(".k-window-content:visible").data("kendoWindow");
+                if (wnd) wnd.close();
+            }
+        </script>
+        <script>
+            function onNscDelete(e) {
+                e.preventDefault();
+
+                var grid = $("#" + nscInEstimateGridName).data("kendoGrid");
+                var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+                var rbId = window.currentRebuiltId || $('#RebuiltId').val()
+                console.warn('window.currentRebuiltId :', window.currentRebuiltId);
+                console.warn('currentRebuiltId :', $('#RebuiltId').val());
+
+                kendo.confirm("Do you want to delete this non stock coded part?")
+                    .then(function () {
+                        // Call your existing endpoint; adjust route/ID as needed
+                        $.ajax({
+                            url: "/NscPartsUsedInEstimates/DeleteNscPartsUsedInEstimates",  //  route
+                            type: "POST",
+                            data: { id: rbId, partNum: dataItem.OrigSuppNum, gridType: 'RebuiltGrid' },              // MMSStockCode
+                            success: function () {
+                                grid.dataSource.read();               // refresh SC grid
+                                // Also refresh parent summary grid if required
+                                if (typeof materialSummaryGridName !== "undefined") {
+                                    var parent = $("#" + materialSummaryGridName).data("kendoGrid");
+                                    if (parent) parent.dataSource.read();
+                                }
+                                $("#notification").data("kendoNotification").success("Deleted successfully");
+                            },
+                            error: function (xhr) {
+                                $("#notification").data("kendoNotification").error("Delete failed: " + xhr.responseText);
+                            }
+                        });
+                    });
+            }
+        </script>
+        @*  -Rebuit Parts-------------------------------------------------------------------------- *@
+
+       <script>
+
+          function saveRbPartPopup() {
+             // Save the current popup row
+                var grid = $("#" + rbInEstimateGridName).data("kendoGrid");
+            if (grid) grid.saveRow();  // Triggers update/create
+          }
+
+            function cancelRbPartPopup() {
+             var grid = $("#" + rbInEstimateGridName).data("kendoGrid");
+            if (grid) grid.cancelRow();
+            // Also close window if still open
+            var wnd = $(".k-window-content:visible").data("kendoWindow");
+            if (wnd) wnd.close();
+          }
+
+       </script>
+        <script>
+
+            function onRbPartsEdit(e) {
+                var wnd = e.container.data("kendoWindow"); //outer popupsize
+                wnd.setOptions({
+                    width: "450px",
+                    height: "400px",
+
+                    scrollable: false,     //
+                    title: e.model.isNew() ? "Add New Rebuilt Part" : "Edit Rebuilt Part",
+                    modal: true,
+                    resizable: false
+                });
+
+                e.container.closest(".k-window").addClass("rbparts-popup-style");
+
+                // track current model for combobox select logic
+                currentRbPartsModel = e.model;
+
+                // Make OrigSuppNum read-only in Edit mode
+                setTimeout(function () {
+                    const combo = $("input[name='RebuiltStockNum']").closest("[data-role='combobox']").data("kendoComboBox");
+                    if (combo) {
+                        combo.readonly(!e.model.isNew());
+                    }
+                }, 200);
+            }
+
+        </script>
+        <script>
+            function onRbPartNumSelect(e) {
+                // onScPartChange(e);
+
+                console.warn('inside onRbPartNumSelect');
+                const selectedValue = e.sender.value();
+                console.warn('selectedValue', selectedValue);
+
+                // In Popup mode, use the stored model
+                const model = currentRbPartsModel;
+
+                if (!model || !selectedValue) {
+                    console.warn("No selected value or model.");
+                    return;
+                }
+
+                // Clear existing values
+                 model.set("Id", "");
+                model.set("RebuiltStockNum", "");
+                model.set("Description", "");
+                model.set("KeyWord", "");
+                // model.set("Qty", "");
+                 model.set("UnitCost", "");
+                // model.set("Percentage", "");
+
+                $.ajax({
+                    url: "/AutoComplete/GetRbPartDetails",
+                    type: "GET",
+                    data: { rebuiltStockNum: selectedValue },
+                    success: function (result) {
+                        if (result) {
+                            model.set("RebuiltStockNum", result.RebuiltStockNum || "");
+                            model.set("Description", result.Description || "");
+                            model.set("KeyWord", result.KeyWord || "");
+                            model.set("UnitCost", result.UnitCost || "");
+                            // model.set("Qty", result.Qty || "");
+                            // model.set("Percentage", result.Percentage || "");
+                             model.set("Id", result.Id || 0);
+                        }
+                        console.warn(" AJAX result:", result);
+                    },
+                    error: function (xhr) {
+                        console.error("Failed to fetch part details:", xhr.responseText);
+                    }
+                });
+            }
+        </script>
+        <script>
+            function onRbDelete(e) {
+                e.preventDefault();
+
+                var grid = $("#" + rbInEstimateGridName).data("kendoGrid");
+                var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+                var rbId = window.currentRebuiltId || $('#RebuiltId').val()
+                console.warn('rbId1 :', window.currentRebuiltId);
+                console.warn('rbId2 :', $('#RebuiltId').val());
+
+                kendo.confirm("Do you want to delete this rebuilt part?")
+                    .then(function () {
+                        // Call your existing endpoint; adjust route/ID as needed
+                        $.ajax({
+                            url: "/RbPartsUsedInEstimates/DeleteRbPartsUsedInEstimates",  //  route
+                            type: "POST",
+                            data: { id: rbId, partNum: dataItem.RebuiltStockNum, gridType: 'RB' },              // MMSStockCode
+                            success: function () {
+                                grid.dataSource.read();               // refresh Rbgrid
+                                // Also refresh parent summary grid if required
+                                if (typeof materialSummaryGridName !== "undefined") {
+                                    var parent = $("#" + materialSummaryGridName).data("kendoGrid");
+                                    if (parent) parent.dataSource.read();
+                                }
+                                $("#notification").data("kendoNotification").success("Deleted successfully");
+                            },
+                            error: function (xhr) {
+                                $("#notification").data("kendoNotification").error("Delete failed: " + xhr.responseText);
+                            }
+                        });
+                    });
+            }
+        </script>
+        @*  Labour details---------------------------------------------------------- *@
+        <script>
+            function onLabourDelete(e) {
+                e.preventDefault();
+
+                var grid = $("#" + labourInEstimateGridName).data("kendoGrid");
+                var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+                var rbId = window.currentRebuiltId || $('#RebuiltId').val()
+                console.warn('rbId1 :', window.currentRebuitId);
+                console.warn('rbId2 :', $('#RebuiltId').val());
+
+                kendo.confirm("Do you want to delete this Labor?")
+                    .then(function () {
+                        // Call your existing endpoint; adjust route/ID as needed
+                        $.ajax({
+                            url: "/LabourDetails/DeleteLabourDetail",  //  route
+                            type: "POST",
+                                data: { id: rbId, partNum: dataItem.Id, gridType: 'RebuiltGrid' },              // MMSStockCode
+                            success: function () {
+                                grid.dataSource.read();               // refresh Rbgrid
+                                // Also refresh parent summary grid if required
+                                if (typeof materialSummaryGridName !== "undefined") {
+                                    var parent = $("#" + materialSummaryGridName).data("kendoGrid");
+                                    if (parent) parent.dataSource.read();
+                                }
+                                $("#notification").data("kendoNotification").success("Deleted successfully");
+                            },
+                            error: function (xhr) {
+                                $("#notification").data("kendoNotification").error("Delete failed: " + xhr.responseText);
+                            }
+                        });
+                    });
+            }
+        </script>
+        <script>
+
+            function onLabourEdit(e) {
+                var wnd = e.container.data("kendoWindow"); //outer popupsize
+                wnd.setOptions({
+                    width: "450px",
+                    height: "600px",
+
+                    scrollable: false,     //
+                    title: e.model.isNew() ? "Add New Labour" : "Edit Labour Details",
+                    modal: true,
+                    resizable: false
+                });
+
+                e.container.closest(".k-window").addClass("labour-popup-style");
+
+                // track current model for combobox select logic
+                currentLabourModel = e.model;
+            }
+
+        </script>
+       
+        <script>
+            function onSupplierNumChange(e) {
+                var row = $(e.sender.element).closest("tr");
+                var supplierNameCombo = row.find("[data-role='combobox'][name='OrigSupplierName']").data("kendoComboBox");
+    
+                if (supplierNameCombo) {
+                    supplierNameCombo.value("");
+                    supplierNameCombo.text("");
+                }
+            }
+        </script>
+        <script>
+
+            function onScGridRequestEnd(e) {
+                // fires after successful create/update/delete
+                if (e.type === "create" && e.response) {
+                    // notification.show(e.response.Message || "Created successfully!", "success");
+                }
+            }
+
+            function onScGridError(e) {
+                // fired when controller returns BadRequest or error
+                if (e.xhr && e.xhr.responseText) {
+
+                    var alertWindow = kendo.alert(e.xhr.responseText);
+
+                }
+            }
+
+
+        </script>
+        <script>
+            function onNscGridError(e) {
+                // fired when controller returns BadRequest or error
+                if (e.xhr && e.xhr.responseText) {
+
+                    var alertWindow = kendo.alert(e.xhr.responseText);
+
+                }
+            }
+        </script>
+
+        <script>
+            function onRbGridError(e) {
+                // fired when controller returns BadRequest or error
+                if (e.xhr && e.xhr.responseText) {
+
+                    var alertWindow = kendo.alert(e.xhr.responseText);
+
+                }
+            }
+        </script>
+        <script>
+            function saveLabourDeatilsPopup() {
+                // Save the current popup row
+
+                var grid = $("#" + labourInEstimateGridName).data("kendoGrid");
+                if (grid) grid.saveRow();  // Triggers update/create
+            }
+
+            function cancelLabourDetailsPopup() {
+                var grid = $("#" + labourInEstimateGridName).data("kendoGrid");
+                if (grid) grid.cancelRow();
+                // Also close window if still open
+                var wnd = $(".k-window-content:visible").data("kendoWindow");
+                if (wnd) wnd.close();
+            }
+
+        </script>
+    }
