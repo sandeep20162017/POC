@@ -1,0 +1,81 @@
+
+------------------------------------------------------------
+-- 1. Create table to track prefix sequences
+------------------------------------------------------------
+IF NOT EXISTS (
+    SELECT 1 
+    FROM sys.tables t 
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'PrefixSequence' AND s.name = 'SBCES'
+)
+BEGIN
+    CREATE TABLE SBCES.PrefixSequence (
+        PrefixCode VARCHAR(10) PRIMARY KEY,
+        LastNumber INT NOT NULL
+    );
+END
+GO
+
+
+------------------------------------------------------------
+-- 2. Seed prefixes (optional)
+-- You can add more prefixes anytime
+------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM SBCES.PrefixSequence WHERE PrefixCode = 'MBD')
+    INSERT INTO SBCES.PrefixSequence (PrefixCode, LastNumber) VALUES ('MBD', 0);
+
+IF NOT EXISTS (SELECT 1 FROM SBCES.PrefixSequence WHERE PrefixCode = 'MBH')
+    INSERT INTO SBCES.PrefixSequence (PrefixCode, LastNumber) VALUES ('MBH', 0);
+GO
+
+
+------------------------------------------------------------
+-- 3. Generate next PK (NO stored procedure)
+--    Use this block before inserting into SBCES.MBLIT
+------------------------------------------------------------
+
+DECLARE @Prefix VARCHAR(10) = 'MBD';   -- <-- FRONT END PASSES THIS
+DECLARE @NextNumber INT;
+DECLARE @NextPK VARCHAR(25);
+
+BEGIN TRAN;
+
+    --------------------------------------------------------
+    -- Try to increment existing prefix
+    --------------------------------------------------------
+    UPDATE SBCES.PrefixSequence
+    SET LastNumber = LastNumber + 1
+    WHERE PrefixCode = @Prefix;
+
+    IF @@ROWCOUNT = 0
+    BEGIN
+        -- Prefix not found, create it starting at 1
+        INSERT INTO SBCES.PrefixSequence (PrefixCode, LastNumber)
+        VALUES (@Prefix, 1);
+
+        SET @NextNumber = 1;
+    END
+    ELSE
+    BEGIN
+        SELECT @NextNumber = LastNumber
+        FROM SBCES.PrefixSequence
+        WHERE PrefixCode = @Prefix;
+    END
+
+    --------------------------------------------------------
+    -- Build final PK: PREFIX + 6‑digit padded number
+    --------------------------------------------------------
+    SET @NextPK = @Prefix + RIGHT('000000' + CAST(@NextNumber AS VARCHAR(6)), 6);
+
+COMMIT TRAN;
+
+PRINT 'Generated PK = ' + @NextPK;
+
+
+------------------------------------------------------------
+-- 4. Insert into your main table SBCES.MBLIT
+--    Replace (...) with your actual columns
+------------------------------------------------------------
+-- INSERT INTO SBCES.MBLIT (MbNumber, ...)
+-- VALUES (@NextPK, ...);
+
