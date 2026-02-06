@@ -1,0 +1,91 @@
+Telerik aSp.net core and asp.net core web application.
+App has Telerik grid, on click in one of the grid cell, app open pop up 
+Edit mode is fine.
+When user clicks on Add New- logs :
+MakeVsBuyIndex:115 inside window.initMakeVsBuyPopupForm
+window.initMakeVsBuyPopupForm @ MakeVsBuyIndex:115Understand this warningAI
+MakeVsBuyIndex:117 mode :  undefined
+
+Looks like issue is with Model.MbNumber. Ideally, I want to get Model.MbNumber from database. It should be incremental and auto generated. Popupcshtml should also have a kendoo drop down (MbPrefix) with 2 values MBH and MBD. User should be able to select the value. For Add, MbNumber should be MBH00001, MBH0002, MBB0003, MBD00004 etc. Prefix plus auto increment counter numbers.
+Edit should as is. 
+Give me all the complete changes.
+App uses dapper for direct sql calls, assume db connection is avaibale
+Details :
+...
+@(Html.Kendo().TabStrip()
+    .Name("makevsbuyTabStrip")
+    .Items(ts =>
+    {
+        ts.Add().Selected(true)
+            .Content(@<text>
+    @(Html.Kendo().Grid<MakeVsBuyViewModel>()
+    .Name("MakeVsBuyGrid")
+    
+    .Columns(c =>
+    {
+    c.Bound(v => v.MbNumber).Title("Mb Number #")
+    .Filterable(f => f.UI("numericFilter"))
+    .ClientTemplate(
+    "<a class='estimate-link' onclick=\"window.openEstimatePopup('#= MbNumber #')\">#= MbNumber #</a>").Width(60);
+...
+ .ServerOperation(true)
+ .Model(m => m.Id(v => v.MbNumber))
+..
+JS :
+ window.openEstimatePopup = function (mbNumber) {
+     console.warn('inside window.openEstimatePopup');
+     var win = $("#estimatePopup").data("kendoWindow");
+     console.warn("mbNumber",mbNumber);
+     window.currentMbNumber = mbNumber;
+     pendingChanges = false; // Reset changes flag
+
+     win.title(mbNumber === "" ? "Add New Estimate" : "Make vs Buy Estimate #" + mbNumber);
+     win.center().open();
+...
+window.loadMakeVsBuyForm = function (mbNumber, callback) {
+    console.warn('window.loadMakeVsBuyForm :', mbNumber);
+
+    $.get('@Url.Action("GetMakeVsBuyById", "MakeVsBuy")', { id: mbNumber }, function (html) {
+        $("#makevsbuyTabContent").html(html);
+        window.tabContentLoaded[0] = true;
+
+        // Initialize Kendo UI widgets in the new HTML
+        kendo.init($("#makevsbuyTabContent"));
+
+        // Rebind actions
+        window.wireMakeVsBuyForm();
+
+        // Apply readonly/edit mode logic AFTER widgets exist
+        setTimeout(function () {
+            window.initMakeVsBuyPopupForm();
+        }, 100);
+..
+window.initMakeVsBuyPopupForm = function () {
+     console.warn('inside window.initMakeVsBuyPopupForm');
+     var mode = $("#formMode").val();
+     console.warn('mode : ', mode);
+     if (!mode) return;
+
+     // Wait for widgets to be fully initialized before applying readonly
+     setTimeout(function () {
+         if (mode === "Add") {
+...
+_MakeVsBuyPopUp.cshtml
+@model BCES.Models.MakeVsBuy.MakeVsBuyViewModel
+@{
+    bool isNew = Model.MbNumber == " ";
+}
+<div class="scparts-popup-style">
+    @*  <div class="section-title">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate VehPOp" : $"Estimate #{Model.VehicleListId}")</div> *@
+    <div class="popup-action">
+        <button id="btnSaveMakeVsBuy" class="k-button k-primary" type="button">Update</button>
+        <button id="btnCancelMakeVsBuy" class="k-button" type="button">Cancel</button>
+       
+    </div>
+</div>
+
+<div class="form-container">
+    <form id="makevsbuyForm">
+   
+        @Html.HiddenFor(m => m.MbNumber)
+        @Html.Hidden("formMode", Model.MbNumber == " " ? "Add" : "Edit", new { id = "formMode" })
