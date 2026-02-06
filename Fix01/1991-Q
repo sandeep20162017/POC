@@ -1,0 +1,52 @@
+System.InvalidOperationException: 'BeginExecuteNonQuery requires the command to have a transaction when the connection assigned to the command is in a pending local transaction.  The Transaction property of the command has not been initialized.'
+Query works fine when executed in SSMS
+    [HttpPost]
+    [AllowAnonymous]
+    public async Task<IActionResult> DeleteScPartsUsedInEstimates(
+         string id,
+         string partNum,
+         string gridType)
+    {
+        try
+        {
+            string pid = ViewBag.PartNum;
+            string pid2 = ViewBag.ParentId;
+            string linkType = "";
+            if (gridType == "VehicleGrid")
+                linkType = "BUS";
+            else if (gridType == "RebuiltGrid")
+                linkType = "RB";
+            else if (gridType == "MakeVsBuyGrid")
+                linkType = "MB";
+
+
+            _dbConnection.Open();
+            using var transaction = _dbConnection.BeginTransaction();
+
+            string sql = @"DELETE FROM SBCES.SCPartsUsed 
+                     WHERE MMSStockCode ='" + partNum + "'" +
+                        " AND LinkCode = '" + id + "'"  +
+                        " AND LinkType ='" + linkType + "'";
+
+            //var parameters = new 
+            //{
+            //    id,
+            //    partNum,
+            //    //linkType = gridType == "VehicleGrid" ? "BUS" : "RB"
+            //};
+
+            int affectedRows = await _dbConnection.ExecuteAsync(sql,  transaction);
+            transaction.Commit();
+
+            if (gridType == "VehicleGrid")
+            {
+                await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, id);
+            }
+
+            return Json(new { success = affectedRows > 0 });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"Delete failed: {ex.Message}");
+        }
+    }
