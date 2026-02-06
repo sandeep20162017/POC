@@ -1,0 +1,245 @@
+1. Fix formMode and isNew in the popup view
+Right now you’re checking against " " (a single space), so for Add you end up with mode = undefined.
+
+Change _MakeVsBuyPopUp.cshtml:
+
+csharp
+@model BCES.Models.MakeVsBuy.MakeVsBuyViewModel
+
+@{
+    // New when MbNumber is null or empty
+    bool isNew = string.IsNullOrEmpty(Model.MbNumber);
+}
+
+<div class="scparts-popup-style">
+    <div class="popup-action">
+        <button id="btnSaveMakeVsBuy" class="k-button k-primary" type="button">Update</button>
+        <button id="btnCancelMakeVsBuy" class="k-button" type="button">Cancel</button>
+    </div>
+</div>
+
+<div class="form-container">
+    <form id="makevsbuyForm">
+        @Html.HiddenFor(m => m.MbNumber)
+        @Html.Hidden("formMode", isNew ? "Add" : "Edit", new { id = "formMode" })
+
+        <div class="form-group double-width">
+            @Html.Label("MbPrefix", "Make Vs Buy Prefix", new { @class = "form-label" })
+            @(Html.Kendo().DropDownList()
+                .Name("MbPrefix")                 // name must match JS vm property
+                .DataTextField("PrefixCode")
+                .DataValueField("PrefixCode")
+                .AutoBind(true)
+                .OptionLabel("Select prefix...")
+                .DataSource(ds =>
+                {
+                    ds.Read(r => r.Action("ReadMbPrefix", "MakeVsBuy"));
+                })
+                .Enable(isNew)                    // only editable on Add
+            )
+        </div>
+
+        <!-- your other fields here -->
+    </form>
+</div>
+Now window.initMakeVsBuyPopupForm will see mode as "Add" or "Edit" reliably.
+
+2. Make the “Add” flow call the popup with empty MbNumber
+Wherever you wire the “Add New” button, make sure you call:
+
+js
+// toolbar or button click
+window.openEstimatePopup("");
+Your existing function already handles this:
+
+js
+window.openEstimatePopup = function (mbNumber) {
+    console.warn('inside window.openEstimatePopup');
+    var win = $("#estimatePopup").data("kendoWindow");
+    console.warn("mbNumber", mbNumber);
+
+    window.currentMbNumber = mbNumber;
+    pendingChanges = false;
+
+    win.title(!mbNumber ? "Add New Estimate" : "Make vs Buy Estimate #" + mbNumber);
+    win.center().open();
+
+    window.loadMakeVsBuyForm(mbNumber, function () {
+        // callback logic
+    });
+};
+3. Load view model for Add vs Edit in controller
+In your MakeVsBuyController:
+
+csharp
+[HttpGet]
+public async Task<IActionResult> GetMakeVsBuyById(string id)
+{
+    if (string.IsNullOrEmpty(id))
+    {
+        // ADD mode: empty MbNumber, no PK yet
+        var vm = new MakeVsBuyViewModel
+        {
+            MbNumber = null,
+            // set any defaults here
+        };
+        return PartialView("_MakeVsBuyPopUp", vm);
+    }
+
+    // EDIT mode: load from DB
+    const string sql = @"
+        SELECT MbNumber, Keyword, Description, BusType, NumBusComp,
+               VendorPartNum, BuyCode, RebuildCode, CoreCode, AnnualUsage,
+               BenchNumber, SampleProvided, Recommendation
+        FROM CES.SBCES.MBLIT
+        WHERE MbNumber = @MbNumber";
+
+    var model = await _dbConnection.QueryFirstOrDefaultAsync<MakeVsBuyViewModel>(sql, new { MbNumber = id });
+
+    if (model == null)
+        return NotFound();
+
+    return PartialView("_MakeVsBuyPopUp", model);
+}
+4. Generate MbNumber on Add using prefix (Dapper + sequence table)
+Use the prefix selected in the popup (MbPrefix dropdown) and generate MbNumber server‑side in AddMakeVsBuyView.
+
+csharp
+[HttpPost]
+public async Task<IActionResult> AddMakeVsBuyView(
+    [DataSourceRequest] DataSourceRequest request,
+    [FromBody] MakeVsBuyViewModel makevsbuyViewModel)
+{
+    if (makevsbuyViewModel == null)
+        return BadRequest("Unable to save. Model data is missing.");
+
+    if (!ModelState.IsValid)
+        return BadRequest("Unable to save. Required fields are missing.");
+
+    // ADD mode: MbNumber not set yet
+    if (string.IsNullOrEmpty(makevsbuyViewModel.MbNumber))
+    {
+        if (string.IsNullOrEmpty(makevsbuyViewModel.MbPrefix))
+            return BadRequest("Prefix is required for new estimates.");
+
+        using (var tran = _dbConnection.BeginTransaction())
+        {
+            // 1) increment sequence for this prefix
+            const string updateSql = @"
+                UPDATE CES.SBCES.MBPrefixSequence
+                SET LastNumber = LastNumber + 1
+                WHERE PrefixCode = @Prefix;
+
+                IF @@ROWCOUNT = 0
+                BEGIN
+                    INSERT INTO CES.SBCES.MBPrefixSequence (PrefixCode, LastNumber)
+                    VALUES (@Prefix, 1);
+                END;
+
+                SELECT LastNumber
+                FROM CES.SBCES.MBPrefixSequence
+                WHERE PrefixCode = @Prefix;";
+
+            var nextNumber = await _dbConnection.ExecuteScalarAsync<int>(
+                updateSql,
+                new { Prefix = makevsbuyViewModel.MbPrefix },
+                tran
+            );
+
+            // 2) build MbNumber = PREFIX + 6‑digit padded number
+            makevsbuyViewModel.MbNumber =
+                makevsbuyViewModel.MbPrefix + nextNumber.ToString("D6");
+
+            // 3) insert into main table
+            const string insertSql = @"
+                INSERT INTO CES.SBCES.MBLIT
+                    (MbNumber, Keyword, Description, BusType, NumBusComp,
+                     VendorPartNum, BuyCode, RebuildCode, CoreCode, AnnualUsage,
+                     BenchNumber, SampleProvided, Recommendation)
+                VALUES
+                    (@MbNumber, @Keyword, @Description, @BusType, @NumBusComp,
+                     @VendorPartNum, @BuyCode, @RebuildCode, @CoreCode, @AnnualUsage,
+                     @BenchNumber, @SampleProvided, @Recommendation);";
+
+            await _dbConnection.ExecuteAsync(insertSql, makevsbuyViewModel, tran);
+
+            tran.Commit();
+        }
+    }
+    else
+    {
+        // EDIT mode: update existing
+        const string updateSql = @"
+            UPDATE CES.SBCES.MBLIT
+            SET Keyword = @Keyword,
+                Description = @Description,
+                BusType = @BusType,
+                NumBusComp = @NumBusComp,
+                VendorPartNum = @VendorPartNum,
+                BuyCode = @BuyCode,
+                RebuildCode = @RebuildCode,
+                CoreCode = @CoreCode,
+                AnnualUsage = @AnnualUsage,
+                BenchNumber = @BenchNumber,
+                SampleProvided = @SampleProvided,
+                Recommendation = @Recommendation
+            WHERE MbNumber = @MbNumber;";
+
+        await _dbConnection.ExecuteAsync(updateSql, makevsbuyViewModel);
+    }
+
+    // return MbNumber so client can update title, etc.
+    return Json(makevsbuyViewModel);
+}
+Make sure your view model has MbPrefix:
+
+csharp
+public class MakeVsBuyViewModel
+{
+    public string MbNumber { get; set; }
+    public string MbPrefix { get; set; }   // from dropdown
+
+    public string Keyword { get; set; }
+    public string Description { get; set; }
+    public string BusType { get; set; }
+    public int? NumBusComp { get; set; }
+    public string VendorPartNum { get; set; }
+    public string BuyCode { get; set; }
+    public string RebuildCode { get; set; }
+    public string CoreCode { get; set; }
+    public int? AnnualUsage { get; set; }
+    public string BenchNumber { get; set; }
+    public string SampleProvided { get; set; }
+    public string Recommendation { get; set; }
+}
+5. Include MbPrefix in your JS view model
+In your wireMakeVsBuyForm:
+
+js
+var vm = {
+    MbNumber: $("#MbNumber").val(),
+    MbPrefix: $("#MbPrefix").val(),   // <-- from dropdown
+    Keyword: $("#Keyword").val(),
+    Description: $("#Description").val(),
+    BusType: $("#BusType").val(),
+    NumBusComp: $("#NumBusComp").val(),
+    VendorPartNum: $("#VendorPartNum").val(),
+    BuyCode: $("#BuyCode").val(),
+    RebuildCode: $("#RebuildCode").val(),
+    CoreCode: $("#CoreCode").val(),
+    AnnualUsage: $("#AnnualUsage").val(),
+    BenchNumber: $("#BenchNumber").val(),
+    SampleProvided: $("#SampleProvided").val(),
+    Recommendation: $("#Recommendation").val()
+};
+You already post JSON and use [FromBody], so this will bind cleanly.
+
+This gives you:
+
+mode correctly set to Add/Edit
+
+A prefix dropdown (MBH/MBD) on the popup
+
+Server‑side, transaction‑safe MbNumber generation: MBH000001, MBH000002, MBD000003, …
+
+Edit mode leaves existing MbNumber untouched and disables prefix selection.
