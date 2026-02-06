@@ -1,45 +1,48 @@
 For edit and add :
-Failed to load resource: the server responded with a status of 500 (Internal Server Error)
-n unhandled exception occurred while processing the request.
-InvalidOperationException: The view '~/Views/Shared/_MakeVsBuyPopUp' was not found. The following locations were searched:
-~/Views/Shared/_MakeVsBuyPopUp
+Failed to load resource: the server responded with a status of 500 (Internal Server Error)Understand this errorAI
+MakeVsBuy/GetMakeVsBuyById:1 
+        
+When visted https://localhost:44332/MakeVsBuy/GetMakeVsBuyById I see the form but not formatted (no css etc)
+SELECT MbNumber, Keyword, Description, BusType, NumBusComp,
+                       VendorPartNum, BuyCode, RebuildCode, CoreCode, AnnualUsage,
+                       BenchNumber, SampleProvided, Recommendation
+                FROM CES.SBCES.MBLIST
+                WHERE MbNumber = 'MBH0097'
+returns correct value is ssms.
 
-File exists at Views/Shared/_MakeVsBuyPopUp.cshtml
+Controoler logic :
+ public ActionResult GetMakeVsBuyById(string id, bool readOnly = false)
+ {
 
-id is correct when edit.
-public ActionResult GetMakeVsBuyById(string id, bool readOnly = false)
-{
+     if (string.IsNullOrEmpty(id))            
+     {
+         // ADD mode: empty MbNumber, no PK yet
+         var vm = new MakeVsBuyViewModel
+         {
+             MbNumber = null,
+             // set any defaults here
+         };
+         return PartialView("~/Views/Shared/_MakeVsBuyPopUp.cshtml", vm);
+     }
 
-    if (string.IsNullOrEmpty(id))
-    {
-        // ADD mode: empty MbNumber, no PK yet
-        var vm = new MakeVsBuyViewModel
-        {
-            MbNumber = null,
-            // set any defaults here
-        };
-        return PartialView("_MakeVsBuyPopUp", vm);
-    }
+     // EDIT mode: load from DB
+     const string sql = @"
+         SELECT MbNumber, Keyword, Description, BusType, NumBusComp,
+                VendorPartNum, BuyCode, RebuildCode, CoreCode, AnnualUsage,
+                BenchNumber, SampleProvided, Recommendation
+         FROM CES.SBCES.MBLIST
+         WHERE MbNumber = @MbNumber";
 
-    // EDIT mode: load from DB
-    const string sql = @"
-        SELECT MbNumber, Keyword, Description, BusType, NumBusComp,
-               VendorPartNum, BuyCode, RebuildCode, CoreCode, AnnualUsage,
-               BenchNumber, SampleProvided, Recommendation
-        FROM CES.SBCES.MBLIST
-        WHERE MbNumber = @MbNumber";
+     var model =  _dbConnection.QueryFirstOrDefaultAsync<MakeVsBuyViewModel>(sql, new { MbNumber = id });
 
-    var model =  _dbConnection.QueryFirstOrDefaultAsync<MakeVsBuyViewModel>(sql, new { MbNumber = id });
+     if (model == null)
+         return NotFound();
 
-    if (model == null)
-        return NotFound();
+     ViewBag.ReadOnly = readOnly;
+     ViewBag.ParentId = id;  /*save parent id*/
+     //ViewBag.FormattedDate = model.DateOpened;
 
-    ViewBag.ReadOnly = readOnly;
-    ViewBag.ParentId = id;  /*save parent id*/
-    //ViewBag.FormattedDate = model.DateOpened;
+     return PartialView("~/Views/Shared/_MakeVsBuyPopUp.cshtml", model);
 
-    return PartialView("~/Views/Shared/_MakeVsBuyPopUp", model);
-
-    
-}
-
+     
+ }
