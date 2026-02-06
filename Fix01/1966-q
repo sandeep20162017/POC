@@ -1,0 +1,102 @@
+ [HttpPost]
+ public async Task<IActionResult> AddMakeVsBuyView(  [DataSourceRequest] DataSourceRequest request,
+     [FromBody] MakeVsBuyViewModel makevsbuyViewModel)
+ {
+     try
+     {
+         if (makevsbuyViewModel == null)
+             return BadRequest("Unable to save. Model data is missing.");
+
+         //if (!ModelState.IsValid)
+         //    return BadRequest("Unable to save. Required fields are missing.");
+
+         // ADD mode: MbNumber not set yet
+         if (string.IsNullOrEmpty(makevsbuyViewModel.MbNumber))
+         {
+             if (string.IsNullOrEmpty(makevsbuyViewModel.MbPrefix))
+                 return BadRequest("Prefix is required for new estimates.");
+             _dbConnection.Open();
+             using (var tran = _dbConnection.BeginTransaction())
+             {
+                 // 1) increment sequence for this prefix
+                 const string updateSql = @"
+         UPDATE CES.SBCES.MBPrefixSequence
+         SET LastNumber = LastNumber + 1
+         WHERE PrefixCode = @Prefix;
+
+         IF @@ROWCOUNT = 0
+         BEGIN
+             INSERT INTO CES.SBCES.MBPrefixSequence (PrefixCode, LastNumber)
+             VALUES (@Prefix, 1);
+         END;
+
+         SELECT LastNumber
+         FROM CES.SBCES.MBPrefixSequence
+         WHERE PrefixCode = @Prefix;";
+
+                 var nextNumber = await _dbConnection.ExecuteScalarAsync<int>(
+                     updateSql,
+                     new { Prefix = makevsbuyViewModel.MbPrefix },
+                     tran
+                 );
+
+                 // 2) build MbNumber = PREFIX + 6‑digit padded number
+                 makevsbuyViewModel.MbNumber =
+                     makevsbuyViewModel.MbPrefix + nextNumber.ToString("D6");
+
+                 // 3) insert into main table
+                 const string insertSql = @"
+         INSERT INTO CES.SBCES.MBLIST
+             (MbNumber, Keyword, Description, BusType, NumBusComp,
+              VendorPartNum, BuyCode, RebuildCode, CoreCode, AnnualUsage,
+              BenchNumber, SampleProvided, Recommendation)
+         VALUES
+             (@MbNumber, @Keyword, @Description, @BusType, @NumBusComp,
+              @VendorPartNum, @BuyCode, @RebuildCode, @CoreCode, @AnnualUsage,
+              @BenchNumber, @SampleProvided, @Recommendation, );";
+
+                 await _dbConnection.ExecuteAsync(insertSql, makevsbuyViewModel, tran);
+
+                 tran.Commit();
+             }
+         }
+         else
+         {
+             // EDIT mode: update existing
+             const string updateSql = @"
+     UPDATE CES.SBCES.MBLIST
+     SET Keyword = @Keyword,
+         Description = @Description,
+         BusType = @BusType,
+         NumBusComp = @NumBusComp,
+         VendorPartNum = @VendorPartNum,
+         BuyCode = @BuyCode,
+         RebuildCode = @RebuildCode,
+         CoreCode = @CoreCode,
+         AnnualUsage = @AnnualUsage,
+         BenchNumber = @BenchNumber,
+         SampleProvided = @SampleProvided,
+         Recommendation = @Recommendation
+     WHERE MbNumber = @MbNumber;";
+
+             await _dbConnection.ExecuteAsync(updateSql, makevsbuyViewModel);
+         }
+
+         // return MbNumber so client can update title, etc.
+         return Json(makevsbuyViewModel);
+     }
+     catch (Exception ex)
+     {
+         return null;
+     }
+ }
+
+ In the below sql I want to include DateOpened (datetime column in MBLIST table) and set it to Todays Date and Time
+  INSERT INTO CES.SBCES.MBLIST
+     (MbNumber, Keyword, Description, BusType, NumBusComp,
+      VendorPartNum, BuyCode, RebuildCode, CoreCode, AnnualUsage,
+      BenchNumber, SampleProvided, Recommendation)
+ VALUES
+     (@MbNumber, @Keyword, @Description, @BusType, @NumBusComp,
+      @VendorPartNum, @BuyCode, @RebuildCode, @CoreCode, @AnnualUsage,
+      @BenchNumber, @SampleProvided, @Recommendation, );";
