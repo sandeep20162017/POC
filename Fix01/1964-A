@@ -1,0 +1,98 @@
+✅ 2. SQL Changes (Add Column Only)
+sql
+ALTER TABLE SBCES.MBLIST
+ADD MbPrefix VARCHAR(10) NULL;
+No other table needs to change.
+
+❗ You do NOT need to update:
+MBPrefixSequence
+
+Any other lookup tables
+
+Any foreign keys
+
+Because MbPrefix is purely informational and used only for new inserts.
+
+✅ 3. Update INSERT SQL
+You already have this — just add MbPrefix:
+
+sql
+INSERT INTO CES.SBCES.MBLIST
+    (MbNumber, MbPrefix, Keyword, Description, BusType, NumBusComp,
+     VendorPartNum, BuyCode, RebuildCode, CoreCode, AnnualUsage,
+     BenchNumber, SampleProvided, Recommendation, DateOpened)
+VALUES
+    (@MbNumber, @MbPrefix, @Keyword, @Description, @BusType, @NumBusComp,
+     @VendorPartNum, @BuyCode, @RebuildCode, @CoreCode, @AnnualUsage,
+     @BenchNumber, @SampleProvided, @Recommendation, GETDATE());
+✅ 4. Update SELECT in GetMakeVsBuyById
+Add MbPrefix:
+
+csharp
+const string sql = @"
+    SELECT MbNumber, MbPrefix, Keyword, Description, BusType, NumBusComp,
+           VendorPartNum, BuyCode, RebuildCode, CoreCode, AnnualUsage,
+           BenchNumber, SampleProvided, Recommendation
+    FROM CES.SBCES.MBLIST
+    WHERE MbNumber = @MbNumber";
+This ensures the dropdown shows the correct value in Edit mode.
+
+✅ 5. Update ViewModel
+Add:
+
+csharp
+public string MbPrefix { get; set; }
+✅ 6. Update Popup View
+Your dropdown is already correct:
+
+csharp
+@(Html.Kendo().DropDownList()
+    .Name("MbPrefix")
+    .DataTextField("PrefixCode")
+    .DataValueField("PrefixCode")
+    .OptionLabel("Select prefix...")
+    .DataSource(ds => ds.Read(r => r.Action("ReadMbPrefix", "MakeVsBuy")))
+    .Enable(isNew)   // disable in edit mode
+)
+✔ Add hidden field so value posts even when disabled
+csharp
+@Html.HiddenFor(m => m.MbPrefix)
+This is important because disabled controls do NOT post values.
+
+✅ 7. Update JS ViewModel
+You already have:
+
+js
+MbPrefix: $("#MbPrefix").val(),
+But when the dropdown is disabled in Edit mode, .val() returns "".
+
+So add fallback:
+
+js
+MbPrefix: $("#MbPrefix").val() || $("#MbPrefix").data("kendoDropDownList")?.value()
+Or simplest:
+
+Keep the hidden field
+
+Always read from hidden field:
+
+js
+MbPrefix: $("#MbPrefix").val()
+✅ 8. Update Add Logic (already correct)
+You already enforce:
+
+csharp
+if (string.IsNullOrEmpty(makevsbuyViewModel.MbPrefix))
+    return BadRequest("Prefix is required for new estimates.");
+Perfect.
+
+🎯 Do we need to update MBPrefixSequence?
+No.
+
+MBPrefixSequence already stores:
+
+Code
+PrefixCode | LastNumber
+This table is only used to generate new MbNumbers.
+
+Legacy rows with NULL MbPrefix do NOT affect this table.
