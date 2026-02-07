@@ -1,0 +1,269 @@
+Need to add MbPrefix in the table, insert and read controller and JS actions.  
+populate correct value in the drop down list MbPrefix - on pge load.
+[SBCES].[MbList] has data already. While adding new column MbPrefix VARCHAR(10), keep all the other columns and data. 
+drop down list MbPrefix is required field when use adds a new Mb deatils. It canot be edited/updated.
+I am curious what should be the value for the existing rows. Default to some value or keep blank? Pls suggest
+Also assist me in making the changes.
+
+<div class="form-row"> 
+      <div class="form-group single-width">
+          @Html.Label("MbPrefix", "Site", new { @class = "form-label" })
+          @(Html.Kendo().DropDownList()
+              .Name("MbPrefix")                 // name must match JS vm property
+              .DataTextField("PrefixCode")
+              .DataValueField("PrefixCode")
+              .AutoBind(true)
+              .OptionLabel("Select prefix...")
+              .DataSource(ds =>
+              {
+                  ds.Read(r => r.Action("ReadMbPrefix", "MakeVsBuy"));
+              })
+              .Enable(isNew)                    // only editable on Add
+              )
+      </div>
+
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[MbList]    Script Date: 2/7/2026 1:18:35 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[MbList](
+	[MbNumber] [varchar](25) NOT NULL,
+	[Keyword] [varchar](50) NULL,
+	[Description] [varchar](50) NULL,
+	[BusType] [varchar](50) NULL,
+	[NumBusComp] [varchar](10) NULL,
+	[VendorPartNum] [varchar](25) NULL,
+	[BuyCode] [varchar](25) NOT NULL,
+	[RebuildCode] [varchar](25) NULL,
+	[CoreCode] [varchar](25) NULL,
+	[AnnualUsage] [varchar](25) NULL,
+	[BenchNumber] [varchar](25) NULL,
+	[SampleProvided] [varchar](25) NULL,
+	[Recommendation] [varchar](1) NULL,
+	[RemanCost] [varchar](25) NULL,
+	[ExternalCost] [varchar](25) NULL,
+	[BuyNewCost] [varchar](25) NULL,
+	[InternalCost] [varchar](25) NULL,
+	[SopNumber] [varchar](25) NULL,
+	[CoreCost] [varchar](25) NULL,
+	[JobNumber] [varchar](25) NULL,
+	[DateOpened] [datetime] NULL,
+	[Readmanualnewprice] [int] NULL,
+ CONSTRAINT [PK_MbList] PRIMARY KEY CLUSTERED 
+(
+	[MbNumber] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+window.loadMakeVsBuyForm = function (mbNumber, callback) {
+    console.warn('window.loadMakeVsBuyForm :', mbNumber);
+
+    $.get('@Url.Action("GetMakeVsBuyById", "MakeVsBuy")', { id: mbNumber }, function (html) {
+...
+
+public async Task<IActionResult> GetMakeVsBuyById(string id, bool readOnly = false)
+{
+    if (string.IsNullOrEmpty(id) || id == "0" )
+    {
+        
+        // ADD mode
+        var vm = new MakeVsBuyViewModel
+        {
+            MbNumber = null
+        };
+
+        return PartialView("~/Views/Shared/_MakeVsBuyPopUp.cshtml", vm);
+    }
+
+    // EDIT mode
+    const string sql = @"
+            SELECT MbNumber, Keyword, Description, BusType, NumBusComp,
+                   VendorPartNum, BuyCode, RebuildCode, CoreCode, AnnualUsage,
+                   BenchNumber, SampleProvided, Recommendation
+            FROM CES.SBCES.MBLIST   
+            WHERE MbNumber = @MbNumber";
+
+    var model = await _dbConnection.QueryFirstOrDefaultAsync<MakeVsBuyViewModel>(
+        sql,
+        new { MbNumber = id }
+    );
+
+    if (model == null)
+        return NotFound();
+
+    ViewBag.ReadOnly = readOnly;
+    ViewBag.ParentId = id;
+
+    return PartialView("~/Views/Shared/_MakeVsBuyPopUp.cshtml", model);
+}
+
+[HttpPost]
+public async Task<IActionResult> AddMakeVsBuyView(  [DataSourceRequest] DataSourceRequest request,
+    [FromBody] MakeVsBuyViewModel makevsbuyViewModel)
+{
+    try
+    {
+        if (makevsbuyViewModel == null)
+            return BadRequest("Unable to save. Model data is missing.");
+
+        //if (!ModelState.IsValid)
+        //    return BadRequest("Unable to save. Required fields are missing.");
+
+        // ADD mode: MbNumber not set yet
+        if (string.IsNullOrEmpty(makevsbuyViewModel.MbNumber))
+        {
+            if (string.IsNullOrEmpty(makevsbuyViewModel.MbPrefix))
+                return BadRequest("Prefix is required for new estimates.");
+            _dbConnection.Open();
+            using (var tran = _dbConnection.BeginTransaction())
+            {
+                // 1) increment sequence for this prefix
+                const string updateSql = @"
+        UPDATE CES.SBCES.MBPrefixSequence
+        SET LastNumber = LastNumber + 1
+        WHERE PrefixCode = @Prefix;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            INSERT INTO CES.SBCES.MBPrefixSequence (PrefixCode, LastNumber)
+            VALUES (@Prefix, 1);
+        END;
+
+        SELECT LastNumber
+        FROM CES.SBCES.MBPrefixSequence
+        WHERE PrefixCode = @Prefix;";
+
+                var nextNumber = await _dbConnection.ExecuteScalarAsync<int>(
+                    updateSql,
+                    new { Prefix = makevsbuyViewModel.MbPrefix },
+                    tran
+                );
+
+                // 2) build MbNumber = PREFIX + 6‑digit padded number
+                makevsbuyViewModel.MbNumber =
+                    makevsbuyViewModel.MbPrefix + nextNumber.ToString("D6");
+
+                // 3) insert into main table
+                const string insertSql = @"
+        INSERT INTO CES.SBCES.MBLIST
+            (MbNumber, Keyword, Description, BusType, NumBusComp,
+             VendorPartNum, BuyCode, RebuildCode, CoreCode, AnnualUsage,
+             BenchNumber, SampleProvided, Recommendation, DateOpened)
+        VALUES
+            (@MbNumber, @Keyword, @Description, @BusType, @NumBusComp,
+             @VendorPartNum, @BuyCode, @RebuildCode, @CoreCode, @AnnualUsage,
+             @BenchNumber, @SampleProvided, @Recommendation, GETDATE());";
+
+                await _dbConnection.ExecuteAsync(insertSql, makevsbuyViewModel, tran);
+
+                tran.Commit();
+            }
+        }
+        else
+        {
+            // EDIT mode: update existing
+            const string updateSql = @"
+    UPDATE CES.SBCES.MBLIST
+    SET Keyword = @Keyword,
+        Description = @Description,
+        BusType = @BusType,
+        NumBusComp = @NumBusComp,
+        VendorPartNum = @VendorPartNum,
+        BuyCode = @BuyCode,
+        RebuildCode = @RebuildCode,
+        CoreCode = @CoreCode,
+        AnnualUsage = @AnnualUsage,
+        BenchNumber = @BenchNumber,
+        SampleProvided = @SampleProvided,
+        Recommendation = @Recommendation
+    WHERE MbNumber = @MbNumber;";
+
+            await _dbConnection.ExecuteAsync(updateSql, makevsbuyViewModel);
+        }
+
+        // return MbNumber so client can update title, etc.
+        return Json(makevsbuyViewModel);
+    }
+    catch (Exception ex)
+    {
+        return null;
+    }
+}
+
+js :
+  $("#btnSaveMakeVsBuy").off("click").on("click", function (e) {
+      e.preventDefault();
+      $("#makevsbuyForm").submit();
+  });
+
+  $("#makevsbuyForm").off("submit").on("submit", function (e) {
+      e.preventDefault();
+
+      // Validate form here if needed
+
+      var vm = {
+          MbNumber: $("#MbNumber").val(),
+          MbPrefix: $("#MbPrefix").val(),
+          Keyword: $("#Keyword").val(),
+          Description: $("#Description").val(),
+          BusType: $("#BusType").val(),
+          NumBusComp: $("#NumBusComp").val(),
+          VendorPartNum: $("#VendorPartNum").val(),
+          BuyCode: $("#BuyCode").val(),
+          RebuildCode: $("#RebuildCode").val(),
+          CoreCode: $("#CoreCode").val(),
+          AnnualUsage: $("#AnnualUsage").val(),
+          BenchNumber: $("#BenchNumber").val(),
+          SampleProvided: $("#SampleProvided").val(),
+          Recommendation: $("#Recommendation").val()
+      };
+      console.warn("window.currentMakeVsBuyId", window.currentMakeVsBuyId);
+      var url = !window.currentMakeVsBuyId || window.currentMakeVsBuyId === "0"
+          ? '@Url.Action("AddMakeVsBuyView", "MakeVsBuy")'
+          : '@Url.Action("UpdateMakeVsBuyView", "MakeVsBuy")';
+
+      $.ajax({
+          url: url,
+          type: 'POST',
+          contentType: "application/json",
+          data: JSON.stringify(vm),
+          success: function (response) {
+              if (response && response.MbNumber) {
+                  pendingChanges = false;
+                  $("#estimatePopup").data("kendoWindow").unbind("close");
+                  window.currentMakeVsBuyId = response.MbNumber;
+                  $("#MakeVsBuyGrid").data("kendoGrid").dataSource.read();
+
+                  // Update window title with new ID
+                  var win = $("#estimatePopup").data("kendoWindow");
+                  win.title("Make Vs Buy Estimate #" + response.MbNumber);
+....
+
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[MBPrefixSequence]    Script Date: 2/7/2026 1:29:13 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[MBPrefixSequence](
+	[PrefixCode] [varchar](10) NOT NULL,
+	[LastNumber] [int] NOT NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[PrefixCode] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+
