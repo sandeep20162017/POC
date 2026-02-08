@@ -1,0 +1,100 @@
+create or replace FUNCTION get_labour_cost
+(vi_IDnum in varchar2, vi_type in varchar2)
+RETURN number IS
+
+V_LINK_CODE VARCHAR2(30);
+V_PRICE number (20,10);
+V_FINAL_PRICE number (20,10);
+V_RET_VAL VARCHAR2(25);
+
+CURSOR C_RB_LIST_To_Prop (vi_IDnum IN varchar)
+IS
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS "link_code",
+                SC_PARTS_USED.qty_reqd AS "QTY",
+                SC_PARTS_USED.percent_usage AS "%",
+                SC_PARTS_USED.mms_rebuilt_code AS "Rebuilt Code"
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = vi_type AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_IDnum);
+
+cur_RBRec C_RB_LIST_To_Prop%ROWTYPE;
+
+    CURSOR cur_Labour (vi_IDnum IN varchar)IS
+        SELECT
+            EMPLOYEE_LABOUR.labour_defn AS "LABOUR TYPE",
+            EMPLOYEE_LABOUR.costcentre AS "CC",
+            EMPLOYEE_LABOUR.task AS "TASK",
+            REPLACE(EMPLOYEE_LABOUR.usage,',','.') AS "USAGE",
+            EMPLOYEE_LABOUR.hrs_reqd AS "TIME",
+            EMPLOYEE_SALARIES.rate_per_hour AS "RATE PER HOUR",
+            EMPLOYEE_LABOUR.time_addition AS "TIME ADDITION",
+            HHMM_TO_DECIMAL(EMPLOYEE_LABOUR.adj_hrs) AS "WRENCH TIME"
+        FROM
+            EMPLOYEE_LABOUR,
+            EMPLOYEE_SALARIES,
+            EMPL_CLASS
+        WHERE
+            EMPLOYEE_LABOUR.labour_defn = UPPER(EMPL_CLASS.labour_defn) AND
+            EMPLOYEE_SALARIES.wage_group = EMPL_CLASS.wage_group AND
+            EMPLOYEE_LABOUR.link_number = vi_idnum AND
+            EMPLOYEE_LABOUR.typeid = vi_type;
+
+
+
+cur_LabourRec cur_Labour%ROWTYPE;
+
+BEGIN
+EXECUTE IMMEDIATE 'TRUNCATE TABLE TEMP_LABOUR_LIST';
+open cur_Labour(upper(vi_idnum));
+LOOP
+
+    FETCH cur_Labour
+    INTO cur_LabourRec;
+    EXIT WHEN cur_Labour%NOTFOUND;
+
+    insert into TEMP_LABOUR_LIST values (cur_LabourRec."LABOUR TYPE",cur_LabourRec."CC" ,cur_LabourRec."TASK" ,cur_LabourRec."USAGE" ,HHMM_TO_MINUTES(cur_LabourRec."TIME ADDITION"),cur_LabourRec."RATE PER HOUR", cur_LabourRec."RATE PER HOUR" * HHMM_TO_MINUTES(cur_LabourRec."TIME ADDITION") * cur_LabourRec."USAGE" / 6000, round((cur_LabourRec."USAGE" / 100) * HHMM_TO_MINUTES(cur_LabourRec."TIME ADDITION")) ,'RB',upper(vi_idnum), round((cur_LabourRec."USAGE" / 100) * HHMM_TO_MINUTES(cur_LabourRec."WRENCH TIME")));
+
+END LOOP;
+CLOSE cur_Labour;
+
+--checks to see how many rebuilt parts are attached to the rebuilt part number
+-- inputted(rb_num) into this procedure
+SELECT count(*) INTO V_PRICE FROM SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = UPPER(vi_type) AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_idnum);
+
+
+--if this current rebuilt part (rb_num) in this procedure resides
+--in any other rebuilt parts update the prices of those rebuilt parts as well.
+if V_PRICE > 0 then
+
+open C_RB_LIST_To_Prop(upper(vi_idnum));
+LOOP
+
+    FETCH C_RB_LIST_To_Prop
+    INTO cur_RBRec;
+    EXIT WHEN C_RB_LIST_To_Prop%NOTFOUND;
+    WRITE_LABOUR (cur_RBRec."Rebuilt Code",cur_RBRec."QTY" * to_number(replace(NVL(cur_RBRec."%",'0'),',','.'))/100);
+
+END LOOP;
+CLOSE C_RB_LIST_To_Prop;
+
+end if;
+
+
+SELECT round(sum(total_cost),2) as LABOUR_COST INTO V_FINAL_PRICE
+        FROM
+            TEMP_LABOUR_LIST;
+
+RETURN V_FINAL_PRICE;
+
+
+EXCEPTION
+   WHEN OTHERS THEN
+    raise_application_error('-20001', sqlerrm);
+    dbms_output.put_line(substr(TO_CHAR(SQLCODE) || ': '||SQLERRM,1,255));
+END GET_LABOUR_COST;
