@@ -1,0 +1,151 @@
+CREATE PROCEDURE WriteLabour
+(
+    @IdNum VARCHAR(50),
+    @Adjustment DECIMAL(20,10)
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    ---------------------------------------------------------
+    -- Cursor: Labour Records
+    ---------------------------------------------------------
+    DECLARE curLabour CURSOR FOR
+    SELECT
+        EL.LabourDefn AS LabourType,
+        EL.CostCentre AS CC,
+        EL.Task AS Task,
+        REPLACE(EL.Usage, ',', '.') AS UsagePercent,
+        EL.HrsReqd AS TimeHHMM,
+        ES.RatePerHour AS RatePerHour,
+        EL.TimeAddition AS TimeAdditionHHMM,
+        dbo.HHMMToDecimal(EL.AdjHrs) AS WrenchTimeHHMM
+    FROM EmployeeLabour EL
+    JOIN EmplClass EC ON EL.LabourDefn = EC.LabourDefn
+    JOIN EmployeeSalaries ES ON ES.WageGroup = EC.WageGroup
+    WHERE EL.LinkNumber = @IdNum
+      AND EL.TypeId = 'RB';
+
+    DECLARE 
+        @LabourType VARCHAR(50),
+        @CC VARCHAR(50),
+        @Task VARCHAR(50),
+        @Usage DECIMAL(18,6),
+        @TimeHHMM VARCHAR(20),
+        @RatePerHour DECIMAL(18,6),
+        @TimeAdditionHHMM VARCHAR(20),
+        @WrenchTimeHHMM VARCHAR(20);
+
+    OPEN curLabour;
+    FETCH NEXT FROM curLabour INTO 
+        @LabourType, @CC, @Task, @Usage, @TimeHHMM,
+        @RatePerHour, @TimeAdditionHHMM, @WrenchTimeHHMM;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        DECLARE 
+            @Minutes DECIMAL(18,6) = dbo.HHMMToMinutes(@TimeAdditionHHMM),
+            @WrenchMinutes DECIMAL(18,6) = dbo.HHMMToMinutes(@WrenchTimeHHMM),
+            @AdjMinutes DECIMAL(18,6),
+            @AdjWrenchMinutes DECIMAL(18,6),
+            @TotalCost DECIMAL(18,6),
+            @CalcTime DECIMAL(18,6);
+
+        SET @AdjMinutes = ROUND(@Minutes * @Adjustment, 0);
+        SET @AdjWrenchMinutes = ROUND(@WrenchMinutes * @Adjustment, 0);
+
+        SET @CalcTime = ROUND((@Usage / 100.0) * @AdjMinutes, 0);
+
+        SET @TotalCost =
+            (@RatePerHour / 60.0) *
+            @AdjMinutes *
+            (@Usage / 100.0);
+
+        INSERT INTO TempLabourList
+        (
+            LabourType,
+            CostCentre,
+            Task,
+            UsagePercent,
+            TimeAdditionMinutes,
+            RatePerHour,
+            TotalCost,
+            CalculatedTime,
+            SourceType,
+            LinkNumber,
+            WrenchTimeMinutes
+        )
+        VALUES
+        (
+            @LabourType,
+            @CC,
+            @Task,
+            @Usage,
+            @AdjMinutes,
+            @RatePerHour,
+            @TotalCost,
+            @CalcTime,
+            'RB',
+            UPPER(@IdNum),
+            ROUND((@Usage / 100.0) * @AdjWrenchMinutes, 0)
+        );
+
+        FETCH NEXT FROM curLabour INTO 
+            @LabourType, @CC, @Task, @Usage, @TimeHHMM,
+            @RatePerHour, @TimeAdditionHHMM, @WrenchTimeHHMM;
+    END
+
+    CLOSE curLabour;
+    DEALLOCATE curLabour;
+
+    ---------------------------------------------------------
+    -- Check if this rebuilt part is used in other rebuilt parts
+    ---------------------------------------------------------
+    DECLARE @Count INT;
+
+    SELECT @Count = COUNT(*)
+    FROM ScPartsUsed
+    WHERE RebuiltPart = 'Y'
+      AND LinkType = 'RB'
+      AND UPPER(LinkCode) = UPPER(@IdNum);
+
+    ---------------------------------------------------------
+    -- Propagate labour to parent rebuilt parts
+    ---------------------------------------------------------
+    IF @Count > 0
+    BEGIN
+        DECLARE curRB CURSOR FOR
+        SELECT
+            UPPER(LinkCode),
+            QtyReqd,
+            PercentUsage,
+            UPPER(MmsRebuiltCode)
+        FROM ScPartsUsed
+        WHERE RebuiltPart = 'Y'
+          AND LinkType = 'RB'
+          AND UPPER(LinkCode) = UPPER(@IdNum);
+
+        DECLARE 
+            @ParentCode VARCHAR(50),
+            @Qty DECIMAL(18,6),
+            @Pct DECIMAL(18,6),
+            @RebuiltCode VARCHAR(50);
+
+        OPEN curRB;
+        FETCH NEXT FROM curRB INTO @ParentCode, @Qty, @Pct, @RebuiltCode;
+
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            DECLARE @Adj DECIMAL(18,6) =
+                (@Qty * (@Pct / 100.0)) * @Adjustment;
+
+            EXEC WriteLabour @RebuiltCode, @Adj;
+
+            FETCH NEXT FROM curRB INTO @ParentCode, @Qty, @Pct, @RebuiltCode;
+        END
+
+        CLOSE curRB;
+        DEALLOCATE curRB;
+    END
+END
+GO
