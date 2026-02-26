@@ -1,0 +1,226 @@
+You are ASP.NET core and Telerik ASP.NET core expert.
+For Add - response.RebuiltId is null. Add is sucessful.
+window.wireRebuiltForm = function () {
+    $("#btnCancelRebuilt").off("click").on("click", function () {
+        if (pendingChanges) {
+            showCloseConfirmation();
+        } else {
+            $("#estimatePopup").data("kendoWindow").close();
+        }
+    });
+
+    $("#btnSaveRebuilt").off("click").on("click", function (e) {
+        console.log('btnSaveRebuilt clicked');
+        e.preventDefault('btnSaveRebuilt clicked');
+        $("#rebuiltForm").submit();
+    });
+
+    $("#rebuiltForm").off("submit").on("submit", function (e) {
+        console.log('submit Rebuilt clicked');
+        e.preventDefault();
+
+        // Validate form here if needed
+      //  console.warn('RebuiltStockNum :', RebuiltStockNum);
+        console.warn($("#RebuiltStockNum").val());
+
+        console.warn('RebuiltId :');
+        console.warn($("#RebuiltId").val());
+
+        var vm = {
+            rebuiltId: $("#RebuiltId").val(),
+            RebuiltStockNum: $("#RebuiltStockNum").val(),
+            MmsStockCode: $("#MmsStockCode").val(),
+            KeyWord: $("#KeyWord").val(),
+            Description: $("#Description").val(),
+            JobNumber: $("#JobNumber").val(),
+            CorePartNum: $("#CoreCode").val(),
+            CoreCharge: $("#CoreCharge").val(),
+            BuyNewCost: $("#BuyNewCost").val(),
+            RemanCost: $("#RemanCost").val(),
+            Sopnumber: $("#Sopnumber").val()
+        };
+
+        var url = window.currentRebuiltId === 0
+            ? '@Url.Action("AddRebuiltPartsView", "RebuiltParts")'
+            : '@Url.Action("UpdateRebuiltPartsView", "RebuiltParts")';
+
+        $.ajax({
+            url: url,
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify(vm),
+            success: function (response) {
+                if (response) {
+                    pendingChanges = false;
+                    $("#estimatePopup").data("kendoWindow").unbind("close");
+                    window.currentRebuiltId = response.RebuiltId;
+                    $("#RebuiltGrid").data("kendoGrid").dataSource.read();
+
+                    // Update window title with new ID
+                    var win = $("#estimatePopup").data("kendoWindow");
+                    win.title("Rebuilt Parts Estimate #" + response.RebuiltId);
+                    kendo.alert(" Estimate Saved successfully!");
+
+                    //kendo.alert(" Estimate #: " + response.RebuiltId + " Saved successfully!");
+                   // $("#ScPartsPopupWindow").data("kendoWindow").close();
+                } else {
+                    kendo.alert("Save succeeded but no Estimate ID was returned.");
+                    $("#ScPartsPopupWindow").data("kendoWindow").close();
+                }
+            },
+            error: function () {
+                kendo.alert("Error saving data.");
+            }
+        });
+    });
+    ...
+    cshtml :
+    @model BCES.Models.Parts.RebuiltPartsViewModel
+@{
+    bool isNew = Model.RebuiltId == 0;
+}
+<div class="scparts-popup-style">
+    @*  <div class="section-title">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate VehPOp" : $"Estimate #{Model.VehicleListId}")</div> *@
+    <div class="popup-action">
+        <button id="btnSaveRebuilt" class="k-button k-primary" type="button">Update</button>
+        <button id="btnCancelRebuilt" class="k-button" type="button">Cancel</button>
+
+    </div>
+</div>
+
+<div class="form-container">
+    <form id="rebuiltForm">
+        @Html.HiddenFor(m => m.RebuiltId)
+        @Html.Hidden("formMode", Model.RebuiltId == 0 ? "Add" : "Edit", new { id = "formMode" })
+        ....
+  Controller :
+   [AllowAnonymous]
+ public async Task<IActionResult> AddRebuiltPartsView([DataSourceRequest] DataSourceRequest request,[FromBody] RebuiltPartsViewModel rebuiltPartsViewModel)
+ {
+     try
+     {               
+         var buses = _selectedBuses;
+         rebuiltPartsViewModel.SelectedBuses = _selectedBuses;
+         rebuiltPartsViewModel.LastModifiedBy = ViewBag.UserName;
+         rebuiltPartsViewModel.EnteredBy = ViewBag.UserName;
+         rebuiltPartsViewModel.DateEntered = DateTime.Now.ToString();
+         //names for display
+         string selectedBusIds = string.Join(",", _selectedBuses);
+         //update model
+         rebuiltPartsViewModel.BusId = selectedBusIds;
+
+         //convert to it to pass to query
+         var busIds = buses.Select(int.Parse).ToList();
+         //list of all the SiteNames for binding
+         string selectedBusNames = GetUserSelectedBusNames(busIds);
+         //update model for binding
+         rebuiltPartsViewModel.BusName = selectedBusNames;
+
+         //site related
+         // Split the comma-separated strings into lists
+         var busIdsList = _selectedBuses;
+         var busNamesList = selectedBusNames.Split(',').ToList();
+         var updatedRebuiltPartsView = RebuiltPartsController.UpdateBusInModel(rebuiltPartsViewModel, busIdsList, busNamesList);
+
+
+         var busId = await AddRebuiltPartAsync(rebuiltPartsViewModel);
+        ModelState.Clear();
+        return Json(new[] { rebuiltPartsViewModel }.ToDataSourceResult(request, ModelState));
+        
+         // return RedirectToAction("RebuiltPartsIndex");
+     }
+     catch (Exception ex)
+     {
+         return StatusCode(500, "An error occurred while adding the Rebuilt Part.");
+     }
+ }
+
+ private async Task<int> AddRebuiltPartAsync([FromBody] RebuiltPartsViewModel rebuiltPartsViewModel)
+ {
+     var userName = ViewBag.UserName;
+     
+     _dbConnection.Open();
+     using (var transaction =  _dbConnection.BeginTransaction())
+     {
+         try
+         {
+             // Insert into the main RbMasterlist table
+             var insertRbMasterlistQuery = @"
+                 INSERT INTO SBCES.RbMasterlist (
+                     RebuiltStockNum,
+                     MmsStockCode,
+                     DetailedDesc,
+                     Keyword,
+                     JobNumber,
+                     CoreCharge,
+                     CorePartNum,
+                     BuyNewCost,
+                     RemanCost,
+                     LastModifiedBy,
+                     DateEntered
+                 )
+                 VALUES (
+                     @RebuiltStockNum,
+                     @MmsStockCode,
+                     @DetailedDesc,
+                     @Keyword,
+                     @JobNumber,
+                     @CoreCharge,
+                     @CorePartNum,
+                     @BuyNewCost,
+                     @RemanCost,
+                     @LastModifiedBy,
+                     @DateEntered
+                 );
+
+                 SELECT CAST(SCOPE_IDENTITY() AS INT);
+             ";
+             var rbMasterlistId = await _dbConnection.QuerySingleAsync<int>(
+     insertRbMasterlistQuery,
+     new
+     {
+         RebuiltStockNum = rebuiltPartsViewModel.RebuiltStockNum,
+         MmsStockCode = rebuiltPartsViewModel.MmsStockCode,
+         DetailedDesc = rebuiltPartsViewModel.Description,   // FIXED
+         Keyword = rebuiltPartsViewModel.KeyWord,            // FIXED
+         JobNumber = rebuiltPartsViewModel.JobNumber,
+         CoreCharge = rebuiltPartsViewModel.CoreCharge,
+         CorePartNum = rebuiltPartsViewModel.CorePartNum,
+         BuyNewCost = rebuiltPartsViewModel.BuyNewCost,
+         RemanCost = rebuiltPartsViewModel.RemanCost,
+         LastModifiedBy = ViewBag.UserName,                          // FIXED
+         DateEntered = DateTime.Now
+     },
+     transaction
+ );
+
+             // Insert bus associations
+             var insertBusesQuery = @"
+                                     INSERT INTO SBCES.RBLISTOFBUSES (RebuiltStockNum, listid)
+                                     VALUES (@RebuiltStockNum,@BusId)";
+
+             var tt=0;
+             foreach (var bus in rebuiltPartsViewModel.Buses)
+             {
+                 await _dbConnection.ExecuteAsync(insertBusesQuery, new
+                 {
+                     rebuiltPartsViewModel.RebuiltStockNum,
+                     BusId = bus.BusId
+                 }, transaction);
+             }
+
+             // Commit the transaction
+              transaction.Commit();
+
+             return rbMasterlistId;
+         }
+         catch (Exception ex)
+         {
+             // Rollback the transaction in case of an error
+             transaction.Rollback();
+             Console.WriteLine($"Error creating rebuilt parts data: {ex.Message}");
+             throw; // Re-throw the exception to propagate it
+         }
+     }
+
+ }
