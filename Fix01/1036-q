@@ -1,0 +1,243 @@
+ASP.NET Core and Telerik ASP.net core controls.
+App populates grid. When user clicks on one of the column link, tab strip is displayed.
+App uses telerik tab strip. 
+Main tabstrip is Rebuilt Part.
+When New Rebuilt part is added, part is saved, popup is populated but not from database. User clicks on other tab and goes back to Rebuilt part tab, but all the fields are blanck.
+Trying to solve this defect.
+App is already in prod, so minimal changes pls.
+Will this help -  When new part is added, refresh Rebuilt part from database? Give me full functions which are changed. No JS errors.
+     [HttpPost]
+     [AllowAnonymous]
+     public async Task<IActionResult> AddRebuiltPartsView([DataSourceRequest] DataSourceRequest request,[FromBody] RebuiltPartsViewModel rebuiltPartsViewModel)
+     {
+         try
+         {               
+             var buses = _selectedBuses;
+             rebuiltPartsViewModel.SelectedBuses = _selectedBuses;
+             rebuiltPartsViewModel.LastModifiedBy = ViewBag.UserName;
+             rebuiltPartsViewModel.EnteredBy = ViewBag.UserName;
+             rebuiltPartsViewModel.DateEntered = DateTime.Now.ToString();
+             rebuiltPartsViewModel.LastModifiedDate = DateTime.Now.ToString();
+             //names for display
+             string selectedBusIds = string.Join(",", _selectedBuses);
+             //update model
+             rebuiltPartsViewModel.BusId = selectedBusIds;
+
+             //convert to it to pass to query
+             var busIds = buses.Select(int.Parse).ToList();
+             //list of all the SiteNames for binding
+             string selectedBusNames = GetUserSelectedBusNames(busIds);
+             //update model for binding
+             rebuiltPartsViewModel.BusName = selectedBusNames;
+
+             //site related
+             // Split the comma-separated strings into lists
+             var busIdsList = _selectedBuses;
+             var busNamesList = selectedBusNames.Split(',').ToList();
+             var updatedRebuiltPartsView = RebuiltPartsController.UpdateBusInModel(rebuiltPartsViewModel, busIdsList, busNamesList);
+
+
+             var newId = await AddRebuiltPartAsync(rebuiltPartsViewModel);
+             rebuiltPartsViewModel.RebuiltId = newId;
+             // ModelState.Clear();
+             //return Json(new[] { rebuiltPartsViewModel }.ToDataSourceResult(request, ModelState));
+             return Json(new { RebuiltId = newId });
+
+             // return RedirectToAction("RebuiltPartsIndex");
+         }
+         catch (Exception ex)
+         {
+             return StatusCode(500, "An error occurred while adding the Rebuilt Part.");
+         }
+     }
+
+     
+        private async Task<int> AddRebuiltPartAsync([FromBody] RebuiltPartsViewModel rebuiltPartsViewModel)
+        {
+            var userName = ViewBag.UserName;
+            
+            _dbConnection.Open();
+            using (var transaction =  _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Insert into the main RbMasterlist table
+                    var insertRbMasterlistQuery = @"
+                        INSERT INTO SBCES.RbMasterlist (
+                            RebuiltStockNum,
+                            MmsStockCode,
+                            DetailedDesc,
+                            Keyword,
+                            JobNumber,
+                            CoreCharge,
+                            CorePartNum,
+                            BuyNewCost,
+                            RemanCost,
+                            LastModifiedBy,
+                            DateEntered
+                        )
+                        VALUES (
+                            @RebuiltStockNum,
+                            @MmsStockCode,
+                            @DetailedDesc,
+                            @Keyword,
+                            @JobNumber,
+                            @CoreCharge,
+                            @CorePartNum,
+                            @BuyNewCost,
+                            @RemanCost,
+                            @LastModifiedBy,
+                            @DateEntered
+                        );
+
+                        SELECT CAST(SCOPE_IDENTITY() AS INT);
+                    ";
+                    var rbMasterlistId = await _dbConnection.QuerySingleAsync<int>(
+            insertRbMasterlistQuery,
+            new
+            {
+                RebuiltStockNum = rebuiltPartsViewModel.RebuiltStockNum,
+                MmsStockCode = rebuiltPartsViewModel.MmsStockCode,
+                DetailedDesc = rebuiltPartsViewModel.Description,   // FIXED
+                Keyword = rebuiltPartsViewModel.KeyWord,            // FIXED
+                JobNumber = rebuiltPartsViewModel.JobNumber,
+                CoreCharge = rebuiltPartsViewModel.CoreCharge,
+                CorePartNum = rebuiltPartsViewModel.CorePartNum,
+                BuyNewCost = rebuiltPartsViewModel.BuyNewCost,
+                RemanCost = rebuiltPartsViewModel.RemanCost,
+                LastModifiedBy = ViewBag.UserName,                          // FIXED
+                DateEntered = DateTime.Now
+            },
+            transaction
+        );
+
+                    // Insert bus associations
+                    var insertBusesQuery = @"
+                                            INSERT INTO SBCES.RBLISTOFBUSES (RebuiltStockNum, listid)
+                                            VALUES (@RebuiltStockNum,@BusId)";
+
+                    var tt=0;
+                    foreach (var bus in rebuiltPartsViewModel.Buses)
+                    {
+                        await _dbConnection.ExecuteAsync(insertBusesQuery, new
+                        {
+                            rebuiltPartsViewModel.RebuiltStockNum,
+                            BusId = bus.BusId
+                        }, transaction);
+                    }
+
+                    // Commit the transaction
+                     transaction.Commit();
+
+                    return rbMasterlistId;
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of an error
+                    transaction.Rollback();
+                    Console.WriteLine($"Error creating rebuilt parts data: {ex.Message}");
+                    throw; // Re-throw the exception to propagate it
+                }
+            }
+
+        }
+
+     ===========
+     USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[VehicleList]    Script Date: 3/2/2026 4:28:51 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[VehicleList](
+	[VehicleListId] [int] NOT NULL,
+	[VehSeriesCode] [varchar](500) NOT NULL,
+	[NumOfVehicles] [varchar](10) NOT NULL,
+	[ProjDesc] [varchar](200) NOT NULL,
+	[DateEntered] [datetime] NOT NULL,
+	[EnteredBy] [varchar](25) NOT NULL,
+	[ModifiedLastBy] [varchar](25) NOT NULL,
+	[ModifiedLastDate] [datetime] NOT NULL,
+	[Make] [varchar](25) NULL,
+	[Model] [varchar](25) NULL,
+	[Year] [varchar](4) NULL,
+	[Engine] [varchar](25) NULL,
+	[Transmission] [varchar](25) NULL,
+	[Differential] [varchar](25) NULL,
+	[Sopnumber] [varchar](30) NULL,
+	[LabourCost] [numeric](20, 2) NULL,
+	[LabourOverheadAmount] [numeric](20, 2) NULL,
+	[LabourBenefits] [numeric](20, 2) NULL,
+	[LabourFringe] [numeric](20, 2) NULL,
+	[LabourTotal] [numeric](20, 2) NULL,
+	[MaterialsTotal] [numeric](20, 2) NULL,
+	[TotalBusEstimateCost] [numeric](20, 2) NULL,
+	[TotalTax] [numeric](20, 2) NULL,
+	[TotalCostTax] [numeric](20, 2) NULL,
+	[OemKitsTotal] [numeric](20, 2) NULL,
+ CONSTRAINT [PK_VehicleList] PRIMARY KEY CLUSTERED 
+(
+	[VehicleListId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [LabourCost]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [LabourOverheadAmount]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [LabourBenefits]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [LabourFringe]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [LabourTotal]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [MaterialsTotal]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [TotalBusEstimateCost]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [TotalTax]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [TotalCostTax]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [OemKitsTotal]
+GO
+
+======================
+VehPopup.cshtml :
+@model BCES.Models.Vehicle.VehicleViewModel
+
+<div class="scparts-popup-style">
+   @*  <div class="section-title">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate VehPOp" : $"Estimate #{Model.VehicleListId}")</div> *@
+    <div class="popup-action">
+        <button id="btnSave" class="k-button k-primary" type="button">Update</button>
+        <button id="btnCancelVehicle" class="k-button" type="button">Cancel</button>
+       @*  <button id="btnSave" type="button">
+            <span class="vehicle-btn-icon">✓</span> Save
+        </button>
+        <button id="btnCancelVehicle"  type="button">
+            <span class="vehicle-btn-icon">✕</span> Cancel
+        </button> *@
+    </div>
+</div>
+
+<div class="form-container">
+    <form id="vehicleForm">
+        @Html.HiddenFor(m => m.VehicleListId)
+        @Html.Hidden("formMode", Model.VehicleListId == 0 ? "Add" : "Edit", new { id = "formMode" })
+        ....
+        
+
