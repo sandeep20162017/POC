@@ -1,0 +1,67 @@
+🔥 Step 1 — Restore Controller to JSON
+
+Change AddRebuiltPartsView back to:
+
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> AddRebuiltPartsView(
+    [FromBody] RebuiltPartsViewModel rebuiltPartsViewModel)
+{
+    try
+    {
+        rebuiltPartsViewModel.LastModifiedBy = ViewBag.UserName;
+        rebuiltPartsViewModel.EnteredBy = ViewBag.UserName;
+        rebuiltPartsViewModel.DateEntered = DateTime.Now.ToString();
+        rebuiltPartsViewModel.LastModifiedDate = DateTime.Now.ToString();
+
+        var newId = await AddRebuiltPartAsync(rebuiltPartsViewModel);
+
+        return Json(new { RebuiltId = newId });
+    }
+    catch (Exception)
+    {
+        return StatusCode(500, "An error occurred while adding the Rebuilt Part.");
+    }
+}
+🔥 Step 2 — Modify Success Function (IMPORTANT)
+
+Replace your success function with this:
+
+success: function (response) {
+
+    if (response && response.RebuiltId) {
+
+        pendingChanges = false;
+
+        window.currentRebuiltId = response.RebuiltId;
+
+        var win = $("#estimatePopup").data("kendoWindow");
+
+        win.title("Rebuilt Parts Estimate #" + response.RebuiltId);
+
+        // 🔥 THIS IS THE KEY FIX
+        // Reload ONLY the Rebuilt tab content from DB
+        $("#rebuiltTabContainer").load(
+            '@Url.Action("GetRbById", "RebuiltParts")' +
+            '?rebuiltId=' + response.RebuiltId + '&readOnly=false'
+        );
+
+        $("#RebuiltGrid").data("kendoGrid").dataSource.read();
+
+        kendo.alert("Estimate #: " + response.RebuiltId + " Saved successfully!");
+
+    } else {
+        kendo.alert("Save succeeded but no Estimate ID was returned.");
+    }
+}
+⚠️ Important
+
+You must wrap the Rebuilt tab content inside a container like:
+
+<div id="rebuiltTabContainer">
+    @Html.Partial("_RbPopUp", Model)
+</div>
+
+If you don’t already have that wrapper, add it inside the Rebuilt tab content.
+
+This allows reloading ONLY that tab, not entire TabStrip.
