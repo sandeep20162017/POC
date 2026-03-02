@@ -1,0 +1,118 @@
+[HttpPost]
+public async Task<IActionResult> CreateScPartsUsedInEstimates(
+    [DataSourceRequest] DataSourceRequest request,
+    StockCodedPartsViewModel model,
+    [FromQuery] string id,
+    [FromQuery] string gridType)
+{
+    if (model == null)
+    {
+        ModelState.AddModelError("", "No data submitted.");
+        return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+    }
+
+    _dbConnection.Open();
+    using var transaction = _dbConnection.BeginTransaction();
+
+    try
+    {
+        var enteredBy = User?.Identity?.Name?.ToUpper() ?? "SYSTEM";
+        var dateEntered = DateTime.Now;
+        var linkCode = id?.ToUpper();
+
+        string linkType = gridType switch
+        {
+            "RebuiltGrid" => "RB",
+            "VehicleGrid" => "BUS",
+            "MakeVsBuyGrid" => "MB",
+            _ => ""
+        };
+
+        var mmsStockCode = model.MMSStockCode?.ToUpperInvariant();
+
+        // Duplicate check
+        var duplicateCheckSql = @"
+            SELECT COUNT(*) 
+            FROM SBCES.ScPartsUsed 
+            WHERE UPPER(MmsStockCode) = @MMSStockCode
+              AND UPPER(LinkCode) = @LinkCode
+              AND UPPER(LinkType) = @LinkType";
+
+        var duplicateCount = await _dbConnection.ExecuteScalarAsync<int>(
+            duplicateCheckSql,
+            new { MMSStockCode = mmsStockCode, LinkCode = linkCode, LinkType = linkType },
+            transaction
+        );
+
+        if (duplicateCount > 0)
+        {
+            ModelState.AddModelError("MMSStockCode",
+                $"MMSStockCode '{model.MMSStockCode}' already exists for this estimate.");
+
+            return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+        }
+
+        var parameters = new DynamicParameters();
+        parameters.Add("MMSStockCode", mmsStockCode);
+        parameters.Add("LastModifiedDate", dateEntered);
+        parameters.Add("LastModifiedBy", enteredBy);
+        parameters.Add("UnitCost", model.UnitCost ?? 0m);
+        parameters.Add("MmsNewCost", model.MmsNewCost ?? 0m);
+        parameters.Add("CC", model.CC?.ToUpperInvariant());
+        parameters.Add("Qty", model.Qty.ToString());
+        parameters.Add("Percentage", model.Percentage.ToString());
+        parameters.Add("LinkCode", linkCode);
+        parameters.Add("IsRebuiltPart", "N");
+        parameters.Add("LinkType", linkType);
+        parameters.Add("RebuiltPartNum", id);
+        parameters.Add("CoreCost", model.CoreCost ?? 0m);
+        parameters.Add("RebPartCost", model.PartCost ?? 0m);
+        parameters.Add("OrigSupplierName", model.OrigSupplierName?.ToUpperInvariant());
+        parameters.Add("OrigSupplierNum", model.OrigSupplierNum?.ToUpperInvariant());
+
+        // 🔥 IMPORTANT: OUTPUT INSERTED.Id
+        var sql = @"
+            INSERT INTO SBCES.ScPartsUsed (
+                MmsStockCode, DateEntered, EnteredBy, MmsCost, OemCost,
+                LastModifiedBy, LastModifiedDate, CostCentre, QtyReqd,
+                PercentUsage, LinkCode, RebuiltPart, LinkType, MmsRebuiltCode,
+                CoreCost, RebPartCost, OrigSupplierName, OrigSupNum
+            )
+            OUTPUT INSERTED.Id
+            VALUES (
+                UPPER(@MMSStockCode), 
+                @LastModifiedDate, 
+                UPPER(@LastModifiedBy),
+                @UnitCost, 
+                @MmsNewCost,
+                UPPER(@LastModifiedBy), 
+                @LastModifiedDate, 
+                UPPER(@CC),
+                @Qty, 
+                @Percentage,
+                UPPER(@LinkCode), 
+                UPPER(@IsRebuiltPart), 
+                UPPER(@LinkType),
+                UPPER(@RebuiltPartNum), 
+                @CoreCost,
+                @RebPartCost,
+                UPPER(@OrigSupplierName),
+                UPPER(@OrigSupplierNum)
+            )";
+
+        // 🔥 Get new Id
+        var newId = await _dbConnection.ExecuteScalarAsync<int>(sql, parameters, transaction);
+
+        model.Id = newId;
+
+        transaction.Commit();
+
+        return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+    }
+    catch (Exception ex)
+    {
+        transaction.Rollback();
+        ModelState.AddModelError("", $"Error: {ex.Message}");
+        return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+    }
+}
