@@ -1,0 +1,60 @@
+Following is used when link is clicked. Can I reuse this function?
+  public ActionResult GetRbById( int rebuiltId, bool readOnly = false)
+  {
+
+      var rebuiltPart = rebuiltId == 0
+          ? new RebuiltPartsViewModel() // Add mode
+          : _dbConnection.QueryFirstOrDefault<RebuiltPartsViewModel>(@"
+          SELECT rbm.RbMasterlistId as RebuiltId,
+                                      rbm.[RebuiltStockNum],
+                                      rbm.[MmsStockCode],
+                                      rbm.[Keyword],
+                                      rbm.JobNumber,
+                                      rbm.[CorePartNum],
+                                      rbm.[DetailedDesc] AS Description,
+                                      rbm.[CoreCharge],
+                                      rbm.[EstimatedCost],
+                                      rbm.[BuyNewCost],
+                                      rbm.[RemanCost],
+                                      rbm.[ExternalCost],
+                                      --rbl.listid,
+                                      STRING_AGG(CAST(lb.listid AS VARCHAR), ',') AS BusId,
+                                      STRING_AGG(lb.description, ',') AS BusName,
+                                      rbm.DateEntered,
+				                rbm.LastModifiedBy
+                                      FROM 
+                                          SBCES.RbMasterlist rbm
+                                      LEFT JOIN 
+                                          SBCES.RBLISTOFBUSES rbl ON rbm.RebuiltStockNum = rbl.RebuiltStockNum
+                                      LEFT JOIN 
+                                          SBCES.LISTOFBUSES lb ON rbl.listid = lb.listid
+                                          WHERE  --rbl.listid is not null and 
+                                           rbm.RbMasterlistId = @Id
+                                           GROUP BY
+                                           rbm.RbMasterlistId,
+                                          rbm.[RebuiltStockNum],
+                                          rbm.[MmsStockCode],
+                                          rbm.[Keyword],
+                                          rbm.JobNumber,
+                                          rbm.[CorePartNum],
+                                          rbm.[DetailedDesc],
+                                          rbm.[CoreCharge],
+                                          rbm.[EstimatedCost],
+                                          rbm.[BuyNewCost],
+                                          rbm.[RemanCost],
+                                          rbm.[ExternalCost],
+                                          rbm.DateEntered,
+                                          rbm.LastModifiedBy
+                                          --rbl.listid
+                                            order by rbm.RbMasterlistId desc
+          ", new { Id = rebuiltId });
+
+      if (rebuiltPart == null)
+          return Content("Rb not found");
+
+      ViewBag.ReadOnly = readOnly;
+      ViewBag.ParentId = rebuiltId;  /*save parent id*/
+      ViewBag.FormattedDate = rebuiltPart.LastModifiedDate;
+
+      return PartialView("~/Views/Shared/_RbPopUp.cshtml", rebuiltPart);
+  }
