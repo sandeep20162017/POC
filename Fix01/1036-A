@@ -1,0 +1,53 @@
+Replace entire method with this:
+
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> AddRebuiltPartsView(
+    [DataSourceRequest] DataSourceRequest request,
+    [FromBody] RebuiltPartsViewModel rebuiltPartsViewModel)
+{
+    try
+    {
+        rebuiltPartsViewModel.LastModifiedBy = ViewBag.UserName;
+        rebuiltPartsViewModel.EnteredBy = ViewBag.UserName;
+        rebuiltPartsViewModel.DateEntered = DateTime.Now.ToString();
+        rebuiltPartsViewModel.LastModifiedDate = DateTime.Now.ToString();
+
+        // Save
+        var newId = await AddRebuiltPartAsync(rebuiltPartsViewModel);
+
+        // 🔥 IMPORTANT: Reload full DB record
+        var freshModel = await GetRebuiltPartById(newId);
+
+        return Json(freshModel);
+    }
+    catch (Exception)
+    {
+        return StatusCode(500, "An error occurred while adding the Rebuilt Part.");
+    }
+}
+🔥 2️⃣ NEW METHOD — GetRebuiltPartById (ADD THIS)
+private async Task<RebuiltPartsViewModel> GetRebuiltPartById(int id)
+{
+    var sql = @"
+        SELECT 
+            RebuiltId,
+            RebuiltStockNum,
+            MmsStockCode,
+            DetailedDesc AS Description,
+            Keyword AS KeyWord,
+            JobNumber,
+            CoreCharge,
+            CorePartNum,
+            BuyNewCost,
+            RemanCost,
+            LastModifiedBy,
+            DateEntered,
+            LastModifiedDate
+        FROM SBCES.RbMasterlist
+        WHERE RebuiltId = @Id";
+
+    return await _dbConnection.QueryFirstOrDefaultAsync<RebuiltPartsViewModel>(
+        sql,
+        new { Id = id });
+}
