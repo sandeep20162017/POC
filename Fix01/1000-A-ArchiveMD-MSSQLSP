@@ -1,0 +1,279 @@
+⚠️ Important Assumption
+
+You must create a SQL Server sequence (if not already):
+
+CREATE SEQUENCE SBCES.ArchMbListSeq
+AS INT
+START WITH 1
+INCREMENT BY 1;
+✅ Final Stored Procedure (Clean + Production Ready)
+CREATE PROCEDURE SBCES.ArchiveMb
+(
+    @MbNumber VARCHAR(25),
+    @Username VARCHAR(50),
+    @LinkNumber VARCHAR(30),
+    @TypeId VARCHAR(3),
+    @LabourCost NUMERIC(20,2),
+    @LabourOverheadAmount NUMERIC(20,2),
+    @LabourTotal NUMERIC(20,2),
+    @MaterialsTotal NUMERIC(20,2),
+    @TotalMbEstimateCost NUMERIC(20,2),
+    @TaxTotal NUMERIC(20,2),
+    @TotalCostTax NUMERIC(20,2),
+    @RetVal INT OUTPUT
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @ArchId INT;
+    DECLARE @Price NUMERIC(18,2);
+
+    BEGIN TRY
+        BEGIN TRAN;
+
+        -- Generate sequence value once (replaces NEXTVAL + CURRVAL)
+        SET @ArchId = NEXT VALUE FOR SBCES.ArchMbListSeq;
+
+        /* 1. MASTER LIST INSERT */
+        INSERT INTO SBCES.ArchMbMasterlist
+        (
+            ArchMbMasterlistId, MbNumber, Keyword, Description,
+            BusType, NumBusComp, VendorPartNum, BuyCode,
+            RebuildCode, CoreCode, AnnualUsage, BenchNumber,
+            SampleProvided, Recommendation, RemanCost,
+            ExternalCost, BuyNewCost, InternalCost,
+            SopNumber, CoreCost, JobNumber,
+            DateEntered, LabourCost, LabourOverheadAmount,
+            LabourTotal, MaterialsTotal, TotalMbEstimateCost,
+            TotalTax, TotalCostTax
+        )
+        SELECT
+            @ArchId,
+            MB.mb_number,
+            MB.keyword,
+            MB.description,
+            MB.bus_type,
+            MB.num_bus_comp,
+            MB.vendor_part_num,
+            MB.buy_code,
+            MB.rebuild_code,
+            MB.core_code,
+            MB.annual_usage,
+            MB.bench_number,
+            MB.sample_provided,
+            MB.recommendation,
+            MB.reman_cost,
+            MB.external_cost,
+            ISNULL(SCP.MMS_NEW_COST,0),
+            MB.internal_cost,
+            MB.sop_number,
+            MB.core_cost,
+            ISNULL(MB.job_number,' '),
+            GETDATE(),
+            @LabourCost,
+            @LabourOverheadAmount,
+            @LabourTotal,
+            @MaterialsTotal,
+            @TotalMbEstimateCost,
+            @TaxTotal,
+            @TotalCostTax
+        FROM MB_LIST MB
+        LEFT JOIN STOCK_CODED_PARTS SCP
+            ON MB.buy_code = SCP.mms_stock_code
+        WHERE MB.mb_number = @MbNumber;
+
+        /* 2. EMPLOYEE LABOUR */
+        INSERT INTO SBCES.ArchMbEmployeeLabour
+        (
+            LabourDefn, DateEntered, LinkNumber, TypeId,
+            CostCentre, Task, LabourType, Usage,
+            HrsReqd, AdjHrs, TimeAddition, ArchMbMasterlistId
+        )
+        SELECT
+            labour_defn, date_entered, link_number, typeid,
+            costcentre, task, labour_type, usage,
+            hrs_reqd, adj_hrs, time_addition,
+            @ArchId
+        FROM EMPLOYEE_LABOUR
+        WHERE link_number = @LinkNumber
+          AND typeid = @TypeId;
+
+        /* 3. MATERIAL COST FUNCTION */
+        SET @Price = dbo.GetMaterialCost(@LinkNumber, @TypeId);
+
+        /* 3a. SC PARTS USED (REBILT = Y) */
+        INSERT INTO SBCES.ArchMbScPartsUsed
+        (
+            MmsStockCode, DateEntered, RebPartCost, UserEntered,
+            MmsCost, OemCost, MmsRebuiltCode, CostCentre,
+            QtyReqd, PercentUsage, LinkCode, RebuiltPart,
+            LinkType, Corecost, ArchMbMasterlistId,
+            TotalCost, ScKeyword, ScDescription
+        )
+        SELECT
+            UPPER(S.mms_stock_code),
+            S.date_entered,
+            ISNULL(A.RB_UNIT_COST,0),
+            UPPER(S.user_entered),
+            ISNULL(S.mms_cost,0),
+            ISNULL(S.oem_cost,0),
+            UPPER(S.mms_rebuilt_code),
+            UPPER(S.cost_centre),
+            S.qty_reqd,
+            REPLACE(S.percent_usage,',','.'),
+            @LinkNumber,
+            'Y',
+            'RB',
+            S.corecost,
+            @ArchId,
+            ISNULL(A.RB_COST,0),
+            UPPER(R.keyword),
+            UPPER(R.detailed_desc)
+        FROM SC_PARTS_USED S
+        LEFT JOIN RB_MASTERLIST R
+            ON R.rebuilt_stock_num = S.mms_rebuilt_code
+        LEFT JOIN (
+            SELECT
+                rb_reference,
+                ROUND(SUM(total_cost),2) RB_COST,
+                ROUND(SUM(total_unit_cost),2) RB_UNIT_COST
+            FROM TEMP_MATERIALS_LIST
+            GROUP BY rb_reference
+        ) A
+            ON A.rb_reference = S.mms_rebuilt_code
+        WHERE S.link_code = @LinkNumber
+          AND S.rebuilt_part = 'Y'
+          AND S.link_type = @TypeId;
+
+        /* 3b. SC PARTS USED (REBILT = N) */
+        INSERT INTO SBCES.ArchMbScPartsUsed
+        (
+            MmsStockCode, DateEntered, RebPartCost, UserEntered,
+            MmsCost, OemCost, MmsRebuiltCode, CostCentre,
+            QtyReqd, PercentUsage, LinkCode, RebuiltPart,
+            LinkType, Corecost, ArchMbMasterlistId,
+            TotalCost, ScKeyword, ScDescription
+        )
+        SELECT
+            A.mms_stock_code,
+            A.date_entered,
+            A.reb_part_cost,
+            A.user_entered,
+            A.mms_cost,
+            A.oem_cost,
+            A.mms_rebuilt_code,
+            A.cost_centre,
+            A.qty_reqd,
+            A.percent_usage,
+            A.link_code,
+            A.rebuilt_part,
+            A.link_type,
+            dbo.FinalCost(A.percent_usage, A.qty_reqd, A.corecost, 0),
+            @ArchId,
+            A.mms_cost * CAST(A.qty_reqd AS NUMERIC) *
+            (CAST(REPLACE(ISNULL(A.percent_usage,'0'),',','.') AS NUMERIC)/100),
+            ISNULL(B.part_type,''),
+            ISNULL(B.detailed_desc,'')
+        FROM SC_PARTS_USED A
+        LEFT JOIN STOCK_CODED_PARTS B
+            ON B.mms_stock_code = A.mms_stock_code
+        WHERE A.link_code = @LinkNumber
+          AND A.link_type = @TypeId
+          AND A.rebuilt_part = 'N';
+
+        /* 4. NSC PARTS */
+        INSERT INTO SBCES.ArchMbNscPartsUsed
+        (
+            OrigSuppNum, OrigSupplierName, CostCentre,
+            QtyReqd, PercentUsage, DateEntered,
+            EnteredBy, LinkCode, Cost, LinkType,
+            Corecost, ArchMbMasterlistId, TotalCost
+        )
+        SELECT
+            orig_supp_num,
+            orig_supplier_name,
+            cost_centre,
+            qty_reqd,
+            percent_usage,
+            date_entered,
+            entered_by,
+            link_code,
+            cost,
+            link_type,
+            dbo.FinalCost(percent_usage, qty_reqd, corecost, 0),
+            @ArchId,
+            cost * CAST(qty_reqd AS NUMERIC) *
+            (CAST(REPLACE(ISNULL(percent_usage,'0'),',','.') AS NUMERIC)/100)
+        FROM NSC_PARTS_USED
+        WHERE link_code = @LinkNumber
+          AND link_type = @TypeId;
+
+        /* 5. LABOUR TOTAL */
+        INSERT INTO SBCES.ArchMbLabourCcTotal
+        (
+            CostCentre, TotalHours, ArchMbMasterlistId
+        )
+        SELECT
+            CC,
+            SUM(extended_time),
+            @ArchId
+        FROM TEMP_LABOUR_LIST
+        GROUP BY CC;
+
+        /* 6. BUSES */
+        INSERT INTO SBCES.ArchMbListBuses
+        (
+            BusDescription, ArchMbMasterlistId
+        )
+        SELECT
+            L.description,
+            @ArchId
+        FROM MB_LIST_OF_BUSES M
+        JOIN LIST_OF_BUSES L
+            ON M.list_id = L.list_id
+        WHERE M.mb_number = @LinkNumber;
+
+        /* 7. MATERIAL TOTAL */
+        INSERT INTO SBCES.ArchMbmaterielsCcTotal
+        (
+            CostCentre, TotalCost, ArchMbMasterlistId
+        )
+        SELECT
+            cost_centre,
+            SUM(total_cost),
+            @ArchId
+        FROM TEMP_MATERIALS_LIST
+        GROUP BY cost_centre;
+
+        COMMIT;
+
+        SET @RetVal = 0;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK;
+        SET @RetVal = -2;
+    END CATCH
+END
+💡 Telerik + MVC Integration Tip
+
+Since you're passing this from MVC:
+
+Use a ViewModel matching SP params
+
+Call via DbContext.Database.ExecuteSqlRaw
+
+Always pass OUTPUT param explicitly
+
+Example:
+
+var retParam = new SqlParameter("@RetVal", SqlDbType.Int)
+{
+    Direction = ParameterDirection.Output
+};
+
+await _context.Database.ExecuteSqlRawAsync(
+    "EXEC SBCES.ArchiveMb @MbNumber, @Username, @LinkNumber, @TypeId, @LabourCost, @LabourOverheadAmount, @LabourTotal, @MaterialsTotal, @TotalMbEstimateCost, @TaxTotal, @TotalCostTax, @RetVal OUTPUT",
+    parameters);
+
+var result = (int)retParam.Value;
