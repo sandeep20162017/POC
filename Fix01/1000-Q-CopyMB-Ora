@@ -1,0 +1,219 @@
+FUNCTION COPY_MB_ESTIMATE
+    (vi_mb_number IN MB_LIST.mb_number%TYPE,
+     vi_new_mb_number IN MB_LIST.mb_number%TYPE,
+     vi_keyword IN MB_LIST.keyword%TYPE,
+     vi_rebuild_number IN MB_LIST.rebuild_code%TYPE,
+     vi_entered_by IN NSC_PARTS_USED.entered_by%TYPE,
+     vo_ret_val OUT NUMBER) RETURN NUMBER IS
+
+BEGIN
+    -- Copy the main information for the MB estimate
+    INSERT INTO MB_LIST
+    (
+         mb_number,
+         keyword,
+         description,
+         bus_type,
+         num_bus_comp,
+         vendor_part_num,
+         buy_code,
+         rebuild_code,
+         core_code,
+         annual_usage,
+         bench_number,
+         sample_provided,
+         recommendation,
+         reman_cost,
+         external_cost,
+         buy_new_cost,
+         internal_cost,
+         sop_number,
+         core_cost,
+         job_number,
+         date_opened,
+         readmanualnewprice
+    )
+    SELECT
+         NVL(vi_new_mb_number, ' '),
+         UPPER(NVL(vi_keyword, ' ')),
+         description,
+         bus_type,
+         num_bus_comp,
+         vendor_part_num,
+         buy_code,
+         UPPER(NVL(vi_rebuild_number, ' ')),
+         core_code,
+         annual_usage,
+         bench_number,
+         sample_provided,
+         recommendation,
+         reman_cost,
+         external_cost,
+         buy_new_cost,
+         internal_cost,
+         sop_number,
+         core_cost,
+         job_number,
+         sysdate,
+         readmanualnewprice
+    FROM
+        MB_LIST
+    WHERE
+        mb_number = vi_mb_number;
+
+    -- Add the Non Stock Coded Parts used in the estimate
+    INSERT INTO NSC_PARTS_USED
+    (
+        orig_supp_num,
+        orig_supplier_name,
+        cost_centre,
+        percent_usage,
+        entered_by,
+        date_entered,
+        last_modified_by,
+        last_modified_date,
+        link_code,
+        qty_reqd,
+        cost,
+        link_type,
+        corecost,
+        id
+    )
+    SELECT
+        orig_supp_num,
+        orig_supplier_name,
+        cost_centre,
+        percent_usage,
+        UPPER(NVL(vi_entered_by, ' ')),
+        SYSDATE,
+        UPPER(NVL(vi_entered_by, ' ')),
+        SYSDATE,
+        NVL(vi_new_mb_number, ' '),
+        qty_reqd,
+        cost,
+        'MB',
+        corecost,
+        id
+    FROM
+        NSC_PARTS_USED
+    WHERE
+        link_code = vi_mb_number AND
+        link_type = 'MB';
+
+    -- Add the Stock Coded and Rebuilt Parts used in the estimate
+    INSERT INTO SC_PARTS_USED
+    (
+        mms_stock_code,
+        cost_centre,
+        percent_usage,
+        user_entered,
+        date_entered,
+        last_modified_by,
+        last_modified_date,
+        link_code,
+        qty_reqd,
+        reb_part_cost,
+        mms_rebuilt_code,
+        rebuilt_part,
+        link_type,
+        corecost,
+        mms_cost,
+        oem_cost
+    )
+    SELECT
+        mms_stock_code,
+        cost_centre,
+        percent_usage,
+        UPPER(NVL(vi_entered_by, ' ')),
+        SYSDATE,
+        UPPER(NVL(vi_entered_by, ' ')),
+        SYSDATE,
+        NVL(vi_new_mb_number, ' '),
+        qty_reqd,
+        reb_part_cost,
+        mms_rebuilt_code,
+        rebuilt_part,
+        'MB',
+        corecost,
+        mms_cost,
+        oem_cost
+    FROM
+        SC_PARTS_USED
+    WHERE
+        link_code = vi_mb_number AND
+        link_type = 'MB';
+
+    -- Add Labour to the estimate
+    INSERT INTO EMPLOYEE_LABOUR
+    (
+        labour_defn,
+        date_entered,
+        link_number,
+        typeid,
+        costcentre,
+        EMPLOYEE_LABOUR.task,
+        labour_type,
+        usage,
+        hrs_reqd,
+        adj_hrs,
+        date_revised,
+        time_addition,
+        rebuilt_part_num,
+        last_modified_by
+    )
+    SELECT
+        labour_defn,
+        SYSDATE,
+        NVL(vi_new_mb_number, ' '),
+        'MB',
+        costcentre,
+        EMPLOYEE_LABOUR.task,
+        labour_type,
+        usage,
+        hrs_reqd,
+        adj_hrs,
+        SYSDATE,
+        time_addition,
+        rebuilt_part_num,
+        UPPER(NVL(vi_entered_by, ' '))
+    FROM
+        EMPLOYEE_LABOUR
+    WHERE
+        link_number = vi_mb_number AND
+        typeid = 'MB';
+        
+    -- Add Bus List to the estimate
+    INSERT INTO MB_LIST_OF_BUSES
+    (
+         mb_number,
+         list_id
+    )
+    SELECT
+        NVL(vi_new_mb_number, ' '),
+        list_id
+    FROM
+        MB_LIST_OF_BUSES
+    WHERE
+        mb_number = vi_mb_number;
+
+    -- Commit the changes and return the ID of the new part
+    COMMIT;
+    vo_ret_val := 0;
+    RETURN 0;
+
+    -- Handle Exceptions and Rollback the Database if necessary
+    EXCEPTION
+        WHEN no_data_found THEN
+            ROLLBACK;
+		    vo_ret_val := -146;
+		    RETURN -1;
+        WHEN DUP_VAL_ON_INDEX THEN
+            ROLLBACK;
+            vo_ret_val := -147;
+            RETURN -1;
+        WHEN others THEN
+            ROLLBACK;
+            vo_ret_val := -148;
+            RETURN -1;
+
+END COPY_MB_ESTIMATE;
