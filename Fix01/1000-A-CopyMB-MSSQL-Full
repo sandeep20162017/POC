@@ -1,0 +1,297 @@
+CREATE PROCEDURE SBCES.CopyMbEstimate
+(
+    @viMbNumber        VARCHAR(50),
+    @viNewMbNumber     VARCHAR(50),
+    @viKeyword         VARCHAR(100),
+    @viRebuildNumber   VARCHAR(50),
+    @viEnteredBy       VARCHAR(50),
+    @voRetVal          INT OUTPUT
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ret INT = 0;
+
+    PRINT 'CopyMbEstimate: START';
+    PRINT '  viMbNumber      = ' + ISNULL(@viMbNumber, '<NULL>');
+    PRINT '  viNewMbNumber   = ' + ISNULL(@viNewMbNumber, '<NULL>');
+    PRINT '  viKeyword       = ' + ISNULL(@viKeyword, '<NULL>');
+    PRINT '  viRebuildNumber = ' + ISNULL(@viRebuildNumber, '<NULL>');
+    PRINT '  viEnteredBy     = ' + ISNULL(@viEnteredBy, '<NULL>');
+
+    BEGIN TRY
+        BEGIN TRAN;
+
+        ------------------------------------------------------------
+        -- Copy the main information for the MB estimate (MbList)
+        ------------------------------------------------------------
+        PRINT 'Inserting into SBCES.MbList...';
+
+        INSERT INTO SBCES.MbList
+        (
+             mbNumber,
+             keyword,
+             description,
+             busType,
+             numBusComp,
+             vendorPartNum,
+             buyCode,
+             rebuildCode,
+             coreCode,
+             annualUsage,
+             benchNumber,
+             sampleProvided,
+             recommendation,
+             remanCost,
+             externalCost,
+             buyNewCost,
+             internalCost,
+             sopNumber,
+             coreCost,
+             jobNumber,
+             dateOpened,
+             readManualNewPrice
+        )
+        SELECT
+             ISNULL(@viNewMbNumber, ' '),
+             UPPER(ISNULL(@viKeyword, ' ')),
+             description,
+             busType,
+             numBusComp,
+             vendorPartNum,
+             buyCode,
+             UPPER(ISNULL(@viRebuildNumber, ' ')),
+             coreCode,
+             annualUsage,
+             benchNumber,
+             sampleProvided,
+             recommendation,
+             remanCost,
+             externalCost,
+             buyNewCost,
+             internalCost,
+             sopNumber,
+             coreCost,
+             jobNumber,
+             GETDATE(),
+             readManualNewPrice
+        FROM
+            SBCES.MbList
+        WHERE
+            mbNumber = @viMbNumber;
+
+        PRINT '  Rows inserted into MbList: ' + CAST(@@ROWCOUNT AS VARCHAR(20));
+
+        -- Simulate NO_DATA_FOUND if nothing was copied from MbList
+        IF @@ROWCOUNT = 0
+        BEGIN
+            RAISERROR('NO_DATA_FOUND_MBLIST', 16, 1);
+        END
+
+        ------------------------------------------------------------
+        -- Add the Non Stock Coded Parts used in the estimate
+        -- (NscPartsUsed)
+        ------------------------------------------------------------
+        PRINT 'Inserting into SBCES.NscPartsUsed...';
+
+        INSERT INTO SBCES.NscPartsUsed
+        (
+            origSuppNum,
+            origSupplierName,
+            costCentre,
+            percentUsage,
+            enteredBy,
+            dateEntered,
+            lastModifiedBy,
+            lastModifiedDate,
+            linkCode,
+            qtyReqd,
+            cost,
+            linkType,
+            coreCost,
+            id
+        )
+        SELECT
+            origSuppNum,
+            origSupplierName,
+            costCentre,
+            percentUsage,
+            UPPER(ISNULL(@viEnteredBy, ' ')),
+            GETDATE(),
+            UPPER(ISNULL(@viEnteredBy, ' ')),
+            GETDATE(),
+            ISNULL(@viNewMbNumber, ' '),
+            qtyReqd,
+            cost,
+            'MB',
+            coreCost,
+            id
+        FROM
+            SBCES.NscPartsUsed
+        WHERE
+            linkCode = @viMbNumber
+            AND linkType = 'MB';
+
+        PRINT '  Rows inserted into NscPartsUsed: ' + CAST(@@ROWCOUNT AS VARCHAR(20));
+
+        ------------------------------------------------------------
+        -- Add the Stock Coded and Rebuilt Parts used in the estimate
+        -- (ScPartsUsed)
+        ------------------------------------------------------------
+        PRINT 'Inserting into SBCES.ScPartsUsed...';
+
+        INSERT INTO SBCES.ScPartsUsed
+        (
+            mmsStockCode,
+            costCentre,
+            percentUsage,
+            userEntered,
+            dateEntered,
+            lastModifiedBy,
+            lastModifiedDate,
+            linkCode,
+            qtyReqd,
+            rebPartCost,
+            mmsRebuiltCode,
+            rebuiltPart,
+            linkType,
+            coreCost,
+            mmsCost,
+            oemCost
+        )
+        SELECT
+            mmsStockCode,
+            costCentre,
+            percentUsage,
+            UPPER(ISNULL(@viEnteredBy, ' ')),
+            GETDATE(),
+            UPPER(ISNULL(@viEnteredBy, ' ')),
+            GETDATE(),
+            ISNULL(@viNewMbNumber, ' '),
+            qtyReqd,
+            rebPartCost,
+            mmsRebuiltCode,
+            rebuiltPart,
+            'MB',
+            coreCost,
+            mmsCost,
+            oemCost
+        FROM
+            SBCES.ScPartsUsed
+        WHERE
+            linkCode = @viMbNumber
+            AND linkType = 'MB';
+
+        PRINT '  Rows inserted into ScPartsUsed: ' + CAST(@@ROWCOUNT AS VARCHAR(20));
+
+        ------------------------------------------------------------
+        -- Add Labour to the estimate (EmployeeLabour)
+        ------------------------------------------------------------
+        PRINT 'Inserting into SBCES.EmployeeLabour...';
+
+        INSERT INTO SBCES.EmployeeLabour
+        (
+            labourDefn,
+            dateEntered,
+            linkNumber,
+            typeId,
+            costCentre,
+            [task],
+            labourType,
+            usage,
+            hrsReqd,
+            adjHrs,
+            dateRevised,
+            timeAddition,
+            rebuiltPartNum,
+            lastModifiedBy
+        )
+        SELECT
+            labourDefn,
+            GETDATE(),
+            ISNULL(@viNewMbNumber, ' '),
+            'MB',
+            costCentre,
+            [task],
+            labourType,
+            usage,
+            hrsReqd,
+            adjHrs,
+            GETDATE(),
+            timeAddition,
+            rebuiltPartNum,
+            UPPER(ISNULL(@viEnteredBy, ' '))
+        FROM
+            SBCES.EmployeeLabour
+        WHERE
+            linkNumber = @viMbNumber
+            AND typeId = 'MB';
+
+        PRINT '  Rows inserted into EmployeeLabour: ' + CAST(@@ROWCOUNT AS VARCHAR(20));
+
+        ------------------------------------------------------------
+        -- Add Bus List to the estimate (MbListOfBuses)
+        ------------------------------------------------------------
+        PRINT 'Inserting into SBCES.MbListOfBuses...';
+
+        INSERT INTO SBCES.MbListOfBuses
+        (
+             mbNumber,
+             listId
+        )
+        SELECT
+            ISNULL(@viNewMbNumber, ' '),
+            listId
+        FROM
+            SBCES.MbListOfBuses
+        WHERE
+            mbNumber = @viMbNumber;
+
+        PRINT '  Rows inserted into MbListOfBuses: ' + CAST(@@ROWCOUNT AS VARCHAR(20));
+
+        ------------------------------------------------------------
+        -- Commit and return success
+        ------------------------------------------------------------
+        COMMIT TRAN;
+
+        SET @voRetVal = 0;
+        SET @ret = 0;
+
+        PRINT 'CopyMbEstimate: SUCCESS, voRetVal = 0';
+        RETURN @ret;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRAN;
+
+        DECLARE @errNum INT        = ERROR_NUMBER();
+        DECLARE @errMsg NVARCHAR(4000) = ERROR_MESSAGE();
+
+        PRINT 'CopyMbEstimate: ERROR';
+        PRINT '  ErrorNumber = ' + CAST(@errNum AS VARCHAR(20));
+        PRINT '  ErrorMessage = ' + ISNULL(@errMsg, '<NULL>');
+
+        -- Map to Oracle-style return codes
+        IF @errMsg LIKE 'NO_DATA_FOUND_MBLIST%'
+        BEGIN
+            SET @voRetVal = -146;   -- NO_DATA_FOUND
+            SET @ret      = -1;
+        END
+        ELSE IF @errNum IN (2601, 2627)  -- duplicate key / unique index
+        BEGIN
+            SET @voRetVal = -147;   -- DUP_VAL_ON_INDEX
+            SET @ret      = -1;
+        END
+        ELSE
+        BEGIN
+            SET @voRetVal = -148;   -- OTHERS
+            SET @ret      = -1;
+        END
+
+        PRINT 'CopyMbEstimate: FAILURE, voRetVal = ' + CAST(@voRetVal AS VARCHAR(20));
+        RETURN @ret;
+    END CATCH;
+END;
+GO
