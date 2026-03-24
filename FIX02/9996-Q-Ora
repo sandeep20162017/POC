@@ -1,0 +1,95 @@
+I am migrating Cyystal reports which used Oracle to MS SQL.
+Crystal report (Oracle) calls  RPT_COST_VARIANCE and maps  the field names.
+1. MS SQL uses scehma name SBCES
+2. Database is migrated from Oracle to MS SQL, Table, col , function name in Orcle are Snake_Cased i nmS SQL it is CamelCased
+
+I dont want to change mappings in crystal report. It will use Snake_Case.
+Assist me in migrating below oracle to MS SQL
+
+
+PROCEDURE RPT_COST_VARIANCE
+    (vo_Cursor OUT query_cur) IS
+
+
+BEGIN
+    INTERNAL_RB_PRICE;
+
+
+    OPEN vo_cursor FOR
+        SELECT
+            *
+        FROM
+            TEMP_RBP_COST;
+END RPT_COST_VARIANCE;
+
+create or replace PROCEDURE INTERNAL_RB_PRICE
+   IS
+--
+-- To modify this template, edit file PROC.TXT in TEMPLATE
+-- directory of SQL Navigator
+--
+-- Purpose: Briefly explain the functionality of the procedure
+--
+-- MODIFICATION HISTORY
+-- Person      Date    Comments
+-- ---------   ------  -------------------------------------------
+ --  variable_name                 datatype;
+   -- Declare program variables as shown above
+REBUILT_STOCK_NUM                  VARCHAR2(30);
+DETAILED_DESC                      VARCHAR2(250);
+BUY_NEW_COST                      VARCHAR2(30);
+TOTAL_PRICE                        NUMBER(25,10);
+ACTIVE                             number(1,4);
+KEYWORD                             VARCHAR2(250);
+
+CURSOR RB_PART_NUMBERS
+    IS
+    SELECT RB_MASTERLIST.REBUILT_STOCK_NUM, RB_MASTERLIST.detailed_desc,
+    nvl(replace(replace(trim(round(STOCK_CODED_PARTS.MMS_NEW_COST, 2)),',','.'), '$', ''),'0.00') AS BUY_NEW_COST,RB_MASTERLIST.active,
+     RB_MASTERLIST.keyword as keyword from RB_MASTERLIST, stock_coded_parts where rb_masterlist.mms_stock_code =+ stock_coded_parts.mms_stock_code
+     order by RB_MASTERLIST.rebuilt_stock_num desc;
+
+
+
+BEGIN
+EXECUTE IMMEDIATE 'TRUNCATE TABLE TEMP_RBP_COST';
+--REBUILT_STOCK_NUM := RB_MASTERLIST.rebuilt_stock_num;
+
+   -- statements;
+
+open RB_PART_NUMBERS;
+LOOP
+    FETCH RB_PART_NUMBERS
+    INTO REBUILT_STOCK_NUM,DETAILED_DESC, BUY_NEW_COST, ACTIVE,KEYWORD;
+
+
+    EXIT WHEN RB_PART_NUMBERS%NOTFOUND;
+
+    TOTAL_PRICE := CES_INQUIRY.rpt_rbp_cost(upper(REBUILT_STOCK_NUM),'RB');
+    INSERT INTO TEMP_RBP_COST (RB_NUMBER,TOTAL_COST,DETAILED_DESC,External_Cost,ACTIVE, KEYWORD) VALUES(REBUILT_STOCK_NUM, TOTAL_PRICE, detailed_desc, buy_new_cost,ACTIVE, KEYWORD);
+
+END LOOP;
+--FOR RB_NUMBER IN TEMP_RBP_COST  LOOP
+ --   INTERNAL_COST:= CES_INQUIRY.rpt_rbp_cost(TEMP_RBP_COST.RB_NUMBER,'RB');
+ --   INSERT INTO TEMP_RBP_COST (TOTAL_COST) VALUES INTERNAL_COST;
+
+--EXCEPTION
+  --  WHEN exception_name THEN
+       -- statements ;
+END; -- Procedure
+
+--------------------------------------------------------
+--  DDL for Table TEMP_RBP_COST
+--------------------------------------------------------
+
+  CREATE GLOBAL TEMPORARY TABLE "CES"."TEMP_RBP_COST" 
+   (	"TOTAL_COST" NUMBER(20,10), 
+	"RB_NUMBER" VARCHAR2(30 BYTE), 
+	"DETAILED_DESC" VARCHAR2(250 BYTE), 
+	"EXTERNAL_COST" VARCHAR2(25 BYTE), 
+	"ACTIVE" NUMBER(*,0), 
+	"KEYWORD" VARCHAR2(250 BYTE)
+   ) ON COMMIT PRESERVE ROWS ;
+
+Crystal report :
+Available fields 
