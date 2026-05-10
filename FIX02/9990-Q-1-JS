@@ -1,0 +1,257 @@
+        <script>
+            function onSupplierNumChange(e) {
+                console.warn("onSupplierNumChange");
+
+                var supplierNumCombo = e.sender;
+                var supplierNumber = supplierNumCombo.value();
+
+                // Find popup editor
+                var popup = supplierNumCombo.wrapper.closest(".k-window-content");
+
+                // Find SupplierName ComboBox
+                var supplierNameCombo = popup.find("[data-role='combobox']")
+                    .filter(function () {
+                        var n = $(this).attr("name") || "";
+                        var i = $(this).attr("id") || "";
+                        return n.indexOf("OrigSupplierName") > -1 || i.indexOf("OrigSupplierName") > -1;
+                    })
+                    .data("kendoComboBox");
+
+                if (!supplierNameCombo) {
+                    console.error("OrigSupplierName ComboBox not found in popup!");
+                    return;
+                }
+
+                // CLEAR SUPPLIER NAME UI
+                supplierNameCombo.value("");
+                supplierNameCombo.text("");
+                supplierNameCombo.dataSource.data([]);
+                supplierNameCombo.refresh();
+
+                // DISABLE dependent fields (NOT Qty / Percentage)
+                disableDependentFields(popup, true);
+
+                // GET MODEL
+                var grid = $("#VehiclesIndexGrid").data("kendoGrid");
+                var model = grid && grid.editable ? grid.editable.options.model : null;
+
+                // Fields to clear
+                const fieldsToClear = [
+                    "OrigSupplierName",
+                    "OrigSupplierNameId",
+                    "KeyWord",
+                    "Description",
+                    "UnitCost",
+                    "Percentage",
+                    "TotalCost",
+                    "Qty"
+                ];
+
+                // CLEAR MODEL FIELDS
+                if (model) {
+                    fieldsToClear.forEach(function (f) {
+                        if (model.fields && model.fields[f] !== undefined) {
+                            model.set(f, "");
+                        }
+                    });
+                }
+
+                // CLEAR UI WIDGETS
+                fieldsToClear.forEach(function (f) {
+                    var input = popup.find("[name*='" + f + "']");
+
+                    if (input.length) {
+                        var numeric = input.data("kendoNumericTextBox");
+                        if (numeric) {
+                            numeric.value(null);
+                            numeric.trigger("change");
+                            return;
+                        }
+
+                        var textbox = input.data("kendoTextBox");
+                        if (textbox) {
+                            textbox.value("");
+                            return;
+                        }
+
+                        input.val("");
+                    }
+                });
+
+                if (!supplierNumber) {
+                    console.warn("No supplier number selected, skipping lookup.");
+                    return;
+                }
+
+                console.warn("Fetching supplier name for number:", supplierNumber);
+
+                // AJAX to load supplier names
+                $.ajax({
+                    url: "/AutoComplete/GetSupplierNames",
+                    type: "GET",
+                    data: { supplierNumber: supplierNumber },
+                    success: function (data) {
+                        console.log("Supplier name data:", data);
+
+                        supplierNameCombo.dataSource.data(data);
+                        supplierNameCombo.refresh();
+
+                        supplierNameCombo.value("");
+                        supplierNameCombo.text("");
+                    },
+                    error: function (xhr, status, error) {
+                        console.error("Error fetching supplier names:", error);
+                    }
+                });
+            }
+
+            function disableDependentFields(popup, disable) {
+                // Qty and Percentage must ALWAYS stay enabled
+                const fields = ["KeyWord", "Description", "UnitCost", "TotalCost"];
+
+                fields.forEach(function (f) {
+                    var input = popup.find("[name*='" + f + "']");
+
+                    if (input.length) {
+                        var numeric = input.data("kendoNumericTextBox");
+                        if (numeric) {
+                            numeric.enable(!disable);
+                            return;
+                        }
+
+                        var textbox = input.data("kendoTextBox");
+                        if (textbox) {
+                            textbox.enable(!disable);
+                            return;
+                        }
+
+                        input.prop("disabled", disable);
+                    }
+                });
+            }
+
+                       
+            // AUTO-CALCULATE TOTAL COST WITH DEBUG
+            $(document).on("change",
+                "input[name='Qty'], input[name='UnitCost'], input[name='Percentage']",
+                function () {
+
+                console.warn("=== TOTAL COST CALCULATION TRIGGERED ===");
+
+                var popup = $(".k-window-content:visible");
+                console.warn("Popup found:", popup.length > 0);
+
+                // DEBUG: Show raw inputs
+                console.warn("Raw Qty input:", popup.find("input[name='Qty']")[0]);
+                console.warn("Raw UnitCost input:", popup.find("input[name='UnitCost']")[0]);
+                console.warn("Raw Percentage input:", popup.find("input[name='Percentage']")[0]);
+
+                // ⭐ Correctly get the REAL widgets (not hidden inputs)
+                var qtyWidget = popup.find("input[name='Qty']").data("kendoNumericTextBox");
+                var unitCostWidget = popup.find("input[name='UnitCost']").data("kendoNumericTextBox");
+                var percentageWidget = popup.find("input[name='Percentage']").data("kendoNumericTextBox");
+
+                // DEBUG: Show widget objects
+                console.warn("qtyWidget:", qtyWidget);
+                console.warn("unitCostWidget:", unitCostWidget);
+                console.warn("percentageWidget:", percentageWidget);
+
+                if (!qtyWidget || !unitCostWidget || !percentageWidget) {
+                    console.error("❌ One or more widgets NOT FOUND. Calculation aborted.");
+                    return;
+                }
+
+                // DEBUG: Show widget values BEFORE reading
+                console.warn("Widget values BEFORE reading:",
+                    "qtyWidget.value():", qtyWidget.value(),
+                    "unitCostWidget.value():", unitCostWidget.value(),
+                    "percentageWidget.value():", percentageWidget.value()
+                );
+
+                // ⭐ Now these values will be correct
+                var qty = qtyWidget.value() || 0;
+                var unitCost = unitCostWidget.value() || 0;
+                var percentage = percentageWidget.value() || 0;
+
+                // DEBUG: Show extracted values
+                console.warn("Extracted values → qty:", qty,
+                    "unitCost:", unitCost,
+                    "percentage:", percentage
+                );
+
+                var total = qty * unitCost * (percentage / 100);
+                /////////////////////////////////
+                console.warn("=== DEBUG: GRID + MODEL INSPECTION ===");
+
+// 1️⃣ List all grids on the page
+$(".k-grid").each(function () {
+    console.warn("FOUND GRID ID:", this.id);
+});
+
+// 2️⃣ Try to detect the active grid automatically
+var detectedGridId = $(".k-grid:visible").attr("id");
+console.warn("Detected visible grid ID:", detectedGridId);
+
+// 3️⃣ Try to load the grid instance
+var detectedGrid = detectedGridId ? $("#" + detectedGridId).data("kendoGrid") : null;
+console.warn("Detected grid instance:", detectedGrid);
+
+// 4️⃣ Try to get the model from the detected grid
+var detectedModel = detectedGrid?.editable?.options?.model;
+console.warn("Detected model:", detectedModel);
+
+// 5️⃣ If model exists, print all field names
+if (detectedModel && detectedModel.fields) {
+    console.warn("Model fields:", Object.keys(detectedModel.fields));
+} else {
+    console.error("❌ No model found. Popup may NOT belong to a grid.");
+}
+
+console.warn("=== END DEBUG ===");
+
+
+
+                //////////////////////////////////
+
+                // DEBUG: Show calculation
+                console.warn("CALCULATION → qty:", qty,
+                    "× unitCost:", unitCost,
+                    "× (percentage/100):", (percentage / 100),
+                    "= total:", total
+                );
+
+                // Update model
+                            var grid = $("#VehiclesIndexGrid").data("kendoGrid");
+                var model = grid?.editable?.options?.model;
+
+                console.warn("Model found:", !!model);
+                if (model) {
+                    console.warn("Model BEFORE update:", model.toJSON());
+                }
+
+                if (model && model.fields["TotalCost"] !== undefined) {
+                    console.warn("Updating model.TotalCost →", total);
+                    model.set("TotalCost", total);
+                    console.warn("Model AFTER update:", model.toJSON());
+                } else {
+                    console.error("❌ Model or model.fields.TotalCost NOT FOUND");
+                }
+
+                // Update widget
+                var totalCostWidget = popup.find("input[name='TotalCost']").data("kendoNumericTextBox");
+
+                console.warn("totalCostWidget:", totalCostWidget);
+
+                if (totalCostWidget) {
+                    console.warn("Updating TotalCost widget →", total);
+                    totalCostWidget.value(total);
+                    totalCostWidget.trigger("change");
+                } else {
+                    console.error("❌ TotalCost widget NOT FOUND");
+                }
+
+                console.warn("=== END TOTAL COST CALCULATION ===");
+            });
+
+
+        </script>
