@@ -1,0 +1,395 @@
+ASP.NET core applictuion using Telerik controllers. Assist me to fix below issue (only for TotalCost), code and logs are added below. Minimal fix as app is already in production
+Parts/RebuiltPartsIndex.cshtml
+<!-- Kendo main grid -->
+@(Html.Kendo().Grid<RebuiltPartsViewModel>()
+    .Name("RebuiltGrid")
+    .Columns(c =>
+    {
+        c.Bound(v => v.RebuiltId)
+            .Title("Rebuilt Part #")
+            .ClientTemplate("<a class='estimate-link' onclick='window.openEstimatePopup(#=RebuiltId#)'>#=RebuiltId#</a>")
+            .Width(60);
+...
+.ToolBar(tb => tb.ClientTemplate(
+    "<button class='k-button k-button-icontext' onclick='window.openEstimatePopup(0)'>" +
+    "<span class='k-icon k-i-plus'></span>Add New Rebuilt Parts Estimate</button>"
+))
+JS :
+window.openEstimatePopup = function (rebuiltId) {
+    console.warn('inside window.openEstimatePopup');
+    console.warn(rebuiltId);
+
+    var win = $("#estimatePopup").data("kendoWindow");
+    window.currentRebuiltId = rebuiltId;
+    pendingChanges = false; // Reset changes flag
+
+    win.title(rebuiltId === 0 ? "Add New Estimate" : "Rebuilt Part Estimate #" + rebuiltId);
+    win.center().open();
+
+    // Load vehicle tab first
+    $("#rebuiltTabContent").load('@Url.Action("GetRbById", "RebuiltParts")', { rebuiltId: rebuiltId }, function () {
+        // Initialize Kendo UI widgets in the loaded content
+        kendo.init($("#rebuiltTabContent"));
+
+        // Set values for Kendo widgets after initialization
+        setTimeout(function () {
+            // Set values for ComboBoxEditor fields
+            setComboBoxValues();
+            initRebuiltPopupForm();
+            wireRebuiltForm();
+        }, 100);
+
+        if (rebuiltId !== 0) {
+            enableAllTabs();
+        }
+    });
+};
+window.loadRebuiltForm = function (rebuiltId, callback) {
+    console.warn('window.loadRebuiltForm :', rebuiltId);
+
+    $.get('@Url.Action("GetRbById", "RebuiltParts")', { rebuiltId: rebuiltId }, function (html) {
+        $("#rebuiltTabContent").html(html);
+        window.tabContentLoaded[0] = true;
+
+        // Initialize Kendo UI widgets in the new HTML
+        kendo.init($("#rebuiltTabContent"));
+
+        // Rebind actions
+        window.wireRebuiltForm();
+
+        // Apply readonly/edit mode logic AFTER widgets exist
+        setTimeout(function () {
+            window.initRebuiltPopupForm();
+        }, 100);
+
+        // Enable/disable tabs depending on vehicleId
+        var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+        if (rebuiltId !== 0 && tabStrip) {
+            for (var i = 1; i <= 8; i++) {
+                tabStrip.enable(tabStrip.tabGroup.children().eq(i), true);
+            }
+        } else if (rebuiltId === 0 && tabStrip) {
+            for (var i = 1; i <= 8; i++) {
+                tabStrip.enable(tabStrip.tabGroup.children().eq(i), false);
+            }
+        }
+
+        if (typeof callback === "function") callback();
+    });
+};
+When use clicks on the estimate number pop up is displayed
+window.loadRebuiltForm = function (rebuiltId, callback) {
+    console.warn('window.loadRebuiltForm :', rebuiltId);
+
+    $.get('@Url.Action("GetRbById", "RebuiltParts")', { rebuiltId: rebuiltId }, function (html) {
+        $("#rebuiltTabContent").html(html);
+        window.tabContentLoaded[0] = true;
+
+        // Initialize Kendo UI widgets in the new HTML
+        kendo.init($("#rebuiltTabContent"));
+
+        // Rebind actions
+        window.wireRebuiltForm();
+
+        // Apply readonly/edit mode logic AFTER widgets exist
+        setTimeout(function () {
+            window.initRebuiltPopupForm();
+        }, 100);
+
+        // Enable/disable tabs depending on vehicleId
+        var tabStrip = $("#estimateTabs").data("kendoTabStrip");
+        if (rebuiltId !== 0 && tabStrip) {
+            for (var i = 1; i <= 8; i++) {
+                tabStrip.enable(tabStrip.tabGroup.children().eq(i), true);
+            }
+        } else if (rebuiltId === 0 && tabStrip) {
+            for (var i = 1; i <= 8; i++) {
+                tabStrip.enable(tabStrip.tabGroup.children().eq(i), false);
+            }
+        }
+
+        if (typeof callback === "function") callback();
+    });
+};
+
+This popup has different tabs. All the tabs use Telerik grid. One of the tab is Non-Stock-Coed Parts.
+When user clicks on NonStockCodedParts tab, below shared _NscPartsUsed.cshtml gets called.
+ @model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+
+@{
+    ViewData["Title"] = "Non Stock Coded Parts Details";
+    var nscGridName = $"NScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}"; /* save gridname in hidden field for JS */
+    var parentId = $"{ ViewBag.PartNum }";
+    bool isArchived = ViewBag.GridType == "ArchivedVehicleGrid"; //ArchiveDisable
+    bool isAdmin = ViewBag.RoleId == 1; //ArchiveDisable
+    string gridName = $"NscPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}"; //for JS
+}
+<script>
+    // Store grid name for JavaScript access
+    var nscInEstimateGridName = '@gridName';
+</script>
+<h6>Non Stock Coded Parts Used (_NscPartsUsed)</h6>
+<input type="hidden" id="nscGridNameField" value="@nscGridName" /> @* save gridname in hidden field for JS *@
+@(
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()    
+                
+                .Name($"NscPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}")
+                 .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "NscGrid" }) //lockcols
+               
+                .Columns(columns =>
+                {
+                    columns.Bound(c => c.Oid).Title("Oid").Hidden(true);
+                    columns.Bound(c => c.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("Contains")))
+                    .EditorTemplateName("NscComboBox")
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                    .Width(140)
+                     .ClientTemplate("<a href='javascript:void(0)' class='non-stock-code-cell'>#= OrigSuppNum #</a>");
+                   @*  columns.Command(command =>
+                   {
+                       command.Custom("Populate Details").Click("refreshNscPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+                   }).Width(60); *@
+
+                    columns.Bound(c => c.OrigSupplierName)
+                    .Title("Supplier Name")
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell" })
+                    .Filterable(ftb => ftb.Cell(cell => cell.Operator("Contains")
+                    .SuggestionOperator(FilterType.Contains)))
+                    
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:notNew" } //lockcols
+                    })
+                    .EditorTemplateName("NscSupplierComboBox").Width(120);
+
+                   @*  columns.Bound(c => c.Description)
+                    .Title("Description")
+                    .EditorTemplateName("ComboBoxEditor")
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                    })
+                    .Width(140)
+                    ; *@
+                    columns.Bound(c => c.KeyWord)
+                    .Title("KeyWord")
+                    .EditorTemplateName("ComboBoxEditor")
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RebuiltGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                    })
+                    
+                    .Width(100);
+                    //  columns.Bound(c => c.OemPartCost).Title("Unit Cost").Format("{0:N2}").Width(30);
+                  @*   columns.Bound(c => c.CC).Title("Cost Centre")
+                    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains")
+                    .SuggestionOperator(FilterType.Contains))).EditorTemplateName("ComboBoxEditor").Width(70)
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell" });
+ *@
+                    columns.Bound(c => c.Qty).Title("Qty").Width(70)
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" }); 
+
+
+                    columns.Bound(c => c.Percentage).Title("%").HtmlAttributes(new { data_field = "Percentage"}).Width(60)
+                    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive, MustBePercentage" })
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" });
+
+                    columns.Bound(c => c.UnitCost)
+                    .Title("Unit Cost")
+                    .EditorTemplateName("ComboBoxEditor")
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RebuiltGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                    })
+
+                    .Width(80);
+
+                   @*  columns.Bound(c => c.CoreCost).Title("Core Cost").Width(80)
+                    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters" })
+                    .EditorTemplateName("ComboBoxEditor"); *@
+
+                    @* columns.Bound(c => c.TotalCost)
+                   .Title("Total Cost")
+                   .Width(90)
+                   .Format("{0:C2}")
+                   .Editable("false")
+                   .EditorTemplateName("ComboBoxEditor")
+                   .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                   })
+                   ; *@
+                    @* columns.Bound(c => c.LastModifiedBy)
+         .Title("Modified By")
+         .EditorTemplateName("ComboBoxEditor")
+         .ClientTemplate("#= LastModifiedBy && LastModifiedBy !== 0 ? LastModifiedBy : '(System Generated)' #")
+         .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+         })
+         .Width(160); *@
+
+        @* columns.Bound(c => c.LastModifiedDate)
+        .Title("Modified Date")
+        .Width(160)
+        .EditorTemplateName("ComboBoxEditor")
+        .ClientTemplate("#=  LastModifiedDate !== 0 ? formatToEST(LastModifiedDate) : '(System Generated)' #")
+        .EditorViewData(new Dictionary<string, object> {
+        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+         }); *@
+                   
+                    @* columns.Command(command =>
+                    {
+                        command.Custom("Re-Calculate")
+                            .Click("recalculateTotalCost")
+                            .HtmlAttributes(new { @class = "k-grid-recalculate" });
+                    }).HtmlAttributes( new { data_field = "Commands" }).Width(80);*@
+
+                    columns.Bound(c => c.TotalCost).Title("Total Cost").Width(90); 
+                    
+                    // columns.Bound(c => c.DateRevised).Title("Date Revised");
+                    // columns.Command(command => command.Edit()).Title("Actions");
+                    columns.Command(command =>
+        {
+            if (!isArchived && isAdmin) //ArchiveDisable
+            {
+
+                command.Custom("Delete")
+                 .Click("onNscDelete")
+                 .Text("Delete")
+                 .IconClass("k-icon k-i-delete")
+                 .HtmlAttributes(new
+                 {
+                     @class = "scparts-action-btn k-button",
+                     title = "Delete",
+                     data_grid = $"NscPartsMaterialDetailsRebuiltPartsGrid",
+                     data_url = Url.Action("DeleteNscPartsUsedInEstimates", "NscPartsUsedInEstimates"),
+                     data_id_field = "id",
+                     data_parentPartId_field = "parentPartId",
+                     data_grid_type = "NSCPartGrid"
+                 });
+            }
+        }).Width(100);
+                })
+
+                
+     .ToolBar(toolbar =>
+    {
+        if (!isArchived && isAdmin) //ArchiveDisable
+        {
+            toolbar.Create();
+           // toolbar.Save();
+        }
+    })
+    //.Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Editable(editable => editable.Mode(GridEditMode.PopUp)
+        .Window(w => w.Width("600px").Title("Edit Non Stock Coded Part")))
+   .Pageable(p => p
+    .Numeric(true)       // Show numeric page buttons
+    .Input(false)        // Hide input box
+    .PreviousNext(true)  // Show next/prev arrows
+    )
+    .Scrollable(s => s.Height("200px")) //UID
+    .Sortable()
+    .Filterable()
+    .Resizable(r => r.Columns(true))
+    
+    .Events(e => e.Edit("onNscPartsEdit"))
+    .Resizable(r => r.Columns(true))
+   
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .PageSize(5)
+        .ServerOperation(true)
+        .Model(model =>
+        {
+            model.Id(c => c.OrigSuppNum);
+            model.Field(c => c.OrigSupplierName);
+            model.Field(c => c.OrigSuppNum);
+            model.Field(c => c.KeyWord);
+            model.Field(c => c.Description);
+            model.Field(c => c.OemPartCost);
+            model.Field(c => c.Percentage);
+            model.Field(c => c.TotalCost).Editable(false);
+            model.Field(c => c.LastModifiedBy).Editable(false);
+            model.Field(c => c.LastModifiedDate).Editable(false);
+           // model.Field(c => c.TotalCost).Editable(true);
+         
+          //  model.Field("needsRecalculation", typeof(bool)).DefaultValue(false);
+        })
+        .Events(events =>
+        {
+                      
+          //  events.RequestEnd("onNscRequestEnd");
+            events.Error("onNscGridError");
+        })
+
+        .Read(read => read.Url(Url.Action("GetNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+       
+        .Create(create => create.Url(Url.Action("CreateNscPartsUsedInEstimatess", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        //.Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsedInRbtParts", "NscPartsUsedInEstimates") + "?parentId=0000" + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete
+            .Url(Url.Action("DeleteNscPartsUsedInEstimates", "NscPartsUsedInEstimates")
+                 + $"?id="+ViewBag.PartNum +"&gridType={ViewBag.GridType}")
+            .Type(HttpVerbs.Post)
+)
+    )
+
+)
+
+
+in _NscPartsUsed.cstml when user clicks on Supplier Number another popup is displayed.
+function getSupplierNameParams() {
+    var combo = $("input[name='OrigSuppNum']").data("kendoComboBox");
+    console.warn('combo :', combo);
+    return {
+        supplierNumber: combo ? combo.value() : ""
+    };
+}
+
+I need your help to fix below javascript. This is working fine on other  pages - like MakeVsBuy, which has same logic. Perhaps some ids or grid names is not matching.
+Problem is TotalCost in Non-stockcoedparts is not updated. All the other logic is working fine.
+Application is already in production. I need minimal changes.
+logs:
+Popup found: true
+(anonymous) @ RebuiltPartsIndex:1483Understand this warningAI
+RebuiltPartsIndex:1486 Raw Qty input: <input data-val=​"true" data-val-required=​"Required." id=​"Qty" name=​"Qty" required=​"required" type=​"text" value data-role=​"numerictextbox" role=​"spinbutton" class=​"k-input k-valid" aria-valuemin=​"0" aria-disabled=​"false" style=​"display:​ none;​" data-bind=​"value:​Qty" aria-valuenow=​"100">​
+(anonymous) @ RebuiltPartsIndex:1486Understand this warningAI
+RebuiltPartsIndex:1487 Raw UnitCost input: <input data-val=​"true" data-val-number=​"The field UnitCost must be a number." id=​"UnitCost" name=​"UnitCost" readonly=​"readonly" type=​"text" value data-role=​"numerictextbox" role=​"spinbutton" class=​"k-input k-valid" aria-disabled=​"false" style=​"display:​ none;​" data-bind=​"value:​UnitCost" aria-valuenow=​"1">​
+(anonymous) @ RebuiltPartsIndex:1487Understand this warningAI
+RebuiltPartsIndex:1488 Raw Percentage input: <input data-val=​"true" data-val-required=​"Required." id=​"Percentage" name=​"Percentage" required=​"required" type=​"text" value data-role=​"numerictextbox" role=​"spinbutton" class=​"k-input k-valid" aria-valuemin=​"0" aria-valuemax=​"100" aria-disabled=​"false" style=​"display:​ none;​" data-bind=​"value:​Percentage" aria-valuenow=​"100">​
+(anonymous) @ RebuiltPartsIndex:1488Understand this warningAI
+RebuiltPartsIndex:1496 qtyWidget: init
+(anonymous) @ RebuiltPartsIndex:1496Understand this warningAI
+RebuiltPartsIndex:1497 unitCostWidget: init
+(anonymous) @ RebuiltPartsIndex:1497Understand this warningAI
+RebuiltPartsIndex:1498 percentageWidget: init
+(anonymous) @ RebuiltPartsIndex:1498Understand this warningAI
+RebuiltPartsIndex:1506 Widget values BEFORE reading: qtyWidget.value(): 100 unitCostWidget.value(): 1 percentageWidget.value(): 0
+(anonymous) @ RebuiltPartsIndex:1506Understand this warningAI
+RebuiltPartsIndex:1518 Extracted values → qty: 100 unitCost: 1 percentage: 0
+(anonymous) @ RebuiltPartsIndex:1518Understand this warningAI
+RebuiltPartsIndex:1526 === DEBUG: GRID + MODEL INSPECTION ===
+(anonymous) @ RebuiltPartsIndex:1526Understand this warningAI
+RebuiltPartsIndex:1530 FOUND GRID ID: RebuiltGrid
+(anonymous) @ RebuiltPartsIndex:1530Understand this warningAI
+RebuiltPartsIndex:1530 FOUND GRID ID: NscPartsMaterialDetailsRebuiltPartsGrid_1107
+(anonymous) @ RebuiltPartsIndex:1530Understand this warningAI
+RebuiltPartsIndex:1535 Detected visible grid ID: RebuiltGrid
+(anonymous) @ RebuiltPartsIndex:1535Understand this warningAI
+RebuiltPartsIndex:1539 Detected grid instance: init
+(anonymous) @ RebuiltPartsIndex:1539Understand this warningAI
+RebuiltPartsIndex:1543 Detected model: undefined
+(anonymous) @ RebuiltPartsIndex:1543Understand this warningAI
+RebuiltPartsIndex:1549 ❌ No model found. Popup may NOT belong to a grid.
+(anonymous) @ RebuiltPartsIndex:1549Understand this errorAI
+RebuiltPartsIndex:1552 === END DEBUG ===
+(anonymous) @ RebuiltPartsIndex:1552Understand this warningAI
+RebuiltPartsIndex:1556 CALCULATION → qty: 100 × unitCost: 1 × (percentage/100): 0 = total: 0
+(anonymous) @ RebuiltPartsIndex:1556Understand this warningAI
+RebuiltPartsIndex:1572 totalCostWidget: init
+(anonymous) @ RebuiltPartsIndex:1572Understand this warningAI
+RebuiltPartsIndex:1575 Updating TotalCost widget → 0
+(anonymous) @ RebuiltPartsIndex:1575Understand this warningAI
+RebuiltPartsIndex:1582 === END TOTAL COST CALCULATION ===
