@@ -1,0 +1,392 @@
+Create SSIS project (one‑time UI)
+Open Visual Studio 2022.
+
+File → New → Project.
+
+Search: Integration Services Project.
+
+Name: CES_IFS_Interface → Create.
+
+Rename Package.dtsx to pkg_CES_IFS_Interface.dtsx.
+
+That’s all the UI we can’t script.
+
+2. SQL objects in CES (copy/paste)
+Run all of this in CES database.
+
+2.1 Config table (Dev/UAT/Prod connection strings)
+sql
+USE [CES];
+GO
+
+IF OBJECT_ID('[SBCES].[Config]', 'U') IS NOT NULL
+    DROP TABLE [SBCES].[Config];
+GO
+
+CREATE TABLE [SBCES].[Config] (
+    ConfigKey   VARCHAR(100) NOT NULL,
+    ConfigValue VARCHAR(4000) NOT NULL,
+    CONSTRAINT PK_Config PRIMARY KEY (ConfigKey)
+);
+GO
+
+INSERT INTO [SBCES].[Config] (ConfigKey, ConfigValue) VALUES
+('IFS_Oracle_ConnectionString',
+ 'DATA SOURCE=(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=ocipp-dqcof-scan.ttcociclientsub.ttcocivcn.oraclevcn.com)(PORT=1521)))(CONNECT_DATA=(SERVICE_NAME=ifsread1cs_svc.int.ttc.ca)));USER ID=ttc_int_support;Password=dHRjX2ludF9zdXBwb3J0;'),
+('CES_Sql_ConnectionString',
+ 'Server=AppCESDB_DEV;user=CESUser;password=CESUser#Dev;database=CES;TrustServerCertificate=True');
+GO
+Change values per environment (Dev/UAT/Prod) in this table only.
+
+2.2 Error logging procedure
+sql
+USE [CES];
+GO
+
+IF OBJECT_ID('[SBCES].[usp_LogCesError]', 'P') IS NOT NULL
+    DROP PROCEDURE [SBCES].[usp_LogCesError];
+GO
+
+CREATE PROCEDURE [SBCES].[usp_LogCesError]
+    @ErrorDesc VARCHAR(2000)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    INSERT INTO [SBCES].[Errors] (
+        LogId,
+        UserName,
+        DateTime,
+        ModuleName,
+        FunctionName,
+        LineNum,
+        ErrorDesc,
+        ErrNum
+    )
+    VALUES (
+        999999,                -- LogId
+        'System',              -- UserName
+        GETDATE(),             -- DateTime
+        'CESIFSInterface',     -- ModuleName
+        'DataExtraction',      -- FunctionName
+        NULL,                  -- LineNum
+        @ErrorDesc,            -- ErrorDesc
+        2000                   -- ErrNum
+    );
+END;
+GO
+2.3 Interface status table + proc (success/failure flag)
+sql
+USE [CES];
+GO
+
+IF OBJECT_ID('[SBCES].[InterfaceStatus]', 'U') IS NOT NULL
+    DROP TABLE [SBCES].[InterfaceStatus];
+GO
+
+CREATE TABLE [SBCES].[InterfaceStatus] (
+    InterfaceName    VARCHAR(100) NOT NULL,
+    LastRunDateTime  DATETIME     NULL,
+    LastStatus       VARCHAR(20)  NULL,   -- e.g. SUCCESS / FAIL
+    LastErrorDesc    VARCHAR(2000) NULL,
+    CONSTRAINT PK_InterfaceStatus PRIMARY KEY (InterfaceName)
+);
+GO
+
+IF OBJECT_ID('[SBCES].[usp_SetInterfaceStatus]', 'P') IS NOT NULL
+    DROP PROCEDURE [SBCES].[usp_SetInterfaceStatus];
+GO
+
+CREATE PROCEDURE [SBCES].[usp_SetInterfaceStatus]
+    @InterfaceName VARCHAR(100),
+    @Status        VARCHAR(20),
+    @ErrorDesc     VARCHAR(2000) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM [SBCES].[InterfaceStatus] WHERE InterfaceName = @InterfaceName)
+    BEGIN
+        UPDATE [SBCES].[InterfaceStatus]
+        SET LastRunDateTime = GETDATE(),
+            LastStatus      = @Status,
+            LastErrorDesc   = @ErrorDesc
+        WHERE InterfaceName = @InterfaceName;
+    END
+    ELSE
+    BEGIN
+        INSERT INTO [SBCES].[InterfaceStatus] (
+            InterfaceName,
+            LastRunDateTime,
+            LastStatus,
+            LastErrorDesc
+        )
+        VALUES (
+            @InterfaceName,
+            GETDATE(),
+            @Status,
+            @ErrorDesc
+        );
+    END
+END;
+GO
+We’ll use InterfaceName = 'CES_IFS' in SSIS.
+
+3. SSIS package variables
+Open pkg_CES_IFS_Interface.dtsx.
+
+Open Variables window (menu: SSIS → Variables).
+
+Add:
+
+Name: OracleConnString – Scope: Package – Type: String – Value: (blank)
+
+Name: SqlConnString – Scope: Package – Type: String – Value: (blank)
+
+Name: InterfaceName – Scope: Package – Type: String – Value: CES_IFS
+
+No date variables now (no date columns).
+
+4. Connection Managers with expressions
+4.1 CES SQL connection
+In the Connection Managers pane → right‑click → New OLE DB Connection.
+
+Configure to CES DEV (any valid connection).
+
+Name it: CM_CES_SQL.
+
+Select CM_CES_SQL → Properties → Expressions.
+
+Add:
+
+Property: ConnectionString
+
+Expression:
+
+text
+@[User::SqlConnString]
+4.2 IFS Oracle connection
+New OLE DB Connection → configure Oracle provider to IFS (any valid connection).
+
+Name: CM_IFS_ORACLE.
+
+Set Expression:
+
+Property: ConnectionString
+
+Expression:
+
+text
+@[User::OracleConnString]
+5. Load config values into variables
+On Control Flow:
+
+5.1 Get Oracle connection string
+Add Execute SQL Task: SQL_Get_OracleConn.
+
+Connection: CM_CES_SQL.
+
+SQLStatement:
+
+sql
+SELECT ConfigValue
+FROM [SBCES].[Config]
+WHERE ConfigKey = 'IFS_Oracle_ConnectionString';
+ResultSet: Single row.
+
+Result Set mapping:
+
+Result Name: 0
+
+Variable Name: User::OracleConnString
+
+5.2 Get CES SQL connection string
+Copy/paste previous task → rename SQL_Get_CESConn.
+Change SQL:
+
+sql
+SELECT ConfigValue
+FROM [SBCES].[Config]
+WHERE ConfigKey = 'CES_Sql_ConnectionString';
+Map result to User::SqlConnString.
+
+Connect SQL_Get_OracleConn → SQL_Get_CESConn.
+
+6. Main transactional load (Sequence Container)
+Add Sequence Container: SEQ_Load_CES_From_IFS.
+
+TransactionOption = Required.
+
+Connect SQL_Get_CESConn → SEQ_Load_CES_From_IFS.
+
+Inside SEQ_Load_CES_From_IFS:
+
+6.1 Truncate CES tables
+Add Execute SQL Task: SQL_Truncate_CES_Tables.
+
+Connection: CM_CES_SQL.
+
+SQLStatement:
+
+sql
+TRUNCATE TABLE [CES].[SBCES].[VendorPartDesc];
+TRUNCATE TABLE [CES].[SBCES].[PartOrder];
+TRUNCATE TABLE [CES].[SBCES].[PartMaster];
+TRUNCATE TABLE [CES].[SBCES].[TextData];
+7. Data Flow tasks (1‑to‑1 copy)
+All Data Flow Tasks:
+
+Source: CM_IFS_ORACLE
+
+Destination: CM_CES_SQL
+
+No WHERE clause (full copy).
+
+7.1 VendorPartDesc
+Add Data Flow Task: DF_VendorPartDesc after SQL_Truncate_CES_Tables.
+
+Inside:
+
+OLE DB Source: SRC_IFS_VendorPartDesc
+
+Connection: CM_IFS_ORACLE
+
+Data access mode: SQL command
+
+SQLCommand:
+
+sql
+SELECT
+    PART_NUMBER        AS PartNumber,
+    PRINT_SEQ          AS PrintSeq,
+    VENDOR_PART_NUMBER AS VendorPartNumber,
+    BUSINESS_NAME      AS BusinessName,
+    PART_XDESC_ED_LINE AS PartXdescEdLine
+FROM TTC_INTERFACE_CES_PartDesc
+Add Data Conversion if needed (e.g., CHAR(6) → DT_STR(13)).
+
+OLE DB Destination: DST_CES_VendorPartDesc
+
+Connection: CM_CES_SQL
+
+Table: [CES].[SBCES].[VendorPartDesc]
+
+Map columns 1:1.
+
+7.2 PartOrder
+Add Data Flow Task: DF_PartOrder.
+
+Source:
+
+sql
+SELECT
+    STOCK_CODED_NUMBER     AS StockCodedNumber,
+    T_ACCT_NO_OM           AS TAcctNoOm,
+    ORIGINAL_ORDER_QTY_OM  AS OriginalOrderQtyOm,
+    COST_CENTRE            AS CostCentre,
+    DATE_ORDERED           AS DateOrdered
+FROM TTC_INTERFACE_CES_PartOrder
+Destination: [CES].[SBCES].[PartOrder].
+
+7.3 PartMaster
+Add Data Flow Task: DF_PartMaster.
+
+Source:
+
+sql
+SELECT
+    PART_NUMBER              AS PartNumber,
+    DESCRIPTION_PM           AS DescriptionPm,
+    LEVEL_TOTAL_COST_LA_PM   AS LevelTotalCostLaPm,
+    LEVEL_TOTAL_COST_WA_PM   AS LevelTotalCostWaPm,
+    PRODUCT_CODE_PM          AS ProductCodePm
+FROM TTC_INTERFACE_CES_PartMaster
+Destination: [CES].[SBCES].[PartMaster].
+
+7.4 TextData
+Add Data Flow Task: DF_TextData.
+
+Source:
+
+sql
+SELECT
+    TEXT_TYPE     AS TextType,
+    TEXT_KEY      AS TextKey,
+    TEXT_LINE_NO  AS TextLineNo,
+    TEXT_LINE_TX  AS TextLineTx
+FROM TTC_INTERFACE_CES_text_data
+Destination: [CES].[SBCES].[TextData].
+
+Chain inside SEQ_Load_CES_From_IFS:
+
+SQL_Truncate_CES_Tables → DF_VendorPartDesc → DF_PartOrder → DF_PartMaster → DF_TextData.
+
+Because SEQ_Load_CES_From_IFS.TransactionOption = Required, truncates + inserts are one transaction—any failure rolls back all.
+
+8. Error logging from SSIS to SBCES.Errors
+On the package:
+
+Go to Event Handlers tab.
+
+Select OnError → click Link.
+
+Inside handler, add Execute SQL Task: SQL_Log_Error.
+
+Connection: CM_CES_SQL.
+
+SQLStatement:
+
+sql
+EXEC [SBCES].[usp_LogCesError] ?;
+Parameter Mapping:
+
+Variable Name: System::ErrorDescription
+
+Direction: Input
+
+Data Type: VARCHAR
+
+Parameter Name: 0
+
+Size: 2000
+
+Now any error writes a row to [SBCES].[Errors].
+
+9. Success / failure flag for next SSIS package
+Back on Control Flow, outside the Sequence Container:
+
+Add Execute SQL Task: SQL_SetStatus_Success.
+
+Connection: CM_CES_SQL.
+
+SQLStatement:
+
+sql
+EXEC [SBCES].[usp_SetInterfaceStatus]
+     'CES_IFS',
+     'SUCCESS',
+     NULL;
+Precedence constraint: from SEQ_Load_CES_From_IFS to this task, green (Success) only.
+
+Add Execute SQL Task: SQL_SetStatus_Fail.
+
+Connection: CM_CES_SQL.
+
+SQLStatement:
+
+sql
+EXEC [SBCES].[usp_SetInterfaceStatus]
+     'CES_IFS',
+     'FAIL',
+     'FAILED – see SBCES.Errors for details';
+Precedence constraint: from SEQ_Load_CES_From_IFS to this task, red (Failure) only.
+
+Now:
+
+Next SSIS package can check:
+
+sql
+SELECT LastStatus, LastRunDateTime, LastErrorDesc
+FROM [SBCES].[InterfaceStatus]
+WHERE InterfaceName = 'CES_IFS';
+and only run if LastStatus = 'SUCCESS'.
