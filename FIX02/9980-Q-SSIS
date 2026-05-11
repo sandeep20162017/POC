@@ -1,0 +1,133 @@
+You are MS SQL and Oracle expet. You have excllenet knowledge of creating SSIS package. We recently migrated CES Oracle to CES MS SQL. I need your assistance to write SSIS packagee to get the data from IFS (Oracle) to CES ( MS SQL) database - 4 tables below.No need to worry about CES Oracle database. Error message should be saved in CES Erros table below (some haed value should be set as in the below description). Data must only be for yesterday's date (T-1). Clear CES tables before any new inserts. For testing, I will pass date (any past date). Default should be T-1. 
+This SSIS package will be hosted on CES MS SQL database. If any of the insert fails, roll back full and record the error. Dtabase configutaion must be in config (Dev, UAT, Production).
+
+IFS database :
+DATA SOURCE=(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=ocipp-dqcof-scan.ttcociclientsub.ttcocivcn.oraclevcn.com)(PORT=1521)))(CONNECT_DATA=(SERVICE_NAME=ifsread1cs_svc.int.ttc.ca)));USER ID=ttc_int_support;Password=dHRjX2ludF9zdXBwb3J0;" 
+
+"CESConnectionString": "Server=AppCESDB_DEV ;user=CESUser;password=CESUser#Dev;database=CES;TrustServerCertificate=True"
+
+IFS Interface application processes the data in three steps:
+
+1.	Extract Cost Estimation Data from the IFS Oracle database through views, defined as follows:
+a.	TTC_INTERFACE_CES_PartMaster
+b.	TTC_INTERFACE_CES_text_data
+c.	TTC_INTERFACE_CES_PartDesc
+d.	TTC_INTERFACE_CES_PartOrder
+
+2.	Perform necessary transformations (If required)
+
+3.	Write data to the CES database
+•	TTC_INTERFACE_CES_PartDesc maps to CES.SBCES.VendorPartDesc
+•	TTC_INTERFACE_CES_ PartOrder maps to CES.SBCES.PartOrder
+•	TTC_INTERFACE_CES_PartMaster maps to CES.SBCES.PartMaster
+•	TTC_INTERFACE_CES_ text_data maps to CES.SBCES.TextData
+
+IFS TABLE NAME: TTC_INTERFACE_CES_PartDesc
+
+NEW CES MS SQL TABLE NAME: CES.SBCES.VendorPartDesc
+
+FIELD 
+(CES Oracle TABLE)	FIELD TYPE 
+(CES Oracle TABLE)	FIELD 
+(CES MS SQL TABLE)	FIELD TYPE 
+(CES MS SQL TABLE)
+PART_NUMBER	CHAR(6) 
+NOT NULL	PartNumber	char (13) 
+not null
+PRINT_SEQ	NUMBER(10,0)	PrintSeq	int
+null
+VENDOR_PART_NUMBER	VARCHAR2(25)	VendorPartNumber	varchar (40)
+null
+BUSINESS_NAME	VARCHAR2(40)	BusinessName	varchar (40)
+null
+PART_XDESC_ED_LINE	VARCHAR2(132)	PartXdescEdLine	varchar (132)
+null
+
+IFS TABLE NAME: TTC_INTERFACE_CES_ PartOrder
+OLD CES Oracle TABLE NAME: TTC_INTERFACE_CES_ PartOrder
+NEW CES MS SQL TABLE NAME: CES.SBCES.PartOrder
+FIELD 
+(CES Oracle TABLE)	FIELD TYPE 
+(CES Oracle TABLE)	FIELD 
+(CES MS SQL TABLE)	FIELD TYPE 
+(CES MS SQL TABLE)
+STOCK_CODED_NUMBER	CHAR(6)	StockCodedNumber	nchar (13)
+T_ACCT_NO_OM	VARCHAR2(8)	TAcctNoOm	varchar (8)
+ORIGINAL_ORDER_QTY_OM          	NUMBER(11,3)	OriginalOrderQtyOm          	numeric  (11,3)
+COST_CENTRE	CHAR(4)	CostCentre	nchar (4)
+DATE_ORDERED	DATE	DateOrdered	Date
+
+IFS TABLE NAME: TTC_INTERFACE_CES_PartMaster
+OLD CES Oracle TABLE NAME: TTC_INTERFACE_CES_PartMaster
+NEW CES MS SQL TABLE NAME: CES.SBCES.PartMaster
+
+FIELD 
+(CES Oracle TABLE)	FIELD TYPE 
+(CES Oracle TABLE)	FIELD 
+(CES MS SQL TABLE)	FIELD TYPE 
+(CES MS SQL TABLE)
+PART_NUMBER	CHAR(6) 
+NOT NULL	PartNumber	nchar (13) 
+NOT NULL
+DESCRIPTION_PM	VARCHAR2(30)	DescriptionPm	varchar (35)
+LEVEL_TOTAL_COST_LA_PM	NUMBER(15,5)	LevelTotalCostLaPm	numeric (15,5)
+LEVEL_TOTAL_COST_WA_PM	NUMBER(15,5)	LevelTotalCostWaPm	numeric (15,5)
+PRODUCT_CODE_PM	VARCHAR2(10)	ProductCodePm	varchar (10)
+
+IFS TABLE NAME: TTC_INTERFACE_CES_ text_data
+OLD CES Oracle TABLE NAME: TTC_INTERFACE_CES_ text_data
+NEW CES MS SQL TABLE NAME: CES.SBCES.TextData
+
+FIELD 
+(CES Oracle TABLE)	FIELD TYPE 
+(CES Oracle TABLE)	FIELD 
+(CES MS SQL TABLE)	FIELD TYPE 
+(CES MS SQL TABLE)
+TEXT_TYPE	CHAR(4) 
+NOT NULL	TextType	char (4)
+
+not null
+TEXT_KEY	VARCHAR2(35) NOT NULL	TextKey	varchar (35)
+
+not null
+TEXT_LINE_NO	NUMBER(5,0) NOT NULL	TextLineNo	numeric (5,0)
+
+not null
+TEXT_LINE_TX	VARCHAR2(132) NOT NULL	TextLineTx	varchar (132)
+
+not null
+
+No changes in Field name or Field Type in MS SQL.
+
+MS SQL uses CamelCase naming convention, current CES Oracle database uses Snake_Case naming convention.
+
+Execution of the CES portion of the IFS Interface application will be scheduled by TNG once daily, Monday to Friday.
+
+Record all the failures in SBCES.CES.Error table
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[Errors]    Script Date: 5/11/2026 1:15:06 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[Errors](
+	[LogId] [int] NOT NULL, --set as 999999
+	[UserName] [varchar](50) NULL, --Set as System
+	[DateTime] [datetime] NULL, -Todays date time
+	[ModuleName] [varchar](100) NULL, -- set as CESIFSInterface
+	[FunctionName] [varchar](100) NULL, -- set as DataExtraction
+	[LineNum] [int] NULL, -- Null
+	[ErrorDesc] [varchar](2000) NULL, --Actual error from SSIS package
+	[ErrNum] [int] NULL, -- set as 2000
+ CONSTRAINT [PK_Errors] PRIMARY KEY CLUSTERED 
+(
+	[LogId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+
