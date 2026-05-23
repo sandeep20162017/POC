@@ -1,3 +1,241 @@
+ASP.NET core v8 and Telerik ASP.NET core controls.
+_ScpartsUsed.cshtml uses grid. When user clicks on ID new clienttemplate is popped up (StockCodedPartsViewModel.cshtml), attached below. 
+Issue is when user edits estimate (change % or quantity), ModifiedBy and ModifiedDate is not updated. It still shows old model values. It must reflect the new value and DateTimeNow.
+Application is already in production, need minimal change pls
+
+
+_ScpartsUsed.cshtml
+@(
+Html.Kendo().Grid<BCES.Models.Parts.StockCodedPartsViewModel>()    
+     .Name($"ScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}") 
+     .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "RbGrid" }) //lockcols
+      
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.Id).Title("Id").Width(50);
+columns.Bound(c => c.MMSStockCode)
+                .Title("Stock Code")
+                .HtmlAttributes(new { @class = "stock-code-cell", data_field = "MMSStockCode" })
+                .IncludeInMenu(false)
+                .ClientTemplate("<a href='javascript:void(0)' class='stock-code-cell'>#= MMSStockCode #</a>")
+                .HeaderHtmlAttributes(new { @class = "required-header" })
+                .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                .EditorTemplateName("ScComboBox")
+                .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+                
+                .Width(180);
+...
+
+Controller :
+ public async Task<IActionResult> UpdateScPartsUsedInEstimates(
+     [FromForm] StockCodedPartsViewModel model,
+     [FromQuery] string id,
+     [FromQuery] string gridType)
+ {
+...
+var sql = @"
+            UPDATE SBCES.SCPartsUsed 
+            SET 
+                CostCentre = UPPER(@CC),
+                MMSCost = @UnitCost,
+                QtyReqd = UPPER(@Qty),
+                PercentUsage = UPPER(@Percentage),
+                CoreCost = @CoreCost,
+                LastModifiedBy = @LastModifiedBy,
+                LastModifiedDate = @LastModifiedDate,
+                EnteredBy = @LastModifiedBy,
+                DateEntered = @LastModifiedDate
+            WHERE 
+                MMSStockCode = @MMSStockCode
+                AND LinkCode = @LinkCode
+                AND LinkType = @LinkType
+                
+                ";
+...
+  private async Task<IEnumerable<StockCodedPartsViewModel>> GetScPartsUsedInRBEstimates(string parentId, string gridType)
+  {
+
+
+      try
+      {
+
+          var query = @"
+                       DECLARE @Id VARCHAR(30) = '" + parentId + "'" +
+                       @"
+                         
+                           SELECT 
+                          SCP.ID as Id,
+                          UPPER(SCP.MMSSTOCKCODE) AS MMSSTOCKCODE,
+                          ISNULL(SCPARTS.[MmsNewCost], 0) AS UnitCost,
+                          UPPER(SCP.QTYREQD) AS QTY,
+                          REPLACE(SCP.PERCENTUSAGE, ',', '.') AS [Percentage],
+                          REPLACE(
+                              CAST(SBCES.FINALCOST(
+                                  CAST(SCP.PERCENTUSAGE AS NUMERIC(18,2)), 
+                                  CAST(SCP.QTYREQD AS NUMERIC(18,2)), 
+                                  SCP.CORECOST, 
+                                  0
+                              ) AS DECIMAL(18,2)), ',', '.'
+                          ) AS CORECOST,
+                          REPLACE(
+                              CAST(SBCES.FINALCOST(
+                                  CAST(SCP.PERCENTUSAGE AS NUMERIC(18,2)), 
+                                  CAST(SCP.QTYREQD AS NUMERIC(18,2)), 
+                                  ISNULL(SCPARTS.[MmsNewCost], 0), 
+                                  0
+                              ) AS DECIMAL(18,2)), ',', '.'
+                          ) AS TOTALCOST,
+                          UPPER(SCP.COSTCENTRE) AS CC,
+                          ISNULL(UPPER(SCPARTS.DETAILEDDESC), '') AS DetailedDesc,
+                          ISNULL(UPPER(SCPARTS.PARTTYPE), '') AS PartType,
+                          SCPARTS.[OrigSupplierNum] AS [OrigSupplierNum],
+					 SCPARTS.[OrigSupplierName] AS [OrigSupplierName],
+                          SCP.OEMCOST AS [OEM COST],
+                          SCP.MMSREBUILTCODE AS MMSREBUILTCODE,
+                          SCP.REBPARTCOST AS [RebuiltPartCost],
+                          UPPER(SCP.REBUILTPART) AS REBUILTPART,
+                          SCP.LinkCode,
+                          SCP.LastModifiedBy,
+					SCP.LastModifiedDate,
+                          SCP.EnteredBy,
+					SCP.DateEntered
+                      FROM 
+                          SBCES.SCPARTSUSED SCP
+                      LEFT JOIN 
+                          SBCES.STOCKCODEDPARTS SCPARTS 
+                          ON SCPARTS.MMSSTOCKCODE = SCP.MMSSTOCKCODE
+                      WHERE 
+                          SCP.LINKCODE = @Id 
+                          AND SCP.LINKTYPE = 'RB'
+                          AND SCP.RebuiltPart = 'N'
+                      ORDER BY 
+                          SCP.MMSSTOCKCODE;
+
+                          ";
+
+          return await _dbConnection.QueryAsync<StockCodedPartsViewModel>(query);
+
+      }
+      catch (Exception ex)
+      {
+          return null;
+      }
+  }
+js :
+          function onScPartsEdit(e) {
+
+              // --- 1. Hard guard so UID can't kill the popup ---
+              if (!e.model) {
+                  console.warn("Edit event triggered without a model. Ignoring.");
+                  return;
+              }
+
+              var wnd = e.container.data("kendoWindow"); //outer popupsize
+              wnd.setOptions({
+                  width: "450px",
+                  height: "640px",
+
+                  scrollable: false,     //
+                  title: e.model.isNew() ? "Add New Stock Coded Part" : "Edit Stock Coded Part",
+                  modal: true,
+                  resizable: false
+              });
+
+              e.container.closest(".k-window").addClass("scparts-popup-style");
+
+              // track current model for combobox select logic
+              currentScPartsModel = e.model;
+
+              // Make Stock Code read-only in Edit mode
+              setTimeout(function () {
+                  const combo = $("input[name='MMSStockCode']").closest("[data-role='combobox']").data("kendoComboBox");
+                  if (combo) {
+                      combo.readonly(!e.model.isNew());
+                  }
+
+
+                  ////////////////////////////////
+                  var container = e.container; // this is the popup window’s form
+
+                  // Get Kendo NumericTextBoxes using the [name] attribute
+                  var unitCost = container.find("[name='UnitCost']").data("kendoTextBox");
+                  var qty = container.find("[name='Qty']").data("kendoNumericTextBox");
+                  var percentage = container.find("[name='Percentage']").data("kendoNumericTextBox");
+                  var totalCost = container.find("[name='TotalCost']").data("kendoNumericTextBox");
+
+
+                  function calculateTotal() {
+                      var u = unitCost.value() || 0;
+                      var q = qty.value() || 0;
+                      var p = percentage.value() || 0;
+
+                      totalCost.value(u * q * (p / 100));
+                      
+                  }
+
+                  // Hook into change events
+                  unitCost.bind("change", calculateTotal);
+                  qty.bind("change", calculateTotal);
+                  percentage.bind("change", calculateTotal);
+
+                  // Run once on popup load (for editing existing records)
+                  calculateTotal();
+
+                  ///////////////////////////////
+              }, 50); //UID
+          }
+
+</script>
+<script>
+    function onScPartNumSelect(e) {
+        // onScPartChange(e);
+
+        console.warn('inside onScPartNumSelect');
+        const selectedValue = e.sender.value();
+        console.warn('selectedValue', selectedValue);
+
+        // In Popup mode, use the stored model
+        const model = currentScPartsModel;
+
+        if (!model || !selectedValue) {
+            console.warn("No selected value or model.");
+            return;
+        }
+
+        // Clear existing values
+        model.set("MmsStockCode", "");
+        model.set("Description", "");
+        model.set("KeyWord", "");
+        model.set("CoreCharge", "");
+        model.set("UnitCost", "");
+         model.set("DetailedDesc", "");
+          model.set("PartType", "");
+
+        $.ajax({
+            url: "/AutoComplete/GetScPartDetails",
+            type: "GET",
+            data: { mmsStockCode: selectedValue },
+            success: function (result) {
+                if (result) {
+                    model.set("MmsStockCode", result.MmsStockCode || "");
+                    model.set("DetailedDesc", result.DetailedDesc || "");
+                    model.set("PartType", result.PartType || "");
+                    model.set("OrigSupplierNum", result.OrigSupplierNum || "");
+                    model.set("OrigSupplierName", result.OrigSupplierName || "");
+                    model.set("CoreCost", result.PartCost || "");
+                    model.set("UnitCost", result.UnitCost || "");
+                    
+
+                }
+                console.warn(" AJAX result:", result);
+            },
+            error: function (xhr) {
+                console.error("Failed to fetch part details:", xhr.responseText);
+            }
+        });
+    }
+</script>
+StockCodedPartsViewModel.cshtml (client template)
 @model BCES.Models.Parts.StockCodedPartsViewModel
 
 @{
