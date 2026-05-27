@@ -1,0 +1,92 @@
+Slight change in the logic. Value in finalcost function should be from table scp.mmnewcost
+It must loop and give me total of all the final cost. It is not doing now
+WITH MaterialCost AS (
+
+							SELECT 
+								/* ============================================================
+								   SC PARTS MATERIAL COST (RebuiltPart = 'N', LinkType = 'BUS')
+								   ============================================================ */
+								 
+								(
+									SELECT 
+										SUM(
+											CASE 
+												WHEN SUS.RebuiltPart = 'N'
+													 AND SUS.LinkType = 'MB'
+													 AND SUS.LinkCode = @LinkCode
+												THEN TRY_CAST(
+														SBCES.FinalCost(
+															CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+															CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+															ISNULL(SCP.MmsNewCost, 0),
+															0
+														) AS DECIMAL(18,2)
+													)
+												ELSE 0 
+											END
+										)
+									FROM SBCES.ScPartsUsed SUS
+									 LEFT JOIN 
+										SBCES.STOCKCODEDPARTS SCP 
+										ON SUS.MMSSTOCKCODE = SCP.MMSSTOCKCODE
+									WHERE 
+									--SUS.LinkType = 'MB'
+									 -- AND 
+									  SUS.LinkCode = @LinkCode
+								) AS SCPartsMaterialCost,
+
+								/* ============================================================
+								   RB PARTS MATERIAL COST (RebuiltPart = 'Y', LinkType = 'BUS')
+								   ============================================================ */
+								(
+									SELECT 
+										SUM(
+											CASE 
+												WHEN SUS.RebuiltPart = 'Y'
+													 AND SUS.LinkType = 'MB'
+													 AND SUS.LinkCode = @LinkCode
+												THEN TRY_CAST(
+														SBCES.FinalCost(
+															CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+															CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+															ISNULL(SCP.MmsNewCost, 0),
+															0
+														) AS DECIMAL(18,2)
+													)
+												ELSE 0 
+											END
+										)
+									FROM SBCES.ScPartsUsed SUS
+									
+									 LEFT JOIN 
+										SBCES.STOCKCODEDPARTS SCP 
+										ON SUS.MMSSTOCKCODE = SCP.MMSSTOCKCODE
+									WHERE SUS.LinkType = 'MB'
+									  AND SUS.LinkCode = @LinkCode
+								) AS RBPartsMaterialCost,
+
+								/* ============================================================
+								   NSC PARTS MATERIAL COST (LinkType = 'MB')
+								   ============================================================ */
+								(
+									SELECT 
+										SUM(
+											CASE 
+												WHEN NSUS.LinkType = 'MB'
+													 AND NSUS.LinkCode = @LinkCode
+												THEN TRY_CAST(
+														SBCES.FinalCost(
+															CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)),
+															CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)),
+															ISNULL(NSUS.Cost, 0),
+															0
+														) AS DECIMAL(18,2)
+													)
+												ELSE 0 
+											END
+										)
+									FROM SBCES.NscPartsUsed NSUS
+									WHERE NSUS.LinkType = 'MB'
+									  AND NSUS.LinkCode = @LinkCode
+								) AS NSCSCPartsMaterialCost
+						)
