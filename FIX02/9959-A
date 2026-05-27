@@ -1,0 +1,60 @@
+DECLARE @LinkCode VARCHAR(30) = 'MBH0096';
+-- DECLARE @LinkCode VARCHAR(30) = '4352';
+
+WITH MaterialCost AS (
+
+    SELECT 
+        /* ================================
+           SC PARTS MATERIAL COST (SCPartsUsed)
+           ================================ */
+        (
+            SELECT 
+                SUM(
+                    CASE 
+                        WHEN SUS.RebuiltPart = 'N'
+                             AND SUS.LinkType = 'MB'
+                             AND SUS.LinkCode = @LinkCode
+                        THEN TRY_CAST(
+                                SBCES.FinalCost(
+                                    CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                                    CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                                    ISNULL(SUS.MmsCost, 0),
+                                    0
+                                ) AS DECIMAL(18,2)
+                            )
+                        ELSE 0 
+                    END
+                )
+            FROM SBCES.ScPartsUsed SUS
+            WHERE SUS.LinkType = 'MB'
+              AND SUS.LinkCode = @LinkCode
+        ) AS SCPartsMaterialCost,
+
+        /* ================================
+           NSC PARTS MATERIAL COST (NscPartsUsed)
+           ================================ */
+        (
+            SELECT 
+                SUM(
+                    CASE 
+                        WHEN NSUS.LinkType = 'MB'
+                             AND NSUS.LinkCode = @LinkCode
+                        THEN TRY_CAST(
+                                SBCES.FinalCost(
+                                    CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)),
+                                    CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)),
+                                    ISNULL(NSUS.Cost, 0),
+                                    0
+                                ) AS DECIMAL(18,2)
+                            )
+                        ELSE 0 
+                    END
+                )
+            FROM SBCES.NscPartsUsed NSUS
+            WHERE NSUS.LinkType = 'MB'
+              AND NSUS.LinkCode = @LinkCode
+        ) AS NSCSCPartsMaterialCost
+)
+
+SELECT *
+FROM MaterialCost;
