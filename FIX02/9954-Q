@@ -1,0 +1,137 @@
+Fix below error in the following :
+Msg 16924, Level 16, State 1, Procedure SBCES.GetLabourCost,  Line 60 [Batch Start Line 2]
+Cursorfetch: The number of variables declared in the INTO list must match that of selected columns.
+
+Messsages 
+Msg 16924, Level 16, State 1, Procedure SBCES.GetLabourCost, Line 60 [Batch Start Line 2]
+Cursorfetch: The number of variables declared in the INTO list must match that of selected columns.
+
+(0 rows affected)
+The 'GetLabourCost' procedure attempted to return a status of NULL, which is not allowed. A status of 0 will be returned instead.
+
+(1 row affected)
+
+(1 row affected)
+
+Completion time: 2026-05-27T15:44:12.8637339-04:00
+
+USE [CES]
+GO
+/****** Object:  StoredProcedure [SBCES].[GetLabourCost]    Script Date: 5/27/2026 3:44:33 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER PROCEDURE [SBCES].[GetLabourCost]
+    (@viIdnum VARCHAR(4000), @viType VARCHAR(4000),
+     @VFinalPrice DECIMAL(20,2) OUTPUT
+)
+AS
+BEGIN
+    DECLARE @SqlStatement AS NVARCHAR(1000);
+    DECLARE @curRBRecRebuiltCode VARCHAR(50);
+    DECLARE @curRBRecQty VARCHAR(50);
+    DECLARE @curRBRecUsage VARCHAR(50);
+    DECLARE @curRBRecLinkCode VARCHAR(50);
+    DECLARE @VLinkCode VARCHAR(30);
+    DECLARE @VPrice DECIMAL(20,10);
+    DECLARE @VRetVal VARCHAR(25);
+    DECLARE @Adjustment DECIMAL(20,10);
+    DECLARE @curLabourRecLabourType VARCHAR(50);
+    DECLARE @curLabourRecCC VARCHAR(50);
+    DECLARE @curLabourRecTask VARCHAR(50);
+    DECLARE @curLabourRecUsage VARCHAR(50);
+    DECLARE @curLabourRecTime VARCHAR(50);
+    DECLARE @curLabourRecRatePerHour NUMERIC(18,2);
+    DECLARE @curLabourRecTimeAddition NUMERIC(18,2);
+    DECLARE @curLabourRecWrenchTime VARCHAR(50);
+
+    DECLARE C_RB_List_To_Prop CURSOR LOCAL FOR
+    SELECT DISTINCT UPPER(SCPartsUsed.LinkCode) AS LinkCode,
+                    SCPartsUsed.QtyReqd AS Qty,
+                    SCPartsUsed.PercentUsage AS Usage,
+                    SCPartsUsed.MMSRebuiltCode AS RebuiltCode
+    FROM SBCES.SCPartsUsed
+    WHERE SCPartsUsed.RebuiltPart = 'Y' AND
+          SCPartsUsed.LinkType = @viType AND
+          UPPER(SCPartsUsed.LinkCode) = UPPER(@viIdnum);
+
+    DECLARE cur_Labour CURSOR LOCAL FOR
+    SELECT EmployeeLabour.LabourDefn AS LabourType,
+           EmployeeLabour.CostCentre AS CC,
+           EmployeeLabour.Task AS Task,
+           REPLACE(EmployeeLabour.Usage,',','.') AS Usage,
+           EmployeeLabour.HrsReqd AS Time,
+           EmployeeSalaries.RatePerHour AS RatePerHour,
+           EmployeeLabour.TimeAddition AS TimeAddition
+         --  SBCES.HHmmTominutes(ISNULL(TRY_CAST(EmployeeLabour.AdjHrs AS DECIMAL(18,2)), 0)) AS WrenchTime
+		   
+    FROM SBCES.EmployeeLabour,
+         SBCES.EmployeeSalaries,
+         SBCES.EmplClass
+    WHERE  EmployeeLabour.LabourDefn = UPPER(EmplClass.LabourDefn) AND
+          EmployeeSalaries.WageGroup = EmplClass.WageGroup AND
+          EmployeeLabour.LinkNumber = @viIdnum 
+		 AND
+          EmployeeLabour.TypeId =  @viType;
+
+    SET @SqlStatement = 'TRUNCATE TABLE SBCES.TempLabourList';
+    EXECUTE sp_executesql @SqlStatement;
+
+    OPEN cur_Labour;
+    FETCH NEXT FROM cur_Labour INTO @curLabourRecLabourType, @curLabourRecCC, @curLabourRecTask, @curLabourRecUsage, @curLabourRecTime, @curLabourRecRatePerHour, @curLabourRecTimeAddition, @curLabourRecWrenchTime;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        INSERT INTO SBCES.TempLabourList VALUES (
+            @curLabourRecLabourType,
+            @curLabourRecCC,
+            @curLabourRecTask,
+            @curLabourRecUsage,
+            SBCES.HHmmToMinutes(@curLabourRecTimeAddition),
+            @curLabourRecRatePerHour,
+            @curLabourRecRatePerHour * SBCES.HHmmToMinutes(@curLabourRecTimeAddition) * @curLabourRecUsage / 6000,
+            CONVERT(DECIMAL(10,2), ROUND((@curLabourRecUsage / 100.0) * SBCES.HHmmToMinutes(@curLabourRecTimeAddition), 2)),
+            @viType,
+            @viIdnum,
+            ROUND((@curLabourRecUsage / 100.0) * SBCES.HHmmToMinutes(@curLabourRecWrenchTime), 2)
+        );
+        FETCH NEXT FROM cur_Labour INTO @curLabourRecLabourType, @curLabourRecCC, @curLabourRecTask, @curLabourRecUsage, @curLabourRecTime, @curLabourRecRatePerHour, @curLabourRecTimeAddition, @curLabourRecWrenchTime;
+    END;
+    CLOSE cur_Labour;
+    DEALLOCATE cur_Labour;
+
+    SELECT @VPrice = COUNT(*) FROM SBCES.SCPartsUsed WHERE
+          SCPartsUsed.RebuiltPart = 'Y' AND
+          SCPartsUsed.LinkType = UPPER(@viType) AND
+          UPPER(SCPartsUsed.LinkCode) = UPPER(@viIdnum);
+
+    IF @VPrice > 0
+    BEGIN
+        OPEN C_RB_List_To_Prop;
+        WHILE 1=1
+        BEGIN
+            FETCH C_RB_List_To_Prop INTO @curRBRecLinkCode, @curRBRecQty, @curRBRecUsage, @curRBRecRebuiltCode;
+            IF @@FETCH_STATUS <> 0 BREAK;
+            SET @Adjustment = @curRBRecQty * CAST(REPLACE(ISNULL(@curRBRecUsage,'0'),',','.') AS DECIMAL(10,2)) / 100;
+            EXEC SBCES.WriteLabour @curRBRecRebuiltCode, @curRBRecQty;
+        END;
+        CLOSE C_RB_List_To_Prop;
+        DEALLOCATE C_RB_List_To_Prop;
+    END;
+
+		SELECT [LabourType]
+		  ,[Cc]
+		  ,[Task]
+		  ,[Usage]
+		  ,[Time]
+		  ,[RatePerHour]
+		  ,[TotalCost]
+		  ,[ExtendedTime]
+		  ,[EstimateType]
+		  ,[EstimateNumber]
+		  ,[WrenchTime]
+	  FROM [CES].[SBCES].[TempLabourList]
+    RETURN @VFinalPrice;
+END;
