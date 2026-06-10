@@ -1,0 +1,171 @@
+CREATE OR ALTER PROCEDURE SBCES.WriteLabour
+(
+      @ViIdnum VARCHAR(30)
+    , @ViAdjustment DECIMAL(18,6)
+)
+AS
+BEGIN
+
+    SET NOCOUNT ON;
+
+    DECLARE @VPrice INT;
+
+    BEGIN TRY
+
+        INSERT INTO SBCES.TempLabourList
+        (
+              LabourType
+            , Cc
+            , Task
+            , Usage
+            , Time
+            , RatePerHour
+            , TotalCost
+            , ExtendedTime
+            , EstimateType
+            , EstimateNumber
+            , WrenchTime
+        )
+        SELECT
+              EL.LabourDefn
+            , EL.CostCentre
+            , EL.Task
+            , CAST(REPLACE(EL.[Usage], ',', '.') AS DECIMAL(18,2))
+            , ROUND(
+                CAST(SBCES.HhmmToMinutes(EL.TimeAddition) AS DECIMAL(18,2))
+                * @ViAdjustment
+              ,0)
+            , ES.RatePerHour
+            ,
+              (ES.RatePerHour / 60.0)
+              *
+              ROUND(
+                    CAST(SBCES.HhmmToMinutes(EL.TimeAddition) AS DECIMAL(18,2))
+                    * @ViAdjustment
+              ,0)
+              *
+              (
+                CAST(REPLACE(EL.[Usage], ',', '.') AS DECIMAL(18,4))
+                / 100.0
+              )
+            ,
+              CAST
+              (
+                ROUND
+                (
+                    (
+                        CAST(REPLACE(EL.[Usage], ',', '.') AS DECIMAL(18,4))
+                        / 100.0
+                    )
+                    *
+                    CAST(SBCES.HhmmToMinutes(EL.TimeAddition) AS DECIMAL(18,2))
+                    *
+                    @ViAdjustment
+                ,0)
+                AS VARCHAR(8)
+              )
+            ,
+              'RB'
+            ,
+              UPPER(@ViIdnum)
+            ,
+              CAST
+              (
+                ROUND
+                (
+                    (
+                        CAST(REPLACE(EL.[Usage], ',', '.') AS DECIMAL(18,4))
+                        / 100.0
+                    )
+                    *
+                    ROUND
+                    (
+                        CAST
+                        (
+                            SBCES.HhmmToMinutes
+                            (
+                                SBCES.HhmmToDecimal(EL.AdjHrs)
+                            ) AS DECIMAL(18,2)
+                        )
+                        * @ViAdjustment
+                    ,0)
+                ,0)
+                AS VARCHAR(25)
+              )
+        FROM SBCES.EmployeeLabour EL
+        INNER JOIN SBCES.EmplClass EC
+            ON UPPER(EL.LabourDefn) = UPPER(EC.LabourDefn)
+        INNER JOIN SBCES.EmployeeSalaries ES
+            ON ES.WageGroup = EC.WageGroup
+        WHERE EL.LinkNumber = @ViIdnum
+          AND EL.TypeId = 'RB';
+
+        ------------------------------------------------------------------
+        -- Recursive Child Rebuilt Parts
+        ------------------------------------------------------------------
+
+        SELECT
+            @VPrice = COUNT(*)
+        FROM SBCES.ScPartsUsed
+        WHERE RebuiltPart = 'Y'
+          AND LinkType = 'RB'
+          AND UPPER(LinkCode) = UPPER(@ViIdnum);
+
+        IF @VPrice > 0
+        BEGIN
+
+            DECLARE
+                  @LinkCode VARCHAR(30)
+                , @Qty DECIMAL(18,6)
+                , @PercentUsage DECIMAL(18,6)
+                , @RebuiltCode VARCHAR(30);
+
+            DECLARE RB_CURSOR CURSOR LOCAL FAST_FORWARD FOR
+
+                SELECT DISTINCT
+                      UPPER(LinkCode)
+                    , CAST(QtyReqd AS DECIMAL(18,6))
+                    , CAST(PercentUsage AS DECIMAL(18,6))
+                    , UPPER(MmsRebuiltCode)
+                FROM SBCES.ScPartsUsed
+                WHERE RebuiltPart = 'Y'
+                  AND LinkType = 'RB'
+                  AND UPPER(LinkCode) = UPPER(@ViIdnum);
+
+            OPEN RB_CURSOR;
+
+            FETCH NEXT FROM RB_CURSOR
+            INTO
+                  @LinkCode
+                , @Qty
+                , @PercentUsage
+                , @RebuiltCode;
+
+            WHILE @@FETCH_STATUS = 0
+            BEGIN
+
+                EXEC SBCES.WriteLabour
+                     @ViIdnum      = @RebuiltCode,
+                     @ViAdjustment = (@Qty * @PercentUsage / 100.0)
+                                     * @ViAdjustment;
+
+                FETCH NEXT FROM RB_CURSOR
+                INTO
+                      @LinkCode
+                    , @Qty
+                    , @PercentUsage
+                    , @RebuiltCode;
+            END
+
+            CLOSE RB_CURSOR;
+            DEALLOCATE RB_CURSOR;
+
+        END
+
+    END TRY
+    BEGIN CATCH
+        THROW;
+    END CATCH
+
+END
+GO
