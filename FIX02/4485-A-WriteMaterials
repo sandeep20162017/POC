@@ -1,0 +1,206 @@
+CREATE OR ALTER PROCEDURE SBCES.WriteMaterials
+(
+      @ViIdnum         VARCHAR(30)
+    , @ViAdjustment    DECIMAL(18,6)
+    , @ViRbReference   VARCHAR(25)
+    , @ViAdjustment2   DECIMAL(18,6)
+)
+AS
+BEGIN
+
+    SET NOCOUNT ON;
+
+    DECLARE @VPrice DECIMAL(20,10);
+
+    BEGIN TRY
+
+        ----------------------------------------------------------------------
+        -- Material Costs
+        ----------------------------------------------------------------------
+
+        INSERT INTO SBCES.TempMaterialsList
+        (
+              AssemblyArea
+            , CostCentre
+            , TotalCost
+            , TaxableCost
+            , RbReference
+            , TotalUnitCost
+        )
+        SELECT
+              ISNULL(CC.Name,'NONE')
+            , ISNULL(M.CostCentre,'0')
+            , CAST(ROUND(M.TotalCost * @ViAdjustment,2) AS VARCHAR(25))
+            , CAST(M.TaxableCost * @ViAdjustment AS VARCHAR(25))
+            , @ViRbReference
+            , CAST(@ViAdjustment2 * M.TotalCost AS VARCHAR(25))
+        FROM
+        (
+            SELECT
+                  A.CostCentre
+                , SUM(A.Cost)      AS TotalCost
+                , SUM(A.TaxCost)   AS TaxableCost
+            FROM
+            (
+                ------------------------------------------------------------------
+                -- Stock Parts
+                ------------------------------------------------------------------
+                SELECT
+                      SPU.CostCentre
+                    ,
+                      CAST(
+                          SBCES.FinalCost(
+                              SPU.PercentUsage,
+                              SPU.QtyReqd,
+                              SPU.MmsCost,
+                              0
+                          ) AS DECIMAL(18,2)
+                      )
+                      -
+                      CAST(
+                          SBCES.FinalCost(
+                              SPU.PercentUsage,
+                              SPU.QtyReqd,
+                              SPU.CoreCost,
+                              0
+                          ) AS DECIMAL(18,2)
+                      ) AS Cost
+                    ,
+                      CAST(
+                          SBCES.FinalCost(
+                              SPU.PercentUsage,
+                              SPU.QtyReqd,
+                              SPU.MmsCost,
+                              0
+                          ) AS DECIMAL(18,2)
+                      ) AS TaxCost
+                FROM SBCES.ScPartsUsed SPU
+                WHERE SPU.LinkCode = UPPER(@ViIdnum)
+                  AND SPU.RebuiltPart = 'N'
+                  AND SPU.LinkType = 'RB'
+
+                UNION ALL
+
+                ------------------------------------------------------------------
+                -- Non Stock Parts
+                ------------------------------------------------------------------
+                SELECT
+                      NSPU.CostCentre
+                    ,
+                      CAST(
+                          SBCES.FinalCost(
+                              NSPU.PercentUsage,
+                              NSPU.QtyReqd,
+                              NSCP.OemPartCost,
+                              0
+                          ) AS DECIMAL(18,2)
+                      )
+                      -
+                      CAST(
+                          SBCES.FinalCost(
+                              NSPU.PercentUsage,
+                              NSPU.QtyReqd,
+                              NSPU.CoreCost,
+                              0
+                          ) AS DECIMAL(18,2)
+                      ) AS Cost
+                    ,
+                      CAST(
+                          SBCES.FinalCost(
+                              NSPU.PercentUsage,
+                              NSPU.QtyReqd,
+                              NSCP.OemPartCost,
+                              0
+                          ) AS DECIMAL(18,2)
+                      ) AS TaxCost
+                FROM SBCES.NscPartsUsed NSPU
+                LEFT JOIN SBCES.NonStockCodedParts NSCP
+                    ON NSCP.Id = NSPU.Id
+                WHERE NSPU.LinkCode = UPPER(@ViIdnum)
+                  AND NSPU.LinkType = 'RB'
+
+            ) A
+            GROUP BY
+                A.CostCentre
+        ) M
+        LEFT JOIN SBCES.CostCentres CC
+            ON CC.CostCentre = M.CostCentre;
+
+        ----------------------------------------------------------------------
+        -- Check For Child Rebuilt Parts
+        ----------------------------------------------------------------------
+
+        SELECT
+            @VPrice = COUNT(*)
+        FROM SBCES.ScPartsUsed
+        WHERE RebuiltPart = 'Y'
+          AND LinkType = 'RB'
+          AND UPPER(LinkCode) = UPPER(@ViIdnum);
+
+        ----------------------------------------------------------------------
+        -- Recursive Processing
+        ----------------------------------------------------------------------
+
+        IF @VPrice > 0
+        BEGIN
+
+            DECLARE
+                  @LinkCode      VARCHAR(30)
+                , @Qty           DECIMAL(18,6)
+                , @PercentUsage  DECIMAL(18,6)
+                , @RebuiltCode   VARCHAR(30);
+
+            DECLARE RB_CURSOR CURSOR LOCAL FAST_FORWARD FOR
+
+                SELECT DISTINCT
+                      UPPER(LinkCode)
+                    , CAST(QtyReqd AS DECIMAL(18,6))
+                    , CAST(PercentUsage AS DECIMAL(18,6))
+                    , UPPER(MmsRebuiltCode)
+                FROM SBCES.ScPartsUsed
+                WHERE RebuiltPart = 'Y'
+                  AND LinkType = 'RB'
+                  AND UPPER(LinkCode) = UPPER(@ViIdnum);
+
+            OPEN RB_CURSOR;
+
+            FETCH NEXT FROM RB_CURSOR
+            INTO
+                  @LinkCode
+                , @Qty
+                , @PercentUsage
+                , @RebuiltCode;
+
+            WHILE @@FETCH_STATUS = 0
+            BEGIN
+
+                EXEC SBCES.WriteMaterials
+                     @ViIdnum       = @RebuiltCode,
+                     @ViAdjustment  = (@Qty * @PercentUsage / 100.0)
+                                        * @ViAdjustment,
+                     @ViRbReference = @ViRbReference,
+                     @ViAdjustment2 = @ViAdjustment2
+                                        * (@Qty * @PercentUsage / 100.0);
+
+                FETCH NEXT FROM RB_CURSOR
+                INTO
+                      @LinkCode
+                    , @Qty
+                    , @PercentUsage
+                    , @RebuiltCode;
+            END
+
+            CLOSE RB_CURSOR;
+            DEALLOCATE RB_CURSOR;
+
+        END
+
+    END TRY
+    BEGIN CATCH
+
+        THROW;
+
+    END CATCH
+
+END
+GO
