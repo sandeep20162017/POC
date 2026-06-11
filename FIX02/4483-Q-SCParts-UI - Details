@@ -1,0 +1,480 @@
+I have ASP.NET core web application. Uses Telerik asp.net core controllers and custom client template forms. . PopUP - clientTempate. I need your assistance to give users a rich UI experience.
+Flow is like :
+VehicleIndex (grid). When user clicks on Add New Estimate or Estimate # Pop Up is displayed  (_Vehpopup.cshtml)
+
+
+(_Vehpopup.cshtml) has tabs. User can Add or Edit.  Each tab has its own Telerik  grid. 
+One of the tab is Stock Coded Parts. It has is own grid (ScPartsUsed.cshtml)and and popup  client template (StockCodedPartsViewModel.cshtml)
+
+_Vehpopup.cshtml is rendered correctly. I need you assistance to render opo up on pop  up StockCodedPartsViewModel.cshtml correctly. With Nice Ui/UX experience. MAx utilization of space and adjust width and height.  inScPartsEdit javascript sets width and height for StockCodedPartsViewModel.cshtml
+
+Application is in production. I only need mininimal UI and css changes. Keep  samecolun nmaes and other logic. Not scrollable.
+
+Thoughts : Instead of html form can we use kendoo window? Just make the changes for StockCodedPartsViewModel.cshml. Give me any css changes.  app uses white back ground. No dark of gaudy colors. Just back and white.
+
+My code ;
+Vehicle Index :
+@(Html.Kendo().Grid<VehicleViewModel>()
+    .Name("VehicleGrid")
+    .Columns(c =>
+    {
+        c.Bound(v => v.VehicleListId)
+            .Title("Estimate #")
+           @*  .Filterable(f => f.UI("numericFilter")) *@
+            .ClientTemplate("<a class='estimate-link' onclick='window.openEstimatePopup(#=VehicleListId#)'>#=VehicleListId#</a>")
+            .Width(120);....
+.ToolBar(tb => tb.ClientTemplate(
+    "<button class='k-button k-button-icontext' onclick='window.openEstimatePopup(0)'>" +
+    "<span class='k-icon k-i-plus'></span>Add New Vehicle Estimate</button>" +
+...
+JS:
+function onScPartsEdit(e) {
+
+    // --- 1. Hard guard so UID can't kill the popup ---
+    if (!e.model) {
+        console.warn("Edit event triggered without a model. Ignoring.");
+        return;
+    }
+
+    var wnd = e.container.data("kendoWindow"); //outer popupsize
+    wnd.setOptions({
+       width : "450px",
+       height : "600px",
+
+        scrollable: false,     //
+        title: e.model.isNew() ? "Add New Stock Coded Part" : "Edit Stock Coded Part",
+        modal: true,
+        resizable: false
+    });
+
+ 
+
+    e.container.closest(".k-window").addClass("scparts-popup-style");
+
+    // track current model for combobox select logic
+    currentScPartsModel = e.model;
+.....
+
+window.openEstimatePopup = function (vehicleId) {
+    console.warn('inside window.openEstimatePopup');
+    var win = $("#estimatePopup").data("kendoWindow");
+    window.currentVehicleId = vehicleId;
+    pendingChanges = false; 
+
+    win.title(vehicleId === 0 ? "Add New Estimate" : "Vehicle Estimate #" + vehicleId);
+    win.center().open();
+
+
+
+    // Load vehicle tab first
+    $("#vehicleTabContent").empty();
+    $("#vehicleTabContent").load('@Url.Action("GetVehicleById", "Vehicles")', { id: vehicleId }, function () {
+        // Initialize Kendo UI widgets in the loaded content
+        kendo.init($("#vehicleTabContent"));
+
+        // Set values for Kendo widgets after initialization
+        setTimeout(function () {
+            // Set values for ComboBoxEditor fields
+            setComboBoxValues();
+            initVehiclePopupForm();
+            wireVehicleForm();
+        }, 300);
+
+        if (vehicleId !== 0) {
+            //enableAllTabs();
+
+            var ts = $("#estimateTabs").data("kendoTabStrip");
+            for (var i = 1; i <= 8; i++) {
+                console.log('enabling tabs');
+                ts.enable(ts.tabGroup.children().eq(i), true);
+            }
+
+        }
+    });
+};
+// ── Load partial tabs
+window.loadTabContent = function (elementId, url, data, callback) {
+    $("#" + elementId).load(url, data, function () {
+        if (typeof callback === "function") callback();
+    });
+};
+
+// ── Tab selection handler
+window.onTabSelect = function (e) {
+    var index = $(e.item).index();
+
+    var tabsConfig = [
+        { id: "vehicleTabContent", url: '@Url.Action("GetVehicleById", "Vehicles")' },
+        // { id: "partsTabContent", url: "/Vehicles/MaterialCostSummaryPartial" },
+        // { id: "labourTabContent", url: "/Vehicles/LabourHourSummaryPartial" },
+        // { id: "allLabourTabContent", url: "/Vehicles/AllLabourInRBPartial" },
+        { id: "labourDetailsTabContent", url: "/Vehicles/LabourDetailsPartial" },
+        { id: "stockCodedPartsTabContent", url: "/Vehicles/ScDetailsPartial" },
+        { id: "nonStockCodedPartsTabContent", url: "/Vehicles/NonStockPartsPartial" },
+        { id: "rebuiltPartsTabContent", url: "/Vehicles/RebuiltPartsPartial" },
+        { id: "finalEstimateTabContent", url: "/Vehicles/TotalCostPartial" }
+    ];
+
+    var tab = tabsConfig[index];
+    if (!tab) return;
+
+    //  Always reload tab content from server
+    $("#" + tab.id).empty();
+    loadTabContent(
+        tab.id,
+        tab.url,
+        { id: window.currentVehicleId, gridType: "VehicleGrid" }
+    );
+};
+// ===== Vehicle Estimate Popup =====
+$("#estimatePopup").kendoWindow({
+    modal: true,
+    width: "1100px",
+    height: "540px",
+    resizable: false,
+    scrollable: false,
+    title: "Estimate",
+    visible: false,
+    actions: ["Close"],
+    open: function () {
+        var ts = $("#estimateTabs").data("kendoTabStrip");
+        if (ts) {
+            ts.select(0); //  reset to Vehicle tab every time
+        }
+
+        //  clear all tab contents to avoid stale grids
+        $("#vehicleTabContent,  #labourDetailsTabContent, #stockCodedPartsTabContent, #nonStockCodedPartsTabContent, #rebuiltPartsTabContent, #finalEstimateTabContent").empty();
+      //   $("#vehicleTabContent, #partsTabContent, #labourTabContent, #allLabourTabContent, #labourDetailsTabContent, #stockCodedPartsTabContent, #nonStockCodedPartsTabContent, #rebuiltPartsTabContent, #finalEstimateTabContent").empty();
+
+        //  load vehicle form fresh
+    console.warn('loadVehicleForm - B : window.currentVehicleId :', window.currentVehicleId);
+    loadVehicleForm(window.currentVehicleId, function () {
+        setPopupReadonly([
+            "VehicleListId", "VehSeriesCode", "ProjDesc", "Make", "VehModel", "Year",
+            "Engine", "Transmission", "Differential", "Sopnumber",
+            "ModifiedLastBy", "ModifiedLastDate"
+        ]);
+
+        setPopupEditable(["NumOfVehicles"]);
+    });
+
+        //////////
+    },
+    close: function (e) {
+        if (pendingChanges) {
+            e.preventDefault();
+            showCloseConfirmation();
+        }
+    }
+});
+
+_VehPopUp.cshtml :
+@model BCES.Models.Vehicle.VehicleViewModel
+
+<div class="scparts-popup-style">
+   @*  <div class="section-title">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate VehPOp" : $"Estimate #{Model.VehicleListId}")</div> *@
+    <div class="popup-action">
+        <button id="btnSave" class="k-button k-primary" type="button">Update</button>
+        <button id="btnCancelVehicle" class="k-button" type="button">Cancel</button>
+        <button id="btnHelpMakeVsBuy"
+                class="k-button k-button-icontext"
+                type="button"
+                onclick="showHelpPopup('/help/makevsbuypopuphelp.html')">
+
+            <span class="k-icon k-i-question"></span>
+            Help
+        </button>
+       @*  <button id="btnSave" type="button">
+            <span class="vehicle-btn-icon">✓</span> Save
+        </button>
+        <button id="btnCancelVehicle"  type="button">
+            <span class="vehicle-btn-icon">✕</span> Cancel
+        </button> *@
+    </div>
+</div>
+
+<div class="form-container">
+    <form id="vehicleForm">
+        @Html.HiddenFor(m => m.VehicleListId)
+        @Html.Hidden("formMode", Model.VehicleListId == 0 ? "Add" : "Edit", new { id = "formMode" })
+
+        <!-- Vehicle Information Section -->
+        <div class="section-title">Vehicle Information</div>
+
+        <!-- Row 1: Estimate #, Vehicle Series, Quantity -->
+        <div class="form-row">
+           @*  <div class="form-group  double-width">
+                @Html.LabelFor(m => m.VehicleListId, "Estimate #", new { @class = "form-label" })
+                @Html.EditorFor(m => m.VehicleListId, new { htmlAttributes = new { @class = "k-textbox", style = "width:100%" } })
+
+            </div> *@
+
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.VehSeriesCode, "Vehicle Series", new { @class = "form-label required-label" })
+                @Html.EditorFor(m => m.VehSeriesCode, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control required-cell" },
+                { "required-cell", "required" }
+                }
+
+                    })
+            </div>
+
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.NumOfVehicles, "# Of Vehicles", new { @class = "form-label required-label" })
+                @(Html.Kendo().NumericTextBox()
+                    .Name("NumOfVehicles")
+                    .Format("0")
+                    .Min(1)
+                    .Value(Model.NumOfVehicles)
+                    .HtmlAttributes(new { @class = "form-control", required = "required" })
+                    )
+            </div>
+        </div>
+
+        <!-- Row 2: Description, SOP Number -->
+        <div class="form-row">
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.ProjDesc, "Description", new { @class = "form-label required-label" })
+                @Html.EditorFor(m => m.ProjDesc, "VehDescriptionComboBox", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control required-cell" },
+                { "required", "required" }
+                }
+                    })
+               
+            </div> 
+
+            <div class="form-group double-width">
+                @Html.LabelFor(m => m.Sopnumber, "SOP Number", new { @class = "form-label" })
+                @Html.EditorFor(m => m.Sopnumber, new { htmlAttributes = new { @class = "k-textbox", style = "width:100%" } })
+          
+            </div>
+        </div>
+
+        <!-- Specifications Section -->
+        <div class="section-title">Specifications</div>
+
+        <!-- Row 3: Make, Model, Year -->
+        <div class="form-row">
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.Make, "Make", new { @class = "form-label" })
+                @Html.EditorFor(m => m.Make, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control" }
+                }
+                    })
+            </div>
+
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.VehModel, "Model", new { @class = "form-label" })
+                @Html.EditorFor(m => m.VehModel, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control" }
+                }
+                    })
+            </div>
+
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.Year, "Year", new { @class = "form-label" })
+                @(Html.Kendo().NumericTextBox()
+                    .Name("Year")
+                    .Format("0")
+                    .Min(1900)
+                    .Max(2100)
+                    .Value(Model.Year)
+                    .HtmlAttributes(new { @class = "form-control" })
+                    )
+            </div>
+        </div>
+
+        <!-- Row 4: Engine, Transmission, Differential -->
+        <div class="form-row">
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.Engine, "Engine", new { @class = "form-label" })
+                @Html.EditorFor(m => m.Engine, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control" }
+                }
+                    })
+            </div>
+
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.Transmission, "Transmission", new { @class = "form-label" })
+                @Html.EditorFor(m => m.Transmission, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control" }
+                }
+                    })
+            </div>
+
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.Differential, "Differential", new { @class = "form-label" })
+                @Html.EditorFor(m => m.Differential, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control" }
+                }
+                    })
+            </div>
+        </div>
+        <!-- History -->
+        <div class="section-title">History</div>
+        <div class="form-row">
+            <div class="form-group double-width">
+                @Html.LabelFor(m => m.ModifiedLastBy, "Modified By", new { @class = "form-label" })
+                @(Html.Kendo().TextBoxFor(m => m.ModifiedLastBy).HtmlAttributes(new { @readonly = "readonly" }))
+            </div>
+            <div class="form-group double-width">
+                @Html.LabelFor(m => m.ModifiedLastDate, "Modified Date", new { @class = "form-label" })
+                @(Html.Kendo().TextBoxFor(m => m.ModifiedLastDate).HtmlAttributes(new { @readonly = "readonly" }))
+            </div>
+        </div>
+        
+    </form>
+</div>
+
+ScPartsUsed.cshtml:
+ .Columns(columns =>
+ {
+     columns.Bound(c => c.Id).Title("Id").Width(50);
+   
+     columns.Bound(c => c.MMSStockCode)
+                     .Title("Stock Code")
+                     .HtmlAttributes(new { @class = "stock-code-cell", data_field = "MMSStockCode" })
+                     .IncludeInMenu(false)
+                     .ClientTemplate("<a href='javascript:void(0)' class='stock-code-cell'>#= MMSStockCode #</a>")
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                     .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                     .EditorTemplateName("ScComboBox")
+                     .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains)))
+                     
+                     .Width(180);
+....
+
+StockCodedPartsViewModel.cshtml :
+@model BCES.Models.Parts.StockCodedPartsViewModel
+
+@{
+    var mdl = Model ?? new BCES.Models.Parts.StockCodedPartsViewModel();
+    bool isNew = false;
+    if (mdl.Id == 0)
+    {
+        isNew = true;
+    }
+    
+}
+
+<div id="notification"></div>
+<div class="popup-container scparts-popup-style">
+    <div class="popup-actions">
+        <button class="k-button k-primary" type="button" onclick="saveScPartPopup()">Update</button>
+        <button class="k-button" type="button" onclick="cancelScPartPopup()">Cancel</button>
+    </div>
+
+    <div class="form-container">
+        <form id="scPartsForm">
+            @Html.HiddenFor(m => m.LinkCode)
+
+            <!-- Part Information -->
+            <div class="section-title">Part Information</div>
+            <div class="form-row">
+                @* <div class="form-group double-width">
+                    @Html.LabelFor(m => m.Id, "Id", new { @class = "form-label required-label" })
+                    @Html.EditorFor(m => m.Id, "ScComboBox", new { htmlAttributes = new { required = "required" } })
+                </div> *@
+                <div class="form-group double-width">
+                    @Html.LabelFor(m => m.MMSStockCode, "Stock Code", new { @class = "form-label required-label" })
+                    @Html.EditorFor(m => m.MMSStockCode, "ScComboBox", new { htmlAttributes = new { required = "required" } })
+                </div>
+                <div class="form-group double-width">
+                    @Html.LabelFor(m => m.PartType, "Part Type", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.PartType).HtmlAttributes(new { @readonly = "readonly" }))
+                </div>
+                
+                <div class="form-group  double-width">
+                    @Html.LabelFor(m => m.CoreCost, "Core Cost", new { @class = "form-label" })
+                    @(Html.Kendo().NumericTextBoxFor(m => m.CoreCost).Min(0).Format("c2"))
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group full-width">
+                    @Html.LabelFor(m => m.DetailedDesc, "Part Description", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.DetailedDesc).HtmlAttributes(new { @readonly = "readonly" }))
+                </div>
+            </div>
+
+            <!-- Supplier Information -->
+            <div class="section-title">Supplier/Cost Information</div>
+            <div class="form-row">
+                <div class="form-group double-width">
+                    @Html.LabelFor(m => m.CC, "Cost Centre", new { @class = "form-label required-label" })
+                    @Html.EditorFor(m => m.CC, "ComboBoxEditor", new { htmlAttributes = new { required = "required" } })
+                </div>
+                <div class="form-group double-width">
+                    @Html.LabelFor(m => m.OrigSupplierNum, "Supplier Num", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.OrigSupplierNum).HtmlAttributes(new { @readonly = "readonly" }))
+                </div>
+                <div class="form-group double-width">
+                    @Html.LabelFor(m => m.OrigSupplierName, "Supplier Name", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.OrigSupplierName).HtmlAttributes(new { @readonly = "readonly" }))
+                </div>
+            </div>
+
+            <!-- Cost Information -->
+           @*  <div class="section-title">Cost Information</div> *@
+            <div class="form-row">
+                <div class="form-group">
+                    @Html.LabelFor(m => m.UnitCost, "Unit Cost", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.UnitCost).HtmlAttributes(new { @readonly = "readonly" }))
+                   
+                </div>
+                <div class="form-group">
+                    @Html.LabelFor(m => m.Qty, "Quantity", new { @class = "form-label required-label" })
+                    @(Html.Kendo().NumericTextBoxFor(m => m.Qty).Min(0).Format("n0").HtmlAttributes(new { required = "required" }))
+                </div>
+                <div class="form-group">
+                    @Html.LabelFor(m => m.Percentage, "%", new { @class = "form-label required-label" })
+                    @(Html.Kendo().NumericTextBoxFor(m => m.Percentage).Format("n0").Min(0).Max(100).HtmlAttributes(new { required = "required" }))
+                </div>
+                <div class="form-group">
+                    @Html.LabelFor(m => m.TotalCost, "Total", new { @class = "form-label" })
+                    @(Html.Kendo().NumericTextBoxFor(m => m.TotalCost)
+                        .Format("c2")
+                        .Min(0)
+                        .HtmlAttributes(new { @readonly = "readonly" }))
+                </div>
+               @*  <div class="form-group double-width">
+                    @Html.LabelFor(m => m.TotalCost, "Total Cost", new { @class = "form-label" })
+                    @(Html.Kendo().NumericTextBoxFor(m => m.TotalCost).Format("c2").HtmlAttributes(new { @readonly = "readonly" }))
+                </div> *@
+            </div>
+
+            <!-- History -->
+            <div class="section-title">History</div>
+            <div class="form-row">
+                <div class="form-group double-width">
+                    @Html.LabelFor(m => m.LastModifiedBy, "Modified By", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.LastModifiedBy).HtmlAttributes(new { @readonly = "readonly" }))
+                </div>
+                <div class="form-group double-width">
+                    @Html.LabelFor(m => m.LastModifiedDate, "Modified Date", new { @class = "form-label" })
+                    @(Html.Kendo().TextBoxFor(m => m.LastModifiedDate).HtmlAttributes(new { @readonly = "readonly" }))
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
