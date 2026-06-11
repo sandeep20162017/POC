@@ -1,0 +1,276 @@
+CREATE OR ALTER PROCEDURE SBCES.GetMaterialCost
+(
+      @ViIdnum        VARCHAR(30)
+    , @ViType         VARCHAR(10)
+    , @MaterialCost   DECIMAL(18,2) OUTPUT
+)
+AS
+BEGIN
+
+    SET NOCOUNT ON;
+
+    DECLARE
+          @VPrice       INT
+        , @VKitTotal    DECIMAL(20,10)
+        , @KitCount     INT;
+
+    BEGIN TRY
+
+        ------------------------------------------------------------------
+        -- Oracle:
+        -- EXECUTE IMMEDIATE 'TRUNCATE TABLE TEMP_MATERIALS_LIST';
+        ------------------------------------------------------------------
+
+        TRUNCATE TABLE SBCES.TempMaterialsList;
+
+        ------------------------------------------------------------------
+        -- Direct Material Records
+        ------------------------------------------------------------------
+
+        INSERT INTO SBCES.TempMaterialsList
+        (
+              AssemblyArea
+            , CostCentre
+            , TotalCost
+            , TaxableCost
+            , RbReference
+            , TotalUnitCost
+        )
+        SELECT
+              ISNULL(C.Name,'NONE')
+            , ISNULL(A.CostCentre,'0')
+            , CAST(ISNULL(SUM(A.Cost),0) AS VARCHAR(25))
+            , CAST(ISNULL(SUM(A.TaxCost),0) AS VARCHAR(25))
+            , @ViIdnum
+            , CAST(ISNULL(SUM(A.Cost),0) AS VARCHAR(25))
+        FROM
+        (
+            ----------------------------------------------------------
+            -- Stock Parts
+            ----------------------------------------------------------
+
+            SELECT
+                  SPU.CostCentre
+                ,
+                  CAST
+                  (
+                      SBCES.FinalCost
+                      (
+                          SPU.PercentUsage,
+                          SPU.QtyReqd,
+                          SPU.MmsCost,
+                          0
+                      )
+                      AS DECIMAL(18,2)
+                  )
+                  -
+                  CAST
+                  (
+                      SBCES.FinalCost
+                      (
+                          SPU.PercentUsage,
+                          SPU.QtyReqd,
+                          SPU.CoreCost,
+                          0
+                      )
+                      AS DECIMAL(18,2)
+                  ) AS Cost
+                ,
+                  CAST
+                  (
+                      SBCES.FinalCost
+                      (
+                          SPU.PercentUsage,
+                          SPU.QtyReqd,
+                          SPU.MmsCost,
+                          0
+                      )
+                      AS DECIMAL(18,2)
+                  ) AS TaxCost
+            FROM SBCES.ScPartsUsed SPU
+            WHERE SPU.LinkCode = UPPER(@ViIdnum)
+              AND SPU.RebuiltPart = 'N'
+              AND SPU.LinkType = UPPER(@ViType)
+
+            UNION ALL
+
+            ----------------------------------------------------------
+            -- Non Stock Parts
+            ----------------------------------------------------------
+
+            SELECT
+                  NSPU.CostCentre
+                ,
+                  CAST
+                  (
+                      SBCES.FinalCost
+                      (
+                          NSPU.PercentUsage,
+                          NSPU.QtyReqd,
+                          NSCP.OemPartCost,
+                          0
+                      )
+                      AS DECIMAL(18,2)
+                  )
+                  -
+                  CAST
+                  (
+                      SBCES.FinalCost
+                      (
+                          NSPU.PercentUsage,
+                          NSPU.QtyReqd,
+                          NSPU.CoreCost,
+                          0
+                      )
+                      AS DECIMAL(18,2)
+                  ) AS Cost
+                ,
+                  CAST
+                  (
+                      SBCES.FinalCost
+                      (
+                          NSPU.PercentUsage,
+                          NSPU.QtyReqd,
+                          NSCP.OemPartCost,
+                          0
+                      )
+                      AS DECIMAL(18,2)
+                  ) AS TaxCost
+            FROM SBCES.NscPartsUsed NSPU
+            LEFT JOIN SBCES.NonStockCodedParts NSCP
+                ON NSCP.Id = NSPU.Id
+            WHERE NSPU.LinkCode = UPPER(@ViIdnum)
+              AND NSPU.LinkType = UPPER(@ViType)
+
+        ) A
+        INNER JOIN SBCES.CostCentres C
+            ON C.CostCentre = A.CostCentre
+        GROUP BY
+              A.CostCentre
+            , C.Name;
+
+        ------------------------------------------------------------------
+        -- Check For Child Rebuilt Parts
+        ------------------------------------------------------------------
+
+        SELECT
+            @VPrice = COUNT(*)
+        FROM SBCES.ScPartsUsed
+        WHERE RebuiltPart = 'Y'
+          AND LinkType = UPPER(@ViType)
+          AND UPPER(LinkCode) = UPPER(@ViIdnum);
+
+        IF @VPrice > 0
+        BEGIN
+
+            DECLARE
+                  @Qty DECIMAL(18,6)
+                , @PercentUsage DECIMAL(18,6)
+                , @RebuiltCode VARCHAR(30);
+
+            DECLARE RB_CURSOR CURSOR LOCAL FAST_FORWARD FOR
+
+                SELECT DISTINCT
+                      CAST(QtyReqd AS DECIMAL(18,6))
+                    , CAST(REPLACE(ISNULL(PercentUsage,'0'),',','.') AS DECIMAL(18,6))
+                    , MmsRebuiltCode
+                FROM SBCES.ScPartsUsed
+                WHERE RebuiltPart = 'Y'
+                  AND LinkType = UPPER(@ViType)
+                  AND UPPER(LinkCode) = UPPER(@ViIdnum);
+
+            OPEN RB_CURSOR;
+
+            FETCH NEXT FROM RB_CURSOR
+            INTO
+                  @Qty
+                , @PercentUsage
+                , @RebuiltCode;
+
+            WHILE @@FETCH_STATUS = 0
+            BEGIN
+
+                EXEC SBCES.WriteMaterials
+                     @ViIdnum       = @RebuiltCode,
+                     @ViAdjustment  = @Qty * @PercentUsage / 100.0,
+                     @ViRbReference = @RebuiltCode,
+                     @ViAdjustment2 = 1;
+
+                FETCH NEXT FROM RB_CURSOR
+                INTO
+                      @Qty
+                    , @PercentUsage
+                    , @RebuiltCode;
+            END
+
+            CLOSE RB_CURSOR;
+            DEALLOCATE RB_CURSOR;
+
+        END
+
+        ------------------------------------------------------------------
+        -- BUS Kit Logic
+        ------------------------------------------------------------------
+
+        SELECT
+            @KitCount = COUNT(*)
+        FROM SBCES.OemKitsTotal2
+        WHERE Link = @ViIdnum;
+
+        IF UPPER(@ViType) = 'BUS'
+           AND @KitCount > 0
+        BEGIN
+
+            SELECT
+                @VKitTotal = TotalKitCost
+            FROM SBCES.OemKitsTotal2
+            WHERE Link = @ViIdnum;
+
+            INSERT INTO SBCES.TempMaterialsList
+            (
+                  AssemblyArea
+                , CostCentre
+                , TotalCost
+                , TaxableCost
+                , RbReference
+                , TotalUnitCost
+            )
+            VALUES
+            (
+                  'KITS'
+                , '05H7'
+                , CAST(@VKitTotal AS VARCHAR(25))
+                , CAST(@VKitTotal AS VARCHAR(25))
+                , @ViIdnum
+                , CAST(@VKitTotal AS VARCHAR(25))
+            );
+
+        END
+
+        ------------------------------------------------------------------
+        -- Final Total
+        ------------------------------------------------------------------
+
+        SELECT
+            @MaterialCost =
+            ROUND
+            (
+                ISNULL
+                (
+                    SUM
+                    (
+                        CAST(ISNULL(TotalCost,'0') AS DECIMAL(18,2))
+                    )
+                ,0)
+            ,2)
+        FROM SBCES.TempMaterialsList;
+
+    END TRY
+    BEGIN CATCH
+
+        THROW;
+
+    END CATCH
+
+END
+GO
