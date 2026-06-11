@@ -1,0 +1,148 @@
+CREATE OR ALTER PROCEDURE SBCES.RptRbpCost
+(
+      @ViRbNum      VARCHAR(30)
+    , @ViLinkType   VARCHAR(10)
+    , @TotalCost    DECIMAL(20,2) OUTPUT
+)
+AS
+BEGIN
+
+    SET NOCOUNT ON;
+
+    DECLARE
+          @VPrice           DECIMAL(20,10) = 0
+        , @LabourSubtotal   DECIMAL(20,10) = 0
+        , @LabourOverhead   DECIMAL(20,10) = 0
+        , @LabourTotal      DECIMAL(20,10) = 0
+        , @MaterialsTotal   DECIMAL(20,10) = 0
+        , @CoreCostStr      VARCHAR(30)
+        , @CoreCost         DECIMAL(20,10) = 0
+        , @MaterialCost     DECIMAL(20,10)
+        , @LabourCost       DECIMAL(20,10);
+
+    BEGIN TRY
+
+        ------------------------------------------------------------------
+        -- Get Material Cost
+        ------------------------------------------------------------------
+
+        EXEC SBCES.GetMaterialCost
+             @ViIdnum      = @ViRbNum,
+             @ViType       = @ViLinkType,
+             @MaterialCost = @MaterialCost OUTPUT;
+
+        SET @VPrice = ISNULL(@MaterialCost,0);
+
+        SELECT
+            @MaterialsTotal =
+            ISNULL
+            (
+                SUM
+                (
+                    CAST(ISNULL(TotalCost,'0') AS DECIMAL(20,10))
+                )
+            ,0)
+        FROM SBCES.TempMaterialsList;
+
+        ------------------------------------------------------------------
+        -- Get Labour Cost
+        ------------------------------------------------------------------
+
+        EXEC SBCES.GetLabourCost
+             @ViIdnum     = @ViRbNum,
+             @ViType      = @ViLinkType,
+             @LabourCost  = @LabourCost OUTPUT;
+
+        SET @VPrice = ISNULL(@LabourCost,0);
+
+        SELECT
+            @LabourSubtotal =
+            ISNULL
+            (
+                SUM
+                (
+                    CAST(ISNULL(TotalCost,'0') AS DECIMAL(20,10))
+                )
+            ,0)
+        FROM SBCES.TempLabourList;
+
+        ------------------------------------------------------------------
+        -- Labour Overhead
+        ------------------------------------------------------------------
+
+        SELECT
+            @LabourOverhead =
+            ISNULL
+            (
+                MAX
+                (
+                    CAST
+                    (
+                        REPLACE([Value],',','.')
+                        AS DECIMAL(20,10)
+                    )
+                ) * @LabourSubtotal
+            ,0)
+        FROM SBCES.CesSettings
+        WHERE Parameter = 'OVERHEAD';
+
+        ------------------------------------------------------------------
+        -- Labour Total
+        ------------------------------------------------------------------
+
+        SET @LabourTotal =
+            @LabourSubtotal + @LabourOverhead;
+
+        ------------------------------------------------------------------
+        -- Core Charge
+        ------------------------------------------------------------------
+
+        SELECT
+            @CoreCostStr = ISNULL(CoreCharge,'0')
+        FROM SBCES.RbMasterList
+        WHERE UPPER(RebuiltStockNum) = UPPER(@ViRbNum);
+
+        IF @CoreCostStr IS NULL
+           OR LTRIM(RTRIM(@CoreCostStr)) = ''
+        BEGIN
+            SET @CoreCost = 0;
+        END
+        ELSE
+        BEGIN
+            SET @CoreCost =
+                TRY_CAST
+                (
+                    REPLACE
+                    (
+                        REPLACE(@CoreCostStr,'$','')
+                    ,',','.')
+                    AS DECIMAL(20,10)
+                );
+
+            SET @CoreCost = ISNULL(@CoreCost,0);
+        END
+
+        ------------------------------------------------------------------
+        -- Final Cost
+        ------------------------------------------------------------------
+
+        SET @VPrice =
+            ROUND
+            (
+                ISNULL
+                (
+                    @MaterialsTotal
+                    - @CoreCost
+                    + @LabourTotal
+                ,0)
+            ,2);
+
+        SET @TotalCost = ISNULL(@VPrice,0);
+
+    END TRY
+    BEGIN CATCH
+        THROW;
+    END CATCH
+
+END
+GO
