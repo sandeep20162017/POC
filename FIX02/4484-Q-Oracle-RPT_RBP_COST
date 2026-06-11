@@ -1,0 +1,77 @@
+FUNCTION RPT_RBP_COST
+    (vi_rbnum  IN RB_MASTERLIST.rebuilt_stock_num%TYPE,
+     vi_link_type IN SC_PARTS_USED.link_type%TYPE) RETURN NUMBER IS
+
+     emesg varchar2(30);
+     vo_total_cost_ret NUMBER(20,10);
+     labour_subtotal NUMBER(20,10);
+     labour_overhead NUMBER(20,10);
+     labour_total NUMBER(20,10);
+     nscp_total NUMBER(20,10);
+     scp_total NUMBER(20,10);
+     rbp_total NUMBER(20,10);
+     materials_total NUMBER(20,10);
+     core_cost_str VARCHAR2(30);
+     core_cost NUMBER(20,10);
+     V_PRICE number (20,10);
+
+BEGIN
+
+--Get the total material cost
+    V_PRICE := NVL(get_material_cost(vi_rbnum,vi_link_type),0);
+
+      SELECT
+        NVL(SUM(TOTAL_COST),0) AS "TOTAL COST"
+      INTO
+        MATERIALS_TOTAL
+      FROM
+        TEMP_MATERIALS_LIST;
+
+--get the total labour costs
+    V_PRICE := NVL(get_labour_cost(vi_rbnum,vi_link_type),0);
+
+
+        SELECT
+           NVL(SUM(TOTAL_COST),0) AS "TOTAL COST"
+        INTO
+            labour_subtotal
+        FROM
+            TEMP_LABOUR_LIST;
+
+--retrieve the labour overhead amount
+    SELECT
+        nvl( (MAX( to_number(replace(CES_SETTINGS.value,',','.'))) * labour_subtotal),0)
+    INTO
+        labour_overhead
+    FROM
+        CES_SETTINGS
+    WHERE
+        CES_SETTINGS.parameter = 'OVERHEAD';
+
+    -- Calculate the Labour Total with overhead
+
+    labour_total := labour_subtotal + labour_overhead;
+
+    SELECT
+        nvl(core_charge,'0')
+    INTO
+        core_cost_str
+    FROM
+        RB_MASTERLIST
+    WHERE
+        UPPER(RB_MASTERLIST.rebuilt_stock_num) = vi_rbnum;
+
+    -- Convert the Core Cost into a number
+    -- vhou 2010-06-07 Add replace function to get rid of '$' synbol in the data
+    IF core_cost_str = '' OR core_cost_str = ' ' OR core_cost_str IS NULL THEN
+        core_cost := 0;
+    ELSE
+        core_cost := to_number(REPLACE(REPLACE(core_cost_str, ',', '.'),'$',''));
+    END IF;
+
+    -- Calculate the Total Cost of the rebuilt part
+    V_PRICE:= round(nvl(((materials_total - core_cost + labour_total )),0), 2) ;
+
+    RETURN nvl(V_PRICE,0);
+
+END RPT_RBP_COST;
