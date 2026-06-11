@@ -1,0 +1,127 @@
+CREATE OR ALTER PROCEDURE SBCES.InternalRbPrice
+AS
+BEGIN
+
+    SET NOCOUNT ON;
+
+    BEGIN TRY
+
+        ------------------------------------------------------------------
+        -- Oracle:
+        -- TRUNCATE TEMP_RBP_COST
+        ------------------------------------------------------------------
+
+        TRUNCATE TABLE SBCES.TempRbpCost;
+
+        ------------------------------------------------------------------
+        -- Variables
+        ------------------------------------------------------------------
+
+        DECLARE
+              @RebuiltStockNum VARCHAR(30)
+            , @DetailedDesc VARCHAR(250)
+            , @BuyNewCost VARCHAR(30)
+            , @Active DECIMAL(1,0)
+            , @Keyword VARCHAR(250)
+            , @TotalPrice DECIMAL(25,10);
+
+        ------------------------------------------------------------------
+        -- Cursor
+        ------------------------------------------------------------------
+
+        DECLARE RB_PART_NUMBERS CURSOR LOCAL FAST_FORWARD FOR
+
+            SELECT
+                  RB.RebuiltStockNum
+                , RB.DetailedDesc
+                , ISNULL
+                  (
+                      REPLACE
+                      (
+                          REPLACE
+                          (
+                              LTRIM(RTRIM(CAST(ROUND(SCP.MmsNewCost,2) AS VARCHAR(30))))
+                          ,',','.')
+                      ,'$','')
+                  ,'0.00')
+                , RB.Active
+                , RB.Keyword
+            FROM SBCES.RbMasterList RB
+            LEFT JOIN SBCES.StockCodedParts SCP
+                ON RB.MmsStockCode = SCP.MmsStockCode
+            ORDER BY RB.RebuiltStockNum DESC;
+
+        OPEN RB_PART_NUMBERS;
+
+        FETCH NEXT FROM RB_PART_NUMBERS
+        INTO
+              @RebuiltStockNum
+            , @DetailedDesc
+            , @BuyNewCost
+            , @Active
+            , @Keyword;
+
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+
+            ------------------------------------------------------------------
+            -- Equivalent to:
+            -- TOTAL_PRICE := RPT_RBP_COST(...)
+            ------------------------------------------------------------------
+
+            EXEC SBCES.RptRbpCost
+                 @ViRbNum    = UPPER(@RebuiltStockNum),
+                 @ViLinkType = 'RB',
+                 @TotalCost  = @TotalPrice OUTPUT;
+
+            ------------------------------------------------------------------
+            -- Insert
+            ------------------------------------------------------------------
+
+            INSERT INTO SBCES.TempRbpCost
+            (
+                  RbNumber
+                , TotalCost
+                , DetailedDesc
+                , ExternalCost
+                , Active
+                , Keyword
+            )
+            VALUES
+            (
+                  @RebuiltStockNum
+                , @TotalPrice
+                , @DetailedDesc
+                , @BuyNewCost
+                , @Active
+                , @Keyword
+            );
+
+            FETCH NEXT FROM RB_PART_NUMBERS
+            INTO
+                  @RebuiltStockNum
+                , @DetailedDesc
+                , @BuyNewCost
+                , @Active
+                , @Keyword;
+
+        END
+
+        CLOSE RB_PART_NUMBERS;
+        DEALLOCATE RB_PART_NUMBERS;
+
+    END TRY
+    BEGIN CATCH
+
+        IF CURSOR_STATUS('local','RB_PART_NUMBERS') >= -1
+        BEGIN
+            CLOSE RB_PART_NUMBERS;
+            DEALLOCATE RB_PART_NUMBERS;
+        END;
+
+        THROW;
+
+    END CATCH
+
+END
+GO
