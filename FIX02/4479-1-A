@@ -1,0 +1,415 @@
+@{
+    ViewData["Title"] = "Total Cost Summary";
+    string gridName = $"LabourDetailsGrid_{ViewBag.PartNum}";
+}
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Total Cost Summary Report</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+        /* Print Styles */
+        @@media print {
+            body {
+                font-family: Arial, Helvetica, sans-serif;
+                background: white;
+                margin: 0;
+                padding: 20px;
+            }
+            .no-print {
+                display: none !important;
+            }
+            .report-container {
+                box-shadow: none;
+                padding: 0;
+                margin: 0;
+            }
+            .cost-row {
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }
+            button, .print-button {
+                display: none;
+            }
+        }
+
+        /* Screen Styles */
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .report-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px 30px 30px 30px;
+        }
+
+        .report-header {
+            text-align: center;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #2c3e50;
+        }
+
+        .report-header h1 {
+            margin: 0 0 5px 0;
+            color: #2c3e50;
+            font-size: 24px;
+        }
+
+        .report-header .subtitle {
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: bold;
+            background-color: #34495e;
+            color: white;
+            padding: 8px 12px;
+            margin: 20px 0 15px 0;
+            border-radius: 4px;
+        }
+
+        .cost-row {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+            padding: 8px 5px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .cost-row.total-row {
+            border-bottom: 2px solid #bdc3c7;
+            font-weight: bold;
+        }
+
+        .cost-col {
+            flex: 1;
+            padding: 0 8px;
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap;
+        }
+
+        .cost-col .label {
+            font-weight: bold;
+            margin-right: 8px;
+            min-width: 120px;
+            color: #2c3e50;
+        }
+
+        .cost-col .value {
+            font-weight: normal;
+            color: #2c3e50;
+        }
+
+        .indent-1 {
+            margin-left: 30px;
+        }
+
+        .grand-total {
+            background-color: #f8f9fa;
+            font-size: 16px;
+            font-weight: bold;
+            padding: 12px;
+            margin-top: 20px;
+            border-top: 3px double #2c3e50;
+        }
+
+        .print-button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-bottom: 20px;
+            float: right;
+        }
+
+        .print-button:hover {
+            background-color: #2980b9;
+        }
+
+        .clearfix::after {
+            content: "";
+            clear: both;
+            display: table;
+        }
+
+        .value-bold {
+            font-weight: bold;
+        }
+
+        /* Responsive */
+        @@media (max-width: 768px) {
+            .cost-col {
+                flex: 100%;
+                margin-bottom: 8px;
+            }
+            .cost-col .label {
+                min-width: 140px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="report-container">
+    <div class="clearfix">
+        <button class="print-button no-print" onclick="window.print();">🖨️ Print Report</button>
+    </div>
+
+    <div class="report-header">
+        <h1>Total Cost Summary Report</h1>
+        <div class="subtitle">Estimate ID: @ViewBag.PartNum &nbsp;|&nbsp; Generated: @DateTime.Now.ToString("yyyy-MM-dd HH:mm")</div>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loadingIndicator" style="text-align:center; padding:50px;">
+        <span>Loading cost data...</span>
+    </div>
+
+    <!-- Cost Summary Content - Report Layout -->
+    <div id="costSummaryContent" style="display: none;">
+        <!-- SECTION: Material Cost -->
+        <div class="section-title">📦 MATERIAL COST</div>
+
+        <!-- Row 1: Parts Total = SC Parts + NSC Parts + RB Cost = Total Cost (no Tax) -->
+        <div class="cost-row">
+            <div class="cost-col">
+                <span class="label">Parts Total:</span>
+                <span class="value" id="partsTotalDisplay">$0.00</span>
+            </div>
+            <div class="cost-col">
+                <span class="label">SC Parts:</span>
+                <span class="value" id="scPartsDisplay">$0.00</span>
+            </div>
+            <div class="cost-col">
+                <span class="label">NSC Parts:</span>
+                <span class="value" id="nscPartsDisplay">$0.00</span>
+            </div>
+            <div class="cost-col">
+                <span class="label">RB Cost:</span>
+                <span class="value" id="rbCostDisplay">$0.00</span>
+            </div>
+            <div class="cost-col">
+                <span class="label">Total Cost (no Tax):</span>
+                <span class="value value-bold" id="materialNoTaxDisplay">$0.00</span>
+            </div>
+        </div>
+
+        <!-- Row 2: Tax & Total Cost with Tax -->
+        <div class="cost-row">
+            <div class="cost-col">
+                <span class="label">Tax Amount:</span>
+                <span class="value" id="materialTaxDisplay">$0.00</span>
+            </div>
+            <div class="cost-col">
+                <span class="label">Total Cost with Tax:</span>
+                <span class="value value-bold" id="materialWithTaxDisplay">$0.00</span>
+            </div>
+        </div>
+
+        <!-- Row 3 (Duplicate row for consistency as per requirement - showing same breakdown again) -->
+        <div class="cost-row">
+            <div class="cost-col">
+                <span class="label">Parts Total:</span>
+                <span class="value" id="partsTotalDisplay2">$0.00</span>
+            </div>
+            <div class="cost-col">
+                <span class="label">SC Parts:</span>
+                <span class="value" id="scPartsDisplay2">$0.00</span>
+            </div>
+            <div class="cost-col">
+                <span class="label">NSC Parts:</span>
+                <span class="value" id="nscPartsDisplay2">$0.00</span>
+            </div>
+            <div class="cost-col">
+                <span class="label">RB Cost:</span>
+                <span class="value" id="rbCostDisplay2">$0.00</span>
+            </div>
+            <div class="cost-col">
+                <span class="label">Total Cost (no Tax):</span>
+                <span class="value value-bold" id="materialNoTaxDisplay2">$0.00</span>
+            </div>
+        </div>
+
+        <!-- SECTION: Labour Cost -->
+        <div class="section-title">🔧 LABOUR COST</div>
+
+        <!-- Row 6: Fringe -->
+        <div class="cost-row">
+            <div class="cost-col">
+                <span class="label">Fringe:</span>
+                <span class="value" id="labourFringeDisplay">$0.00</span>
+            </div>
+        </div>
+
+        <!-- Row 7: Blended Fringe & Benefits -->
+        <div class="cost-row">
+            <div class="cost-col">
+                <span class="label">Blended Fringe & Benefits:</span>
+                <span class="value" id="blendedFringeCostDisplay">$0.00</span>
+            </div>
+        </div>
+
+        <!-- Row 7 (duplicate in requirement but we'll show Overhead on its own row as per spec) -->
+        <div class="cost-row">
+            <div class="cost-col">
+                <span class="label">Overhead:</span>
+                <span class="value" id="labourOverheadDisplay">$0.00</span>
+            </div>
+        </div>
+
+        <!-- Row 8: Total Labour Cost -->
+        <div class="cost-row total-row">
+            <div class="cost-col">
+                <span class="label">Total Labour Cost:</span>
+                <span class="value value-bold" id="totalLabourCostDisplay">$0.00</span>
+            </div>
+        </div>
+
+        <!-- SECTION: Total Cost -->
+        <div class="section-title">💰 TOTAL COST</div>
+
+        <!-- Row 9: Grand Total (With Tax) -->
+        <div class="grand-total">
+            <div class="cost-col">
+                <span class="label">GRAND TOTAL (With Tax):</span>
+                <span class="value value-bold" id="totalWithTaxDisplay">$0.00</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- No data message -->
+    <div id="noDataMessage" class="no-data-message" style="display: none; text-align:center; padding:40px;">
+        <div style="font-size:48px;">⚠️</div>
+        <p style="font-size:16px;">No cost data available for this estimate</p>
+        <button id="retryButton" class="k-button k-primary" style="margin-top:15px; padding:8px 20px;">Retry Loading</button>
+    </div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+    // Store parameters from ViewBag
+    var partNum = '@ViewBag.PartNum';
+    var gridType = '@ViewBag.GridType';
+
+    // Build URL with proper parameter encoding
+    var totalCostDataUrl = '@Url.Action("GetTotalCostInEstimates", "TotalCost")' +
+                           '?id=' + encodeURIComponent(partNum) +
+                           '&gridType=' + encodeURIComponent(gridType);
+
+    $(document).ready(function() {
+        fetchTotalCostData();
+        $("#retryButton").click(function() {
+            $("#noDataMessage").hide();
+            $("#loadingIndicator").show();
+            $("#costSummaryContent").hide();
+            fetchTotalCostData();
+        });
+    });
+
+    function fetchTotalCostData() {
+        console.log("Fetching data from:", totalCostDataUrl);
+        $.ajax({
+            url: totalCostDataUrl,
+            type: 'GET',
+            dataType: 'json',
+            success: function(response) {
+                if (response && response.Data && response.Data.length > 0) {
+                    var costData = response.Data[0];
+                    console.log("Cost data received:", costData);
+                    populateCostSummary(costData);
+                    $("#loadingIndicator").hide();
+                    $("#costSummaryContent").show();
+                    $("#noDataMessage").hide();
+                } else {
+                    console.log("No data found");
+                    showNoDataMessage();
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error("Error fetching cost data:", error);
+                showNoDataMessage();
+            }
+        });
+    }
+
+    function populateCostSummary(costData) {
+        // Helper to get numeric values
+        function getVal(value) {
+            return (value !== null && value !== undefined) ? parseFloat(value) : 0;
+        }
+
+        var scParts = getVal(costData.SCPartsMaterialCost);
+        var nscParts = getVal(costData.NSCSCPartsMaterialCost);
+        var rbParts = getVal(costData.RBPartsMaterialCost);
+        var materialNoTax = getVal(costData.MaterialTotalCostNoTax);
+        var materialTax = getVal(costData.MaterialTotalTaxAmount);
+        var materialWithTax = getVal(costData.MaterialTotalWithTax);
+
+        var labourFringe = getVal(costData.LabourFringe);
+        var blendedFringeCost = getVal(costData.BlendedFringeBenefitCost);
+        var labourOverhead = getVal(costData.LabourOverhead);
+        var totalLabour = getVal(costData.FinalLabourCost);
+        var totalWithTax = getVal(costData.TotalWithTax);
+
+        // Format currency
+        function formatMoney(val) {
+            return '$' + val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        // Helper to set both displays (Row1 and Row3)
+        function setText(id, value) {
+            $(id).text(formatMoney(value));
+        }
+
+        // Row 1 & Row 3 values (same data for both rows as per requirement)
+        setText("#partsTotalDisplay", materialNoTax);
+        setText("#scPartsDisplay", scParts);
+        setText("#nscPartsDisplay", nscParts);
+        setText("#rbCostDisplay", rbParts);
+        setText("#materialNoTaxDisplay", materialNoTax);
+
+        setText("#partsTotalDisplay2", materialNoTax);
+        setText("#scPartsDisplay2", scParts);
+        setText("#nscPartsDisplay2", nscParts);
+        setText("#rbCostDisplay2", rbParts);
+        setText("#materialNoTaxDisplay2", materialNoTax);
+
+        // Row 2
+        setText("#materialTaxDisplay", materialTax);
+        setText("#materialWithTaxDisplay", materialWithTax);
+
+        // Labour section
+        setText("#labourFringeDisplay", labourFringe);
+        setText("#blendedFringeCostDisplay", blendedFringeCost);
+        setText("#labourOverheadDisplay", labourOverhead);
+        setText("#totalLabourCostDisplay", totalLabour);
+
+        // Grand Total
+        setText("#totalWithTaxDisplay", totalWithTax);
+    }
+
+    function showNoDataMessage() {
+        $("#loadingIndicator").hide();
+        $("#costSummaryContent").hide();
+        $("#noDataMessage").show();
+    }
+</script>
+
+</body>
+</html>
