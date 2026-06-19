@@ -1,0 +1,235 @@
+ALTER TABLE SBCES.TextData
+ALTER COLUMN TextKey varchar(30) NULL;
+GO
+---------
+ALTER TABLE SBCES.MmsCostTemp
+ALTER COLUMN MmsNewCost numeric(15,5) NULL;
+GO
+-------------------------------------
+```sql
+CREATE OR ALTER PROCEDURE SBCES.IfsMmsSync
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    BEGIN TRY
+
+        --------------------------------------------------------------------
+        -- Backup StockCodedParts
+        --------------------------------------------------------------------
+        TRUNCATE TABLE SBCES.StockCodedPartsBackup;
+
+        INSERT INTO SBCES.StockCodedPartsBackup
+        (
+            MmsStockCode,
+            CorePartNumber,
+            PartType,
+            JobNumber,
+            DetailedDesc,
+            DateEntered,
+            ItemRefNumber,
+            OverheadType,
+            CoreCharge,
+            PartCost,
+            LastModifiedDate,
+            LastModifiedBy,
+            AddedBy,
+            MmsNewCost,
+            OemPartCost,
+            MmsSyncDate,
+            OrigSupplierNum,
+            OrigSupplierName
+        )
+        SELECT
+            RTRIM(ISNULL(MmsStockCode,'')),
+            ISNULL(CorePartNumber,''),
+            ISNULL(PartType,''),
+            ISNULL(JobNumber,''),
+            ISNULL(DetailedDesc,''),
+            ISNULL(DateEntered,''),
+            ISNULL(ItemRefNumber,''),
+            ISNULL(OverheadType,0),
+            ISNULL(CoreCharge,0),
+            ISNULL(PartCost,0),
+            LastModifiedDate,
+            LastModifiedBy,
+            ISNULL(AddedBy,''),
+            ISNULL(MmsNewCost,0),
+            ISNULL(OemPartCost,0),
+            MmsSyncDate,
+            ISNULL(OrigSupplierNum,''),
+            ISNULL(OrigSupplierName,'')
+        FROM SBCES.StockCodedParts;
+
+        --------------------------------------------------------------------
+        -- Clear tables
+        --------------------------------------------------------------------
+        TRUNCATE TABLE SBCES.StockCodedParts;
+        TRUNCATE TABLE SBCES.PriceNoTax;
+        TRUNCATE TABLE SBCES.LastPriceNoTax;
+
+        --------------------------------------------------------------------
+        -- Populate StockCodedParts
+        --------------------------------------------------------------------
+        INSERT INTO SBCES.StockCodedParts
+        (
+            MmsStockCode,
+            PartType,
+            MmsNewCost,
+            DetailedDesc,
+            MmsSyncDate,
+            OrigSupplierName,
+            OrigSupplierNum
+        )
+        SELECT DISTINCT
+            RTRIM(a.PartNumber),
+            LEFT(a.DescriptionPm,30),
+            dbo.GetNewCost(
+                ISNULL(a.LevelTotalCostLaPm,0),
+                a.LevelTotalCostWaPm
+            ),
+            b.PartXdescEdLine,
+            GETDATE(),
+            ISNULL(RTRIM(b.BusinessName),''),
+            ISNULL(b.VendorPartNumber,'')
+        FROM SBCES.PartMaster a
+        LEFT JOIN
+        (
+            SELECT
+                A.PrintSeq,
+                A.PartNumber,
+                A.BusinessName,
+                A.VendorPartNumber,
+                A.PartXdescEdLine
+            FROM SBCES.VendorPartDesc A
+            INNER JOIN
+            (
+                SELECT
+                    PartNumber AS Pn,
+                    MAX(PrintSeq) AS Seq
+                FROM SBCES.VendorPartDesc
+                WHERE VendorPartNumber <> ' '
+                  AND BusinessName NOT LIKE '%SUPERSEDED%'
+                GROUP BY PartNumber
+            ) B
+            ON RTRIM(A.PartNumber)=RTRIM(B.Pn)
+            AND A.PrintSeq=B.Seq
+        ) b
+        ON RTRIM(a.PartNumber)=RTRIM(b.PartNumber)
+        WHERE a.ProductCodePm NOT LIKE '%PLUM%';
+
+        --------------------------------------------------------------------
+        -- MMS_COST_TEMP
+        --------------------------------------------------------------------
+        TRUNCATE TABLE SBCES.MmsCostTemp;
+
+        INSERT INTO SBCES.MmsCostTemp
+        (
+            MmsNewCode,
+            MmsNewCost
+        )
+        SELECT
+            MmsStockCode,
+            MmsNewCost
+        FROM SBCES.StockCodedParts
+        WHERE ISNULL(MmsNewCost,0)=0;
+
+        UPDATE t
+        SET t.MmsNewCost = b.MmsNewCost
+        FROM SBCES.MmsCostTemp t
+        INNER JOIN SBCES.StockCodedPartsBackup b
+            ON RTRIM(t.MmsNewCode)=RTRIM(b.MmsStockCode);
+
+        UPDATE s
+        SET s.MmsNewCost = t.MmsNewCost
+        FROM SBCES.StockCodedParts s
+        INNER JOIN SBCES.MmsCostTemp t
+            ON RTRIM(s.MmsStockCode)=RTRIM(t.MmsNewCode);
+
+        --------------------------------------------------------------------
+        -- NON_STOCK_CODED_PARTS
+        --------------------------------------------------------------------
+        INSERT INTO SBCES.NonStockCodedParts
+        (
+            OrigSupplierName,
+            OrigSupplierNum,
+            DetailedDesc,
+            Keyword,
+            DateEntered
+        )
+        SELECT
+            RTRIM(a.BusinessName),
+            a.VendorPartNumber,
+            RTRIM(a.PartXdescEdLine),
+            RTRIM(b.PartType),
+            GETDATE()
+        FROM SBCES.VendorPartDesc a,
+             SBCES.StockCodedParts b,
+             (
+                SELECT DISTINCT RTRIM(OrigSupplierNum) AS OrigSupplierNum
+                FROM SBCES.NonStockCodedParts
+             ) c
+        WHERE RTRIM(a.PartNumber)=RTRIM(b.MmsStockCode)
+          AND a.VendorPartNumber <> ''
+          AND RTRIM(a.VendorPartNumber) <> c.OrigSupplierNum;
+
+        --------------------------------------------------------------------
+        -- SC_OEMKITS_TEXT_DATA
+        --------------------------------------------------------------------
+        TRUNCATE TABLE SBCES.ScOemkitsTextData;
+
+        INSERT INTO SBCES.ScOemkitsTextData
+        (
+            MmsNewCode,
+            TextData
+        )
+        SELECT
+            b.MmsStockCode,
+            a.TextLineTx
+        FROM SBCES.TextData a
+        INNER JOIN SBCES.StockCodedParts b
+            ON RTRIM(a.TextKey)=RTRIM(b.MmsStockCode)
+        WHERE a.TextType='PM5P';
+
+        --------------------------------------------------------------------
+        -- Replace Oracle cursor with set-based update
+        --------------------------------------------------------------------
+        UPDATE spu
+        SET spu.MmsCost = scp.MmsNewCost
+        FROM SBCES.ScPartsUsed spu
+        INNER JOIN SBCES.StockCodedParts scp
+            ON RTRIM(spu.MmsStockCode)=RTRIM(scp.MmsStockCode)
+        WHERE spu.RebuiltPart='N';
+
+        --------------------------------------------------------------------
+        -- KitsMasterlist
+        --------------------------------------------------------------------
+        UPDATE k
+        SET k.EstimatedCost = s.MmsNewCost
+        FROM SBCES.KitsMasterlist k
+        INNER JOIN SBCES.StockCodedParts s
+            ON RTRIM(k.PartNumber)=RTRIM(s.MmsStockCode);
+
+    END TRY
+
+    BEGIN CATCH
+
+        DECLARE
+            @ErrorMessage NVARCHAR(4000),
+            @ErrorNumber INT,
+            @ErrorSeverity INT,
+            @ErrorState INT;
+
+        SELECT
+            @ErrorMessage = ERROR_MESSAGE(),
+            @ErrorNumber = ERROR_NUMBER(),
+            @ErrorSeverity = ERROR_SEVERITY(),
+            @ErrorState = ERROR_STATE();
+
+        THROW @ErrorNumber, @ErrorMessage, @ErrorState;
+
+    END CATCH
+
+END
+GO
+```
