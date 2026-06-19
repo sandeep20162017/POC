@@ -1,0 +1,248 @@
+create or replace PROCEDURE ifs_mms_sync IS
+
+V_LINK_CODE VARCHAR(30);
+--V_LINK_CODE NUMBER;
+V_PRICE number (15,5); --hold temperary dollar amounts trhoughout the function
+err_num NUMBER; --holds the error number if an error should occur
+err_msg VARCHAR2(100);  --holds teh error message should an error occur
+
+
+--Creates a cursor with a list of rebuilt part #'s entered in the application
+CURSOR C_RB_LIST
+    IS
+    SELECT upper(rtrim(rebuilt_stock_num))
+    from RB_MasterList;
+
+-- Creates a cursor of all the stock coded parts used in all the estimates,
+-- exludes stock codes which represent rebuilt parts
+CURSOR C_SC_PARTS_LIST
+    IS
+    SELECT distinct mms_stock_code
+    from sc_parts_used
+    where rebuilt_part = 'N';
+
+-- Start MMSSYNC
+begin
+
+begin
+EXECUTE IMMEDIATE 'TRUNCATE TABLE STOCK_CODED_PARTS_BACKUP';
+end;
+
+begin
+insert into STOCK_CODED_PARTS_BACKUP ( MMS_STOCK_CODE , CORE_PART_NUMBER , PART_TYPE , JOB_NUMBER , DETAILED_DESC
+      , DATE_ENTERED , ITEM_REF_NUMBER , OVERHEADTYPE , CORE_CHARGE , PART_COST
+      , LAST_MODIFIED_DATE , LAST_MODIFIED_BY , ADDED_BY , MMS_NEW_COST , OEM_PART_COST
+      , MMS_SYNC_DATE, ORIG_SUPPLIER_NUM, ORIG_SUPPLIER_NAME ) select
+      trim(nvl(mms_stock_code,' ')), nvl(core_part_number,' '), nvl(part_type,' '), nvl(job_number,' '),
+       nvl(detailed_desc,' '), nvl(date_entered,' ') , nvl(item_ref_number,' '), nvl(overheadtype,0),
+       nvl(core_charge,0), nvl(part_cost,0),last_modified_date, last_modified_by,
+       nvl(added_by,' '), nvl(mms_new_cost,0), nvl(oem_part_cost,0), mms_sync_date,
+       nvl(orig_supplier_num,' '), nvl(orig_supplier_name,' ')
+      from STOCK_CODED_PARTS;
+      commit;
+    EXCEPTION
+    WHEN OTHERS THEN RAISE;
+        err_num := SQLCODE;
+        err_msg := SUBSTR(SQLERRM, 1, 100);
+        dbms_output.put_line('ERROR: insert into STOCK_CODED_PARTS_BACKUP');
+        raise_application_error(err_num, err_msg , FALSE);
+        rollback;
+end;
+
+begin
+EXECUTE IMMEDIATE 'truncate TABLE STOCK_CODED_PARTS';
+end;
+
+begin
+EXECUTE IMMEDIATE 'truncate TABLE PRICENOTAX';
+end;
+
+begin
+EXECUTE IMMEDIATE 'truncate TABLE LASTPRICENOTAX';
+end;
+/*
+begin
+insert into PRICENOTAX (MMS_STOCK_CODE, PRICE, DATE_LAST_ACTIVITY,DESCRIPTION, VENDOR_PART_NUMBER) SELECT trim(Order_Master.ORDER_PART_NUMBER_OM) ,PO_Item.unit_price,  PO_Item.date_last_activity, PO_Item.part_decription, PO_Item.vendor_part_number FROM "PO_Item" PO_Item, "Order_Master" Order_Master WHERE (trim(PO_Item.order_number) = trim(Order_Master.order_number) AND trim(PO_Item.order_line_no) = trim(Order_Master.order_line) and (Order_Master.order_number like 'PB%'
+OR Order_Master.order_number like 'BR%' OR Order_Master.order_number like 'PP%' or Order_Master.order_number like 'PC%' or Order_Master.order_number like 'PM%')); --grab unique part numbers from table last_buy_price
+      commit;
+    EXCEPTION
+    WHEN OTHERS THEN RAISE;
+        err_num := SQLCODE;
+        err_msg := SUBSTR(SQLERRM, 1, 100);
+        dbms_output.put_line('ERROR: insert into PRICENOTAX');
+        raise_application_error(err_num, err_msg , FALSE);
+        rollback;
+
+end;
+
+Begin
+insert into LASTPRICENOTAX (MMS_STOCK_CODE, PRICE) Select a.mms_stock_code, min(b.price) from (select MAX (date_last_activity) as last_date, mms_stock_code
+from PRICENOTAX group by mms_stock_code) a, PRICENOTAX b where (trim(a.mms_stock_code) = trim(b.mms_stock_code) and trim(a.last_date) = trim(b.date_last_activity)) group by a.mms_stock_code;
+    commit;
+    EXCEPTION
+    WHEN OTHERS THEN RAISE;
+        err_num := SQLCODE;
+        err_msg := SUBSTR(SQLERRM, 1, 100);
+        dbms_output.put_line('ERROR: insert into LASTPRICENOTAX');
+        raise_application_error(err_num, err_msg , FALSE);
+        rollback;
+end;
+
+*/
+
+
+
+--Take away the first parameter in the  getnewfunction() edit the getnewcost function to accept 2 param instead of 3, replace the LASTPRICENOTAX table with the
+begin
+insert into STOCK_CODED_PARTS (MMS_STOCK_CODE,PART_TYPE,MMS_NEW_COST,DETAILED_DESC,MMS_SYNC_DATE, ORIG_SUPPLIER_NAME ,ORIG_SUPPLIER_NUM)
+     select distinct trim(a.part_number), substr(a.description_pm,1,30) as description_pm,
+        GetNewCost(nvl(a.level_total_cost_la_pm, 0), a.level_total_cost_wa_pm),
+        b.part_xdesc_ed_line, sysdate,nvl(rtrim(b.business_name), ' '),nvl(b.vendor_part_number, ' ') from PART_MASTER a, (select A.PRINT_SEQ, A.part_number, A.business_name, A.vendor_part_number, a.part_xdesc_ed_line from VENDOR_PART_DESC A, (SELECT part_number as pn, max(print_seq) as seq
+  FROM VENDOR_PART_DESC where vendor_part_number <> ' ' and business_name not like '%SUPERSEDED%' group by part_number) b where rtrim(a.part_number) = rtrim(b.pn) and a.print_seq = b.seq   ) b where rtrim(a.part_number) = rtrim(b.part_number(+))  and a.product_code_pm not like '%PLUM%';
+      commit;
+   EXCEPTION
+    WHEN OTHERS THEN RAISE;
+        err_num := SQLCODE;
+        err_msg := SUBSTR(SQLERRM, 1, 100);
+        dbms_output.put_line('ERROR: insert into STOCK_CODED_PARTS 1st');
+        raise_application_error(err_num, err_msg , FALSE);
+        rollback;
+
+end;
+
+
+begin
+EXECUTE IMMEDIATE 'truncate TABLE MMS_COST_TEMP';
+end;
+
+begin
+insert into MMS_COST_TEMP select MMS_STOCK_CODE, MMS_NEW_COST from STOCK_CODED_PARTS where MMS_NEW_COST is NULL or MMS_NEW_COST = 0;
+      commit;
+    EXCEPTION
+    WHEN OTHERS THEN RAISE;
+        err_num := SQLCODE;
+        err_msg := SUBSTR(SQLERRM, 1, 100);
+        dbms_output.put_line('ERROR: insert into MMS_COST_TEMP 1st');
+        raise_application_error(err_num, err_msg , FALSE);
+        rollback;
+end;
+
+begin
+update MMS_COST_TEMP SET MMS_NEW_COST = (SELECT MMS_NEW_COST FROM STOCK_CODED_PARTS_BACKUP WHERE rtrim(MMS_COST_TEMP.MMS_NEW_CODE) = rtrim(STOCK_CODED_PARTS_BACKUP.MMS_STOCK_CODE)) WHERE EXISTS (SELECT MMS_NEW_COST FROM STOCK_CODED_PARTS_BACKUP WHERE rtrim(MMS_COST_TEMP.MMS_NEW_CODE) = rtrim(STOCK_CODED_PARTS_BACKUP.MMS_STOCK_CODE));
+      commit;
+    EXCEPTION
+    WHEN OTHERS THEN RAISE;
+        err_num := SQLCODE;
+        err_msg := SUBSTR(SQLERRM, 1, 100);
+        dbms_output.put_line('ERROR: insert into MMS_COST_TEMP 2nd');
+        raise_application_error(err_num, err_msg , FALSE);
+        rollback;
+end;
+
+
+begin
+update STOCK_CODED_PARTS SET MMS_NEW_COST = (SELECT MMS_NEW_COST FROM MMS_COST_TEMP WHERE STOCK_CODED_PARTS.MMS_STOCK_CODE = MMS_COST_TEMP.MMS_NEW_CODE) WHERE EXISTS (SELECT MMS_NEW_COST FROM MMS_COST_TEMP WHERE rtrim(STOCK_CODED_PARTS.MMS_STOCK_CODE) = rtrim(MMS_COST_TEMP.MMS_NEW_CODE));
+     commit;
+    EXCEPTION
+    WHEN OTHERS THEN RAISE;
+        err_num := SQLCODE;
+        err_msg := SUBSTR(SQLERRM, 1, 100);
+        dbms_output.put_line('ERROR: insert into STOCK_CODED_PARTS 2nd');
+        raise_application_error(err_num, err_msg , FALSE);
+        rollback;
+end;
+
+begin
+insert into NON_STOCK_CODED_PARTS(ORIG_SUPPLIER_NAME,ORIG_SUPPLIER_NUM,DETAILED_DESC,KEYWORD,DATE_ENTERED) SELECT rtrim(a.business_name) as business_name,a.vendor_part_number, rtrim(a.part_xdesc_ed_line),rtrim(b.part_type),sysdate FROM VENDOR_PART_DESC a, STOCK_CODED_PARTS b, (select distinct rtrim(ORIG_SUPPLIER_NUM) AS ORIG_SUPPLIER_NUM from NON_STOCK_CODED_PARTS)  c where rtrim(a.part_number) = rtrim(b.MMS_STOCK_CODE) and a.vendor_part_number <> '' and rtrim(a.vendor_part_number) <> c.ORIG_SUPPLIER_NUM;
+      commit;
+    EXCEPTION
+    WHEN OTHERS THEN RAISE;
+        err_num := SQLCODE;
+        err_msg := SUBSTR(SQLERRM, 1, 100);
+        dbms_output.put_line('ERROR: insert into NON_STOCK_CODED_PARTS');
+        raise_application_error(err_num, err_msg , FALSE);
+        rollback;
+end;
+
+begin
+EXECUTE IMMEDIATE 'truncate table SC_OEMKITS_TEXT_DATA';
+end;
+
+begin
+insert into SC_OEMKITS_TEXT_DATA(mms_new_code,text_data) select b.mms_stock_code, a.text_line_tx from TEXT_DATA a, STOCK_CODED_PARTS b where rtrim(a.text_key) = rtrim(b.mms_stock_code) and a.text_type like 'PM5P';
+
+      commit;
+    EXCEPTION
+    WHEN OTHERS THEN RAISE;
+        err_num := SQLCODE;
+        err_msg := SUBSTR(SQLERRM, 1, 100);
+        dbms_output.put_line('ERROR: insert into SC_OEMKITS_TEXT_DATA');
+        raise_application_error(err_num, err_msg , FALSE);
+        rollback;
+end;
+
+
+
+begin
+open C_SC_PARTS_LIST;
+LOOP
+    FETCH C_SC_PARTS_LIST
+    INTO V_LINK_CODE;
+    EXIT WHEN C_SC_PARTS_LIST%NOTFOUND;
+
+SELECT count(*) INTO V_PRICE FROM STOCK_CODED_PARTS WHERE rtrim(mms_stock_code) = rtrim(V_LINK_CODE);
+
+if V_PRICE > 0 then
+    SELECT nvl(mms_new_cost,0) INTO V_PRICE FROM STOCK_CODED_PARTS WHERE rtrim(mms_stock_code) = rtrim(V_LINK_CODE);
+    update sc_parts_used set mms_cost = V_PRICE  where rebuilt_part = 'N' and rtrim(mms_stock_code) = rtrim(V_LINK_CODE);
+    commit;
+end if;
+
+END LOOP;
+
+CLOSE C_SC_PARTS_LIST;
+
+    EXCEPTION
+    WHEN OTHERS THEN RAISE;
+        err_num := SQLCODE;
+        err_msg := SUBSTR(SQLERRM, 1, 100);
+        dbms_output.put_line('ERROR: insert into C_SC_PARTS_LIST');
+        raise_application_error(err_num, err_msg , FALSE);
+        rollback;
+end;
+/*
+begin
+open C_RB_LIST;
+LOOP
+    FETCH C_RB_LIST
+    INTO V_LINK_CODE;
+    EXIT WHEN C_RB_LIST%NOTFOUND;
+    update_prices(v_link_code);
+    commit;
+end loop;
+CLOSE C_RB_LIST;
+
+EXCEPTION
+
+    WHEN OTHERS THEN
+    raise_application_error(sqlcode, sqlerrm);
+    dbms_output.put_line(substr(TO_CHAR(SQLCODE) || ': '||SQLERRM,1,255));
+    rollback;
+end;
+*/
+begin
+update KITS_MASTERLIST SET ESTIMATED_COST = (SELECT MMS_NEW_COST FROM STOCK_CODED_PARTS WHERE STOCK_CODED_PARTS.MMS_STOCK_CODE = KITS_MASTERLIST.part_number) where EXISTS (SELECT MMS_NEW_COST FROM STOCK_CODED_PARTS WHERE rtrim(STOCK_CODED_PARTS.MMS_STOCK_CODE) = rtrim(KITS_MASTERLIST.part_number));
+     commit;
+    EXCEPTION
+    WHEN OTHERS THEN RAISE;
+        err_num := SQLCODE;
+        err_msg := SUBSTR(SQLERRM, 1, 100);
+        dbms_output.put_line('ERROR: insert into KITS_MASTERLIST 2nd');
+        raise_application_error(err_num, err_msg , FALSE);
+        rollback;
+end;
+
+
+
+end;
+ 
