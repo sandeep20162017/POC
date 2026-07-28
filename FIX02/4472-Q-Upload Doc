@@ -1,0 +1,438 @@
+Assist me in implementing full solution
+.NET core using Telerik Kendoo.
+In this web application, I want to implement a new feature.
+User shoud be able to upload documents(one or many), not required and be empty
+We need to use Telerik .NET core controls and sharepoint graph api to store documents.
+Document links shoule be stored in the database table and will be shown when page is loaded.
+User hould be able to add and delete document
+When saving Document on share point, all the docs should be saved in a folder (create one ifnot exits) based on VehicleListId#
+Use sharepoing graph api.
+App uses dapper.
+
+Details :
+Please find SP details below
+
+SP Site
+https://ttcportal.sharepoint.com/sites/ces-dev/
+
+Application Details
+
+Display name:
+TTC-CES-CostEstimateSystem-SPO-Connection
+ 
+Application (client) ID:
+79795681-8c89-47f5-9e90-aee9301af6fa
+ 
+Directory (tenant) ID:
+12ce8821-d53a-407c-8212-10e93ff3eb81
+  
+Secret:
+xyz
+
+_VehPopup.html (add upload here)
+@model BCES.Models.Vehicle.VehicleViewModel
+
+<div class="scparts-popup-style">
+   @*  <div class="section-title">@(Model.VehicleListId == 0 ? "Add New Vehicle Estimate VehPOp" : $"Estimate #{Model.VehicleListId}")</div> *@
+    <div class="popup-action">
+        <button id="btnSave" class="k-button k-primary" type="button">Update</button>
+        <button id="btnCancelVehicle" class="k-button" type="button">Cancel</button>
+        <button id="btnHelpMakeVsBuy"
+                class="k-button k-button-icontext"
+                type="button"
+                onclick="showHelpPopup('/help/makevsbuypopuphelp.html')">
+
+            <span class="k-icon k-i-question"></span>
+            Help
+        </button>
+       @*  <button id="btnSave" type="button">
+            <span class="vehicle-btn-icon">✓</span> Save
+        </button>
+        <button id="btnCancelVehicle"  type="button">
+            <span class="vehicle-btn-icon">✕</span> Cancel
+        </button> *@
+    </div>
+</div>
+
+<div class="form-container">
+    <form id="vehicleForm">
+        @Html.HiddenFor(m => m.VehicleListId)
+        @Html.Hidden("formMode", Model.VehicleListId == 0 ? "Add" : "Edit", new { id = "formMode" })
+
+        <!-- Vehicle Information Section -->
+        <div class="section-title">Vehicle Information</div>
+
+        <!-- Row 1: Estimate #, Vehicle Series, Quantity -->
+        <div class="form-row">
+           @*  <div class="form-group  double-width">
+                @Html.LabelFor(m => m.VehicleListId, "Estimate #", new { @class = "form-label" })
+                @Html.EditorFor(m => m.VehicleListId, new { htmlAttributes = new { @class = "k-textbox", style = "width:100%" } })
+
+            </div> *@
+
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.VehSeriesCode, "Vehicle Series", new { @class = "form-label required-label" })
+                @Html.EditorFor(m => m.VehSeriesCode, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control required-cell" },
+                { "required-cell", "required" }
+                }
+
+                    })
+            </div>
+
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.NumOfVehicles, "# Of Vehicles", new { @class = "form-label required-label" })
+                @(Html.Kendo().NumericTextBox()
+                    .Name("NumOfVehicles")
+                    .Format("0")
+                    .Min(1)
+                    .Value(Model.NumOfVehicles)
+                    .HtmlAttributes(new { @class = "form-control", required = "required" })
+                    )
+            </div>
+        </div>
+
+        <!-- Row 2: Description, SOP Number -->
+        <div class="form-row">
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.ProjDesc, "Description", new { @class = "form-label required-label" })
+                @Html.EditorFor(m => m.ProjDesc, "VehDescriptionComboBox", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control required-cell" },
+                { "required", "required" }
+                }
+                    })
+               
+            </div> 
+
+            <div class="form-group double-width">
+                @Html.LabelFor(m => m.Sopnumber, "SOP Number", new { @class = "form-label" })
+                @Html.EditorFor(m => m.Sopnumber, new { htmlAttributes = new { @class = "k-textbox", style = "width:100%" } })
+          
+            </div>
+        </div>
+
+        <!-- Specifications Section -->
+        <div class="section-title">Specifications</div>
+
+        <!-- Row 3: Make, Model, Year -->
+        <div class="form-row">
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.Make, "Make", new { @class = "form-label" })
+                @Html.EditorFor(m => m.Make, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control" }
+                }
+                    })
+            </div>
+
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.VehModel, "Model", new { @class = "form-label" })
+                @Html.EditorFor(m => m.VehModel, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control" }
+                }
+                    })
+            </div>
+
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.Year, "Year", new { @class = "form-label" })
+                @(Html.Kendo().NumericTextBox()
+                    .Name("Year")
+                    .Format("0")
+                    .Min(1900)
+                    .Max(2100)
+                    .Value(Model.Year)
+                    .HtmlAttributes(new { @class = "form-control" })
+                    )
+            </div>
+        </div>
+
+        <!-- Row 4: Engine, Transmission, Differential -->
+        <div class="form-row">
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.Engine, "Engine", new { @class = "form-label" })
+                @Html.EditorFor(m => m.Engine, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control" }
+                }
+                    })
+            </div>
+
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.Transmission, "Transmission", new { @class = "form-label" })
+                @Html.EditorFor(m => m.Transmission, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control" }
+                }
+                    })
+            </div>
+
+            <div class="form-group  double-width">
+                @Html.LabelFor(m => m.Differential, "Differential", new { @class = "form-label" })
+                @Html.EditorFor(m => m.Differential, "ComboBoxEditor", new
+                    {
+                        LockMap = "",
+                        AdditionalAttributes = new Dictionary<string, object> {
+                { "class", "form-control" }
+                }
+                    })
+            </div>
+        </div>
+        <!-- History -->
+        <div class="section-title">History</div>
+        <div class="form-row">
+            <div class="form-group double-width">
+                @Html.LabelFor(m => m.ModifiedLastBy, "Modified By", new { @class = "form-label" })
+                @(Html.Kendo().TextBoxFor(m => m.ModifiedLastBy).HtmlAttributes(new { @readonly = "readonly" }))
+            </div>
+            <div class="form-group double-width">
+                @Html.LabelFor(m => m.ModifiedLastDate, "Modified Date", new { @class = "form-label" })
+                @(Html.Kendo().TextBoxFor(m => m.ModifiedLastDate).HtmlAttributes(new { @readonly = "readonly" }))
+            </div>
+        </div>
+        
+    </form>
+</div>
+Model:
+namespace BCES.Models.Vehicle
+{
+   // [Table("VehicleList", Schema = "SBCES")]
+    public class VehicleViewModel
+    {
+        public VehicleViewModel() {
+            StockCodedParts = new List<StockCodedPartsViewModel>();
+            NonStockParts = new List<NscPartsUsedViewModel>();
+            RebuiltParts = new List<RebuiltPartsViewModel>();
+        }
+        // [Key]
+
+        // [Display(Name = "Vehicle List ID")]
+        [Required(ErrorMessage = "Vehicle List Id is required")]
+        public int VehicleListId { get; set; }
+
+        public int VersionNo { get; set; }
+
+        public int ArchVehicleListId { get; set; }
+
+        public int OldId { get; set; }
+
+        [Required(ErrorMessage = "Vehicle Series Code is required")]
+        [StringLength(50)]
+      //  [Display(Name = "Vehicle Series Code")]
+        public string VehSeriesCode { get; set; }
+
+       [Required(ErrorMessage = "Num Of Vehicles is required")]
+      //  [IntegerValidator]
+      //  [Display(Name = "Number of Vehicles")]
+        public int NumOfVehicles { get; set; }
+
+        [Required(ErrorMessage = "Description is required")]
+        [StringLength(200)]
+      //  [Display(Name = "Project Description")]
+        public string ProjDesc { get; set; }
+
+      //  [Required]
+      //  [Display(Name = "Date Entered")]
+        public DateTime? DateEntered { get; set; } = DateTime.Now;
+
+      //  [Required(ErrorMessage = "Entered By is required")]
+        //[StringLength(25)]
+       // [Display(Name = "Entered By")]
+        public string? EnteredBy { get; set; }
+        ...
+        Controller :
+        
+        [HttpPost]
+        public async Task<IActionResult> AddVehiclesView([FromBody] VehicleViewModel vehicleViewModel)
+        {
+            if (vehicleViewModel == null)
+                return BadRequest("Unable to save. Model data is missing.");
+
+            if (!ModelState.IsValid)
+            {
+                return BadRequest("Unable to save. Required fields are missing.");
+            }
+
+            try
+            {
+                var newId = await AddVehicleAsync(vehicleViewModel);
+
+                // Re-fetch full model from DB
+                var updated = await GetVehicleJsonByIdAsync(newId);
+
+                // return Ok(updated);
+                return Ok(new { VehicleListId = newId, Success = true });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "Add failed: " + ex.Message);
+            }
+        }
+
+      
+
+        private async Task<VehicleViewModel> GetVehicleJsonByIdAsync(int id)
+        {
+            var model = new List<BCES.Models.Parts.StockCodedPartsViewModel> { };
+            return await _dbConnection.QueryFirstOrDefaultAsync<VehicleViewModel>(
+           @"
+            SELECT 
+                VehicleListId,                
+                VehSeriesCode,
+                NumOfVehicles,
+                ProjDesc,
+                DateEntered,
+                EnteredBy,
+                ModifiedLastBy,
+                ModifiedLastDate,
+                Make,
+                Model AS VehModel,
+                Year,
+                Engine,
+                Transmission,
+                Differential,
+                Sopnumber                
+            FROM SBCES.VehicleList
+            WHERE VehicleListId = @id", new { id });
+          }
+
+        [HttpGet] 
+        public ActionResult GetVehicleEstimatePopup(int id)
+        {
+            try
+            {
+                if (id == 0)
+                {
+                    // Create a new vehicle for add mode
+                    var newVehicle = new VehicleViewModel();
+                    ViewBag.ParentId = 0;
+                    ViewBag.FormattedDate = "System Generated";
+                    return PartialView("_VehEstimatePopUp", newVehicle);
+                }
+
+                // Get existing vehicle data using Dapper
+                var vehicle = _dbConnection.QueryFirstOrDefault<VehicleViewModel>(@"
+                SELECT  
+                    [VehicleListId],
+                    [VehSeriesCode],
+                    [NumOfVehicles],
+                    [ProjDesc],
+                    [Sopnumber],
+                    [Make],
+                    [Model],
+                    [Year],
+                    [Engine],
+                    [Transmission],
+                    [Differential],
+                    [ModifiedLastBy],
+                    [ModifiedLastDate]
+                FROM [CES].[SBCES].[VehicleList] 
+                WHERE VehicleListId = @Id",
+                            new { Id = id });
+
+                if (vehicle == null)
+                {
+                    return Content("Vehicle not found");
+                }
+
+                ViewBag.ParentId = id;
+                ViewBag.FormattedDate = vehicle.ModifiedLastDate ;
+
+                return PartialView("_VehPopUp", vehicle);
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+            
+        }
+        Database :
+        USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[VehicleList]    Script Date: 7/28/2026 9:14:32 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[VehicleList](
+	[VehicleListId] [int] NOT NULL,
+	[VehSeriesCode] [varchar](500) NOT NULL,
+	[NumOfVehicles] [varchar](10) NOT NULL,
+	[ProjDesc] [varchar](200) NOT NULL,
+	[DateEntered] [datetime] NOT NULL,
+	[EnteredBy] [varchar](25) NOT NULL,
+	[ModifiedLastBy] [varchar](25) NOT NULL,
+	[ModifiedLastDate] [datetime] NOT NULL,
+	[Make] [varchar](25) NULL,
+	[Model] [varchar](25) NULL,
+	[Year] [varchar](4) NULL,
+	[Engine] [varchar](25) NULL,
+	[Transmission] [varchar](25) NULL,
+	[Differential] [varchar](25) NULL,
+	[Sopnumber] [varchar](30) NULL,
+	[LabourCost] [numeric](20, 2) NULL,
+	[LabourOverheadAmount] [numeric](20, 2) NULL,
+	[LabourBenefits] [numeric](20, 2) NULL,
+	[LabourFringe] [numeric](20, 2) NULL,
+	[LabourTotal] [numeric](20, 2) NULL,
+	[MaterialsTotal] [numeric](20, 2) NULL,
+	[TotalBusEstimateCost] [numeric](20, 2) NULL,
+	[TotalTax] [numeric](20, 2) NULL,
+	[TotalCostTax] [numeric](20, 2) NULL,
+	[OemKitsTotal] [numeric](20, 2) NULL,
+ CONSTRAINT [PK_VehicleList] PRIMARY KEY CLUSTERED 
+(
+	[VehicleListId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [LabourCost]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [LabourOverheadAmount]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [LabourBenefits]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [LabourFringe]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [LabourTotal]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [MaterialsTotal]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [TotalBusEstimateCost]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [TotalTax]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [TotalCostTax]
+GO
+
+ALTER TABLE [SBCES].[VehicleList] ADD  DEFAULT ((0.0)) FOR [OemKitsTotal]
+GO
+
+
+
