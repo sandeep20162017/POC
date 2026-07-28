@@ -1,0 +1,997 @@
+1. NuGet Packages to Install
+Run these commands in Package Manager Console or terminal:
+
+bash
+# Install Dapper (you likely already have this)
+dotnet add package Dapper --version 2.1.35
+
+# Install Microsoft Graph SDK
+dotnet add package Microsoft.Graph --version 5.54.0
+
+# Install Azure Identity for authentication
+dotnet add package Azure.Identity --version 1.12.0
+
+# Install Microsoft.Graph.Auth (optional but helpful)
+dotnet add package Microsoft.Graph.Auth --version 1.0.0-preview.7
+
+# Install System.Text.Json for JSON handling
+dotnet add package System.Text.Json --version 8.0.4
+Or using Package Manager Console:
+
+powershell
+Install-Package Dapper -Version 2.1.35
+Install-Package Microsoft.Graph -Version 5.54.0
+Install-Package Azure.Identity -Version 1.12.0
+Install-Package System.Text.Json -Version 8.0.4
+2. SQL Table Creation Script
+sql
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[MBDocument]    Script Date: 7/28/2026 ******/
+IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[SBCES].[MBDocument]') AND type in (N'U'))
+BEGIN
+    CREATE TABLE [SBCES].[MBDocument](
+        [DocumentId] [int] IDENTITY(1,1) NOT NULL,
+        [MbNumber] [varchar](25) NOT NULL,
+        [FileName] [nvarchar](255) NOT NULL,
+        [FileSize] [bigint] NULL,
+        [ContentType] [nvarchar](100) NULL,
+        [SharePointUrl] [nvarchar](500) NOT NULL,
+        [DriveItemId] [nvarchar](255) NOT NULL,
+        [UploadedBy] [nvarchar](100) NULL,
+        [UploadedDate] [datetime] NOT NULL,
+        [IsDeleted] [bit] NOT NULL DEFAULT 0,
+        [DeletedDate] [datetime] NULL,
+     CONSTRAINT [PK_MBDocument] PRIMARY KEY CLUSTERED 
+    (
+        [DocumentId] ASC
+    )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+    ) ON [PRIMARY]
+
+    ALTER TABLE [SBCES].[MBDocument] ADD CONSTRAINT [FK_MBDocument_MbList] FOREIGN KEY([MbNumber])
+    REFERENCES [SBCES].[MbList] ([MbNumber]) ON DELETE CASCADE
+
+    CREATE NONCLUSTERED INDEX [IX_MBDocument_MbNumber] ON [SBCES].[MBDocument]
+    (
+        [MbNumber] ASC
+    )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+END
+GO
+3. Document ViewModel
+csharp
+// Models/MakeVsBuy/MBDocumentViewModel.cs
+using System;
+
+namespace BCES.Models.MakeVsBuy
+{
+    public class MBDocumentViewModel
+    {
+        public int DocumentId { get; set; }
+        public string MbNumber { get; set; }
+        public string FileName { get; set; }
+        public long? FileSize { get; set; }
+        public string ContentType { get; set; }
+        public string SharePointUrl { get; set; }
+        public string DriveItemId { get; set; }
+        public string UploadedBy { get; set; }
+        public DateTime UploadedDate { get; set; }
+        public bool IsDeleted { get; set; }
+        public DateTime? DeletedDate { get; set; }
+        
+        // Display properties
+        public string FileSizeDisplay => FileSize.HasValue ? FormatFileSize(FileSize.Value) : "N/A";
+        public string UploadedDateDisplay => UploadedDate.ToString("MM/dd/yyyy HH:mm");
+        
+        private string FormatFileSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+            double len = bytes;
+            int order = 0;
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len = len / 1024;
+            }
+            return $"{len:0.##} {sizes[order]}";
+        }
+    }
+}
+4. Controller with Direct Dapper Calls
+csharp
+// Controllers/MakeVsBuyController.cs - Add these methods to your existing controller
+
+using Microsoft.Graph;
+using Azure.Identity;
+using System.IO;
+using System.Text;
+using System.Text.Json;
+
+public partial class MakeVsBuyController : Controller
+{
+    // SharePoint configuration - hardcoded as per your requirements
+    private readonly string _spClientId = "79795681-8c89-47f5-9e90-aee9301af6fa";
+    private readonly string _spTenantId = "12ce8821-d53a-407c-8212-10e93ff3eb81";
+    private readonly string _spClientSecret = "xyz";
+    private readonly string _spSiteUrl = "https://ttcportal.sharepoint.com/sites/ces-dev";
+    private readonly string _spDriveId = ""; // You need to get this from SharePoint - Document Library ID
+    
+    // Graph Client creation - direct method
+    private GraphServiceClient CreateGraphClient()
+    {
+        var options = new ClientSecretCredentialOptions
+        {
+            AuthorityHost = AzureAuthorityHosts.AzurePublicCloud,
+        };
+        
+        var clientSecretCredential = new ClientSecretCredential(
+            _spTenantId, _spClientId, _spClientSecret, options);
+        
+        return new GraphServiceClient(clientSecretCredential);
+    }
+    
+    // Direct SharePoint folder creation
+    private async Task<string> EnsureFolderExists(GraphServiceClient graphClient, string folderPath)
+    {
+        try
+        {
+            // Get the drive
+            var drive = await graphClient.Sites[_spSiteUrl].Drive.GetAsync();
+            
+            if (drive == null)
+                throw new Exception("Drive not found");
+            
+            // Create folder if it doesn't exist
+            var pathParts = folderPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            string currentPath = "";
+            
+            foreach (var part in pathParts)
+            {
+                currentPath += part;
+                
+                // Check if folder exists
+                try
+                {
+                    var existingFolder = await graphClient.Sites[_spSiteUrl]
+                        .Drives[_spDriveId]
+                        .Root
+                        .ItemWithPath(currentPath)
+                        .GetAsync();
+                    
+                    if (existingFolder != null)
+                    {
+                        currentPath += "/";
+                        continue;
+                    }
+                }
+                catch
+                {
+                    // Folder doesn't exist, create it
+                }
+                
+                // Create folder
+                var driveItem = new DriveItem
+                {
+                    Name = part,
+                    Folder = new Folder(),
+                    AdditionalData = new Dictionary<string, object>
+                    {
+                        { "@microsoft.graph.conflictBehavior", "rename" }
+                    }
+                };
+                
+                string parentPath = currentPath.Substring(0, currentPath.Length - part.Length);
+                if (string.IsNullOrEmpty(parentPath))
+                {
+                    // Create at root level
+                    await graphClient.Sites[_spSiteUrl]
+                        .Drives[_spDriveId]
+                        .Root
+                        .Children
+                        .PostAsync(driveItem);
+                }
+                else
+                {
+                    // Get parent folder
+                    var parentFolder = await graphClient.Sites[_spSiteUrl]
+                        .Drives[_spDriveId]
+                        .Root
+                        .ItemWithPath(parentPath.TrimEnd('/'))
+                        .GetAsync();
+                    
+                    if (parentFolder != null)
+                    {
+                        await graphClient.Sites[_spSiteUrl]
+                            .Drives[_spDriveId]
+                            .Items[parentFolder.Id]
+                            .Children
+                            .PostAsync(driveItem);
+                    }
+                }
+                
+                currentPath += "/";
+            }
+            
+            return folderPath;
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Failed to ensure folder exists: {ex.Message}", ex);
+        }
+    }
+    
+    // Direct file upload to SharePoint
+    private async Task<DriveItem> UploadFileToSharePoint(Stream fileStream, string fileName, string folderPath)
+    {
+        try
+        {
+            var graphClient = CreateGraphClient();
+            
+            // Ensure folder exists
+            await EnsureFolderExists(graphClient, folderPath);
+            
+            // Upload file
+            string filePath = $"{folderPath}/{fileName}";
+            
+            using var memoryStream = new MemoryStream();
+            await fileStream.CopyToAsync(memoryStream);
+            memoryStream.Position = 0;
+            
+            // For files > 4MB, use upload session
+            if (memoryStream.Length > 4 * 1024 * 1024)
+            {
+                var uploadSession = await graphClient.Sites[_spSiteUrl]
+                    .Drives[_spDriveId]
+                    .Root
+                    .ItemWithPath(filePath)
+                    .CreateUploadSession()
+                    .PostAsync();
+                
+                // For production, implement chunked upload
+                // Simple approach for demo - use direct upload
+                var result = await graphClient.Sites[_spSiteUrl]
+                    .Drives[_spDriveId]
+                    .Root
+                    .ItemWithPath(filePath)
+                    .Content
+                    .PutAsync(memoryStream);
+                
+                return result;
+            }
+            else
+            {
+                // Direct upload for small files
+                var result = await graphClient.Sites[_spSiteUrl]
+                    .Drives[_spDriveId]
+                    .Root
+                    .ItemWithPath(filePath)
+                    .Content
+                    .PutAsync(memoryStream);
+                
+                return result;
+            }
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Failed to upload file: {ex.Message}", ex);
+        }
+    }
+    
+    // Direct file deletion from SharePoint
+    private async Task DeleteFileFromSharePoint(string driveItemId)
+    {
+        try
+        {
+            var graphClient = CreateGraphClient();
+            
+            await graphClient.Sites[_spSiteUrl]
+                .Drives[_spDriveId]
+                .Items[driveItemId]
+                .DeleteAsync();
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Failed to delete file from SharePoint: {ex.Message}", ex);
+        }
+    }
+    
+    // GET: Get documents for a specific MbNumber
+    [HttpGet]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetDocuments(string mbNumber)
+    {
+        if (string.IsNullOrEmpty(mbNumber))
+            return Json(new { error = "MbNumber is required" });
+        
+        try
+        {
+            const string sql = @"
+                SELECT 
+                    DocumentId,
+                    MbNumber,
+                    FileName,
+                    FileSize,
+                    ContentType,
+                    SharePointUrl,
+                    DriveItemId,
+                    UploadedBy,
+                    UploadedDate,
+                    IsDeleted,
+                    DeletedDate
+                FROM SBCES.MBDocument
+                WHERE MbNumber = @MbNumber AND IsDeleted = 0
+                ORDER BY UploadedDate DESC";
+            
+            var documents = await _dbConnection.QueryAsync<MBDocumentViewModel>(sql, new { MbNumber = mbNumber });
+            return Json(documents);
+        }
+        catch (Exception ex)
+        {
+            return Json(new { error = ex.Message });
+        }
+    }
+    
+    // POST: Upload documents
+    [HttpPost]
+    [AllowAnonymous]
+    public async Task<IActionResult> UploadDocuments(string mbNumber, List<IFormFile> files)
+    {
+        if (string.IsNullOrEmpty(mbNumber))
+            return BadRequest(new { error = "MbNumber is required" });
+        
+        if (files == null || files.Count == 0)
+            return BadRequest(new { error = "No files to upload" });
+        
+        try
+        {
+            var uploadedDocuments = new List<MBDocumentViewModel>();
+            
+            // Create folder path based on MbNumber
+            string folderPath = $"Documents/MB-{mbNumber}";
+            
+            foreach (var file in files)
+            {
+                if (file.Length == 0)
+                    continue;
+                
+                using (var stream = file.OpenReadStream())
+                {
+                    // Upload to SharePoint
+                    var driveItem = await UploadFileToSharePoint(stream, file.FileName, folderPath);
+                    
+                    if (driveItem == null)
+                        throw new Exception($"Failed to upload file: {file.FileName}");
+                    
+                    // Get the web URL
+                    string webUrl = driveItem.WebUrl ?? 
+                        $"https://ttcportal.sharepoint.com/sites/ces-dev/_layouts/15/Doc.aspx?sourcedoc={driveItem.Id}";
+                    
+                    // Save document record to database using Dapper directly
+                    const string insertSql = @"
+                        INSERT INTO SBCES.MBDocument 
+                            (MbNumber, FileName, FileSize, ContentType, SharePointUrl, 
+                             DriveItemId, UploadedBy, UploadedDate, IsDeleted)
+                        VALUES 
+                            (@MbNumber, @FileName, @FileSize, @ContentType, @SharePointUrl, 
+                             @DriveItemId, @UploadedBy, GETDATE(), 0);
+                        
+                        SELECT CAST(SCOPE_IDENTITY() as int)";
+                    
+                    var documentId = await _dbConnection.ExecuteScalarAsync<int>(insertSql, new
+                    {
+                        MbNumber = mbNumber,
+                        FileName = file.FileName,
+                        FileSize = file.Length,
+                        ContentType = file.ContentType,
+                        SharePointUrl = webUrl,
+                        DriveItemId = driveItem.Id,
+                        UploadedBy = User.Identity?.Name ?? "System"
+                    });
+                    
+                    // Get the inserted document
+                    const string selectSql = @"
+                        SELECT 
+                            DocumentId,
+                            MbNumber,
+                            FileName,
+                            FileSize,
+                            ContentType,
+                            SharePointUrl,
+                            DriveItemId,
+                            UploadedBy,
+                            UploadedDate,
+                            IsDeleted,
+                            DeletedDate
+                        FROM SBCES.MBDocument
+                        WHERE DocumentId = @DocumentId";
+                    
+                    var document = await _dbConnection.QueryFirstOrDefaultAsync<MBDocumentViewModel>(selectSql, new { DocumentId = documentId });
+                    uploadedDocuments.Add(document);
+                }
+            }
+            
+            return Json(new 
+            { 
+                success = true, 
+                message = $"Successfully uploaded {uploadedDocuments.Count} document(s)",
+                documents = uploadedDocuments
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+    
+    // POST: Delete document
+    [HttpPost]
+    [AllowAnonymous]
+    public async Task<IActionResult> DeleteDocument(int documentId)
+    {
+        try
+        {
+            // Get document details first using Dapper
+            const string selectSql = @"
+                SELECT 
+                    DocumentId,
+                    MbNumber,
+                    FileName,
+                    DriveItemId,
+                    SharePointUrl
+                FROM SBCES.MBDocument
+                WHERE DocumentId = @DocumentId AND IsDeleted = 0";
+            
+            var document = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(selectSql, new { DocumentId = documentId });
+            
+            if (document == null)
+                return NotFound(new { error = "Document not found" });
+            
+            // Delete from SharePoint
+            try
+            {
+                await DeleteFileFromSharePoint(document.DriveItemId);
+            }
+            catch (Exception ex)
+            {
+                // Log the error but continue with database deletion
+                Console.WriteLine($"Failed to delete file from SharePoint: {ex.Message}");
+                // You might want to log this error
+            }
+            
+            // Mark as deleted in database using Dapper
+            const string updateSql = @"
+                UPDATE SBCES.MBDocument
+                SET IsDeleted = 1, DeletedDate = GETDATE()
+                WHERE DocumentId = @DocumentId";
+            
+            await _dbConnection.ExecuteAsync(updateSql, new { DocumentId = documentId });
+            
+            return Json(new { success = true, message = "Document deleted successfully" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+    
+    // GET: Download document
+    [HttpGet]
+    [AllowAnonymous]
+    public async Task<IActionResult> DownloadDocument(int documentId)
+    {
+        try
+        {
+            // Get document details using Dapper
+            const string selectSql = @"
+                SELECT 
+                    DocumentId,
+                    MbNumber,
+                    FileName,
+                    DriveItemId
+                FROM SBCES.MBDocument
+                WHERE DocumentId = @DocumentId AND IsDeleted = 0";
+            
+            var document = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(selectSql, new { DocumentId = documentId });
+            
+            if (document == null)
+                return NotFound(new { error = "Document not found" });
+            
+            // Get file from SharePoint
+            var graphClient = CreateGraphClient();
+            var driveItem = await graphClient.Sites[_spSiteUrl]
+                .Drives[_spDriveId]
+                .Items[document.DriveItemId]
+                .GetAsync();
+            
+            if (driveItem == null)
+                return NotFound(new { error = "File not found in SharePoint" });
+            
+            // Get file content
+            var fileStream = await graphClient.Sites[_spSiteUrl]
+                .Drives[_spDriveId]
+                .Items[document.DriveItemId]
+                .Content
+                .GetAsync();
+            
+            // Create a memory stream for download
+            using var memoryStream = new MemoryStream();
+            await fileStream.CopyToAsync(memoryStream);
+            memoryStream.Position = 0;
+            
+            return File(memoryStream, "application/octet-stream", document.FileName);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+}
+5. Updated View with Document Management
+html
+<!-- Views/Shared/_MakeVsBuyPopUp.cshtml -->
+@model BCES.Models.MakeVsBuy.MakeVsBuyViewModel
+@{
+    bool isNew = string.IsNullOrEmpty(Model.MbNumber) || (Model.MbNumber == "0") || (Model.MbNumber == "");
+}
+
+@Html.Hidden("MbPrefixHidden", Model.MbPrefix)
+@Html.HiddenFor(m => m.MbNumber, new { id = "MbNumber" })
+
+<div class="scparts-popup-style">
+    <div class="popup-action">
+        <button id="btnSaveMakeVsBuy" class="k-button k-primary" type="button">Update</button>
+        <button id="btnCancelMakeVsBuy" class="k-button" type="button">Cancel</button>
+        <button id="btnHelpMakeVsBuy"
+                class="k-button k-button-icontext"
+                type="button"
+                onclick="showHelpPopup('/help/makevsbuypopuphelp.html')">
+            <span class="k-icon k-i-question"></span>
+            Help
+        </button>
+    </div>
+</div>
+
+<div class="form-container">
+    <form id="makevsbuyForm" enctype="multipart/form-data">
+        @* ... existing form fields ... *@
+        <!-- Keep all your existing form fields -->
+        
+        <!-- Document Management Section -->
+        <div class="section-title" style="margin-top: 20px;">Documents</div>
+        
+        <div class="document-section">
+            <!-- Upload Area -->
+            <div class="upload-area" style="margin-bottom: 15px;">
+                @(Html.Kendo().Upload()
+                    .Name("documentUpload")
+                    .Multiple(true)
+                    .Async(async =>
+                    {
+                        async.Save("UploadDocuments", "MakeVsBuy");
+                        async.AutoUpload(true);
+                        async.WithCredentials(true);
+                    })
+                    .Events(events =>
+                    {
+                        events.Upload("onUpload");
+                        events.Success("onUploadSuccess");
+                        events.Error("onUploadError");
+                        events.Complete("onUploadComplete");
+                    })
+                    .HtmlAttributes(new { style = "width: 100%;" })
+                )
+            </div>
+            
+            <!-- Documents Grid -->
+            <div id="documentsGridContainer">
+                @(Html.Kendo().Grid<BCES.Models.MakeVsBuy.MBDocumentViewModel>()
+                    .Name("documentsGrid")
+                    .Columns(columns =>
+                    {
+                        columns.Bound(d => d.FileName).Title("File Name").Width(300);
+                        columns.Bound(d => d.FileSizeDisplay).Title("Size").Width(100);
+                        columns.Bound(d => d.UploadedDateDisplay).Title("Uploaded Date").Width(150);
+                        columns.Bound(d => d.UploadedBy).Title("Uploaded By").Width(120);
+                        columns.Command(command =>
+                        {
+                            command.Custom("Download").Text("Download").Click("downloadDocument");
+                            command.Custom("Delete").Text("Delete").Click("deleteDocument");
+                        }).Title("Actions").Width(200);
+                    })
+                    .DataSource(dataSource => dataSource
+                        .Ajax()
+                        .Read(read => read.Action("GetDocuments", "MakeVsBuy").Data("getMbNumberForDocuments"))
+                        .Model(model => model.Id(d => d.DocumentId))
+                    )
+                    .HtmlAttributes(new { style = "height: 250px;" })
+                    .Scrollable()
+                    .Sortable()
+                    .Filterable()
+                    .Pageable(pageable => pageable
+                        .Refresh(true)
+                        .PageSizes(new[] { 5, 10, 20 })
+                        .ButtonCount(5)
+                    )
+                )
+            </div>
+        </div>
+    </form>
+</div>
+
+<style>
+    .document-section {
+        padding: 15px;
+        background: #f9f9f9;
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        margin-top: 15px;
+    }
+    
+    .upload-area {
+        background: white;
+        padding: 15px;
+        border: 2px dashed #d0d0d0;
+        border-radius: 4px;
+    }
+    
+    .k-upload {
+        border: none !important;
+    }
+    
+    .section-title {
+        font-weight: bold;
+        font-size: 16px;
+        color: #333;
+        padding-bottom: 8px;
+        border-bottom: 2px solid #007acc;
+        margin-bottom: 15px;
+    }
+    
+    .notification {
+        padding: 10px 15px;
+        margin: 10px 0;
+        border-radius: 4px;
+        display: none;
+    }
+    
+    .notification.success {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+        display: block;
+    }
+    
+    .notification.error {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+        display: block;
+    }
+</style>
+
+<script>
+    // Get MbNumber for grid data
+    function getMbNumberForDocuments() {
+        return { mbNumber: $('#MbNumber').val() };
+    }
+    
+    // Upload event - validate MbNumber exists
+    function onUpload(e) {
+        var mbNumber = $('#MbNumber').val();
+        if (!mbNumber || mbNumber === '0' || mbNumber === '') {
+            alert('Please save the estimate first before uploading documents.');
+            e.preventDefault();
+            return false;
+        }
+    }
+    
+    // Upload success event
+    function onUploadSuccess(e) {
+        if (e.response && e.response.success) {
+            // Refresh the grid
+            $('#documentsGrid').data('kendoGrid').dataSource.read();
+            
+            // Show success message
+            showNotification('Success', e.response.message, 'success');
+        } else if (e.response && e.response.error) {
+            showNotification('Error', e.response.error, 'error');
+        }
+    }
+    
+    // Upload error event
+    function onUploadError(e) {
+        var errorMessage = 'Upload failed';
+        try {
+            if (e.XMLHttpRequest && e.XMLHttpRequest.responseText) {
+                var response = JSON.parse(e.XMLHttpRequest.responseText);
+                if (response && response.error) {
+                    errorMessage = response.error;
+                }
+            }
+        } catch (ex) {
+            // If response is not JSON, use as is
+            errorMessage = e.XMLHttpRequest ? e.XMLHttpRequest.responseText : 'Upload failed';
+        }
+        showNotification('Error', errorMessage, 'error');
+    }
+    
+    // Upload complete event
+    function onUploadComplete(e) {
+        // Refresh the grid
+        $('#documentsGrid').data('kendoGrid').dataSource.read();
+    }
+    
+    // Download document
+    function downloadDocument(e) {
+        e.preventDefault();
+        
+        var dataItem = this.dataItem($(e.currentTarget).closest('tr'));
+        if (!dataItem) return;
+        
+        var documentId = dataItem.DocumentId;
+        if (!documentId) {
+            showNotification('Error', 'Document ID not found', 'error');
+            return;
+        }
+        
+        // Open in new window or download
+        window.location.href = '@Url.Action("DownloadDocument", "MakeVsBuy")?documentId=' + documentId;
+    }
+    
+    // Delete document
+    function deleteDocument(e) {
+        e.preventDefault();
+        
+        var dataItem = this.dataItem($(e.currentTarget).closest('tr'));
+        if (!dataItem) return;
+        
+        var documentId = dataItem.DocumentId;
+        if (!documentId) {
+            showNotification('Error', 'Document ID not found', 'error');
+            return;
+        }
+        
+        if (!confirm('Are you sure you want to delete this document?')) {
+            return;
+        }
+        
+        $.ajax({
+            url: '@Url.Action("DeleteDocument", "MakeVsBuy")',
+            type: 'POST',
+            data: { documentId: documentId },
+            success: function(response) {
+                if (response.success) {
+                    $('#documentsGrid').data('kendoGrid').dataSource.read();
+                    showNotification('Success', response.message, 'success');
+                } else {
+                    showNotification('Error', response.error || 'Delete failed', 'error');
+                }
+            },
+            error: function(xhr) {
+                var errorMessage = 'Delete failed';
+                try {
+                    if (xhr.responseText) {
+                        var response = JSON.parse(xhr.responseText);
+                        if (response && response.error) {
+                            errorMessage = response.error;
+                        }
+                    }
+                } catch (ex) {
+                    errorMessage = xhr.responseText || 'Delete failed';
+                }
+                showNotification('Error', errorMessage, 'error');
+            }
+        });
+    }
+    
+    // Notification helper
+    function showNotification(title, message, type) {
+        // Remove existing notifications
+        $('.notification').remove();
+        
+        var notification = $('<div class="notification ' + type + '"></div>');
+        notification.html('<strong>' + title + ':</strong> ' + message);
+        
+        // Insert after the upload area
+        $('.upload-area').after(notification);
+        
+        // Auto-hide after 5 seconds
+        setTimeout(function() {
+            notification.fadeOut('slow', function() {
+                $(this).remove();
+            });
+        }, 5000);
+    }
+    
+    // Refresh documents when MbNumber changes
+    $(document).ready(function() {
+        // Initial load of documents if MbNumber exists
+        var mbNumber = $('#MbNumber').val();
+        if (mbNumber && mbNumber !== '0' && mbNumber !== '') {
+            $('#documentsGrid').data('kendoGrid').dataSource.read();
+        }
+        
+        // Setup upload with MbNumber parameter
+        var upload = $('#documentUpload').data('kendoUpload');
+        if (upload) {
+            // Override the saveUrl to include MbNumber
+            upload.setOptions({
+                async: {
+                    saveUrl: '@Url.Action("UploadDocuments", "MakeVsBuy")',
+                    autoUpload: true,
+                    withCredentials: true
+                }
+            });
+        }
+    });
+</script>
+6. Update your Save Method to Handle Document Upload After Save
+In your existing AddMakeVsBuyView method, ensure you handle the MbNumber generation correctly:
+
+csharp
+[HttpPost]
+public async Task<IActionResult> AddMakeVsBuyView([DataSourceRequest] DataSourceRequest request, [FromBody] MakeVsBuyViewModel makevsbuyViewModel)
+{
+    try
+    {
+        if (makevsbuyViewModel == null)
+            return BadRequest("Unable to save. Model data is missing.");
+
+        if (string.IsNullOrEmpty(makevsbuyViewModel.MbNumber))
+        {
+            if (string.IsNullOrEmpty(makevsbuyViewModel.MbPrefix))
+                return BadRequest("Prefix is required for new estimates.");
+
+            _dbConnection.Open();
+            using (var tran = _dbConnection.BeginTransaction())
+            {
+                // 1) increment sequence for this prefix
+                const string updateSql = @"
+                    UPDATE CES.SBCES.MBPrefixSequence
+                    SET LastNumber = LastNumber + 1
+                    WHERE PrefixCode = @Prefix;
+
+                    IF @@ROWCOUNT = 0
+                    BEGIN
+                        INSERT INTO CES.SBCES.MBPrefixSequence (PrefixCode, LastNumber)
+                        VALUES (@Prefix, 1);
+                    END;
+
+                    SELECT LastNumber
+                    FROM CES.SBCES.MBPrefixSequence
+                    WHERE PrefixCode = @Prefix;";
+
+                var nextNumber = await _dbConnection.ExecuteScalarAsync<int>(
+                    updateSql,
+                    new { Prefix = makevsbuyViewModel.MbPrefix },
+                    tran
+                );
+
+                // 2) build MbNumber = PREFIX + 6‑digit padded number
+                makevsbuyViewModel.MbNumber =
+                    makevsbuyViewModel.MbPrefix + nextNumber.ToString("D6");
+
+                // 3) insert into main table
+                const string insertSql = @"
+                    INSERT INTO CES.SBCES.MBLIST
+                        (MbPrefix, MbNumber, Keyword, Description, BusType, NumBusComp,
+                         VendorPartNum, BuyCode, RebuildCode, CoreCode, AnnualUsage,
+                         BenchNumber, SampleProvided, Recommendation, DateOpened, CoreCost,
+                         SopNumber, JobNumber, InternalCost, BuyNewCost, RemanCost)
+                    VALUES
+                        (@MbPrefix, @MbNumber, @Keyword, @Description, @BusType, @NumBusComp,
+                         @VendorPartNum, @BuyCode, @RebuildCode, @CoreCode, @AnnualUsage,
+                         @BenchNumber, @SampleProvided, @Recommendation, GETDATE(), @CoreCost,
+                         @SopNumber, @JobNumber, @InternalCost, @BuyNewCost, @RemanCost);";
+
+                await _dbConnection.ExecuteAsync(insertSql, makevsbuyViewModel, tran);
+
+                tran.Commit();
+            }
+        }
+        else
+        {
+            // EDIT mode: update existing
+            const string updateSql = @"
+                UPDATE CES.SBCES.MBLIST
+                SET Keyword = @Keyword,
+                    Description = @Description,
+                    BusType = @BusType,
+                    NumBusComp = @NumBusComp,
+                    VendorPartNum = @VendorPartNum,
+                    BuyCode = @BuyCode,
+                    RebuildCode = @RebuildCode,
+                    CoreCode = @CoreCode,
+                    AnnualUsage = @AnnualUsage,
+                    BenchNumber = @BenchNumber,
+                    SampleProvided = @SampleProvided,
+                    Recommendation = @Recommendation,
+                    CoreCost = @CoreCost,
+                    SopNumber = @SopNumber,
+                    JobNumber = @JobNumber,
+                    InternalCost = @InternalCost,
+                    BuyNewCost = @BuyNewCost, 
+                    RemanCost = @RemanCost
+                WHERE MbNumber = @MbNumber;";
+
+            await _dbConnection.ExecuteAsync(updateSql, makevsbuyViewModel);
+        }
+
+        // Return the generated MbNumber so client can update the UI
+        return Json(new 
+        { 
+            success = true, 
+            mbNumber = makevsbuyViewModel.MbNumber,
+            message = "Saved successfully"
+        });
+    }
+    catch (Exception ex)
+    {
+        return Json(new { success = false, error = ex.Message });
+    }
+}
+7. Update your JavaScript for the Save Button
+Update the save button click handler to handle the MbNumber after save:
+
+javascript
+$('#btnSaveMakeVsBuy').click(function() {
+    var formData = getFormData(); // Your existing form data collection
+    
+    $.ajax({
+        url: '@Url.Action("AddMakeVsBuyView", "MakeVsBuy")',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(formData),
+        success: function(response) {
+            if (response.success) {
+                // Update MbNumber in hidden field
+                if (response.mbNumber) {
+                    $('#MbNumber').val(response.mbNumber);
+                    
+                    // Refresh documents grid if it exists
+                    if ($('#documentsGrid').data('kendoGrid')) {
+                        $('#documentsGrid').data('kendoGrid').dataSource.read();
+                    }
+                }
+                showNotification('Success', response.message, 'success');
+            } else {
+                showNotification('Error', response.error || 'Save failed', 'error');
+            }
+        },
+        error: function(xhr) {
+            showNotification('Error', 'Save failed. Please try again.', 'error');
+        }
+    });
+});
+8. App Settings Configuration (Optional)
+If you prefer to use configuration instead of hardcoded values:
+
+json
+// appsettings.json
+{
+  "SharePoint": {
+    "ClientId": "79795681-8c89-47f5-9e90-aee9301af6fa",
+    "TenantId": "12ce8821-d53a-407c-8212-10e93ff3eb81",
+    "ClientSecret": "xyz",
+    "SiteUrl": "https://ttcportal.sharepoint.com/sites/ces-dev",
+    "DriveId": ""
+  }
+}
+Then update your controller to read from configuration:
+
+csharp
+private readonly IConfiguration _configuration;
+
+public MakeVsBuyController(IDbConnection dbConnection, IConfiguration configuration)
+{
+    _dbConnection = dbConnection;
+    _configuration = configuration;
+    
+    // Read from configuration
+    _spClientId = _configuration["SharePoint:ClientId"];
+    _spTenantId = _configuration["SharePoint:TenantId"];
+    _spClientSecret = _configuration["SharePoint:ClientSecret"];
+    _spSiteUrl = _configuration["SharePoint:SiteUrl"];
+    _spDriveId = _configuration["SharePoint:DriveId"];
+}
+Key Production-Ready Features:
