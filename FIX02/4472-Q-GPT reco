@@ -1,0 +1,157 @@
+Controller
+
+Your MakeVsBuyController would gain a few new actions:
+
+UploadDocuments()
+GetDocuments()
+DeleteDocument()
+DownloadDocument()
+
+These actions would:
+
+Use _dbConnection for SQL (Dapper)
+Use Graph SDK directly for SharePoint
+Return JSON
+
+No service layer.
+
+Graph Client
+
+The only thing I would create is a small helper class (or even private methods) because the Graph authentication code is repetitive.
+
+Example:
+
+MakeVsBuyController
+
+    private GraphServiceClient CreateGraphClient()
+
+    private async Task<string> EnsureFolderExists(...)
+
+    private async Task<DriveItem> UploadFile(...)
+
+    private async Task DeleteFile(...)
+
+These are helper methods, not a service.
+
+SQL
+
+Continue using Dapper exactly like you already do.
+
+await _dbConnection.ExecuteAsync(
+    insertSql,
+    new
+    {
+        MbNumber,
+        FileName,
+        WebUrl,
+        DriveItemId,
+        UploadedDate = DateTime.Now
+    });
+
+Exactly matches the rest of your project.
+
+Folder creation
+
+Controller flow becomes
+
+Upload
+
+↓
+
+if folder doesn't exist
+
+    Create Folder
+
+↓
+
+Upload File
+
+↓
+
+Insert SQL record
+
+↓
+
+Return success
+Delete
+Delete button
+
+↓
+
+Delete SharePoint file
+
+↓
+
+Delete SQL row
+
+↓
+
+Return OK
+The only "helper" I'd add
+
+Rather than a service, I'd create a single file:
+
+Helpers
+
+    SharePointGraphHelper.cs
+
+or even
+
+Utilities
+
+    GraphHelper.cs
+
+containing methods like:
+
+CreateGraphClient()
+
+EnsureFolderExists()
+
+UploadFile()
+
+DeleteFile()
+
+GetFiles()
+
+This keeps the controller readable without introducing another architectural pattern that the rest of the application doesn't use.
+
+One thing I would change
+
+I would not store the SharePoint logic mixed into your existing AddMakeVsBuyView() method.
+
+Instead:
+
+Save Estimate
+
+↓
+
+MbNumber generated
+
+↓
+
+Popup gets MbNumber
+
+↓
+
+Separate UploadDocuments() endpoint
+
+That separation is valuable because:
+
+Saving an estimate shouldn't fail because SharePoint is temporarily unavailable.
+Users can add documents later.
+Users can delete or replace documents independently.
+The code stays easier to maintain.
+My recommendation for your project
+
+Based on your existing codebase, I would use:
+
+✅ Dapper directly in the controller
+✅ Graph SDK called directly from the controller (or a small helper class)
+✅ No Repository pattern
+✅ No Service layer
+✅ No MediatR
+✅ No Unit of Work
+✅ One new SQL table (SBCES.MBDocument)
+✅ Telerik Upload + Telerik Grid in the popup
+
+This fits the style of the rest of your application while remaining production-ready and avoiding unnecessary complexity.
