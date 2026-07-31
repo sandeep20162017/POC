@@ -1,0 +1,1637 @@
+1. Folder Structure
+text
+BCES/
+├── Controllers/
+│   └── Help/
+│       └── HelpController.cs
+├── Models/
+│   └── Help/
+│       └── HelpModels.cs
+├── Helpers/
+│   └── OpenAIHelper.cs
+└── Views/
+    └── Help/
+        └── AIAssistance.cshtml
+2. Helper - OpenAIHelper.cs
+BCES/Helpers/OpenAIHelper.cs
+csharp
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+
+namespace BCES.Helpers
+{
+    public static class OpenAIHelper
+    {
+        // ⚠️ HARDCODE YOUR OPENAI API KEY HERE FOR POC ⚠️
+        private const string API_KEY = "YOUR_OPENAI_API_KEY_HERE";
+        private const string API_URL = "https://api.openai.com/v1/chat/completions";
+        private const string DEFAULT_MODEL = "gpt-4o";
+
+        private static readonly HttpClient _httpClient = new HttpClient();
+
+        static OpenAIHelper()
+        {
+            _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {API_KEY}");
+        }
+
+        public static async Task<string> GetChatCompletionAsync(
+            string systemPrompt,
+            string userPrompt,
+            int maxTokens = 1000,
+            float temperature = 0.7f)
+        {
+            try
+            {
+                var request = new
+                {
+                    model = DEFAULT_MODEL,
+                    messages = new[]
+                    {
+                        new { role = "system", content = systemPrompt },
+                        new { role = "user", content = userPrompt }
+                    },
+                    max_tokens = maxTokens,
+                    temperature = temperature
+                };
+
+                var content = new StringContent(
+                    JsonSerializer.Serialize(request),
+                    Encoding.UTF8,
+                    "application/json");
+
+                var response = await _httpClient.PostAsync(API_URL, content);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    return "I'm having trouble connecting to the AI service. Please try again later.";
+                }
+
+                using var doc = JsonDocument.Parse(responseContent);
+                var result = doc.RootElement
+                    .GetProperty("choices")[0]
+                    .GetProperty("message")
+                    .GetProperty("content")
+                    .GetString();
+
+                return result ?? "I couldn't generate a response. Please try again.";
+            }
+            catch (Exception ex)
+            {
+                return "An error occurred while processing your request. Please try again.";
+            }
+        }
+
+        public static async Task<string> ClassifyIntentAsync(string query)
+        {
+            var systemPrompt = @"
+You are a query classifier for a Cost Estimation System. 
+Classify the user's question into one of these categories:
+- STOCK_PART: Questions about stock coded parts (add, edit, delete, search)
+- NON_STOCK_PART: Questions about non-stock coded parts
+- REBUILT_PART: Questions about rebuilt parts
+- ESTIMATE: Questions about estimates (Vehicle, Make vs Buy)
+- ADMIN: Questions about admin functions (users, settings, etc.)
+- WORKFLOW: How-to questions, step-by-step guides
+- GENERAL: Other questions
+
+Return ONLY the category name.";
+
+            var result = await GetChatCompletionAsync(systemPrompt, query, maxTokens: 20, temperature: 0.1f);
+            return result?.Trim() ?? "GENERAL";
+        }
+
+        public static async Task<string> GetRelevantPageNameAsync(string query)
+        {
+            var systemPrompt = @"
+You are a page classifier for a Cost Estimation System.
+Based on the user's question, identify which page they are asking about.
+Return ONLY the page name from this list:
+- MakeVsBuyIndex
+- VehiclesIndex
+- StockCodedPartsIndex
+- NscPartsUsedIndex
+- RebuiltPartsIndex
+- UserManagementGrid
+- Task
+- DifferentialIndex
+- EngineIndex
+- MakeModelYearIndex
+- TransmissionIndex
+- EmpSalaryIndex
+- LabourTypeIndex
+- Bus
+- SettingIndex
+- Content
+- ArchivedIndex
+
+If the question is not about a specific page, return 'GENERAL'.";
+
+            var result = await GetChatCompletionAsync(systemPrompt, query, maxTokens: 30, temperature: 0.1f);
+            return result?.Trim() ?? "GENERAL";
+        }
+    }
+}
+3. Models - HelpModels.cs
+BCES/Models/Help/HelpModels.cs
+csharp
+using System;
+using System.Collections.Generic;
+
+namespace BCES.Models.Help
+{
+    // ========== PAGE METADATA MODELS ==========
+    
+    public class HelpPageMetadata
+    {
+        public int Id { get; set; }
+        public string PageName { get; set; }
+        public string PageType { get; set; }
+        public string Module { get; set; }
+        public string Controller { get; set; }
+        public string Action { get; set; }
+        public string Url { get; set; }
+        public string JsonMetadata { get; set; }
+        public bool IsActive { get; set; }
+        public int Version { get; set; }
+        public DateTime CreatedDate { get; set; }
+        public DateTime LastUpdated { get; set; }
+        public string CreatedBy { get; set; }
+        public string UpdatedBy { get; set; }
+    }
+
+    public class ExtractedPageMetadata
+    {
+        public PageInfo PageInfo { get; set; }
+        public UiStructure UiStructure { get; set; }
+        public FieldInfo Fields { get; set; }
+        public List<Calculation> Calculations { get; set; }
+        public List<Workflow> Workflows { get; set; }
+        public Dictionary<string, string> Actions { get; set; }
+        public Relationships Relationships { get; set; }
+        public List<ValidationRule> ValidationRules { get; set; }
+        public SampleData SampleData { get; set; }
+    }
+
+    public class PageInfo
+    {
+        public string PageName { get; set; }
+        public string PageType { get; set; }
+        public string Module { get; set; }
+        public string Controller { get; set; }
+        public string Action { get; set; }
+        public string Description { get; set; }
+        public string Url { get; set; }
+    }
+
+    public class UiStructure
+    {
+        public bool HasGrid { get; set; }
+        public string GridName { get; set; }
+        public List<GridColumn> GridColumns { get; set; }
+        public List<Popup> Popups { get; set; }
+        public List<Tab> Tabs { get; set; }
+        public List<Button> Buttons { get; set; }
+        public List<EditTrigger> EditTriggers { get; set; }
+    }
+
+    public class GridColumn
+    {
+        public string Title { get; set; }
+        public string Field { get; set; }
+        public string DataType { get; set; }
+        public bool IsRequired { get; set; }
+        public bool IsEditable { get; set; }
+        public string Width { get; set; }
+        public string Format { get; set; }
+    }
+
+    public class Popup
+    {
+        public string Id { get; set; }
+        public string Title { get; set; }
+        public List<PopupSection> Sections { get; set; }
+        public List<PopupField> Fields { get; set; }
+        public List<Button> Buttons { get; set; }
+        public List<Tab> Tabs { get; set; }
+        public WindowOptions WindowOptions { get; set; }
+    }
+
+    public class PopupSection
+    {
+        public string Name { get; set; }
+        public List<PopupField> Fields { get; set; }
+    }
+
+    public class PopupField
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public string Label { get; set; }
+        public string Type { get; set; }
+        public string Control { get; set; }
+        public bool IsRequired { get; set; }
+        public bool IsReadOnly { get; set; }
+        public bool AutoGenerated { get; set; }
+        public bool EditableInAdd { get; set; }
+        public bool EditableInEdit { get; set; }
+        public string DefaultValue { get; set; }
+        public List<string> Options { get; set; }
+    }
+
+    public class Tab
+    {
+        public string Id { get; set; }
+        public string Title { get; set; }
+        public bool IsActive { get; set; }
+        public bool DependsOnSave { get; set; }
+        public bool HasGrid { get; set; }
+        public string ContentId { get; set; }
+    }
+
+    public class Button
+    {
+        public string Id { get; set; }
+        public string Text { get; set; }
+        public string Location { get; set; }
+        public string Action { get; set; }
+        public string OnClick { get; set; }
+        public string Command { get; set; }
+    }
+
+    public class EditTrigger
+    {
+        public string Element { get; set; }
+        public string Action { get; set; }
+    }
+
+    public class FieldInfo
+    {
+        public List<string> Required { get; set; }
+        public List<string> ReadOnly { get; set; }
+        public List<string> AutoGenerated { get; set; }
+    }
+
+    public class Calculation
+    {
+        public string Formula { get; set; }
+        public List<string> TriggerFields { get; set; }
+        public string TargetField { get; set; }
+    }
+
+    public class Workflow
+    {
+        public string Name { get; set; }
+        public string Description { get; set; }
+        public List<WorkflowStep> Steps { get; set; }
+        public List<string> Prerequisites { get; set; }
+        public List<string> RelatedPages { get; set; }
+    }
+
+    public class WorkflowStep
+    {
+        public int Order { get; set; }
+        public string Action { get; set; }
+        public string Description { get; set; }
+        public string ExpectedResult { get; set; }
+        public string Tip { get; set; }
+    }
+
+    public class Relationships
+    {
+        public string ParentPage { get; set; }
+        public List<string> ChildPages { get; set; }
+        public List<string> RelatedPages { get; set; }
+    }
+
+    public class ValidationRule
+    {
+        public string Field { get; set; }
+        public string Rule { get; set; }
+        public string Pattern { get; set; }
+        public string Message { get; set; }
+    }
+
+    public class SampleData
+    {
+        public string Description { get; set; }
+        public object Example { get; set; }
+    }
+
+    public class WindowOptions
+    {
+        public string Width { get; set; }
+        public string Height { get; set; }
+        public bool Modal { get; set; }
+        public bool Resizable { get; set; }
+        public bool Scrollable { get; set; }
+    }
+
+    // ========== HELP QUERY / RESPONSE MODELS ==========
+
+    public class HelpQuery
+    {
+        public string Text { get; set; }
+        public PageContext PageContext { get; set; }
+        public List<ConversationTurn> ConversationHistory { get; set; }
+    }
+
+    public class PageContext
+    {
+        public string Url { get; set; }
+        public string PageName { get; set; }
+        public string Module { get; set; }
+        public string View { get; set; }
+        public bool HasGrid { get; set; }
+        public string GridName { get; set; }
+        public bool HasPopup { get; set; }
+        public List<object> VisibleFields { get; set; }
+        public RecordInfo CurrentRecord { get; set; }
+    }
+
+    public class RecordInfo
+    {
+        public string Id { get; set; }
+        public string Field { get; set; }
+    }
+
+    public class ConversationTurn
+    {
+        public string Role { get; set; }
+        public string Content { get; set; }
+        public DateTime Timestamp { get; set; }
+    }
+
+    public class HelpResponse
+    {
+        public string Answer { get; set; }
+        public List<RelatedAction> RelatedActions { get; set; }
+        public List<WorkflowStep> WorkflowSteps { get; set; }
+    }
+
+    public class RelatedAction
+    {
+        public string Id { get; set; }
+        public string Label { get; set; }
+        public string Type { get; set; }
+        public string Target { get; set; }
+    }
+
+    public enum IntentType
+    {
+        STOCK_PART,
+        NON_STOCK_PART,
+        REBUILT_PART,
+        ESTIMATE,
+        ADMIN,
+        WORKFLOW,
+        GENERAL
+    }
+}
+4. Controller - HelpController.cs
+BCES/Controllers/Help/HelpController.cs
+csharp
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using BCES.Controllers.Base;
+using BCES.Data;
+using BCES.Helpers;
+using BCES.Models.Help;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Authorization;
+
+namespace BCES.Controllers.Help
+{
+    [Authorize]
+    public class HelpController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+        public HelpController(
+            DapperContext dapper,
+            IHttpContextAccessor httpContextAccessor)
+            : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        // ===== VIEWS =====
+
+        public IActionResult Index()
+        {
+            return View("~/Views/Help/Index.cshtml");
+        }
+
+        public IActionResult AIAssistance()
+        {
+            return View("~/Views/Help/AIAssistance.cshtml");
+        }
+
+        public IActionResult UserGuide()
+        {
+            return View("~/Views/Help/UserGuide.cshtml");
+        }
+
+        public IActionResult TrainingGuide()
+        {
+            return View("~/Views/Help/TrainingGuide.cshtml");
+        }
+
+        // ===== API ENDPOINTS =====
+
+        [HttpPost]
+        public async Task<IActionResult> AskQuestion([FromBody] HelpQuery query)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(query?.Text))
+                    return BadRequest(new { error = "Please enter a question." });
+
+                var response = await ProcessHelpQueryAsync(query);
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = "An error occurred. Please try again." });
+            }
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetPageMetadata(string pageName)
+        {
+            try
+            {
+                var metadata = await GetPageMetadataFromDbAsync(pageName);
+                if (metadata == null)
+                    return NotFound(new { error = "Page not found" });
+
+                var extracted = GetExtractedMetadata(metadata);
+
+                return Ok(new
+                {
+                    metadata.PageName,
+                    metadata.PageType,
+                    metadata.Module,
+                    metadata.Url,
+                    ExtractedMetadata = extracted
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = "Failed to retrieve metadata" });
+            }
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetAllPages()
+        {
+            try
+            {
+                var pages = await GetAllActivePagesAsync();
+                return Ok(pages.Select(p => new
+                {
+                    p.Id,
+                    p.PageName,
+                    p.PageType,
+                    p.Module,
+                    p.Url
+                }));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = "Failed to retrieve pages" });
+            }
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> SearchPages(string term)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(term))
+                    return Ok(new List<object>());
+
+                var pages = await SearchPagesAsync(term);
+                return Ok(pages.Select(p => new
+                {
+                    p.PageName,
+                    p.Module,
+                    p.PageType
+                }));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = "Search failed" });
+            }
+        }
+
+        // ===== PRIVATE METHODS =====
+
+        private async Task<HelpResponse> ProcessHelpQueryAsync(HelpQuery query)
+        {
+            try
+            {
+                // 1. Classify intent
+                var intentStr = await OpenAIHelper.ClassifyIntentAsync(query.Text);
+                var intent = Enum.TryParse<IntentType>(intentStr, out var result) ? result : IntentType.GENERAL;
+
+                // 2. Find relevant page
+                var pageName = await OpenAIHelper.GetRelevantPageNameAsync(query.Text);
+                if (pageName != "GENERAL" && query.PageContext != null)
+                {
+                    query.PageContext.PageName = pageName;
+                }
+
+                // 3. Get page metadata
+                var pageMetadata = await GetPageMetadataFromDbAsync(pageName);
+                var context = BuildContextPrompt(query, pageMetadata);
+
+                // 4. Get AI response
+                var systemPrompt = GetSystemPrompt(intent, query, pageMetadata);
+                var answer = await OpenAIHelper.GetChatCompletionAsync(systemPrompt, context, maxTokens: 1500);
+
+                // 5. Extract workflows if applicable
+                var workflowSteps = new List<WorkflowStep>();
+                if (IsWorkflowQuery(query.Text))
+                {
+                    var metadata = pageMetadata != null ? GetExtractedMetadata(pageMetadata) : null;
+                    if (metadata?.Workflows != null)
+                    {
+                        var workflow = GetRelevantWorkflow(query.Text, metadata.Workflows);
+                        if (workflow != null)
+                        {
+                            workflowSteps = workflow.Steps;
+                        }
+                    }
+                }
+
+                // 6. Get related actions
+                var relatedActions = GetRelatedActions(intent, pageMetadata);
+
+                return new HelpResponse
+                {
+                    Answer = answer,
+                    WorkflowSteps = workflowSteps,
+                    RelatedActions = relatedActions
+                };
+            }
+            catch (Exception ex)
+            {
+                return new HelpResponse
+                {
+                    Answer = "I encountered an error processing your request. Please try again or rephrase your question."
+                };
+            }
+        }
+
+        private async Task<HelpPageMetadata> GetPageMetadataFromDbAsync(string pageName)
+        {
+            if (pageName == "GENERAL" || string.IsNullOrEmpty(pageName))
+                return null;
+
+            var sql = @"
+                SELECT TOP 1 
+                    Id, PageName, PageType, Module, Controller, Action, Url,
+                    JsonMetadata, IsActive, Version, CreatedDate, LastUpdated,
+                    CreatedBy, UpdatedBy
+                FROM SBCES.HelpPageMetadata
+                WHERE PageName = @PageName AND IsActive = 1
+                ORDER BY Version DESC";
+
+            return await _dbConnection.QueryFirstOrDefaultAsync<HelpPageMetadata>(
+                sql, new { PageName = pageName });
+        }
+
+        private async Task<List<HelpPageMetadata>> GetAllActivePagesAsync()
+        {
+            var sql = @"
+                SELECT 
+                    Id, PageName, PageType, Module, Controller, Action, Url,
+                    JsonMetadata, IsActive, Version, CreatedDate, LastUpdated,
+                    CreatedBy, UpdatedBy
+                FROM SBCES.HelpPageMetadata
+                WHERE IsActive = 1
+                ORDER BY Module, PageName";
+
+            return (await _dbConnection.QueryAsync<HelpPageMetadata>(sql)).ToList();
+        }
+
+        private async Task<List<HelpPageMetadata>> SearchPagesAsync(string searchTerm)
+        {
+            var sql = @"
+                SELECT 
+                    Id, PageName, PageType, Module, Controller, Action, Url,
+                    JsonMetadata, IsActive, Version, CreatedDate, LastUpdated,
+                    CreatedBy, UpdatedBy
+                FROM SBCES.HelpPageMetadata
+                WHERE IsActive = 1
+                AND (PageName LIKE '%' + @SearchTerm + '%'
+                     OR Module LIKE '%' + @SearchTerm + '%'
+                     OR Controller LIKE '%' + @SearchTerm + '%'
+                     OR JSON_VALUE(JsonMetadata, '$.pageInfo.description') LIKE '%' + @SearchTerm + '%')
+                ORDER BY Module, PageName";
+
+            return (await _dbConnection.QueryAsync<HelpPageMetadata>(
+                sql, new { SearchTerm = searchTerm })).ToList();
+        }
+
+        private ExtractedPageMetadata GetExtractedMetadata(HelpPageMetadata page)
+        {
+            if (page == null || string.IsNullOrEmpty(page.JsonMetadata))
+                return null;
+
+            try
+            {
+                return JsonSerializer.Deserialize<ExtractedPageMetadata>(page.JsonMetadata);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private string BuildContextPrompt(HelpQuery query, HelpPageMetadata pageMetadata)
+        {
+            var metadata = pageMetadata != null ? GetExtractedMetadata(pageMetadata) : null;
+
+            if (metadata == null)
+                return $"User Query: {query.Text}\nNo specific page metadata found.";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"User Query: {query.Text}");
+            sb.AppendLine($"Current Page: {metadata.PageInfo?.PageName ?? "Unknown"}");
+            sb.AppendLine($"Module: {metadata.PageInfo?.Module ?? "Unknown"}");
+            sb.AppendLine($"Page Type: {metadata.PageInfo?.PageType ?? "Unknown"}");
+            sb.AppendLine($"Description: {metadata.PageInfo?.Description ?? "No description"}");
+            sb.AppendLine();
+
+            if (metadata.UiStructure != null)
+            {
+                sb.AppendLine("=== UI Structure ===");
+                sb.AppendLine($"Has Grid: {metadata.UiStructure.HasGrid}");
+                if (metadata.UiStructure.HasGrid)
+                {
+                    sb.AppendLine($"Grid Name: {metadata.UiStructure.GridName}");
+                    sb.AppendLine("Grid Columns:");
+                    foreach (var col in metadata.UiStructure.GridColumns ?? new List<GridColumn>())
+                    {
+                        var required = col.IsRequired ? " (Required)" : "";
+                        sb.AppendLine($"  - {col.Title} ({col.DataType}){required}");
+                    }
+                }
+
+                if (metadata.UiStructure.Popups != null && metadata.UiStructure.Popups.Count > 0)
+                {
+                    sb.AppendLine("Popups:");
+                    foreach (var popup in metadata.UiStructure.Popups)
+                    {
+                        sb.AppendLine($"  - {popup.Title}");
+                        if (popup.Sections != null)
+                        {
+                            foreach (var section in popup.Sections)
+                            {
+                                sb.AppendLine($"    {section.Name}:");
+                                foreach (var field in section.Fields ?? new List<PopupField>())
+                                {
+                                    var required = field.IsRequired ? " *" : "";
+                                    var readOnly = field.IsReadOnly ? " (Read-Only)" : "";
+                                    sb.AppendLine($"      - {field.Label} ({field.Type}){required}{readOnly}");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (metadata.UiStructure.Tabs != null && metadata.UiStructure.Tabs.Count > 0)
+                {
+                    sb.AppendLine("Tabs:");
+                    foreach (var tab in metadata.UiStructure.Tabs)
+                    {
+                        var active = tab.IsActive ? " (Active)" : "";
+                        sb.AppendLine($"  - {tab.Title}{active}");
+                    }
+                }
+            }
+
+            if (metadata.Fields != null)
+            {
+                sb.AppendLine();
+                sb.AppendLine("=== Field Information ===");
+                if (metadata.Fields.Required != null && metadata.Fields.Required.Count > 0)
+                    sb.AppendLine($"Required Fields: {string.Join(", ", metadata.Fields.Required)}");
+                if (metadata.Fields.ReadOnly != null && metadata.Fields.ReadOnly.Count > 0)
+                    sb.AppendLine($"Read-Only Fields: {string.Join(", ", metadata.Fields.ReadOnly)}");
+                if (metadata.Fields.AutoGenerated != null && metadata.Fields.AutoGenerated.Count > 0)
+                    sb.AppendLine($"Auto-Generated Fields: {string.Join(", ", metadata.Fields.AutoGenerated)}");
+            }
+
+            if (metadata.Workflows != null && metadata.Workflows.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("=== Available Workflows ===");
+                foreach (var workflow in metadata.Workflows)
+                {
+                    sb.AppendLine($"  - {workflow.Name}: {workflow.Description}");
+                }
+            }
+
+            if (metadata.Actions != null && metadata.Actions.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("=== API Endpoints ===");
+                foreach (var action in metadata.Actions)
+                {
+                    sb.AppendLine($"  - {action.Key}: {action.Value}");
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private string GetSystemPrompt(IntentType intent, HelpQuery query, HelpPageMetadata pageMetadata)
+        {
+            var basePrompt = @"
+You are a helpful AI assistant for the BCES Cost Estimation System.
+Your goal is to help users understand and use the system effectively.
+
+Guidelines:
+1. Be specific and provide step-by-step instructions
+2. Mention field names, button names, and locations
+3. Highlight required fields and important information
+4. Provide tips and best practices
+5. If you don't know something, say so and suggest where to find help
+6. Format responses with clear sections and bullet points
+
+Format your response using:
+- ### Headings for sections
+- **Bold** for important items
+- `Code` for field/button names
+- - Bullet points for lists
+- Numbered steps for procedures
+- > Note: for important warnings or tips
+
+";
+
+            var agentSpecificPrompt = intent switch
+            {
+                IntentType.STOCK_PART => @"
+You are a Stock Coded Parts expert.
+
+Key information about Stock Coded Parts:
+- MMS Stock Code: Unique identifier (required)
+- Description: Part description
+- Unit Cost: Cost per unit
+- Core Cost: Refundable core charge
+- Supplier Information: Orig Supplier Number and Name
+- Total Cost calculation: TotalCost = UnitCost × Qty × Percentage/100
+
+When helping:
+- Explain the Add, Edit, Delete operations
+- Mention the ComboBox auto-fill behavior
+- Warn that deleting affects existing estimates
+",
+                IntentType.NON_STOCK_PART => @"
+You are a Non-Stock Coded Parts expert.
+
+Key information about Non-Stock Coded Parts:
+- Orig Supplier Number: Supplier's part number (required)
+- Orig Supplier Name: Supplier name (required)
+- Not kept in regular inventory
+- Ordered from suppliers as needed
+- Refresh Details functionality updates from supplier master
+
+When helping:
+- Explain the supplier relationship
+- Describe the Refresh Details functionality
+- Note that Supplier Number is read-only in edit mode
+",
+                IntentType.REBUILT_PART => @"
+You are a Rebuilt Parts expert.
+
+Key information about Rebuilt Parts:
+- Rebuilt Stock Num: Unique identifier (required, read-only in edit mode)
+- MMS Stock Code: Stock code mapping (required)
+- Keyword: Descriptive keyword (required)
+- Buy New Cost: Cost to buy new (required)
+- Reman Cost: Remanufacturing cost (required)
+- Convert from Make vs Buy: Creates a rebuilt part from an MB estimate
+
+When helping:
+- Explain the Add, Edit, Delete operations
+- Describe the Convert from Make vs Buy feature
+- Mention cost implications
+",
+                IntentType.ESTIMATE => @"
+You are an Estimate expert.
+
+Types of estimates:
+1. Vehicle Estimate - For vehicle repairs/maintenance
+2. Make vs Buy Estimate - For make vs buy decisions
+
+Key features:
+- Main form with required fields
+- Tabs for Labour, Stock Parts, Non-Stock Parts, Rebuilt Parts, Final Estimate
+- Total Cost calculations
+- Copy, Archive, Delete functionality
+
+When helping:
+- Explain the workflow from creation to final estimate
+- Describe each tab's purpose
+- Mention required fields
+- Explain the Total Cost calculation
+",
+                IntentType.ADMIN => @"
+You are an Administration expert.
+
+Admin functions include:
+- User Management (add, edit, delete users, assign roles)
+- Labour Task Management (task descriptions)
+- Differential Management (differential types)
+- Engine Management (engine types)
+- Make Model Year Management
+- Transmission Management
+- Employee Salary Management
+- Labour Type Management
+- List Of Vehicles
+- Change Settings
+- Announcement Settings
+
+When helping:
+- Explain which admin page to use
+- Describe the CRUD operations
+- Mention required fields
+- Warn about implications of changes
+",
+                IntentType.WORKFLOW => @"
+You are a Workflow expert.
+
+Focus on providing:
+1. Step-by-step instructions
+2. Clear numbering
+3. What to expect at each step
+4. Helpful tips
+5. Troubleshooting common issues
+
+Always break down complex tasks into simple, actionable steps.
+",
+                _ => @"
+You are a general assistant for the BCES Cost Estimation System.
+
+Help users with any question about:
+- System features and functionality
+- Navigation
+- Common tasks
+- Troubleshooting
+
+If you're unsure, suggest consulting the User Guide or Training Guide.
+"
+            };
+
+            return basePrompt + "\n" + agentSpecificPrompt;
+        }
+
+        private Workflow GetRelevantWorkflow(string query, List<Workflow> workflows)
+        {
+            if (workflows == null || workflows.Count == 0)
+                return null;
+
+            foreach (var workflow in workflows)
+            {
+                if (query.Contains(workflow.Name, StringComparison.OrdinalIgnoreCase) ||
+                    query.Contains(workflow.Name.Replace("Create ", ""), StringComparison.OrdinalIgnoreCase) ||
+                    (query.Contains("add", StringComparison.OrdinalIgnoreCase) &&
+                     workflow.Name.Contains("Create", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return workflow;
+                }
+            }
+
+            return null;
+        }
+
+        private bool IsWorkflowQuery(string query)
+        {
+            return query.Contains("how to", StringComparison.OrdinalIgnoreCase) ||
+                   query.Contains("steps", StringComparison.OrdinalIgnoreCase) ||
+                   query.Contains("guide", StringComparison.OrdinalIgnoreCase) ||
+                   query.Contains("tutorial", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private List<RelatedAction> GetRelatedActions(IntentType intent, HelpPageMetadata pageMetadata)
+        {
+            var actions = new List<RelatedAction>();
+
+            if (pageMetadata != null)
+            {
+                var metadata = GetExtractedMetadata(pageMetadata);
+                if (metadata?.Actions != null)
+                {
+                    foreach (var action in metadata.Actions)
+                    {
+                        actions.Add(new RelatedAction
+                        {
+                            Id = action.Key,
+                            Label = action.Key.ToUpper(),
+                            Type = "navigate",
+                            Target = action.Value
+                        });
+                    }
+                }
+            }
+
+            // Add common actions based on intent
+            switch (intent)
+            {
+                case IntentType.STOCK_PART:
+                    actions.Add(new RelatedAction { Id = "stock-add", Label = "Add Stock Part", Type = "navigate", Target = "/StockCodedParts/Index" });
+                    break;
+                case IntentType.NON_STOCK_PART:
+                    actions.Add(new RelatedAction { Id = "nsc-add", Label = "Add Non-Stock Part", Type = "navigate", Target = "/NscPartsUsedIndex" });
+                    break;
+                case IntentType.REBUILT_PART:
+                    actions.Add(new RelatedAction { Id = "rb-add", Label = "Add Rebuilt Part", Type = "navigate", Target = "/RebuiltPartsIndex" });
+                    break;
+                case IntentType.ESTIMATE:
+                    actions.Add(new RelatedAction { Id = "estimate-add", Label = "Add Vehicle Estimate", Type = "navigate", Target = "/VehiclesIndex" });
+                    actions.Add(new RelatedAction { Id = "estimate-mb-add", Label = "Add Make vs Buy", Type = "navigate", Target = "/MakeVsBuyIndex" });
+                    break;
+                case IntentType.ADMIN:
+                    actions.Add(new RelatedAction { Id = "admin-users", Label = "User Management", Type = "navigate", Target = "/UserManagementGrid" });
+                    break;
+            }
+
+            return actions;
+        }
+    }
+}
+5. View - AIAssistance.cshtml
+BCES/Views/Help/AIAssistance.cshtml
+html
+@{
+    ViewData["Title"] = "AI Assistance";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+}
+
+@section Styles {
+    <style>
+        .ai-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .ai-header {
+            background: linear-gradient(135deg, #0078d4, #005a9e);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .ai-header h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+
+        .ai-header p {
+            margin: 10px 0 0;
+            opacity: 0.9;
+        }
+
+        .ai-chat {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 600px;
+        }
+
+        .ai-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8f9fa;
+        }
+
+        .ai-message {
+            margin-bottom: 16px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            max-width: 85%;
+            word-wrap: break-word;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .ai-message.user {
+            background: #0078d4;
+            color: white;
+            margin-left: auto;
+            border-bottom-right-radius: 4px;
+        }
+
+        .ai-message.assistant {
+            background: white;
+            border: 1px solid #e0e0e0;
+            margin-right: auto;
+            border-bottom-left-radius: 4px;
+        }
+
+        .ai-message.error {
+            background: #dc3545;
+            color: white;
+            margin-left: auto;
+        }
+
+        .ai-message .time {
+            font-size: 0.75em;
+            opacity: 0.7;
+            margin-top: 4px;
+            display: block;
+        }
+
+        .ai-message ul {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+
+        .ai-message li {
+            margin: 4px 0;
+        }
+
+        .ai-message code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        .ai-message strong {
+            font-weight: 600;
+        }
+
+        .ai-message h3 {
+            margin: 12px 0 8px;
+            color: #0078d4;
+            font-size: 1.1em;
+        }
+
+        .ai-message h4 {
+            margin: 10px 0 6px;
+            color: #005a9e;
+            font-size: 1em;
+        }
+
+        .ai-message blockquote {
+            border-left: 3px solid #0078d4;
+            margin: 8px 0;
+            padding: 8px 16px;
+            background: #f0f7ff;
+        }
+
+        .ai-input-container {
+            padding: 16px 20px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .ai-input-container textarea {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            outline: none;
+            resize: vertical;
+            min-height: 50px;
+            max-height: 150px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        .ai-input-container textarea:focus {
+            border-color: #0078d4;
+            box-shadow: 0 0 0 2px rgba(0,120,212,0.1);
+        }
+
+        .ai-input-container .btn-send {
+            padding: 12px 24px;
+            background: #0078d4;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            height: 50px;
+            min-width: 80px;
+        }
+
+        .ai-input-container .btn-send:hover:not(:disabled) {
+            background: #005a9e;
+        }
+
+        .ai-input-container .btn-send:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .ai-suggestions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 12px 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .ai-suggestions .suggestion-btn {
+            padding: 6px 14px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #333;
+        }
+
+        .ai-suggestions .suggestion-btn:hover {
+            background: #0078d4;
+            color: white;
+            border-color: #0078d4;
+        }
+
+        .ai-typing {
+            display: none;
+            padding: 12px 16px;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            margin-right: auto;
+            max-width: 80px;
+        }
+
+        .ai-typing.active {
+            display: block;
+        }
+
+        .ai-typing-dots {
+            display: flex;
+            gap: 4px;
+            justify-content: center;
+        }
+
+        .ai-typing-dots span {
+            width: 8px;
+            height: 8px;
+            background: #0078d4;
+            border-radius: 50%;
+            animation: typing 1.4s infinite both;
+        }
+
+        .ai-typing-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .ai-typing-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .ai-message pre {
+            background: #f0f0f0;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 8px 0;
+        }
+
+        .ai-message pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .ai-related-actions {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .ai-related-actions .action-btn {
+            padding: 4px 12px;
+            margin: 4px 4px 0 0;
+            background: #e8f0fe;
+            border: 1px solid #d2e3fc;
+            border-radius: 4px;
+            color: #1a73e8;
+            cursor: pointer;
+            font-size: 0.85em;
+        }
+
+        .ai-related-actions .action-btn:hover {
+            background: #d2e3fc;
+        }
+
+        @media (max-width: 768px) {
+            .ai-chat {
+                height: calc(100vh - 200px);
+            }
+
+            .ai-messages {
+                padding: 12px;
+            }
+
+            .ai-message {
+                max-width: 95%;
+            }
+
+            .ai-input-container {
+                padding: 12px;
+                flex-direction: column;
+            }
+
+            .ai-input-container textarea {
+                min-height: 40px;
+            }
+
+            .ai-input-container .btn-send {
+                width: 100%;
+                height: 44px;
+            }
+        }
+    </style>
+}
+
+<div class="ai-container">
+    <div class="ai-header">
+        <h1>
+            <span class="k-icon k-i-robot" style="margin-right: 10px;"></span>
+            AI Assistance
+        </h1>
+        <p>Ask me anything about the Cost Estimation System. I'm here to help!</p>
+    </div>
+
+    <div class="ai-chat">
+        <div class="ai-messages" id="chatMessages">
+            <div class="ai-message assistant">
+                <strong>👋 Hello! I'm your AI Assistant for the Cost Estimation System.</strong>
+                <p>I can help you with:</p>
+                <ul>
+                    <li>Creating and managing estimates</li>
+                    <li>Adding stock, non-stock, and rebuilt parts</li>
+                    <li>Understanding labour and cost calculations</li>
+                    <li>Step-by-step workflows</li>
+                    <li>Troubleshooting common issues</li>
+                </ul>
+                <p>Try asking me a question below!</p>
+                <span class="time">Just now</span>
+            </div>
+        </div>
+
+        <div class="ai-suggestions">
+            <span style="color: #666; font-size: 13px; padding: 4px 0;">Suggested:</span>
+            <button class="suggestion-btn" onclick="askSuggestion('How to create a Make vs Buy estimate?')">
+                Create Make vs Buy
+            </button>
+            <button class="suggestion-btn" onclick="askSuggestion('How to add a stock coded part?')">
+                Add Stock Part
+            </button>
+            <button class="suggestion-btn" onclick="askSuggestion('How to add labour to an estimate?')">
+                Add Labour
+            </button>
+            <button class="suggestion-btn" onclick="askSuggestion('How to convert Make vs Buy to Rebuilt Part?')">
+                Convert MB to RB
+            </button>
+            <button class="suggestion-btn" onclick="askSuggestion('What fields are required for a vehicle estimate?')">
+                Required Fields
+            </button>
+            <button class="suggestion-btn" onclick="askSuggestion('How to add a user in User Management?')">
+                Add User
+            </button>
+        </div>
+
+        <div class="ai-input-container">
+            <textarea id="userQuestion" 
+                      placeholder="Type your question here... (e.g., 'How do I add a rebuilt part?')" 
+                      rows="1"></textarea>
+            <button class="btn-send" id="sendButton" onclick="sendQuestion()">
+                <span class="k-icon k-i-send"></span> Send
+            </button>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        let isProcessing = false;
+        let conversationHistory = [];
+
+        $(document).ready(function() {
+            // Auto-resize textarea
+            $('#userQuestion').on('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+            });
+
+            // Enter key support (Shift+Enter for new line)
+            $('#userQuestion').on('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendQuestion();
+                }
+            });
+
+            // Focus input on load
+            setTimeout(function() {
+                $('#userQuestion').focus();
+            }, 500);
+        });
+
+        function askSuggestion(question) {
+            $('#userQuestion').val(question);
+            sendQuestion();
+        }
+
+        function sendQuestion() {
+            var input = $('#userQuestion');
+            var question = input.val().trim();
+
+            if (!question || isProcessing) return;
+
+            // Add user message
+            addMessage(question, 'user');
+            input.val('');
+            input.css('height', 'auto');
+
+            // Show typing indicator
+            showTypingIndicator(true);
+
+            isProcessing = true;
+            $('#sendButton').prop('disabled', true);
+
+            // Send to server
+            $.ajax({
+                url: '/Help/AskQuestion',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    text: question,
+                    pageContext: {
+                        url: window.location.href,
+                        pageName: 'AIAssistance',
+                        module: 'Help',
+                        view: 'AIAssistance',
+                        hasGrid: false,
+                        visibleFields: []
+                    },
+                    conversationHistory: conversationHistory.slice(-5)
+                }),
+                success: function(response) {
+                    showTypingIndicator(false);
+                    addMessage(response.answer, 'assistant');
+
+                    // Show related actions if any
+                    if (response.relatedActions && response.relatedActions.length > 0) {
+                        addRelatedActions(response.relatedActions);
+                    }
+
+                    conversationHistory.push(
+                        { role: 'user', content: question },
+                        { role: 'assistant', content: response.answer }
+                    );
+                },
+                error: function(xhr) {
+                    showTypingIndicator(false);
+                    var errorMsg = xhr.responseJSON?.error || 'An error occurred. Please try again.';
+                    addMessage('❌ ' + errorMsg, 'error');
+                },
+                complete: function() {
+                    isProcessing = false;
+                    $('#sendButton').prop('disabled', false);
+                    $('#userQuestion').focus();
+                }
+            });
+        }
+
+        function addMessage(content, type) {
+            var container = $('#chatMessages');
+            var messageDiv = $('<div>').addClass('ai-message ' + type);
+
+            if (type === 'assistant') {
+                // Convert markdown-like formatting to HTML
+                var html = content
+                    // Headers
+                    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+                    .replace(/^## (.*$)/gim, '<h4>$1</h4>')
+                    .replace(/^# (.*$)/gim, '<h3>$1</h3>')
+                    // Bold
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    // Italic
+                    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                    // Code blocks
+                    .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+                    // Inline code
+                    .replace(/`(.*?)`/g, '<code>$1</code>')
+                    // Blockquotes
+                    .replace(/^> (.*$)/gim, '<blockquote>$1</blockquote>')
+                    // Line breaks
+                    .replace(/\n/g, '<br />')
+                    // Lists - handle both * and - 
+                    .replace(/^[*-] (.*$)/gim, '<li>$1</li>')
+                    .replace(/(<li>.*?<\/li>)/gs, function(match) {
+                        return '<ul>' + match + '</ul>';
+                    });
+
+                // Clean up multiple <br> tags
+                html = html.replace(/(<br \/>){2,}/g, '<br />');
+                // Clean up empty ul tags
+                html = html.replace(/<ul><\/ul>/g, '');
+
+                messageDiv.html(html);
+            } else {
+                messageDiv.text(content);
+            }
+
+            // Add timestamp
+            var time = new Date().toLocaleTimeString();
+            messageDiv.append('<span class="time">' + time + '</span>');
+
+            container.append(messageDiv);
+            container.scrollTop(container[0].scrollHeight);
+        }
+
+        function addRelatedActions(actions) {
+            var container = $('#chatMessages');
+            var div = $('<div class="ai-message assistant">');
+            div.append('<div class="ai-related-actions"><strong>Related Actions:</strong><br>');
+
+            $.each(actions, function(index, action) {
+                var btn = $('<button class="action-btn" onclick="performAction(\'' + action.id + '\', \'' + action.type + '\', \'' + action.target + '\')">' + action.label + '</button>');
+                div.find('.ai-related-actions').append(btn);
+            });
+
+            div.append('</div>');
+            container.append(div);
+            container.scrollTop(container[0].scrollHeight);
+        }
+
+        function performAction(id, type, target) {
+            switch(type) {
+                case 'navigate':
+                    window.location.href = target;
+                    break;
+                case 'open':
+                    // Try to open a Kendo window
+                    var win = $('#' + target + 'PopupWindow').data('kendoWindow');
+                    if (win) {
+                        win.open();
+                    } else {
+                        // Fallback: navigate
+                        window.location.href = target;
+                    }
+                    break;
+                default:
+                    console.log('Action:', id, type, target);
+            }
+        }
+
+        function showTypingIndicator(show) {
+            var container = $('#chatMessages');
+            var indicator = $('.ai-typing');
+
+            if (show) {
+                if (indicator.length === 0) {
+                    indicator = $(
+                        '<div class="ai-typing active">' +
+                            '<div class="ai-typing-dots">' +
+                                '<span></span>' +
+                                '<span></span>' +
+                                '<span></span>' +
+                            '</div>' +
+                        '</div>'
+                    );
+                    container.append(indicator);
+                }
+                indicator.addClass('active');
+                container.scrollTop(container[0].scrollHeight);
+            } else {
+                indicator.removeClass('active');
+                setTimeout(function() {
+                    indicator.remove();
+                }, 300);
+            }
+        }
+
+        // Auto-send on paste of long questions
+        $('#userQuestion').on('paste', function() {
+            setTimeout(function() {
+                if ($(this).val().length > 50) {
+                    sendQuestion();
+                }
+            }.bind(this), 100);
+        });
+    </script>
+}
+6. Menu Integration
+Add this to your menu (likely in _Layout.cshtml or a shared menu partial):
+
+html
+<li class="k-item">
+    <span class="k-link k-menu-link">
+        <img alt="image" class="k-image" src="/images/home.png" />
+        <span class="k-menu-link-text">Help</span>
+        <span class="k-menu-expand-arrow">
+            <span class="k-icon k-svg-icon k-svg-i-caret-alt-down k-menu-expand-arrow-icon">
+                <svg aria-hidden="true" focusable="false" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M256 352 128 160h256z" />
+                </svg>
+            </span>
+        </span>
+    </span>
+    <ul class="k-group k-menu-group k-reset k-menu-group-md">
+        <li class="k-item" target="_blank">
+            <a class="k-link k-menu-link" href="/Help/UserGuide">
+                <img alt="image" class="k-image" src="/images/part.png" />
+                <span class="k-menu-link-text">User Guide</span>
+            </a>
+        </li>
+        <li class="k-item" target="_blank">
+            <a class="k-link k-menu-link" href="/Help/TrainingGuide">
+                <img alt="image" class="k-image" src="/images/part.png" />
+                <span class="k-menu-link-text">Training Guide</span>
+            </a>
+        </li>
+        <li class="k-item" target="_blank">
+            <a class="k-link k-menu-link" href="/Help/AIAssistance">
+                <img alt="image" class="k-image" src="/images/part.png" />
+                <span class="k-menu-link-text">AI Assistance</span>
+            </a>
+        </li>
+    </ul>
+</li>
+7. Register Route
+Make sure your routes include the Help controller. In Program.cs or Startup.cs:
+
+csharp
+app.MapControllerRoute(
+    name: "help",
+    pattern: "Help/{action=Index}/{id?}",
+    defaults: new { controller = "Help" });
+
+app.MapControllerRoute(
+    name: "default",
+    pattern: "{controller=Home}/{action=Index}/{id?}");
+Summary of Files Created
+File	Path
+OpenAIHelper.cs	BCES/Helpers/OpenAIHelper.cs
+HelpModels.cs	BCES/Models/Help/HelpModels.cs
+HelpController.cs	BCES/Controllers/Help/HelpController.cs
+AIAssistance.cshtml	BCES/Views/Help/AIAssistance.cshtml
+Instructions to Deploy
+Copy all files to the respective folders
+
+Replace OpenAI API Key in OpenAIHelper.cs:
+
+csharp
+private const string API_KEY = "YOUR_ACTUAL_OPENAI_API_KEY_HERE";
+Add the menu item to your navigation
+
+Run the app and navigate to /Help/AIAssistance
+
+Test by asking questions like:
+
+"How to create a Make vs Buy estimate?"
+
+"How to add a stock coded part?"
+
+"What fields are required for a vehicle estimate?
