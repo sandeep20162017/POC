@@ -1,0 +1,52 @@
+------------------------------------------------------------
+-- CONFIGURATION
+------------------------------------------------------------
+DECLARE @schema_name SYSNAME = N'BCES';   
+DECLARE @sql NVARCHAR(MAX);
+
+------------------------------------------------------------
+-- DROP FOREIGN KEYS WHERE THE PARENT TABLE IS IN THIS SCHEMA
+------------------------------------------------------------
+SET @sql = N'';
+
+SELECT @sql = @sql + '
+ALTER TABLE [' + SCHEMA_NAME(fk.schema_id) + '].[' + OBJECT_NAME(fk.parent_object_id) + '] 
+DROP CONSTRAINT [' + fk.name + '];'
+FROM sys.foreign_keys fk
+JOIN sys.objects o ON fk.parent_object_id = o.object_id
+WHERE o.schema_id = SCHEMA_ID(@schema_name);
+
+PRINT @sql;
+EXEC(@sql);
+
+------------------------------------------------------------
+-- DROP ALL OBJECTS IN THE SCHEMA
+------------------------------------------------------------
+SET @sql = N'';
+
+SELECT @sql = @sql + '
+DROP ' +
+    CASE type
+        WHEN 'U' THEN 'TABLE'
+        WHEN 'V' THEN 'VIEW'
+        WHEN 'P' THEN 'PROCEDURE'
+        WHEN 'FN' THEN 'FUNCTION'
+        WHEN 'IF' THEN 'FUNCTION'
+        WHEN 'TF' THEN 'FUNCTION'
+        WHEN 'TR' THEN 'TRIGGER'
+        WHEN 'SQ' THEN 'SEQUENCE'
+        ELSE type
+    END +
+    ' [' + @schema_name + '].[' + name + '];'
+FROM sys.objects
+WHERE schema_id = SCHEMA_ID(@schema_name);
+
+PRINT @sql;
+EXEC(@sql);
+
+------------------------------------------------------------
+-- DROP THE SCHEMA ITSELF
+------------------------------------------------------------
+SET @sql = N'DROP SCHEMA [' + @schema_name + '];';
+PRINT @sql;
+EXEC(@sql);
