@@ -1,0 +1,268 @@
+Step 1 — Install Python 3.10 64-bit
+
+Download and install:
+
+Python 3.10.x Windows installer (64-bit)
+
+During installation:
+
+Check:
+
+☑ Add Python.exe to PATH
+☑ Install pip
+
+Install to:
+
+C:\Python31064
+
+(or default location is fine)
+
+Step 2 — Verify Python installations
+
+Open a new CMD:
+
+py -0p
+
+Expected:
+
+ -3.10-64    C:\Python31064\python.exe
+ -3.10-32    C:\Python310-32\python.exe
+Step 3 — Create new migration virtual environment
+
+Go to your project:
+
+cd C:\ces
+
+Create:
+
+C:\Python31064\python.exe -m venv python31064bit
+
+Activate:
+
+python31064bit\Scripts\activate
+
+Verify:
+
+python -c "import platform;print(platform.architecture())"
+
+Expected:
+
+('64bit', 'WindowsPE')
+Step 4 — Install packages
+python -m pip install --upgrade pip
+
+pip install oracledb
+pip install pyodbc
+
+Verify:
+
+pip list
+
+You should see:
+
+oracledb
+pyodbc
+Step 5 — Combined Oracle + SQL Server connection test
+
+Create:
+
+C:\ces\connection_test.py
+import platform
+import sys
+import pyodbc
+import oracledb
+
+
+print("=" * 70)
+print("PYTHON INFORMATION")
+print("=" * 70)
+
+print("Python :", sys.version)
+print("Arch   :", platform.architecture())
+
+
+############################################################
+# Oracle Test
+############################################################
+
+print("\n" + "=" * 70)
+print("ORACLE CONNECTION TEST")
+print("=" * 70)
+
+
+oracle_user = "CES"
+oracle_password = "ces"
+
+# Option 1:
+# If ces_tst is in tnsnames.ora
+oracle_dsn = "ces_tst"
+
+
+try:
+    oracle_conn = oracledb.connect(
+        user=oracle_user,
+        password=oracle_password,
+        dsn=oracle_dsn
+    )
+
+    print("Oracle connection SUCCESS")
+
+    cursor = oracle_conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT 
+            SYS_CONTEXT('USERENV','DB_NAME'),
+            SYSDATE
+        FROM DUAL
+        """
+    )
+
+    result = cursor.fetchone()
+
+    print("Database :", result[0])
+    print("Date     :", result[1])
+
+    cursor.close()
+    oracle_conn.close()
+
+
+except Exception as e:
+
+    print("Oracle connection FAILED")
+    print(type(e).__name__)
+    print(e)
+
+
+
+############################################################
+# SQL SERVER Test
+############################################################
+
+
+print("\n" + "=" * 70)
+print("SQL SERVER CONNECTION TEST")
+print("=" * 70)
+
+
+sql_connection_string = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=AppCESDB_DEV;"
+    "DATABASE=CES;"
+    "UID=CESUser;"
+    "PWD=CESUser#Dev;"
+    "TrustServerCertificate=Yes;"
+)
+
+
+try:
+
+    sql_conn = pyodbc.connect(
+        sql_connection_string,
+        timeout=10
+    )
+
+    print("SQL Server connection SUCCESS")
+
+    cursor = sql_conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT 
+            @@SERVERNAME,
+            DB_NAME(),
+            GETDATE()
+        """
+    )
+
+    result = cursor.fetchone()
+
+    print("Server :", result[0])
+    print("DB     :", result[1])
+    print("Date   :", result[2])
+
+
+    cursor.close()
+    sql_conn.close()
+
+
+except Exception as e:
+
+    print("SQL Server connection FAILED")
+    print(type(e).__name__)
+    print(e)
+
+
+
+print("\nTest completed.")
+Expected successful output
+
+Something like:
+
+======================================================================
+PYTHON INFORMATION
+======================================================================
+Python : 3.10.x
+Arch   : ('64bit','WindowsPE')
+
+
+======================================================================
+ORACLE CONNECTION TEST
+======================================================================
+
+Oracle connection SUCCESS
+Database : CES
+Date     : 2026-08-06 ...
+
+
+======================================================================
+SQL SERVER CONNECTION TEST
+======================================================================
+
+SQL Server connection SUCCESS
+Server : AppCESDB_DEV
+DB     : CES
+Date   : 2026-08-06 ...
+
+
+Test completed.
+One Oracle note
+
+Because we are using oracledb Thin mode, this line:
+
+dsn = "ces_tst"
+
+depends on your Oracle networking configuration.
+
+If it fails with something like:
+
+DPY-4027: no configuration directory specified
+
+we will point it directly to your tnsnames.ora.
+
+Your earlier log showed:
+
+C:\oracle\product\12.1.0\client_1
+
+so we can configure:
+
+oracledb.defaults.config_dir = r"C:\oracle\product\12.1.0\client_1\network\admin"
+
+if needed.
+
+Once both connections pass, the next script will be the migration engine:
+
+Read Oracle table metadata (ALL_TAB_COLUMNS)
+
+Convert:
+
+STOCK_CODE → StockCode
+Map Oracle types → SQL Server types
+
+Create/load into:
+
+SBCES.TableName
+
+Bulk insert using:
+
+cursor.fast_executemany = True
