@@ -1,0 +1,199 @@
+import sys
+import platform
+import logging
+import pyodbc
+import oracledb
+
+# =========================================================
+# CONFIGURATION
+# =========================================================
+
+ORACLE_DSN = "//ocinp-f453r-scan.ttcocidrclients.ttcocidrvcn.oraclevcn.com:1521/ces_upg_svc.int.ttc.ca"
+ORACLE_USER = "CES"
+ORACLE_PASSWORD = "ces"
+
+SQL_CONN_STR = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=AppCESDB_DEV;"
+    "DATABASE=CES;"
+    "UID=CESUser;"
+    "PWD=CESUser#Dev;"
+    "TrustServerCertificate=Yes;"
+)
+
+SQL_SCHEMA = "SBCES"
+
+ROUND1_TABLES = [
+    "ArchRbEmployeeLabour",
+    "ArchRbLabourCcTotal",
+    "ArchRbListBuses",
+    "ArchRbMasterlist",
+    "ArchRbMaterialsCcTotal",
+    "ArchRbNscPartsUsed",
+    "ArchRbScPartsUsed",
+]
+
+TABLE_NAME_MAP = {
+    "ArchRbEmployeeLabour": "ARCH_RB_EMPLOYEE_LABOUR",
+    "ArchRbLabourCcTotal": "ARCH_RB_LABOUR_CC_TOTAL",
+    "ArchRbListBuses": "ARCH_RB_LIST_BUSES",
+    "ArchRbMasterlist": "ARCH_RB_MASTERLIST",
+    "ArchRbMaterialsCcTotal": "ARCH_RB_MATERIALS_CC_TOTAL",
+    "ArchRbNscPartsUsed": "ARCH_RB_NSC_PARTS_USED",
+    "ArchRbScPartsUsed": "ARCH_RB_SC_PARTS_USED",
+}
+
+DELETE_ORDER = [
+    "ArchRbScPartsUsed",
+    "ArchRbNscPartsUsed",
+    "ArchRbMaterialsCcTotal",
+    "ArchRbEmployeeLabour",
+    "ArchRbLabourCcTotal",
+    "ArchRbListBuses",
+    "ArchRbMasterlist",
+]
+
+INSERT_ORDER = list(reversed(DELETE_ORDER))
+
+
+# =========================================================
+# LOGGING
+# =========================================================
+
+def setup_logging():
+    logger = logging.getLogger("migration")
+    logger.setLevel(logging.INFO)
+
+    handler = logging.FileHandler("migration_round1.log", mode="a", encoding="utf-8")
+    console = logging.StreamHandler(sys.stdout)
+
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    handler.setFormatter(fmt)
+    console.setFormatter(fmt)
+
+    logger.addHandler(handler)
+    logger.addHandler(console)
+    return logger
+
+logger = setup_logging()
+
+
+# =========================================================
+# CONNECTIONS
+# =========================================================
+
+def get_oracle_conn():
+    return oracledb.connect(
+        user=ORACLE_USER,
+        password=ORACLE_PASSWORD,
+        dsn=ORACLE_DSN
+    )
+
+def get_sql_conn():
+    return pyodbc.connect(SQL_CONN_STR, timeout=10)
+
+
+# =========================================================
+# CORE MIGRATION LOGIC
+# =========================================================
+
+def delete_sql_table(sql_conn, table):
+    full = f"{SQL_SCHEMA}.{table}"
+    logger.info(f"Deleting SQL rows: {full}")
+    cur = sql_conn.cursor()
+    try:
+        cur.execute(f"DELETE FROM {full}")
+        sql_conn.commit()
+        logger.info(f"Deleted rows from {full}")
+    except Exception as e:
+        sql_conn.rollback()
+        logger.error(f"Delete failed for {full}: {e}")
+        raise
+    finally:
+        cur.close()
+
+
+def fetch_oracle_rows(oracle_conn, oracle_table):
+    logger.info(f"Fetching Oracle rows: {oracle_table}")
+    cur = oracle_conn.cursor()
+    try:
+        cur.execute(f"SELECT * FROM {oracle_table}")
+        rows = cur.fetchall()
+        logger.info(f"Fetched {len(rows)} rows from {oracle_table}")
+        return rows
+    except Exception as e:
+        logger.error(f"Oracle fetch failed for {oracle_table}: {e}")
+        raise
+    finally:
+        cur.close()
+
+
+def insert_sql_rows(sql_conn, table, rows):
+    full = f"{SQL_SCHEMA}.{table}"
+
+    if not rows:
+        logger.info(f"No rows to insert into {full}")
+        return
+
+    placeholders = ", ".join(["?"] * len(rows[0]))
+    sql = f"INSERT INTO {full} VALUES ({placeholders})"
+
+    logger.info(f"Inserting {len(rows)} rows into {full}")
+
+    cur = sql_conn.cursor()
+    cur.fast_executemany = True
+
+    try:
+        cur.executemany(sql, rows)
+        sql_conn.commit()
+        logger.info(f"Inserted {len(rows)} rows into {full}")
+    except Exception as e:
+        sql_conn.rollback()
+        logger.error(f"Insert failed for {full}: {e}")
+        raise
+    finally:
+        cur.close()
+
+
+def migrate_table(oracle_conn, sql_conn, sql_table):
+    oracle_table = TABLE_NAME_MAP[sql_table]
+    logger.info(f"=== Migrating {sql_table} (Oracle={oracle_table}) ===")
+
+    rows = fetch_oracle_rows(oracle_conn, oracle_table)
+    insert_sql_rows(sql_conn, sql_table, rows)
+
+    logger.info(f"=== Completed {sql_table} ===")
+
+
+# =========================================================
+# MAIN
+# =========================================================
+
+def main():
+    logger.info("=== ROUND 1 MIGRATION START ===")
+    logger.info(f"Python: {sys.version}")
+    logger.info(f"Arch: {platform.architecture()}")
+
+    oracle_conn = get_oracle_conn()
+    sql_conn = get_sql_conn()
+
+    # DELETE PHASE (FK‑safe)
+    logger.info("=== DELETE PHASE ===")
+    for table in DELETE_ORDER:
+        if table in ROUND1_TABLES:
+            delete_sql_table(sql_conn, table)
+
+    # INSERT PHASE (FK‑safe)
+    logger.info("=== INSERT PHASE ===")
+    for table in INSERT_ORDER:
+        if table in ROUND1_TABLES:
+            migrate_table(oracle_conn, sql_conn, table)
+
+    oracle_conn.close()
+    sql_conn.close()
+
+    logger.info("=== ROUND 1 MIGRATION COMPLETE ===")
+
+
+if __name__ == "__main__":
+    main()
