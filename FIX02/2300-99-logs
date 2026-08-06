@@ -1,11 +1,41 @@
-2026-08-06 19:30:25,546 [ERROR] Insert failed for SBCES.ArchRbMasterlist: ('String data, right truncation: length 42 buffer 32', 'HY000')
-Traceback (most recent call last):
-  File "C:\ces\ces_round1.py", line 199, in <module>
-    main()
-  File "C:\ces\ces_round1.py", line 190, in main
-    migrate_table(oracle_conn, sql_conn, table)
-  File "C:\ces\ces_round1.py", line 163, in migrate_table
-    insert_sql_rows(sql_conn, sql_table, rows)
-  File "C:\ces\ces_round1.py", line 147, in insert_sql_rows
-    cur.executemany(sql, rows)
-pyodbc.ProgrammingError: ('String data, right truncation: length 42 buffer 32', 'HY000')
+def insert_sql_rows(sql_conn, table, rows):
+    full = f"{SQL_SCHEMA}.{table}"
+
+    if not rows:
+        logger.info(f"No rows to insert into {full}")
+        return
+
+    placeholders = ", ".join(["?"] * len(rows[0]))
+    sql = f"INSERT INTO {full} VALUES ({placeholders})"
+
+    logger.info(f"Inserting {len(rows)} rows into {full}")
+
+    cursor = sql_conn.cursor()
+    cursor.fast_executemany = False  # disable batch mode for row-by-row safety
+
+    success_count = 0
+    fail_count = 0
+
+    for idx, row in enumerate(rows):
+        try:
+            cursor.execute(sql, row)
+            success_count += 1
+        except Exception as e:
+            fail_count += 1
+            logger.error(
+                f"Row {idx} failed for {full}: {e} | RowData={row}"
+            )
+            # continue to next row
+
+    try:
+        sql_conn.commit()
+    except Exception as e:
+        logger.error(f"Commit failed for {full}: {e}")
+        sql_conn.rollback()
+
+    logger.info(
+        f"Completed insert for {full}: {success_count} succeeded, {fail_count} failed."
+    )
+
+    cursor.close()
+
