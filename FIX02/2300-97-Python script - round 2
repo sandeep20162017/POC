@@ -1,0 +1,311 @@
+import sys
+import platform
+import logging
+import pyodbc
+import oracledb
+
+# =========================================================
+# CONFIGURATION
+# =========================================================
+
+ORACLE_DSN = "//ocinp-f453r-scan.ttcocidrclients.ttcocidrvcn.oraclevcn.com:1521/ces_upg_svc.int.ttc.ca"
+ORACLE_USER = "CES"
+ORACLE_PASSWORD = "ces"
+
+SQL_CONN_STR = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=AppCESDB_DEV;"
+    "DATABASE=CES;"
+    "UID=CESUser;"
+    "PWD=CESUser#Dev;"
+    "TrustServerCertificate=Yes;"
+)
+
+SQL_SCHEMA = "SBCES"
+
+# SBCES tables for Round 2 (you can add more as needed)
+ROUND2_TABLES = {
+    "AllLabourSummary": "ALL_LABOUR_SUMMARY",
+    "ArchMbEmployeeLabour": "ARCH_MB_EMPLOYEE_LABOUR",
+    "MbList": "MB_LIST",
+    "MbListOfBuses": "MB_LIST_OF_BUSES",
+    "NonStockCodedParts": "NON_STOCK_CODED_PARTS",
+    "NscPartsUsed": "NSC_PARTS_USED",
+    "RbListOfBuses": "RB_LIST_OF_BUSES",
+    "RbMasterlist": "RB_MASTERLIST",
+    "ScPartsUsed": "SC_PARTS_USED",
+    "StockCodedParts": "STOCK_CODED_PARTS",
+    "VehicleList": "VEHICLE_LIST",
+    "VendorPartDesc": "VENDOR_PART_DESC",
+    "ListOfBuses": "LIST_OF_BUSES",
+}
+
+# FK-safe delete order (children first)
+DELETE_ORDER = [
+    "MbListOfBuses",
+    "RbListOfBuses",
+    # then parents and others
+    "AllLabourSummary",
+    "ArchMbEmployeeLabour",
+    "NscPartsUsed",
+    "ScPartsUsed",
+    "NonStockCodedParts",
+    "StockCodedParts",
+    "VendorPartDesc",
+    "MbList",
+    "RbMasterlist",
+    "VehicleList",
+    "ListOfBuses",
+]
+
+# Insert order (parents first)
+INSERT_ORDER = list(reversed(DELETE_ORDER))
+
+
+# =========================================================
+# LOGGING
+# =========================================================
+
+def setup_logging():
+    logger = logging.getLogger("migration_round2_sBCES")
+    logger.setLevel(logging.INFO)
+
+    handler = logging.FileHandler("migration_round2_sBCES.log", mode="a", encoding="utf-8")
+    console = logging.StreamHandler(sys.stdout)
+
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    handler.setFormatter(fmt)
+    console.setFormatter(fmt)
+
+    logger.addHandler(handler)
+    logger.addHandler(console)
+    return logger
+
+logger = setup_logging()
+
+
+# =========================================================
+# CONNECTIONS
+# =========================================================
+
+def get_oracle_conn():
+    return oracledb.connect(
+        user=ORACLE_USER,
+        password=ORACLE_PASSWORD,
+        dsn=ORACLE_DSN
+    )
+
+def get_sql_conn():
+    conn = pyodbc.connect(SQL_CONN_STR, timeout=10)
+    cur = conn.cursor()
+    cur.execute("SET ANSI_WARNINGS OFF;")
+    cur.close()
+    return conn
+
+
+# =========================================================
+# SQL COLUMN LENGTHS
+# =========================================================
+
+def get_sql_column_lengths(sql_conn, table):
+    cur = sql_conn.cursor()
+    cur.execute(f"""
+        SELECT CHARACTER_MAXIMUM_LENGTH
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = '{SQL_SCHEMA}'
+          AND TABLE_NAME = '{table}'
+        ORDER BY ORDINAL_POSITION
+    """)
+    col_lengths = [maxlen if maxlen is not None else None for (maxlen,) in cur.fetchall()]
+    cur.close()
+    return col_lengths
+
+
+# =========================================================
+# CORE HELPERS
+# =========================================================
+
+def delete_sql_table(sql_conn, table):
+    full = f"{SQL_SCHEMA}.{table}"
+    logger.info(f"Deleting SQL rows: {full}")
+    cur = sql_conn.cursor()
+    try:
+        cur.execute(f"DELETE FROM {full}")
+        sql_conn.commit()
+        logger.info(f"Deleted rows from {full}")
+    except Exception as e:
+        sql_conn.rollback()
+        logger.error(f"Delete failed for {full}: {e}")
+        raise
+    finally:
+        cur.close()
+
+
+def fetch_oracle_rows(oracle_conn, oracle_table):
+    logger.info(f"Fetching Oracle rows: {oracle_table}")
+    cur = oracle_conn.cursor()
+    cur.execute(f"SELECT * FROM {oracle_table}")
+    rows = cur.fetchall()
+    cur.close()
+    logger.info(f"Fetched {len(rows)} rows from {oracle_table}")
+    return rows
+
+
+def truncate_row_to_sql_lengths(row, col_lengths):
+    new_row = []
+    for idx, value in enumerate(row):
+        maxlen = col_lengths[idx]
+
+        if maxlen is None or value is None:
+            new_row.append(value)
+            continue
+
+        if isinstance(value, str) and len(value) > maxlen:
+            logger.warning(
+                f"Truncating value '{value}' to length {maxlen}"
+            )
+            new_row.append(value[:maxlen])
+        else:
+            new_row.append(value)
+
+    return tuple(new_row)
+
+
+def insert_sql_rows(sql_conn, table, rows):
+    full = f"{SQL_SCHEMA}.{table}"
+
+    if not rows:
+        logger.info(f"No rows to insert into {full}")
+        return
+
+    col_lengths = get_sql_column_lengths(sql_conn, table)
+
+    placeholders = ", ".join(["?"] * len(rows[0]))
+    sql = f"INSERT INTO {full} VALUES ({placeholders})"
+
+    logger.info(f"Inserting {len(rows)} rows into {full}")
+
+    cur = sql_conn.cursor()
+    cur.fast_executemany = False
+
+    success = 0
+    fail = 0
+
+    for idx, row in enumerate(rows):
+        try:
+            safe_row = truncate_row_to_sql_lengths(row, col_lengths)
+            cur.execute(sql, safe_row)
+            success += 1
+        except Exception as e:
+            fail += 1
+            logger.error(
+                f"Row {idx} failed for {full}: {e} | RowData={row}"
+            )
+
+    try:
+        sql_conn.commit()
+    except Exception as e:
+        logger.error(f"Commit failed for {full}: {e}")
+        sql_conn.rollback()
+
+    logger.info(
+        f"Completed insert for {full}: {success} succeeded, {fail} failed."
+    )
+
+    cur.close()
+
+
+# =========================================================
+# FK FILTERING FOR BUS LIST TABLES
+# =========================================================
+
+def load_listofbuses_ids(sql_conn):
+    cur = sql_conn.cursor()
+    cur.execute(f"SELECT ListId FROM {SQL_SCHEMA}.ListOfBuses")
+    ids = {row[0] for row in cur.fetchall()}
+    cur.close()
+    logger.info(f"Loaded {len(ids)} ListId values from {SQL_SCHEMA}.ListOfBuses")
+    return ids
+
+
+def filter_child_rows_by_listid(rows, fk_index, valid_ids, table):
+    filtered = []
+    skipped = 0
+
+    for r in rows:
+        fk_val = r[fk_index]
+        if fk_val in valid_ids:
+            filtered.append(r)
+        else:
+            skipped += 1
+            logger.warning(
+                f"Skipping row in {table}: missing ListId={fk_val} | Row={r}"
+            )
+
+    logger.info(f"{table}: {len(filtered)} kept, {skipped} skipped due to missing ListId")
+    return filtered
+
+
+# =========================================================
+# MIGRATION LOGIC
+# =========================================================
+
+def migrate_table(oracle_conn, sql_conn, table, list_ids=None):
+    oracle_table = ROUND2_TABLES[table]
+    logger.info(f"=== Migrating {SQL_SCHEMA}.{table} (Oracle={oracle_table}) ===")
+
+    rows = fetch_oracle_rows(oracle_conn, oracle_table)
+
+    # FK filtering for MbListOfBuses and RbListOfBuses
+    if table == "MbListOfBuses":
+        # Oracle: (MbNumber, ListId) → ListId at index 1
+        rows = filter_child_rows_by_listid(rows, 1, list_ids, table)
+    elif table == "RbListOfBuses":
+        # Oracle: (RebuiltStockNum, ListId) → ListId at index 1
+        rows = filter_child_rows_by_listid(rows, 1, list_ids, table)
+
+    insert_sql_rows(sql_conn, table, rows)
+
+    logger.info(f"=== Completed {SQL_SCHEMA}.{table} ===")
+
+
+# =========================================================
+# MAIN
+# =========================================================
+
+def main():
+    logger.info("=== ROUND 2 SBCES MIGRATION START ===")
+    logger.info(f"Python: {sys.version}")
+    logger.info(f"Arch: {platform.architecture()}")
+
+    oracle_conn = get_oracle_conn()
+    sql_conn = get_sql_conn()
+
+    logger.info("=== DELETE PHASE (FK-safe) ===")
+    for table in DELETE_ORDER:
+        if table in ROUND2_TABLES:
+            delete_sql_table(sql_conn, table)
+
+    logger.info("=== INSERT PHASE (FK-safe, FKs ON) ===")
+
+    # 1. Insert ListOfBuses first (parent)
+    migrate_table(oracle_conn, sql_conn, "ListOfBuses")
+
+    # 2. Load valid ListId set from SQL
+    list_ids = load_listofbuses_ids(sql_conn)
+
+    # 3. Insert other tables in FK-safe order
+    for table in INSERT_ORDER:
+        if table == "ListOfBuses":
+            continue
+        if table in ROUND2_TABLES:
+            migrate_table(oracle_conn, sql_conn, table, list_ids=list_ids)
+
+    oracle_conn.close()
+    sql_conn.close()
+
+    logger.info("=== ROUND 2 SBCES MIGRATION COMPLETE ===")
+
+
+if __name__ == "__main__":
+    main()
