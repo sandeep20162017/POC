@@ -43,6 +43,7 @@ TABLE_NAME_MAP = {
     "ArchRbEmployeeLabour": "ARCH_RB_EMPLOYEE_LABOUR",
 }
 
+# DELETE children first, parent last
 DELETE_ORDER = [
     "ArchRbEmployeeLabour",
     "ArchRbScPartsUsed",
@@ -53,6 +54,7 @@ DELETE_ORDER = [
     "ArchRbMasterlist",
 ]
 
+# INSERT parent first, children last
 INSERT_ORDER = list(reversed(DELETE_ORDER))
 
 
@@ -92,7 +94,15 @@ def get_oracle_conn():
 def get_sql_conn():
     conn = pyodbc.connect(SQL_CONN_STR, timeout=10)
     cur = conn.cursor()
-    cur.execute("SET ANSI_WARNINGS OFF;")   # REQUIRED for truncation inserts
+
+    # Disable ANSI warnings (required for truncation inserts)
+    cur.execute("SET ANSI_WARNINGS OFF;")
+
+    # Disable all FK constraints permanently
+    for table in ROUND1_TABLES:
+        cur.execute(f"ALTER TABLE {SQL_SCHEMA}.{table} NOCHECK CONSTRAINT ALL;")
+        logger.info(f"Disabled FK constraints for {SQL_SCHEMA}.{table}")
+
     cur.close()
     return conn
 
@@ -103,7 +113,6 @@ def get_sql_conn():
 
 def get_sql_column_lengths(sql_conn, table):
     cur = sql_conn.cursor()
-
     cur.execute(f"""
         SELECT CHARACTER_MAXIMUM_LENGTH
         FROM INFORMATION_SCHEMA.COLUMNS
@@ -111,7 +120,6 @@ def get_sql_column_lengths(sql_conn, table):
           AND TABLE_NAME = '{table}'
         ORDER BY ORDINAL_POSITION
     """)
-
     col_lengths = [maxlen if maxlen is not None else None for (maxlen,) in cur.fetchall()]
     cur.close()
     return col_lengths
@@ -242,7 +250,7 @@ def main():
     for table in DELETE_ORDER:
         delete_sql_table(sql_conn, table)
 
-    logger.info("=== INSERT PHASE (FK‑safe) ===")
+    logger.info("=== INSERT PHASE (FK DISABLED) ===")
     for table in INSERT_ORDER:
         migrate_table(oracle_conn, sql_conn, table)
 
