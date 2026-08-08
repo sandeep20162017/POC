@@ -1,0 +1,48 @@
+DECLARE @SchemaName SYSNAME = 'BCES';   -- <<< CHANGE THIS TO BCES, SCES, CES, SBCES
+
+------------------------------------------------------------
+-- 1. Drop FOREIGN KEYS inside the schema
+------------------------------------------------------------
+DECLARE @sql NVARCHAR(MAX) = N'';
+
+SELECT @sql = @sql + '
+ALTER TABLE [' + @SchemaName + '].[' + OBJECT_NAME(parent_object_id) + '] 
+DROP CONSTRAINT [' + name + '];'
+FROM sys.foreign_keys
+WHERE schema_id = SCHEMA_ID(@SchemaName);
+
+PRINT @sql;
+EXEC(@sql);
+
+------------------------------------------------------------
+-- 2. Drop ALL OBJECTS inside the schema
+------------------------------------------------------------
+SET @sql = N'';
+
+SELECT @sql = @sql + '
+DROP ' +
+    CASE type
+        WHEN 'U' THEN 'TABLE'
+        WHEN 'V' THEN 'VIEW'
+        WHEN 'P' THEN 'PROCEDURE'
+        WHEN 'FN' THEN 'FUNCTION'
+        WHEN 'IF' THEN 'FUNCTION'
+        WHEN 'TF' THEN 'FUNCTION'
+        WHEN 'TR' THEN 'TRIGGER'
+        WHEN 'SQ' THEN 'SEQUENCE'
+        ELSE type
+    END +
+    ' [' + @SchemaName + '].[' + name + '];'
+FROM sys.objects
+WHERE schema_id = SCHEMA_ID(@SchemaName)
+ORDER BY type DESC;   -- ensures tables drop last
+
+PRINT @sql;
+EXEC(@sql);
+
+------------------------------------------------------------
+-- 3. Drop the SCHEMA itself
+------------------------------------------------------------
+DECLARE @DropSchema NVARCHAR(MAX) = 'DROP SCHEMA [' + @SchemaName + '];';
+PRINT @DropSchema;
+EXEC(@DropSchema);
