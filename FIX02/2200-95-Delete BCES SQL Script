@@ -1,121 +1,131 @@
-DECLARE @SchemaName SYSNAME = 'BCES';
-DECLARE @FixCollation SYSNAME = 'SQL_Latin1_General_CP1_CI_AS';
+DECLARE @Schema SYSNAME = 'BCES';
+DECLARE @sql NVARCHAR(MAX);
 
 ------------------------------------------------------------
 -- 1. DROP FOREIGN KEYS
 ------------------------------------------------------------
-DECLARE @sql NVARCHAR(MAX);
+WHILE EXISTS (
+    SELECT 1
+    FROM sys.foreign_keys fk
+    JOIN sys.objects o ON fk.parent_object_id = o.object_id
+    WHERE o.schema_id = SCHEMA_ID(@Schema)
+)
+BEGIN
+    SELECT TOP 1 @sql =
+        'ALTER TABLE [' + @Schema + '].[' + OBJECT_NAME(parent_object_id) +
+        '] DROP CONSTRAINT [' + name + '];'
+    FROM sys.foreign_keys fk
+    JOIN sys.objects o ON fk.parent_object_id = o.object_id
+    WHERE o.schema_id = SCHEMA_ID(@Schema);
 
-SET @sql = (
-    SELECT STRING_AGG(
-        (
-            'ALTER TABLE [' + @SchemaName + '].[' +
-            OBJECT_NAME(parent_object_id) COLLATE SQL_Latin1_General_CP1_CI_AS +
-            '] DROP CONSTRAINT [' + name COLLATE SQL_Latin1_General_CP1_CI_AS + '];'
-        ) COLLATE SQL_Latin1_General_CP1_CI_AS,
-        CHAR(10)
-    ) COLLATE SQL_Latin1_General_CP1_CI_AS
-    FROM sys.foreign_keys
-    WHERE schema_id = SCHEMA_ID(@SchemaName)
-);
-
-PRINT @sql;
-EXEC(@sql);
-
-
-------------------------------------------------------------
--- 2. DROP CHECK CONSTRAINTS
-------------------------------------------------------------
-SET @sql = (
-    SELECT STRING_AGG(
-        (
-            'ALTER TABLE [' + @SchemaName + '].[' +
-            OBJECT_NAME(parent_object_id) COLLATE SQL_Latin1_General_CP1_CI_AS +
-            '] DROP CONSTRAINT [' + name COLLATE SQL_Latin1_General_CP1_CI_AS + '];'
-        ) COLLATE SQL_Latin1_General_CP1_CI_AS,
-        CHAR(10)
-    ) COLLATE SQL_Latin1_General_CP1_CI_AS
-    FROM sys.check_constraints
-    WHERE schema_id = SCHEMA_ID(@SchemaName)
-);
-
-PRINT @sql;
-EXEC(@sql);
-
+    PRINT @sql;
+    EXEC(@sql);
+END
 
 ------------------------------------------------------------
--- 3. DROP DEFAULT CONSTRAINTS
+-- 2. DROP OTHER CONSTRAINTS (PK, UNIQUE, CHECK, DEFAULT)
 ------------------------------------------------------------
-SET @sql = (
-    SELECT STRING_AGG(
-        (
-            'ALTER TABLE [' + @SchemaName + '].[' +
-            OBJECT_NAME(parent_object_id) COLLATE SQL_Latin1_General_CP1_CI_AS +
-            '] DROP CONSTRAINT [' + name COLLATE SQL_Latin1_General_CP1_CI_AS + '];'
-        ) COLLATE SQL_Latin1_General_CP1_CI_AS,
-        CHAR(10)
-    ) COLLATE SQL_Latin1_General_CP1_CI_AS
-    FROM sys.default_constraints
-    WHERE schema_id = SCHEMA_ID(@SchemaName)
-);
-
-PRINT @sql;
-EXEC(@sql);
-
-
-------------------------------------------------------------
--- 4. DROP PK + UNIQUE CONSTRAINTS
-------------------------------------------------------------
-SET @sql = (
-    SELECT STRING_AGG(
-        (
-            'ALTER TABLE [' + @SchemaName + '].[' +
-            OBJECT_NAME(parent_object_id) COLLATE SQL_Latin1_General_CP1_CI_AS +
-            '] DROP CONSTRAINT [' + name COLLATE SQL_Latin1_General_CP1_CI_AS + '];'
-        ) COLLATE SQL_Latin1_General_CP1_CI_AS,
-        CHAR(10)
-    ) COLLATE SQL_Latin1_General_CP1_CI_AS
-    FROM sys.key_constraints
-    WHERE schema_id = SCHEMA_ID(@SchemaName)
-);
-
-PRINT @sql;
-EXEC(@sql);
-
-
-------------------------------------------------------------
--- 5. DROP ALL OBJECTS IN SCHEMA
-------------------------------------------------------------
-SET @sql = (
-    SELECT STRING_AGG(
-        (
-            'DROP ' +
-            CASE type
-                WHEN 'U' THEN 'TABLE'
-                WHEN 'V' THEN 'VIEW'
-                WHEN 'P' THEN 'PROCEDURE'
-                WHEN 'FN' THEN 'FUNCTION'
-                WHEN 'IF' THEN 'FUNCTION'
-                WHEN 'TF' THEN 'FUNCTION'
-                WHEN 'TR' THEN 'TRIGGER'
-                WHEN 'SQ' THEN 'SEQUENCE'
-                ELSE type
-            END +
-            ' [' + @SchemaName + '].[' + name COLLATE SQL_Latin1_General_CP1_CI_AS + '];'
-        ) COLLATE SQL_Latin1_General_CP1_CI_AS,
-        CHAR(10)
-    ) COLLATE SQL_Latin1_General_CP1_CI_AS
+WHILE EXISTS (
+    SELECT 1
     FROM sys.objects
-    WHERE schema_id = SCHEMA_ID(@SchemaName)
-);
+    WHERE schema_id = SCHEMA_ID(@Schema)
+      AND type IN ('PK','UQ','C','D')
+)
+BEGIN
+    SELECT TOP 1 @sql =
+        'ALTER TABLE [' + @Schema + '].[' + OBJECT_NAME(parent_object_id) +
+        '] DROP CONSTRAINT [' + name + '];'
+    FROM sys.objects
+    WHERE schema_id = SCHEMA_ID(@Schema)
+      AND type IN ('PK','UQ','C','D');
 
-PRINT @sql;
-EXEC(@sql);
-
+    PRINT @sql;
+    EXEC(@sql);
+END
 
 ------------------------------------------------------------
--- 6. DROP SCHEMA
+-- 3. DROP ALL TABLES
 ------------------------------------------------------------
-SET @sql = 'DROP SCHEMA [' + @SchemaName + '];';
+WHILE EXISTS (
+    SELECT 1 FROM sys.tables WHERE schema_id = SCHEMA_ID(@Schema)
+)
+BEGIN
+    SELECT TOP 1 @sql =
+        'DROP TABLE [' + @Schema + '].[' + name + '];'
+    FROM sys.tables
+    WHERE schema_id = SCHEMA_ID(@Schema);
+
+    PRINT @sql;
+    EXEC(@sql);
+END
+
+------------------------------------------------------------
+-- 4. DROP ALL VIEWS
+------------------------------------------------------------
+WHILE EXISTS (
+    SELECT 1 FROM sys.views WHERE schema_id = SCHEMA_ID(@Schema)
+)
+BEGIN
+    SELECT TOP 1 @sql =
+        'DROP VIEW [' + @Schema + '].[' + name + '];'
+    FROM sys.views
+    WHERE schema_id = SCHEMA_ID(@Schema);
+
+    PRINT @sql;
+    EXEC(@sql);
+END
+
+------------------------------------------------------------
+-- 5. DROP ALL PROCEDURES
+------------------------------------------------------------
+WHILE EXISTS (
+    SELECT 1 FROM sys.objects WHERE schema_id = SCHEMA_ID(@Schema) AND type = 'P'
+)
+BEGIN
+    SELECT TOP 1 @sql =
+        'DROP PROCEDURE [' + @Schema + '].[' + name + '];'
+    FROM sys.objects
+    WHERE schema_id = SCHEMA_ID(@Schema) AND type = 'P';
+
+    PRINT @sql;
+    EXEC(@sql);
+END
+
+------------------------------------------------------------
+-- 6. DROP ALL FUNCTIONS
+------------------------------------------------------------
+WHILE EXISTS (
+    SELECT 1 FROM sys.objects WHERE schema_id = SCHEMA_ID(@Schema) AND type IN ('FN','IF','TF')
+)
+BEGIN
+    SELECT TOP 1 @sql =
+        'DROP FUNCTION [' + @Schema + '].[' + name + '];'
+    FROM sys.objects
+    WHERE schema_id = SCHEMA_ID(@Schema) AND type IN ('FN','IF','TF');
+
+    PRINT @sql;
+    EXEC(@sql);
+END
+
+------------------------------------------------------------
+-- 7. DROP ALL SEQUENCES
+------------------------------------------------------------
+WHILE EXISTS (
+    SELECT 1 FROM sys.sequences WHERE schema_id = SCHEMA_ID(@Schema)
+)
+BEGIN
+    SELECT TOP 1 @sql =
+        'DROP SEQUENCE [' + @Schema + '].[' + name + '];'
+    FROM sys.sequences
+    WHERE schema_id = SCHEMA_ID(@Schema);
+
+    PRINT @sql;
+    EXEC(@sql);
+END
+
+------------------------------------------------------------
+-- 8. DROP THE SCHEMA
+------------------------------------------------------------
+SET @sql = 'DROP SCHEMA [' + @Schema + '];';
 PRINT @sql;
 EXEC(@sql);
