@@ -1,0 +1,97 @@
+# ============================
+# ces_round4.py
+# ============================
+
+import sys
+import logging
+import pyodbc
+import oracledb
+
+ORACLE_DSN ="//ocipr-wersc-scan.ttcociclientsub.ttcocivcn.oraclevcn.com:1521/ces_prd_svc.int.ttc.ca"
+ORACLE_USER = "CES"
+ORACLE_PASSWORD = "cesprd1210"
+
+SQL_CONN_STR = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=SQL2022UAT;"
+    "DATABASE=CES;"
+    "UID=cesuser;"
+    "PWD=CESUser#UAT;"
+    "TrustServerCertificate=Yes;"
+)
+
+SQL_SCHEMA = "SBCES"
+
+ROUND4_TABLES = {
+    "AuditModifyHistory": "AUDIT_MODIFY_HISTORY"
+}
+
+def setup_logging():
+    logger = logging.getLogger("migration_round4")
+    logger.setLevel(logging.INFO)
+    handler = logging.FileHandler("migration_round4.log", mode="a", encoding="utf-8")
+    console = logging.StreamHandler(sys.stdout)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    handler.setFormatter(fmt)
+    console.setFormatter(fmt)
+    logger.addHandler(handler)
+    logger.addHandler(console)
+    return logger
+
+logger = setup_logging()
+
+def get_oracle_conn():
+    return oracledb.connect(user=ORACLE_USER, password=ORACLE_PASSWORD, dsn=ORACLE_DSN)
+
+def get_sql_conn():
+    conn = pyodbc.connect(SQL_CONN_STR, timeout=10)
+    cur = conn.cursor()
+    cur.execute("SET ANSI_WARNINGS OFF;")
+    cur.execute(f"ALTER TABLE {SQL_SCHEMA}.AuditModifyHistory NOCHECK CONSTRAINT ALL;")
+    cur.close()
+    return conn
+
+def delete_sql_table(sql_conn, table):
+    cur = sql_conn.cursor()
+    cur.execute(f"DELETE FROM {SQL_SCHEMA}.{table}")
+    sql_conn.commit()
+    cur.close()
+
+def fetch_oracle_rows(oracle_conn, oracle_table):
+    cur = oracle_conn.cursor()
+    cur.execute(f"SELECT * FROM {oracle_table}")
+    rows = cur.fetchall()
+    cur.close()
+    return rows
+
+def insert_sql_rows(sql_conn, table, rows):
+    cur = sql_conn.cursor()
+    placeholders = ", ".join(["?"] * len(rows[0]))
+    sql = f"INSERT INTO {SQL_SCHEMA}.{table} VALUES ({placeholders})"
+    success = 0
+    fail = 0
+    for idx, row in enumerate(rows):
+        try:
+            cur.execute(sql, row)
+            success += 1
+        except Exception as e:
+            fail += 1
+            logger.error(f"Row {idx} failed: {e} | Row={row}")
+    sql_conn.commit()
+    cur.close()
+    logger.info(f"{table}: {success} succeeded, {fail} failed")
+
+def main():
+    oracle_conn = get_oracle_conn()
+    sql_conn = get_sql_conn()
+
+    delete_sql_table(sql_conn, "AuditModifyHistory")
+
+    rows = fetch_oracle_rows(oracle_conn, "AUDIT_MODIFY_HISTORY")
+    insert_sql_rows(sql_conn, "AuditModifyHistory", rows)
+
+    oracle_conn.close()
+    sql_conn.close()
+
+if __name__ == "__main__":
+    main()
