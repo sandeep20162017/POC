@@ -22,6 +22,16 @@ SQL_CONN_STR = (
 
 SQL_SCHEMA = "SBCES"
 
+logger = logging.getLogger("migration_round5")
+logger.setLevel(logging.INFO)
+handler = logging.FileHandler("migration_round5.log", mode="a", encoding="utf-8")
+console = logging.StreamHandler(sys.stdout)
+fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+handler.setFormatter(fmt)
+console.setFormatter(fmt)
+logger.addHandler(handler)
+logger.addHandler(console)
+
 # Remaining tables NOT migrated yet
 ROUND5_TABLES = {
     "CostCentres": "COST_CENTRES",
@@ -49,7 +59,7 @@ ROUND5_TABLES = {
 DELETE_ORDER = [
     "EmployeeLabourEmplClass",  # FK → EmployeeLabour
     "EmployeeLabour",           # FK → CostCentres, LabourTaskDescriptions
-    "EmplClass",                # FK → CostCentres
+    "EmplClass",                # FK → EmployeeSalaries
     "CostCentres",              # parent
     "LabourTaskDescriptions",
     "Differential",
@@ -69,18 +79,7 @@ DELETE_ORDER = [
     "VendorPartDesc2"
 ]
 
-# Insert order (parents first)
 INSERT_ORDER = list(reversed(DELETE_ORDER))
-
-logger = logging.getLogger("migration_round5")
-logger.setLevel(logging.INFO)
-handler = logging.FileHandler("migration_round5.log", mode="a", encoding="utf-8")
-console = logging.StreamHandler(sys.stdout)
-fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-handler.setFormatter(fmt)
-console.setFormatter(fmt)
-logger.addHandler(handler)
-logger.addHandler(console)
 
 def get_oracle_conn():
     return oracledb.connect(user=ORACLE_USER, password=ORACLE_PASSWORD, dsn=ORACLE_DSN)
@@ -109,44 +108,27 @@ def fetch_oracle_rows(oracle_conn, sql):
     cur.close()
     return rows
 
-def insert_sql_rows(sql_conn, table, rows):
-    cur = sql_conn.cursor()
-    placeholders = ", ".join(["?"] * len(rows[0]))
-    sql = f"INSERT INTO {SQL_SCHEMA}.{table} VALUES ({placeholders})"
-    success = 0
-    fail = 0
-    for idx, r in enumerate(rows):
-        try:
-            cur.execute(sql, r)
-            success += 1
-        except Exception as e:
-            fail += 1
-            logger.error(f"{table} row {idx} failed: {e} | Row={r}")
-    sql_conn.commit()
-    cur.close()
-    logger.info(f"{table}: {success} succeeded, {fail} failed")
-
 def migrate_costcentres(oracle_conn, sql_conn):
     logger.info("Migrating CostCentres (explicit mapping)")
     rows = fetch_oracle_rows(oracle_conn, """
-        SELECT COST_CENTRE, DESCRIPTION, WAGE_GROUP, DATE_ENTERED, ENTERED_BY
+        SELECT NAME, DATE_ENTERED, COST_CENTRE
         FROM COST_CENTRES
     """)
     sql = f"""
         INSERT INTO {SQL_SCHEMA}.CostCentres
-        (CostCentre, Description, WageGroup, DateEntered, EnteredBy)
-        VALUES (?, ?, ?, ?, ?)
+        (CostCentre, Name, DateEntered)
+        VALUES (?, ?, ?)
     """
     cur = sql_conn.cursor()
     success = 0
     fail = 0
-    for idx, r in enumerate(rows):
+    for idx, (name, date_entered, cost_centre) in enumerate(rows):
         try:
-            cur.execute(sql, r)
+            cur.execute(sql, (cost_centre, name, date_entered))
             success += 1
         except Exception as e:
             fail += 1
-            logger.error(f"CostCentres row {idx} failed: {e} | Row={r}")
+            logger.error(f"CostCentres row {idx} failed: {e} | Row={(name, date_entered, cost_centre)}")
     sql_conn.commit()
     cur.close()
     logger.info(f"CostCentres: {success} succeeded, {fail} failed")
@@ -155,7 +137,7 @@ def migrate_emplclass(oracle_conn, sql_conn):
     logger.info("Migrating EmplClass (explicit mapping)")
     rows = fetch_oracle_rows(oracle_conn, """
         SELECT LABOUR_TYPE, LABOUR_DEFN, WAGE_GROUP, HRS_PER_WEEK,
-               DATE_ENTERED, OVERHEAD_TYPE
+               DATE_ENTERED, OVERHEADTYPE
         FROM EMPL_CLASS
     """)
     sql = f"""
@@ -207,6 +189,27 @@ def migrate_employeelabour(oracle_conn, sql_conn):
     cur.close()
     logger.info(f"EmployeeLabour: {success} succeeded, {fail} failed")
 
+def insert_generic(sql_conn, table, oracle_table, oracle_conn):
+    rows = fetch_oracle_rows(oracle_conn, f"SELECT * FROM {oracle_table}")
+    if not rows:
+        logger.info(f"{table}: no rows")
+        return
+    cur = sql_conn.cursor()
+    placeholders = ", ".join(["?"] * len(rows[0]))
+    sql = f"INSERT INTO {SQL_SCHEMA}.{table} VALUES ({placeholders})"
+    success = 0
+    fail = 0
+    for idx, r in enumerate(rows):
+        try:
+            cur.execute(sql, r)
+            success += 1
+        except Exception as e:
+            fail += 1
+            logger.error(f"{table} row {idx} failed: {e} | Row={r}")
+    sql_conn.commit()
+    cur.close()
+    logger.info(f"{table}: {success} succeeded, {fail} failed")
+
 def main():
     oracle_conn = get_oracle_conn()
     sql_conn = get_sql_conn()
@@ -220,14 +223,13 @@ def main():
     migrate_emplclass(oracle_conn, sql_conn)
     migrate_employeelabour(oracle_conn, sql_conn)
 
-    # Insert remaining tables with generic loader
+    # Insert remaining tables
     for table in INSERT_ORDER:
         if table in ("CostCentres", "EmplClass", "EmployeeLabour"):
             continue
         oracle_table = ROUND5_TABLES.get(table)
         if oracle_table:
-            rows = fetch_oracle_rows(oracle_conn, f"SELECT * FROM {oracle_table}")
-            insert_sql_rows(sql_conn, table, rows)
+            insert_generic(sql_conn, table, oracle_table, oracle_conn)
 
     oracle_conn.close()
     sql_conn.close()
