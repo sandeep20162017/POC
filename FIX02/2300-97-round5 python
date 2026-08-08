@@ -1,5 +1,5 @@
 # ============================
-# ces_round5.py (FK ON, FIXED)
+# ces_round5.py (FK ON, FINAL)
 # ============================
 
 import sys
@@ -32,13 +32,13 @@ console.setFormatter(fmt)
 logger.addHandler(handler)
 logger.addHandler(console)
 
-# Remaining tables NOT migrated yet
+# Remaining SBCES tables NOT migrated yet
 ROUND5_TABLES = {
     "CostCentres": "COST_CENTRES",
-    "Differential": "DIFFERENTIAL",
-    "EmployeeLabour": "EMPLOYEE_LABOUR",
     "EmployeeSalaries": "EMPLOYEE_SALARIES",
     "EmplClass": "EMPL_CLASS",
+    "EmployeeLabour": "EMPLOYEE_LABOUR",
+    "Differential": "DIFFERENTIAL",
     "Engines": "ENGINES",
     "Errors": "ERRORS",
     "KitsMasterlist": "KITS_MASTERLIST",
@@ -48,22 +48,21 @@ ROUND5_TABLES = {
     "MmsCostTemp": "MMS_COST_TEMP",
     "MmsNewCosts": "MMS_NEW_COSTS",
     "NscPartsUsedTemp": "NSC_PARTS_USED_TEMP",
-    "PriceNoTax": "PRICENOTAX",
+    "PriceNotTax": "PRICENOTAX",
     "PartMaster": "PART_MASTER",
     "ScOemkitsTextData": "SC_OEMKITS_TEXT_DATA",
     "SubKits": "SUB_KITS",
-    "VendorPartDesc2": "VENDOR_PART_DESC"
+    "VendorPartDesc": "VENDOR_PART_DESC"
 }
 
 # FK-safe delete order
 DELETE_ORDER = [
-    "EmployeeLabourEmplClass",  # FK → EmployeeLabour
-    "EmployeeLabour",           # FK → CostCentres, LabourTaskDescriptions
-    "EmplClass",                # FK → EmployeeSalaries
-    "CostCentres",              # parent
+    "EmployeeLabour",        # FK → CostCentres, LabourTaskDescriptions
+    "EmplClass",             # FK → EmployeeSalaries
+    "EmployeeSalaries",      # parent
+    "CostCentres",           # parent
     "LabourTaskDescriptions",
     "Differential",
-    "EmployeeSalaries",
     "Engines",
     "Errors",
     "KitsUsed",
@@ -72,11 +71,11 @@ DELETE_ORDER = [
     "MmsCostTemp",
     "MmsNewCosts",
     "NscPartsUsedTemp",
-    "PriceNoTax",
+    "PriceNotTax",
     "PartMaster",
     "ScOemkitsTextData",
     "SubKits",
-    "VendorPartDesc2"
+    "VendorPartDesc"
 ]
 
 INSERT_ORDER = list(reversed(DELETE_ORDER))
@@ -108,6 +107,10 @@ def fetch_oracle_rows(oracle_conn, sql):
     cur.close()
     return rows
 
+# -----------------------------
+# EXPLICIT MAPPINGS
+# -----------------------------
+
 def migrate_costcentres(oracle_conn, sql_conn):
     logger.info("Migrating CostCentres (explicit mapping)")
     rows = fetch_oracle_rows(oracle_conn, """
@@ -132,6 +135,31 @@ def migrate_costcentres(oracle_conn, sql_conn):
     sql_conn.commit()
     cur.close()
     logger.info(f"CostCentres: {success} succeeded, {fail} failed")
+
+def migrate_employeesalaries(oracle_conn, sql_conn):
+    logger.info("Migrating EmployeeSalaries (explicit mapping)")
+    rows = fetch_oracle_rows(oracle_conn, """
+        SELECT WAGE_GROUP, WAGE_RATE, DATE_ENTERED
+        FROM EMPLOYEE_SALARIES
+    """)
+    sql = f"""
+        INSERT INTO {SQL_SCHEMA}.EmployeeSalaries
+        (WageGroup, WageRate, DateEntered)
+        VALUES (?, ?, ?)
+    """
+    cur = sql_conn.cursor()
+    success = 0
+    fail = 0
+    for idx, r in enumerate(rows):
+        try:
+            cur.execute(sql, r)
+            success += 1
+        except Exception as e:
+            fail += 1
+            logger.error(f"EmployeeSalaries row {idx} failed: {e} | Row={r}")
+    sql_conn.commit()
+    cur.close()
+    logger.info(f"EmployeeSalaries: {success} succeeded, {fail} failed")
 
 def migrate_emplclass(oracle_conn, sql_conn):
     logger.info("Migrating EmplClass (explicit mapping)")
@@ -189,6 +217,10 @@ def migrate_employeelabour(oracle_conn, sql_conn):
     cur.close()
     logger.info(f"EmployeeLabour: {success} succeeded, {fail} failed")
 
+# -----------------------------
+# GENERIC LOADER
+# -----------------------------
+
 def insert_generic(sql_conn, table, oracle_table, oracle_conn):
     rows = fetch_oracle_rows(oracle_conn, f"SELECT * FROM {oracle_table}")
     if not rows:
@@ -210,6 +242,10 @@ def insert_generic(sql_conn, table, oracle_table, oracle_conn):
     cur.close()
     logger.info(f"{table}: {success} succeeded, {fail} failed")
 
+# -----------------------------
+# MAIN
+# -----------------------------
+
 def main():
     oracle_conn = get_oracle_conn()
     sql_conn = get_sql_conn()
@@ -220,12 +256,13 @@ def main():
 
     # FK-safe insert
     migrate_costcentres(oracle_conn, sql_conn)
+    migrate_employeesalaries(oracle_conn, sql_conn)
     migrate_emplclass(oracle_conn, sql_conn)
     migrate_employeelabour(oracle_conn, sql_conn)
 
     # Insert remaining tables
     for table in INSERT_ORDER:
-        if table in ("CostCentres", "EmplClass", "EmployeeLabour"):
+        if table in ("CostCentres", "EmployeeSalaries", "EmplClass", "EmployeeLabour"):
             continue
         oracle_table = ROUND5_TABLES.get(table)
         if oracle_table:
