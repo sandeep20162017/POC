@@ -1,23 +1,63 @@
-DECLARE @Schema SYSNAME = 'BCES';
-DECLARE @Object SYSNAME;
+USE CES;
+GO
+
+DECLARE @Schema SYSNAME = 'SCES';
+DECLARE @Table SYSNAME;
+DECLARE @Constraint SYSNAME;
 DECLARE @sql NVARCHAR(MAX);
 
-DECLARE cur CURSOR FOR
-    SELECT QUOTENAME(@Schema) + '.' + QUOTENAME(name)
-    FROM sys.objects
-    WHERE type = 'U' AND schema_id = SCHEMA_ID(@Schema);
+------------------------------------------------------------
+-- CURSOR: Loop through each table in SCES
+------------------------------------------------------------
+DECLARE table_cursor CURSOR FOR
+    SELECT name
+    FROM sys.tables
+    WHERE schema_id = SCHEMA_ID(@Schema);
 
-OPEN cur;
-FETCH NEXT FROM cur INTO @Object;
+OPEN table_cursor;
+FETCH NEXT FROM table_cursor INTO @Table;
 
 WHILE @@FETCH_STATUS = 0
 BEGIN
-    SET @sql = 'DROP TABLE ' + @Object + ';';
+    ------------------------------------------------------------
+    -- 1. Drop all FK constraints referencing this table
+    ------------------------------------------------------------
+    DECLARE fk_cursor CURSOR FOR
+        SELECT fk.name
+        FROM sys.foreign_keys fk
+        WHERE fk.parent_object_id = OBJECT_ID(@Schema + '.' + @Table);
+
+    OPEN fk_cursor;
+    FETCH NEXT FROM fk_cursor INTO @Constraint;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @sql = 'ALTER TABLE [' + @Schema + '].[' + @Table + '] DROP CONSTRAINT [' + @Constraint + '];';
+        PRINT @sql;
+        EXEC(@sql);
+
+        FETCH NEXT FROM fk_cursor INTO @Constraint;
+    END
+
+    CLOSE fk_cursor;
+    DEALLOCATE fk_cursor;
+
+    ------------------------------------------------------------
+    -- 2. Drop the table
+    ------------------------------------------------------------
+    SET @sql = 'DROP TABLE [' + @Schema + '].[' + @Table + '];';
     PRINT @sql;
     EXEC(@sql);
 
-    FETCH NEXT FROM cur INTO @Object;
+    FETCH NEXT FROM table_cursor INTO @Table;
 END
 
-CLOSE cur;
-DEALLOCATE cur;
+CLOSE table_cursor;
+DEALLOCATE table_cursor;
+
+------------------------------------------------------------
+-- 3. Drop the schema
+------------------------------------------------------------
+SET @sql = 'DROP SCHEMA [' + @Schema + '];';
+PRINT @sql;
+EXEC(@sql);
