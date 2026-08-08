@@ -1,131 +1,23 @@
 DECLARE @Schema SYSNAME = 'BCES';
+DECLARE @Table SYSNAME;
 DECLARE @sql NVARCHAR(MAX);
 
-------------------------------------------------------------
--- 1. DROP FOREIGN KEYS
-------------------------------------------------------------
-WHILE EXISTS (
-    SELECT 1
-    FROM sys.foreign_keys fk
-    JOIN sys.tables t ON fk.parent_object_id = t.object_id
-    WHERE t.schema_id = SCHEMA_ID(@Schema)
-)
-BEGIN
-    SELECT TOP 1 @sql =
-        'ALTER TABLE [' + @Schema + '].[' + t.name + '] DROP CONSTRAINT [' + fk.name + '];'
-    FROM sys.foreign_keys fk
-    JOIN sys.tables t ON fk.parent_object_id = t.object_id
-    WHERE t.schema_id = SCHEMA_ID(@Schema);
-
-    PRINT @sql;
-    EXEC(@sql);
-END
-
-------------------------------------------------------------
--- 2. DROP OTHER CONSTRAINTS (PK, UNIQUE, CHECK, DEFAULT)
-------------------------------------------------------------
-WHILE EXISTS (
-    SELECT 1
-    FROM sys.objects o
-    JOIN sys.tables t ON o.parent_object_id = t.object_id
-    WHERE t.schema_id = SCHEMA_ID(@Schema)
-      AND o.type IN ('PK','UQ','C','D')
-)
-BEGIN
-    SELECT TOP 1 @sql =
-        'ALTER TABLE [' + @Schema + '].[' + t.name + '] DROP CONSTRAINT [' + o.name + '];'
-    FROM sys.objects o
-    JOIN sys.tables t ON o.parent_object_id = t.object_id
-    WHERE t.schema_id = SCHEMA_ID(@Schema)
-      AND o.type IN ('PK','UQ','C','D');
-
-    PRINT @sql;
-    EXEC(@sql);
-END
-
-------------------------------------------------------------
--- 3. DROP TABLES
-------------------------------------------------------------
-WHILE EXISTS (
-    SELECT 1 FROM sys.tables WHERE schema_id = SCHEMA_ID(@Schema)
-)
-BEGIN
-    SELECT TOP 1 @sql =
-        'DROP TABLE [' + @Schema + '].[' + name + '];'
+DECLARE table_cursor CURSOR FOR
+    SELECT name
     FROM sys.tables
     WHERE schema_id = SCHEMA_ID(@Schema);
 
-    PRINT @sql;
-    EXEC(@sql);
-END
+OPEN table_cursor;
+FETCH NEXT FROM table_cursor INTO @Table;
 
-------------------------------------------------------------
--- 4. DROP VIEWS
-------------------------------------------------------------
-WHILE EXISTS (
-    SELECT 1 FROM sys.views WHERE schema_id = SCHEMA_ID(@Schema)
-)
+WHILE @@FETCH_STATUS = 0
 BEGIN
-    SELECT TOP 1 @sql =
-        'DROP VIEW [' + @Schema + '].[' + name + '];'
-    FROM sys.views
-    WHERE schema_id = SCHEMA_ID(@Schema);
-
+    SET @sql = 'DROP TABLE [' + @Schema + '].[' + @Table + '];';
     PRINT @sql;
     EXEC(@sql);
+
+    FETCH NEXT FROM table_cursor INTO @Table;
 END
 
-------------------------------------------------------------
--- 5. DROP PROCEDURES
-------------------------------------------------------------
-WHILE EXISTS (
-    SELECT 1 FROM sys.objects WHERE schema_id = SCHEMA_ID(@Schema) AND type = 'P'
-)
-BEGIN
-    SELECT TOP 1 @sql =
-        'DROP PROCEDURE [' + @Schema + '].[' + name + '];'
-    FROM sys.objects
-    WHERE schema_id = SCHEMA_ID(@Schema) AND type = 'P';
-
-    PRINT @sql;
-    EXEC(@sql);
-END
-
-------------------------------------------------------------
--- 6. DROP FUNCTIONS
-------------------------------------------------------------
-WHILE EXISTS (
-    SELECT 1 FROM sys.objects WHERE schema_id = SCHEMA_ID(@Schema) AND type IN ('FN','IF','TF')
-)
-BEGIN
-    SELECT TOP 1 @sql =
-        'DROP FUNCTION [' + @Schema + '].[' + name + '];'
-    FROM sys.objects
-    WHERE schema_id = SCHEMA_ID(@Schema) AND type IN ('FN','IF','TF');
-
-    PRINT @sql;
-    EXEC(@sql);
-END
-
-------------------------------------------------------------
--- 7. DROP SEQUENCES
-------------------------------------------------------------
-WHILE EXISTS (
-    SELECT 1 FROM sys.sequences WHERE schema_id = SCHEMA_ID(@Schema)
-)
-BEGIN
-    SELECT TOP 1 @sql =
-        'DROP SEQUENCE [' + @Schema + '].[' + name + '];'
-    FROM sys.sequences
-    WHERE schema_id = SCHEMA_ID(@Schema);
-
-    PRINT @sql;
-    EXEC(@sql);
-END
-
-------------------------------------------------------------
--- 8. DROP SCHEMA
-------------------------------------------------------------
-SET @sql = 'DROP SCHEMA [' + @Schema + '];';
-PRINT @sql;
-EXEC(@sql);
+CLOSE table_cursor;
+DEALLOCATE table_cursor;
