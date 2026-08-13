@@ -1,0 +1,167 @@
+# ============================
+# ces_round8.py (VehicleList)
+# ============================
+
+import sys
+import logging
+import pyodbc
+import oracledb
+
+# ----------------------------
+# ORACLE CONNECTION
+# ----------------------------
+ORACLE_DSN ="//ocipr-wersc-scan.ttcociclientsub.ttcocivcn.oraclevcn.com:1521/ces_prd_svc.int.ttc.ca"
+ORACLE_USER = "CES"
+ORACLE_PASSWORD = "cesprd1210"
+
+# ----------------------------
+# SQL SERVER CONNECTION
+# ----------------------------
+SQL_CONN_STR = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=SQL2022UAT;"
+    "DATABASE=CES;"
+    "UID=cesuser;"
+    "PWD=CESUser#UAT;"
+    "TrustServerCertificate=Yes;"
+)
+
+SQL_SCHEMA = "SBCES"
+
+# ----------------------------
+# LOGGING
+# ----------------------------
+logger = logging.getLogger("migration_round8")
+logger.setLevel(logging.INFO)
+handler = logging.FileHandler("migration_round8.log", mode="a", encoding="utf-8")
+console = logging.StreamHandler(sys.stdout)
+fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+handler.setFormatter(fmt)
+console.setFormatter(fmt)
+logger.addHandler(handler)
+logger.addHandler(console)
+
+# ----------------------------
+# CONNECTION HELPERS
+# ----------------------------
+def get_oracle_conn():
+    return oracledb.connect(
+        user=ORACLE_USER,
+        password=ORACLE_PASSWORD,
+        dsn=ORACLE_DSN
+    )
+
+def get_sql_conn():
+    conn = pyodbc.connect(SQL_CONN_STR, timeout=10)
+    cur = conn.cursor()
+    cur.execute("SET ANSI_WARNINGS OFF;")
+    cur.close()
+    return conn
+
+# ----------------------------
+# DELETE SQL TABLE
+# ----------------------------
+def delete_sql_table(sql_conn, table):
+    cur = sql_conn.cursor()
+    try:
+        cur.execute(f"DELETE FROM {SQL_SCHEMA}.{table}")
+        sql_conn.commit()
+        logger.info(f"Deleted {table}")
+    except Exception as e:
+        logger.error(f"Delete failed for {table}: {e}")
+    cur.close()
+
+# ----------------------------
+# FETCH ORACLE ROWS
+# ----------------------------
+def fetch_oracle_rows(oracle_conn):
+    sql = """
+        SELECT
+            VEHICLE_LIST_ID,
+            VEH_SERIES_CODE,
+            NUM_OF_VEHICLES,
+            PROJ_DESC,
+            DATE_ENTERED,
+            ENTERED_BY,
+            MODIFIED_LAST_BY,
+            MODIFIED_LAST_DATE,
+            MAKE,
+            MODEL,
+            YEAR,
+            ENGINE,
+            TRANSMISSION,
+            DIFFERENTIAL,
+            SOPNUMBER
+        FROM VEHICLE_LIST
+    """
+    cur = oracle_conn.cursor()
+    cur.execute(sql)
+    rows = cur.fetchall()
+    cur.close()
+    return rows
+
+# ----------------------------
+# INSERT INTO SQL SERVER
+# ----------------------------
+def insert_vehiclelist(sql_conn, rows):
+    sql = f"""
+        INSERT INTO {SQL_SCHEMA}.VehicleList (
+            VehicleListId,
+            VehSeriesCode,
+            NumOfVehicles,
+            ProjDesc,
+            DateEntered,
+            EnteredBy,
+            ModifiedLastBy,
+            ModifiedLastDate,
+            Make,
+            Model,
+            Year,
+            Engine,
+            Transmission,
+            Differential,
+            Sopnumber
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
+    cur = sql_conn.cursor()
+    success = 0
+    fail = 0
+
+    for idx, r in enumerate(rows):
+        try:
+            cur.execute(sql, r)
+            success += 1
+        except Exception as e:
+            fail += 1
+            logger.error(f"VehicleList row {idx} failed: {e} | Row={r}")
+
+    sql_conn.commit()
+    cur.close()
+    logger.info(f"VehicleList: {success} succeeded, {fail} failed")
+
+# ----------------------------
+# MAIN
+# ----------------------------
+def main():
+    logger.info("=== ROUND 8 VEHICLE_LIST MIGRATION START ===")
+
+    oracle_conn = get_oracle_conn()
+    sql_conn = get_sql_conn()
+
+    # Delete existing SQL rows
+    delete_sql_table(sql_conn, "VehicleList")
+
+    # Fetch Oracle rows
+    rows = fetch_oracle_rows(oracle_conn)
+
+    # Insert into SQL
+    insert_vehiclelist(sql_conn, rows)
+
+    oracle_conn.close()
+    sql_conn.close()
+
+    logger.info("=== ROUND 8 VEHICLE_LIST MIGRATION COMPLETE ===")
+
+if __name__ == "__main__":
+    main()
