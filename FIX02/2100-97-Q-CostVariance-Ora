@@ -1,0 +1,702 @@
+I have extracted below queries from crystal reports 8 (legacy) - which fetches data from Oracle
+We have migrated database from Oracle to MS SQL 2022.
+Oracle database and MS SQL database schema and col types match. Only  difference is Oracle ises Snake_Case names and MS SQL uses CamelCase names for tables, columns, functions stored proc etc.
+MS sql must also use schema name SBCEs
+I now need to migrate below Oracle query to MS SQL query
+Identify temp tables, functions, stored proc. tables used.
+In MS SQL ideally wold  like to use joins instead of cursors.
+I can provide you additional details if required.
+Attached queries are in descending orders.
+Help me conver the whole from oracle toMS SQL
+Pls add below in "Cost  Variance" tab
+Oracle
+{call CES.CES_INQUIRY.RPT_COST_VARIANCE}
+PROCEDURE RPT_COST_VARIANCE
+    (vo_Cursor OUT query_cur) IS
+
+
+BEGIN
+    INTERNAL_RB_PRICE;
+
+
+    OPEN vo_cursor FOR
+        SELECT
+            *
+        FROM
+            TEMP_RBP_COST;
+END RPT_COST_VARIANCE;
+
+--------------------------------------------------------------------------------------------
+create or replace PROCEDURE INTERNAL_RB_PRICE
+   IS
+--
+-- To modify this template, edit file PROC.TXT in TEMPLATE
+-- directory of SQL Navigator
+--
+-- Purpose: Briefly explain the functionality of the procedure
+--
+-- MODIFICATION HISTORY
+-- Person      Date    Comments
+-- ---------   ------  -------------------------------------------
+--  variable_name                 datatype;
+   -- Declare program variables as shown above
+REBUILT_STOCK_NUM                  VARCHAR2(30);
+DETAILED_DESC                      VARCHAR2(250);
+BUY_NEW_COST                      VARCHAR2(30);
+TOTAL_PRICE                        NUMBER(25,10);
+ACTIVE                             number(1,4);
+KEYWORD                             VARCHAR2(250);
+
+CURSOR RB_PART_NUMBERS
+    IS
+    SELECT RB_MASTERLIST.REBUILT_STOCK_NUM, RB_MASTERLIST.detailed_desc,
+    nvl(replace(replace(trim(round(STOCK_CODED_PARTS.MMS_NEW_COST, 2)),',','.'), '$', ''),'0.00') AS BUY_NEW_COST,RB_MASTERLIST.active,
+     RB_MASTERLIST.keyword as keyword from RB_MASTERLIST, stock_coded_parts where rb_masterlist.mms_stock_code =+ stock_coded_parts.mms_stock_code
+     order by RB_MASTERLIST.rebuilt_stock_num desc;
+
+
+
+BEGIN
+EXECUTE IMMEDIATE 'TRUNCATE TABLE TEMP_RBP_COST';
+--REBUILT_STOCK_NUM := RB_MASTERLIST.rebuilt_stock_num;
+
+   -- statements;
+
+open RB_PART_NUMBERS;
+LOOP
+    FETCH RB_PART_NUMBERS
+    INTO REBUILT_STOCK_NUM,DETAILED_DESC, BUY_NEW_COST, ACTIVE,KEYWORD;
+
+
+    EXIT WHEN RB_PART_NUMBERS%NOTFOUND;
+
+    TOTAL_PRICE := CES_INQUIRY.rpt_rbp_cost(upper(REBUILT_STOCK_NUM),'RB');
+    INSERT INTO TEMP_RBP_COST (RB_NUMBER,TOTAL_COST,DETAILED_DESC,External_Cost,ACTIVE, KEYWORD) VALUES(REBUILT_STOCK_NUM, TOTAL_PRICE, detailed_desc, buy_new_cost,ACTIVE, KEYWORD);
+
+END LOOP;
+--FOR RB_NUMBER IN TEMP_RBP_COST  LOOP
+--   INTERNAL_COST:= CES_INQUIRY.rpt_rbp_cost(TEMP_RBP_COST.RB_NUMBER,'RB');
+--   INSERT INTO TEMP_RBP_COST (TOTAL_COST) VALUES INTERNAL_COST;
+
+--EXCEPTION
+  --  WHEN exception_name THEN
+       -- statements ;
+END; -- Procedure
+
+ -----------------------------------
+
+FUNCTION RPT_RBP_COST
+    (vi_rbnum  IN RB_MASTERLIST.rebuilt_stock_num%TYPE,
+     vi_link_type IN SC_PARTS_USED.link_type%TYPE) RETURN NUMBER IS
+
+     emesg varchar2(30);
+     vo_total_cost_ret NUMBER(20,10);
+     labour_subtotal NUMBER(20,10);
+     labour_overhead NUMBER(20,10);
+     labour_total NUMBER(20,10);
+     nscp_total NUMBER(20,10);
+     scp_total NUMBER(20,10);
+     rbp_total NUMBER(20,10);
+     materials_total NUMBER(20,10);
+     core_cost_str VARCHAR2(30);
+     core_cost NUMBER(20,10);
+     V_PRICE number (20,10);
+
+BEGIN
+
+--Get the total material cost
+    V_PRICE := NVL(get_material_cost(vi_rbnum,vi_link_type),0);
+
+      SELECT
+        NVL(SUM(TOTAL_COST),0) AS "TOTAL COST"
+      INTO
+        MATERIALS_TOTAL
+      FROM
+        TEMP_MATERIALS_LIST;
+
+--get the total labour costs
+    V_PRICE := NVL(get_labour_cost(vi_rbnum,vi_link_type),0);
+
+
+        SELECT
+           NVL(SUM(TOTAL_COST),0) AS "TOTAL COST"
+        INTO
+            labour_subtotal
+        FROM
+            TEMP_LABOUR_LIST;
+
+--retrieve the labour overhead amount
+    SELECT
+        nvl( (MAX( to_number(replace(CES_SETTINGS.value,',','.'))) * labour_subtotal),0)
+    INTO
+        labour_overhead
+    FROM
+        CES_SETTINGS
+    WHERE
+        CES_SETTINGS.parameter = 'OVERHEAD';
+
+    -- Calculate the Labour Total with overhead
+
+    labour_total := labour_subtotal + labour_overhead;
+
+    SELECT
+        nvl(core_charge,'0')
+    INTO
+        core_cost_str
+    FROM
+        RB_MASTERLIST
+    WHERE
+        UPPER(RB_MASTERLIST.rebuilt_stock_num) = vi_rbnum;
+
+    -- Convert the Core Cost into a number
+    -- vhou 2010-06-07 Add replace function to get rid of '$' synbol in the data
+    IF core_cost_str = '' OR core_cost_str = ' ' OR core_cost_str IS NULL THEN
+        core_cost := 0;
+    ELSE
+        core_cost := to_number(REPLACE(REPLACE(core_cost_str, ',', '.'),'$',''));
+    END IF;
+
+    -- Calculate the Total Cost of the rebuilt part
+    V_PRICE:= round(nvl(((materials_total - core_cost + labour_total )),0), 2) ;
+
+    RETURN nvl(V_PRICE,0);
+
+END RPT_RBP_COST;
+----------------------------------------
+create or replace FUNCTION get_labour_cost
+(vi_IDnum in varchar2, vi_type in varchar2)
+RETURN number IS
+
+V_LINK_CODE VARCHAR2(30);
+V_PRICE number (20,10);
+V_FINAL_PRICE number (20,10);
+V_RET_VAL VARCHAR2(25);
+
+CURSOR C_RB_LIST_To_Prop (vi_IDnum IN varchar)
+IS
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS "link_code",
+                SC_PARTS_USED.qty_reqd AS "QTY",
+                SC_PARTS_USED.percent_usage AS "%",
+                SC_PARTS_USED.mms_rebuilt_code AS "Rebuilt Code"
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = vi_type AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_IDnum);
+
+cur_RBRec C_RB_LIST_To_Prop%ROWTYPE;
+
+    CURSOR cur_Labour (vi_IDnum IN varchar)IS
+        SELECT
+            EMPLOYEE_LABOUR.labour_defn AS "LABOUR TYPE",
+            EMPLOYEE_LABOUR.costcentre AS "CC",
+            EMPLOYEE_LABOUR.task AS "TASK",
+            REPLACE(EMPLOYEE_LABOUR.usage,',','.') AS "USAGE",
+            EMPLOYEE_LABOUR.hrs_reqd AS "TIME",
+            EMPLOYEE_SALARIES.rate_per_hour AS "RATE PER HOUR",
+            EMPLOYEE_LABOUR.time_addition AS "TIME ADDITION",
+            HHMM_TO_DECIMAL(EMPLOYEE_LABOUR.adj_hrs) AS "WRENCH TIME"
+        FROM
+            EMPLOYEE_LABOUR,
+            EMPLOYEE_SALARIES,
+            EMPL_CLASS
+        WHERE
+            EMPLOYEE_LABOUR.labour_defn = UPPER(EMPL_CLASS.labour_defn) AND
+            EMPLOYEE_SALARIES.wage_group = EMPL_CLASS.wage_group AND
+            EMPLOYEE_LABOUR.link_number = vi_idnum AND
+           EMPLOYEE_LABOUR.typeid = vi_type;
+
+
+
+cur_LabourRec cur_Labour%ROWTYPE;
+
+BEGIN
+EXECUTE IMMEDIATE 'TRUNCATE TABLE TEMP_LABOUR_LIST';
+open cur_Labour(upper(vi_idnum));
+LOOP
+
+    FETCH cur_Labour
+    INTO cur_LabourRec;
+    EXIT WHEN cur_Labour%NOTFOUND;
+
+    insert into TEMP_LABOUR_LIST values (cur_LabourRec."LABOUR TYPE",cur_LabourRec."CC" ,cur_LabourRec."TASK" ,cur_LabourRec."USAGE" ,HHMM_TO_MINUTES(cur_LabourRec."TIME ADDITION"),cur_LabourRec."RATE PER HOUR", cur_LabourRec."RATE PER HOUR" * HHMM_TO_MINUTES(cur_LabourRec."TIME ADDITION") * cur_LabourRec."USAGE" / 6000, round((cur_LabourRec."USAGE" / 100) * HHMM_TO_MINUTES(cur_LabourRec."TIME ADDITION")) ,'RB',upper(vi_idnum), round((cur_LabourRec."USAGE" / 100) * HHMM_TO_MINUTES(cur_LabourRec."WRENCH TIME")));
+
+END LOOP;
+CLOSE cur_Labour;
+
+--checks to see how many rebuilt parts are attached to the rebuilt part number
+-- inputted(rb_num) into this procedure
+SELECT count(*) INTO V_PRICE FROM SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = UPPER(vi_type) AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_idnum);
+
+
+--if this current rebuilt part (rb_num) in this procedure resides
+--in any other rebuilt parts update the prices of those rebuilt parts as well.
+if V_PRICE > 0 then
+
+open C_RB_LIST_To_Prop(upper(vi_idnum));
+LOOP
+
+    FETCH C_RB_LIST_To_Prop
+    INTO cur_RBRec;
+    EXIT WHEN C_RB_LIST_To_Prop%NOTFOUND;
+    WRITE_LABOUR (cur_RBRec."Rebuilt Code",cur_RBRec."QTY" * to_number(replace(NVL(cur_RBRec."%",'0'),',','.'))/100);
+
+END LOOP;
+CLOSE C_RB_LIST_To_Prop;
+
+end if;
+
+
+SELECT round(sum(total_cost),2) as LABOUR_COST INTO V_FINAL_PRICE
+        FROM
+            TEMP_LABOUR_LIST;
+
+RETURN V_FINAL_PRICE;
+
+
+EXCEPTION
+   WHEN OTHERS THEN
+    raise_application_error('-20001', sqlerrm);
+    dbms_output.put_line(substr(TO_CHAR(SQLCODE) || ': '||SQLERRM,1,255));
+END GET_LABOUR_COST;
+----------------------------------------------------------
+create or replace FUNCTION get_material_cost
+(vi_IDnum in varchar2, vi_type in varchar2)
+RETURN number IS
+
+V_LINK_CODE VARCHAR2(30);
+V_PRICE number (20,10);
+V_FINAL_PRICE number (20,10);
+V_RET_VAL VARCHAR2(25);
+V_KIT_TOTAL NUMBER(20,10);
+CURSOR C_RB_LIST_To_Prop (vi_IDnum IN varchar)
+IS
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS "link_code",
+                SC_PARTS_USED.qty_reqd AS "QTY",
+                SC_PARTS_USED.percent_usage AS "%",
+                SC_PARTS_USED.mms_rebuilt_code AS "Rebuilt Code"
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = UPPER(vi_type) AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_IDnum);
+
+cur_RBRec C_RB_LIST_To_Prop%ROWTYPE;
+
+
+CURSOR cur_Material (vi_IDnum IN varchar)
+IS
+
+       SELECT
+            nvl(C.name,'NONE') AS "ASSEMBLY AREA",
+            nvl(A.cost_centre, '0') AS "CC",
+            nvl(SUM(A.cost), '0') AS "TOTAL COST",
+            nvl(SUM(A.taxcost), '0')AS "TAXABLE COST"
+        FROM
+            (SELECT
+                cost_centre,
+                (FINAL_COST(percent_usage, qty_reqd, mms_cost, 0) - FINAL_COST(percent_usage, qty_reqd, corecost, 0)) AS cost,
+                FINAL_COST(percent_usage, qty_reqd, mms_cost, 0) AS taxcost
+             FROM
+                SC_PARTS_USED
+             WHERE
+                link_code = upper(vi_idnum) AND
+                rebuilt_part = 'N' AND
+                link_type =upper(vi_type)
+             UNION ALL
+                    SELECT
+                        NSC_PARTS_USED.cost_centre,
+                        (FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0) - FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NSC_PARTS_USED.corecost, 0)) as cost,
+                        FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0) AS taxcost
+                    FROM
+                        NSC_PARTS_USED NSC_PARTS_USED, NON_STOCK_CODED_PARTS NON_STOCK_CODED_PARTS
+                    WHERE
+                        NSC_PARTS_USED.link_code = upper(vi_IDnum) AND
+                        NSC_PARTS_USED.link_type = UPPER(vi_type) AND
+                        NON_STOCK_CODED_PARTS.ID (+)= NSC_PARTS_USED.ID) A,
+            cost_centres C
+        WHERE
+            C.cost_centre = A.cost_centre
+        GROUP BY
+            A.cost_centre,
+            C.name;
+
+cur_MaterialRec cur_Material%ROWTYPE;
+
+BEGIN
+
+EXECUTE IMMEDIATE 'TRUNCATE TABLE TEMP_MATERIALS_LIST';
+commit;
+open cur_Material(upper(vi_idnum));
+LOOP
+    FETCH cur_Material
+    INTO cur_MaterialRec;
+    EXIT WHEN cur_Material%NOTFOUND;
+    insert into TEMP_MATERIALS_LIST values  (cur_MaterialRec."ASSEMBLY AREA",cur_MaterialRec."CC" ,cur_MaterialRec."TOTAL COST",cur_MaterialRec."TAXABLE COST",vi_IDnum,cur_MaterialRec."TOTAL COST");
+
+END LOOP;
+CLOSE cur_Material;
+
+--checks to see how many rebuilt parts are attached to the rebuilt part number
+-- inputted(rb_num) into this procedure
+SELECT count(*) INTO V_PRICE FROM SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = UPPER(vi_type) AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_idnum);
+
+
+--if this current rebuilt part (rb_num) in this procedure resides
+--in any other rebuilt parts update the prices of those rebuilt parts as well.
+if V_PRICE > 0 then
+
+open C_RB_LIST_To_Prop(upper(vi_idnum));
+LOOP
+
+    FETCH C_RB_LIST_To_Prop
+    INTO cur_RBRec;
+    EXIT WHEN C_RB_LIST_To_Prop%NOTFOUND;
+
+    WRITE_MATERIALS (cur_RBRec."Rebuilt Code",cur_RBRec."QTY" * to_number(replace(NVL(cur_RBRec."%",'0'),',','.'))/100 , cur_RBRec."Rebuilt Code", 1 );
+
+END LOOP;
+CLOSE C_RB_LIST_To_Prop;
+
+end if;
+
+SELECT count(*) INTO V_KIT_TOTAL FROM OEM_KITS_TOTAL2 WHERE OEM_KITS_TOTAL2.LINK = VI_IDNUM;
+
+if upper(vi_type) = 'BUS' and V_KIT_TOTAL > 0 then
+    SELECT TOTAL_KIT_COST INTO V_KIT_TOTAL FROM OEM_KITS_TOTAL2 WHERE OEM_KITS_TOTAL2.LINK = VI_IDNUM;
+    insert into TEMP_MATERIALS_LIST values ('KITS','05H7',V_KIT_TOTAL,V_KIT_TOTAL,VI_IDNUM,V_KIT_TOTAL);
+end if;
+
+SELECT round(sum(NVL(total_cost,0)),2) as RB_COST INTO V_FINAL_PRICE
+        FROM
+            TEMP_MATERIALS_LIST;
+
+RETURN V_FINAL_PRICE;
+
+--EXCEPTION
+  --WHEN OTHERS THEN
+    --raise_application_error('-20001', sqlerrm);
+    --dbms_output.put_line(substr(TO_CHAR(SQLCODE) || ': '||SQLERRM,1,255));
+END GET_MATERIAL_COST;
+------------------------------------------------------------------------------
+create or replace PROCEDURE write_labour
+   (vi_idnum IN VARCHAR2,
+    vi_Adjustment IN number)
+IS
+
+-- Declare program variables as shown above
+V_LINK_CODE VARCHAR2(30);
+V_PRICE number (20,10);
+V_RET_VAL VARCHAR2(25);
+
+  CURSOR C_RB_LIST_To_Prop (vi_IDnum IN varchar2)
+IS
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS "link_code",
+                UPPER(SC_PARTS_USED.qty_reqd) AS "QTY",
+                SC_PARTS_USED.percent_usage AS "%",
+                UPPER(SC_PARTS_USED.mms_rebuilt_code) as "Rebuilt Code"
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_IDnum);
+
+cur_RBRec C_RB_LIST_To_Prop%ROWTYPE;
+
+
+    CURSOR cur_Labour (vi_IDnum IN varchar)IS
+        SELECT
+            EMPLOYEE_LABOUR.labour_defn AS "LABOUR TYPE",
+            EMPLOYEE_LABOUR.costcentre AS "CC",
+            EMPLOYEE_LABOUR.task AS "TASK",
+            REPLACE(EMPLOYEE_LABOUR.usage,',','.') AS "USAGE",
+            EMPLOYEE_LABOUR.hrs_reqd AS "TIME",
+            EMPLOYEE_SALARIES.rate_per_hour AS "RATE PER HOUR",
+            EMPLOYEE_LABOUR.time_addition AS "TIME ADDITION",
+            HHMM_TO_DECIMAL(EMPLOYEE_LABOUR.adj_hrs) AS "WRENCH TIME"
+        FROM
+            EMPLOYEE_LABOUR,
+            EMPLOYEE_SALARIES,
+            EMPL_CLASS
+        WHERE
+            EMPLOYEE_LABOUR.labour_defn = UPPER(EMPL_CLASS.labour_defn) AND
+            EMPLOYEE_SALARIES.wage_group = EMPL_CLASS.wage_group AND
+            EMPLOYEE_LABOUR.link_number = vi_idnum AND
+            EMPLOYEE_LABOUR.typeid = 'RB';
+
+cur_LabourRec cur_Labour%ROWTYPE;
+
+BEGIN
+
+open cur_Labour(upper(vi_idnum));
+LOOP
+
+    FETCH cur_Labour
+    INTO cur_LabourRec;
+   EXIT WHEN cur_Labour%NOTFOUND;
+
+    insert into TEMP_LABOUR_LIST values (cur_LabourRec."LABOUR TYPE",cur_LabourRec."CC" ,cur_LabourRec."TASK" ,cur_LabourRec."USAGE" ,round((HHMM_TO_MINUTES(cur_LabourRec."TIME ADDITION") * vi_Adjustment),0),cur_LabourRec."RATE PER HOUR", (cur_LabourRec."RATE PER HOUR"/ 60) * round(HHMM_TO_MINUTES(cur_LabourRec."TIME ADDITION") * vi_Adjustment) * (cur_LabourRec."USAGE"/100) , round((cur_LabourRec."USAGE" / 100) * HHMM_TO_MINUTES(cur_LabourRec."TIME ADDITION") * vi_Adjustment) ,'RB',upper(vi_idnum), round((cur_LabourRec."USAGE" / 100) * round(HHMM_TO_MINUTES(cur_LabourRec."WRENCH TIME") * vi_Adjustment)));
+
+END LOOP;
+CLOSE cur_Labour;
+
+--checks to see how many rebuilt parts are attached to the rebuilt part number
+-- inputted(rb_num) into this procedure
+SELECT count(*) INTO V_PRICE FROM SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_idnum);
+--commit;
+
+--if this current rebuilt part (rb_num) in this procedure resides
+--in any other rebuilt parts update the prices of those rebuilt parts as well.
+if V_PRICE > 0 then
+
+open C_RB_LIST_To_Prop(upper(vi_idnum));
+LOOP
+
+    FETCH C_RB_LIST_To_Prop
+    INTO cur_RBRec;
+  EXIT WHEN C_RB_LIST_To_Prop%NOTFOUND;
+
+    WRITE_LABOUR (cur_RBRec."Rebuilt Code",(cur_RBRec."QTY" * cur_RBRec."%"/100) * vi_adjustment);
+
+END LOOP;
+CLOSE C_RB_LIST_To_Prop;
+end if;
+
+RETURN;
+
+
+EXCEPTION
+   WHEN OTHERS THEN
+    raise_application_error('-20001', sqlerrm);
+    dbms_output.put_line(substr(TO_CHAR(SQLCODE) || ': '||SQLERRM,1,255));
+END;
+---------------------------------------------------------------
+create or replace PROCEDURE write_labour
+   (vi_idnum IN VARCHAR2,
+    vi_Adjustment IN number)
+IS
+
+-- Declare program variables as shown above
+V_LINK_CODE VARCHAR2(30);
+V_PRICE number (20,10);
+V_RET_VAL VARCHAR2(25);
+
+  CURSOR C_RB_LIST_To_Prop (vi_IDnum IN varchar2)
+IS
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS "link_code",
+                UPPER(SC_PARTS_USED.qty_reqd) AS "QTY",
+                SC_PARTS_USED.percent_usage AS "%",
+                UPPER(SC_PARTS_USED.mms_rebuilt_code) as "Rebuilt Code"
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_IDnum);
+
+cur_RBRec C_RB_LIST_To_Prop%ROWTYPE;
+
+
+    CURSOR cur_Labour (vi_IDnum IN varchar)IS
+        SELECT
+            EMPLOYEE_LABOUR.labour_defn AS "LABOUR TYPE",
+            EMPLOYEE_LABOUR.costcentre AS "CC",
+            EMPLOYEE_LABOUR.task AS "TASK",
+            REPLACE(EMPLOYEE_LABOUR.usage,',','.') AS "USAGE",
+            EMPLOYEE_LABOUR.hrs_reqd AS "TIME",
+            EMPLOYEE_SALARIES.rate_per_hour AS "RATE PER HOUR",
+            EMPLOYEE_LABOUR.time_addition AS "TIME ADDITION",
+            HHMM_TO_DECIMAL(EMPLOYEE_LABOUR.adj_hrs) AS "WRENCH TIME"
+        FROM
+            EMPLOYEE_LABOUR,
+            EMPLOYEE_SALARIES,
+            EMPL_CLASS
+        WHERE
+            EMPLOYEE_LABOUR.labour_defn = UPPER(EMPL_CLASS.labour_defn) AND
+            EMPLOYEE_SALARIES.wage_group = EMPL_CLASS.wage_group AND
+            EMPLOYEE_LABOUR.link_number = vi_idnum AND
+            EMPLOYEE_LABOUR.typeid = 'RB';
+
+cur_LabourRec cur_Labour%ROWTYPE;
+
+BEGIN
+
+open cur_Labour(upper(vi_idnum));
+LOOP
+
+    FETCH cur_Labour
+    INTO cur_LabourRec;
+   EXIT WHEN cur_Labour%NOTFOUND;
+
+    insert into TEMP_LABOUR_LIST values (cur_LabourRec."LABOUR TYPE",cur_LabourRec."CC" ,cur_LabourRec."TASK" ,cur_LabourRec."USAGE" ,round((HHMM_TO_MINUTES(cur_LabourRec."TIME ADDITION") * vi_Adjustment),0),cur_LabourRec."RATE PER HOUR", (cur_LabourRec."RATE PER HOUR"/ 60) * round(HHMM_TO_MINUTES(cur_LabourRec."TIME ADDITION") * vi_Adjustment) * (cur_LabourRec."USAGE"/100) , round((cur_LabourRec."USAGE" / 100) * HHMM_TO_MINUTES(cur_LabourRec."TIME ADDITION") * vi_Adjustment) ,'RB',upper(vi_idnum), round((cur_LabourRec."USAGE" / 100) * round(HHMM_TO_MINUTES(cur_LabourRec."WRENCH TIME") * vi_Adjustment)));
+
+END LOOP;
+CLOSE cur_Labour;
+
+--checks to see how many rebuilt parts are attached to the rebuilt part number
+-- inputted(rb_num) into this procedure
+SELECT count(*) INTO V_PRICE FROM SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_idnum);
+--commit;
+
+--if this current rebuilt part (rb_num) in this procedure resides
+--in any other rebuilt parts update the prices of those rebuilt parts as well.
+if V_PRICE > 0 then
+
+open C_RB_LIST_To_Prop(upper(vi_idnum));
+LOOP
+
+    FETCH C_RB_LIST_To_Prop
+    INTO cur_RBRec;
+  EXIT WHEN C_RB_LIST_To_Prop%NOTFOUND;
+
+    WRITE_LABOUR (cur_RBRec."Rebuilt Code",(cur_RBRec."QTY" * cur_RBRec."%"/100) * vi_adjustment);
+
+END LOOP;
+CLOSE C_RB_LIST_To_Prop;
+end if;
+
+RETURN;
+
+
+EXCEPTION
+   WHEN OTHERS THEN
+    raise_application_error('-20001', sqlerrm);
+    dbms_output.put_line(substr(TO_CHAR(SQLCODE) || ': '||SQLERRM,1,255));
+END;
+---------------------------------------------------------------------------------------------
+create or replace PROCEDURE write_materials
+   (vi_idnum IN VARCHAR2,
+    vi_Adjustment IN number,
+    vi_RBReference IN varchar2,
+    vi_Adjustment2 IN number)
+IS
+
+-- Declare program variables as shown above
+V_LINK_CODE VARCHAR2(30);
+V_PRICE number (20,10);
+V_RET_VAL VARCHAR2(25);
+
+  CURSOR C_RB_LIST_To_Prop (vi_IDnum IN varchar2)
+IS
+SELECT DISTINCT UPPER(SC_PARTS_USED.link_code) AS "link_code",
+                UPPER(SC_PARTS_USED.qty_reqd) AS "QTY",
+                SC_PARTS_USED.percent_usage AS "%",
+                UPPER(SC_PARTS_USED.mms_rebuilt_code) as "Rebuilt Code"
+        FROM
+            SC_PARTS_USED
+        WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_IDnum);
+
+cur_RBRec C_RB_LIST_To_Prop%ROWTYPE;
+
+
+  CURSOR cur_Material (vi_IDnum IN varchar)
+IS
+
+       SELECT
+            nvl(C.name,'NONE') AS "ASSEMBLY AREA",
+            nvl(A.cost_centre, '0') AS "CC",
+            nvl(sum(A.cost), '0') AS "TOTAL COST",
+            nvl(sum(A.taxcost), '0')AS "TAXABLE COST"
+        FROM
+            (SELECT
+                cost_centre,
+                (FINAL_COST(percent_usage, qty_reqd, mms_cost, 0) - FINAL_COST(percent_usage, qty_reqd, corecost, 0))AS cost,
+                FINAL_COST(percent_usage, qty_reqd, mms_cost, 0) AS taxcost
+             FROM
+                SC_PARTS_USED
+             WHERE
+                link_code = upper(vi_idnum) AND
+                rebuilt_part = 'N' AND
+                link_type = 'RB'
+             UNION ALL
+                    SELECT
+                        NSC_PARTS_USED.cost_centre,
+                        (FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0) - FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NSC_PARTS_USED.corecost, 0)) as cost,
+                        FINAL_COST(NSC_PARTS_USED.percent_usage, NSC_PARTS_USED.qty_reqd, NON_STOCK_CODED_PARTS.oem_part_cost, 0) AS taxcost
+                    FROM
+                        NSC_PARTS_USED NSC_PARTS_USED,NON_STOCK_CODED_PARTS NON_STOCK_CODED_PARTS
+                    WHERE
+                        NSC_PARTS_USED.link_code = upper(vi_IDnum) AND
+                        NSC_PARTS_USED.link_type = 'RB' AND
+                       NON_STOCK_CODED_PARTS.ID (+)= NSC_PARTS_USED.ID) A,
+            cost_centres C
+        WHERE
+            C.cost_centre = A.cost_centre
+        GROUP BY
+            A.cost_centre,
+            C.name;
+
+cur_MaterialRec cur_Material%ROWTYPE;
+
+BEGIN
+
+open cur_Material(upper(vi_idnum));
+LOOP
+
+    FETCH cur_Material
+    INTO cur_MaterialRec;
+   EXIT WHEN cur_Material%NOTFOUND;
+
+    insert into TEMP_MATERIALS_LIST values (cur_MaterialRec."ASSEMBLY AREA",cur_MaterialRec."CC" ,round(cur_MaterialRec."TOTAL COST" * vi_adjustment,2) ,cur_MaterialRec."TAXABLE COST" * vi_adjustment ,vi_RBReference, vi_adjustment2 * cur_MaterialRec."TOTAL COST");
+
+END LOOP;
+CLOSE cur_Material;
+--***********************************************************
+
+--archive rb part#
+
+--checks to see how many rebuilt parts are attached to the rebuilt part number
+-- inputted(rb_num) into this procedure
+SELECT count(*) INTO V_PRICE FROM SC_PARTS_USED WHERE
+            SC_PARTS_USED.rebuilt_part = 'Y' AND
+            SC_PARTS_USED.link_type = 'RB' AND
+            upper(SC_PARTS_USED.link_code) = upper(vi_idnum);
+--commit;
+
+--if this current rebuilt part (rb_num) in this procedure resides
+--in any other rebuilt parts update the prices of those rebuilt parts as well.
+if V_PRICE > 0 then
+
+open C_RB_LIST_To_Prop(upper(vi_idnum));
+LOOP
+
+    FETCH C_RB_LIST_To_Prop
+    INTO cur_RBRec;
+     EXIT WHEN C_RB_LIST_To_Prop%NOTFOUND;
+
+    WRITE_MATERIALS (cur_RBRec."Rebuilt Code",(cur_RBRec."QTY" * cur_RBRec."%"/100) * vi_adjustment , vi_RBReference, vi_adjustment2 * (cur_RBRec."QTY" * cur_RBRec."%"/100) );
+
+END LOOP;
+CLOSE C_RB_LIST_To_Prop;
+end if;
+
+--***************************************************************************
+--insert into TEMP_MATERIALS_LIST values (cur_MaterialRec."ASSEMBLY AREA",cur_MaterialRec."CC" ,round(cur_MaterialRec."TOTAL COST" * vi_adjustment,2) ,cur_MaterialRec."TAXABLE COST" * vi_adjustment ,vi_RBReference, vi_adjustment2 * cur_MaterialRec."TOTAL COST");
+
+RETURN;
+
+
+EXCEPTION
+   WHEN OTHERS THEN
+    raise_application_error('-20001', sqlerrm);
+    dbms_output.put_line(substr(TO_CHAR(SQLCODE) || ': '||SQLERRM,1,255));
+END;
+
