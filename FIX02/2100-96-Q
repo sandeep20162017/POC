@@ -1,0 +1,61 @@
+Fix
+CREATE OR ALTER PROCEDURE SBCES.RptRbpCost
+	    @viRbnum        VARCHAR(30),
+	    @viLinkType     VARCHAR(10),
+	    @voTotalCost    DECIMAL(20,10) OUTPUT
+	AS
+	BEGIN
+	    SET NOCOUNT ON;
+	
+	    DECLARE @LabourSubtotal DECIMAL(20,10) = 0;
+	    DECLARE @LabourOverhead DECIMAL(20,10) = 0;
+	    DECLARE @LabourTotal DECIMAL(20,10) = 0;
+	    DECLARE @MaterialsTotal DECIMAL(20,10) = 0;
+	    DECLARE @CoreCost DECIMAL(20,10) = 0;
+	    DECLARE @CoreCostStr VARCHAR(30);
+	    DECLARE @V_Price DECIMAL(20,10) = 0;
+	
+	    -- Get material cost
+	    EXEC SBCES.GetMaterialCost
+	        @viIdnum = UPPER(@viRbnum),
+	        @viType = @viLinkType,
+	        @voResult = @V_Price OUTPUT;
+	
+	    SELECT @MaterialsTotal = ISNULL(SUM(TotalCost), 0)
+	    FROM SBCEs.TempMaterialsList;
+	
+	    -- Get labour cost
+	    EXEC SBCES.GetLabourCost
+        @viIdnum = UPPER(@viRbnum),
+	        @viType = @viLinkType,
+	        @voResult = @V_Price OUTPUT;
+	
+	    SELECT @LabourSubtotal = ISNULL(SUM(TotalCost), 0)
+	    FROM SBCEs.TempLabourList;
+	
+	    -- Labour overhead
+	    SELECT @LabourOverhead = ISNULL(MAX(REPLACE(CS.Value, ',', '.')), 0) * @LabourSubtotal
+	    FROM SBCEs.CesSettings CS
+	    WHERE CS.Parameter = 'OVERHEAD';
+	
+	    SET @LabourTotal = @LabourSubtotal + ISNULL(@LabourOverhead, 0);
+	
+    -- Core cost
+	    SELECT @CoreCostStr = CoreCharge
+	    FROM SBCEs.RbMasterlist
+	    WHERE UPPER(RebuiltStockNum) = UPPER(@viRbnum);
+	
+	    IF @CoreCostStr IS NULL OR @CoreCostStr = '' OR @CoreCostStr = ' '
+	        SET @CoreCost = 0;
+	    ELSE
+	        SET @CoreCost = CAST(REPLACE(REPLACE(@CoreCostStr, ',', '.'), '$', '') AS DECIMAL(20,10));
+	
+	    SET @voTotalCost = ROUND(ISNULL((@MaterialsTotal - @CoreCost + @LabourTotal), 0), 2);
+	END;
+	GO
+  errr ;
+  Msg 102, Level 15, State 1, Procedure RptRbpCost, Line 19 [Batch Start Line 0]
+Incorrect syntax near '@viRbnum'.
+Msg 102, Level 15, State 1, Procedure RptRbpCost, Line 28 [Batch Start Line 0]
+Incorrect syntax near '@viRbnum'.
+	
