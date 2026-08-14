@@ -1,0 +1,538 @@
+-- ======================================================================
+-- Migration of Oracle Cost Variance Procedures to SQL Server 2022
+-- Schema: SBCES (all caps)
+-- Naming: CamelCase for all objects (tables, columns, procedures, functions)
+-- ======================================================================
+
+USE [YourDatabaseName];
+GO
+
+-- Ensure schema exists
+IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = 'SBCES')
+BEGIN
+    EXEC('CREATE SCHEMA SBCES');
+END
+GO
+
+-- ======================================================================
+-- 1. HELPER FUNCTIONS
+-- ======================================================================
+
+CREATE OR ALTER FUNCTION SBCES.HhmmToMinutes (@TimeStr VARCHAR(10))
+RETURNS INT
+AS
+BEGIN
+    DECLARE @Minutes INT = 0;
+    IF @TimeStr IS NOT NULL AND @TimeStr != ''
+    BEGIN
+        DECLARE @Pos INT = CHARINDEX(':', @TimeStr);
+        IF @Pos > 0
+        BEGIN
+            SET @Minutes = CAST(SUBSTRING(@TimeStr, 1, @Pos - 1) AS INT) * 60
+                         + CAST(SUBSTRING(@TimeStr, @Pos + 1, LEN(@TimeStr)) AS INT);
+        END
+    END
+    RETURN @Minutes;
+END;
+GO
+
+CREATE OR ALTER FUNCTION SBCES.HhmmToDecimal (@TimeStr VARCHAR(10))
+RETURNS DECIMAL(20,10)
+AS
+BEGIN
+    DECLARE @Decimal DECIMAL(20,10) = 0;
+    IF @TimeStr IS NOT NULL AND @TimeStr != ''
+    BEGIN
+        DECLARE @Pos INT = CHARINDEX(':', @TimeStr);
+        IF @Pos > 0
+        BEGIN
+            DECLARE @Hours INT = CAST(SUBSTRING(@TimeStr, 1, @Pos - 1) AS INT);
+            DECLARE @Mins INT = CAST(SUBSTRING(@TimeStr, @Pos + 1, LEN(@TimeStr)) AS INT);
+            SET @Decimal = @Hours + (@Mins / 60.0);
+        END
+    END
+    RETURN @Decimal;
+END;
+GO
+
+CREATE OR ALTER FUNCTION SBCES.FinalCost (
+    @PercentUsage DECIMAL(20,10),
+    @QtyReqd DECIMAL(20,10),
+    @Cost DECIMAL(20,10),
+    @Adjustment DECIMAL(20,10)
+)
+RETURNS DECIMAL(20,10)
+AS
+BEGIN
+    RETURN ISNULL((@PercentUsage / 100.0) * @QtyReqd * @Cost, 0);
+END;
+GO
+
+-- ======================================================================
+-- 2. TEMPORARY TABLES (persistent for cross-procedure recursion)
+-- ======================================================================
+
+IF OBJECT_ID('SBCES.TempRbpCost', 'U') IS NOT NULL DROP TABLE SBCES.TempRbpCost;
+IF OBJECT_ID('SBCES.TempLabourList', 'U') IS NOT NULL DROP TABLE SBCES.TempLabourList;
+IF OBJECT_ID('SBCES.TempMaterialsList', 'U') IS NOT NULL DROP TABLE SBCES.TempMaterialsList;
+
+CREATE TABLE SBCES.TempRbpCost (
+    RbNumber         VARCHAR(30),
+    TotalCost        DECIMAL(25,10),
+    DetailedDesc     VARCHAR(250),
+    ExternalCost     VARCHAR(30),
+    Active           BIT,
+    Keyword          VARCHAR(250)
+);
+GO
+
+CREATE TABLE SBCES.TempLabourList (
+    LabourType        VARCHAR(50),
+    CostCentre        VARCHAR(20),
+    Task              VARCHAR(50),
+    Usage             DECIMAL(20,10),
+    TimeAddition      DECIMAL(20,10),
+    RatePerHour       DECIMAL(20,10),
+    TotalCost         DECIMAL(20,10),
+    WrenchTime        DECIMAL(20,10),
+    LinkType          VARCHAR(10),
+    LinkNumber        VARCHAR(30),
+    AdjustedWrenchTime DECIMAL(20,10)
+);
+GO
+
+CREATE TABLE SBCES.TempMaterialsList (
+    AssemblyArea     VARCHAR(50),
+    CostCentre       VARCHAR(20),
+    TotalCost        DECIMAL(20,10),
+    TaxableCost      DECIMAL(20,10),
+    LinkNumber       VARCHAR(30),
+    AdjustmentTotal  DECIMAL(20,10)
+);
+GO
+
+-- ======================================================================
+-- 3. RECURSIVE PROCEDURES
+-- ======================================================================
+
+CREATE OR ALTER PROCEDURE SBCES.WriteLabour
+    @viIdnum    VARCHAR(30),
+    @viAdjustment DECIMAL(20,10)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @V_Price DECIMAL(20,10);
+
+    INSERT INTO SBCES.TempLabourList
+    SELECT
+        EL.LabourDefn,
+        EL.CostCentre,
+        EL.Task,
+        REPLACE(EL.Usage, ',', '.') AS Usage,
+        ROUND(SBCES.HhmmToMinutes(EL.TimeAddition) * @viAdjustment, 0) AS TimeAddition,
+        ES.RatePerHour,
+        (ES.RatePerHour / 60.0)
+            * ROUND(SBCES.HhmmToMinutes(EL.TimeAddition) * @viAdjustment, 0)
+            * (REPLACE(EL.Usage, ',', '.') / 100.0) AS TotalCost,
+        ROUND((REPLACE(EL.Usage, ',', '.') / 100.0)
+            * SBCES.HhmmToMinutes(EL.TimeAddition) * @viAdjustment, 0) AS WrenchTime,
+        'RB' AS LinkType,
+        UPPER(@viIdnum) AS LinkNumber,
+        ROUND((REPLACE(EL.Usage, ',', '.') / 100.0)
+            * ROUND(SBCES.HhmmToDecimal(EL.AdjHrs) * @viAdjustment, 0), 0) AS AdjustedWrenchTime
+    FROM SBCES.EmployeeLabour EL
+    INNER JOIN SBCES.EmplClass EC ON EL.LabourDefn = EC.LabourDefn
+    INNER JOIN SBCES.EmployeeSalaries ES ON ES.WageGroup = EC.WageGroup
+    WHERE EL.LinkNumber = @viIdnum
+      AND EL.TypeId = 'RB';
+
+    SELECT @V_Price = COUNT(*)
+    FROM SBCES.ScPartsUsed
+    WHERE RebuiltPart = 'Y'
+      AND LinkType = 'RB'
+      AND LinkCode = @viIdnum;
+
+    IF @V_Price > 0
+    BEGIN
+        DECLARE @RebuiltCode VARCHAR(30), @Qty DECIMAL(20,10), @Pct DECIMAL(20,10), @Adj DECIMAL(20,10);
+        DECLARE rb_cursor CURSOR LOCAL FOR
+            SELECT DISTINCT MmsRebuiltCode, QtyReqd, PercentUsage
+            FROM SBCES.ScPartsUsed
+            WHERE RebuiltPart = 'Y'
+              AND LinkType = 'RB'
+              AND LinkCode = @viIdnum;
+        OPEN rb_cursor;
+        FETCH NEXT FROM rb_cursor INTO @RebuiltCode, @Qty, @Pct;
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            SET @Adj = (@Qty * ISNULL(@Pct, 0) / 100.0) * @viAdjustment;
+            EXEC SBCES.WriteLabour @viIdnum = @RebuiltCode, @viAdjustment = @Adj;
+            FETCH NEXT FROM rb_cursor INTO @RebuiltCode, @Qty, @Pct;
+        END
+        CLOSE rb_cursor;
+        DEALLOCATE rb_cursor;
+    END;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE SBCES.WriteMaterials
+    @viIdnum        VARCHAR(30),
+    @viAdjustment   DECIMAL(20,10),
+    @viRbReference  VARCHAR(30),
+    @viAdjustment2  DECIMAL(20,10)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @V_Price DECIMAL(20,10);
+
+    ;WITH MaterialCTE AS (
+        SELECT
+            ISNULL(C.Name, 'NONE') AS AssemblyArea,
+            ISNULL(SPU.CostCentre, '0') AS CostCentre,
+            SUM((SBCES.FinalCost(SPU.PercentUsage, SPU.QtyReqd, SPU.MmsCost, 0)
+                - SBCES.FinalCost(SPU.PercentUsage, SPU.QtyReqd, SPU.CoreCost, 0)) * @viAdjustment) AS TotalCost,
+            SUM(SBCES.FinalCost(SPU.PercentUsage, SPU.QtyReqd, SPU.MmsCost, 0) * @viAdjustment) AS TaxableCost
+        FROM SBCES.ScPartsUsed SPU
+        LEFT JOIN SBCES.CostCentres C ON C.CostCentre = SPU.CostCentre
+        WHERE SPU.LinkCode = @viIdnum
+          AND SPU.RebuiltPart = 'N'
+          AND SPU.LinkType = 'RB'
+        GROUP BY C.Name, SPU.CostCentre
+        UNION ALL
+        SELECT
+            ISNULL(C.Name, 'NONE') AS AssemblyArea,
+            ISNULL(NSPU.CostCentre, '0') AS CostCentre,
+            SUM((SBCES.FinalCost(NSPU.PercentUsage, NSPU.QtyReqd, NSCP.OemPartCost, 0)
+                - SBCES.FinalCost(NSPU.PercentUsage, NSPU.QtyReqd, NSPU.CoreCost, 0)) * @viAdjustment) AS TotalCost,
+            SUM(SBCES.FinalCost(NSPU.PercentUsage, NSPU.QtyReqd, NSCP.OemPartCost, 0) * @viAdjustment) AS TaxableCost
+        FROM SBCES.NscPartsUsed NSPU
+        LEFT JOIN SBCES.NonStockCodedParts NSCP ON NSCP.ID = NSPU.ID
+        LEFT JOIN SBCES.CostCentres C ON C.CostCentre = NSPU.CostCentre
+        WHERE NSPU.LinkCode = @viIdnum
+          AND NSPU.LinkType = 'RB'
+        GROUP BY C.Name, NSPU.CostCentre
+    )
+    INSERT INTO SBCES.TempMaterialsList
+    SELECT
+        AssemblyArea,
+        CostCentre,
+        ROUND(TotalCost, 2),
+        TaxableCost,
+        @viRbReference,
+        @viAdjustment2 * TotalCost
+    FROM MaterialCTE;
+
+    SELECT @V_Price = COUNT(*)
+    FROM SBCES.ScPartsUsed
+    WHERE RebuiltPart = 'Y'
+      AND LinkType = 'RB'
+      AND LinkCode = @viIdnum;
+
+    IF @V_Price > 0
+    BEGIN
+        DECLARE @RebuiltCode VARCHAR(30), @Qty DECIMAL(20,10), @Pct DECIMAL(20,10), @Adj DECIMAL(20,10), @Adj2 DECIMAL(20,10);
+        DECLARE rb_cursor CURSOR LOCAL FOR
+            SELECT DISTINCT MmsRebuiltCode, QtyReqd, PercentUsage
+            FROM SBCES.ScPartsUsed
+            WHERE RebuiltPart = 'Y'
+              AND LinkType = 'RB'
+              AND LinkCode = @viIdnum;
+        OPEN rb_cursor;
+        FETCH NEXT FROM rb_cursor INTO @RebuiltCode, @Qty, @Pct;
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            SET @Adj = (@Qty * ISNULL(@Pct, 0) / 100.0) * @viAdjustment;
+            SET @Adj2 = @viAdjustment2 * (@Qty * ISNULL(@Pct, 0) / 100.0);
+            EXEC SBCES.WriteMaterials
+                @viIdnum = @RebuiltCode,
+                @viAdjustment = @Adj,
+                @viRbReference = @viRbReference,
+                @viAdjustment2 = @Adj2;
+            FETCH NEXT FROM rb_cursor INTO @RebuiltCode, @Qty, @Pct;
+        END
+        CLOSE rb_cursor;
+        DEALLOCATE rb_cursor;
+    END;
+END;
+GO
+
+-- ======================================================================
+-- 4. MAIN COST CALCULATION PROCEDURES
+-- ======================================================================
+
+CREATE OR ALTER PROCEDURE SBCES.GetMaterialCost
+    @viIdnum    VARCHAR(30),
+    @viType     VARCHAR(10),
+    @voResult   DECIMAL(20,10) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @V_Price DECIMAL(20,10) = 0;
+    DECLARE @V_Final_Price DECIMAL(20,10) = 0;
+    DECLARE @V_Kit_Total DECIMAL(20,10) = 0;
+
+    TRUNCATE TABLE SBCES.TempMaterialsList;
+
+    ;WITH MaterialCTE AS (
+        SELECT
+            ISNULL(C.Name, 'NONE') AS AssemblyArea,
+            ISNULL(SPU.CostCentre, '0') AS CostCentre,
+            SUM(SBCES.FinalCost(SPU.PercentUsage, SPU.QtyReqd, SPU.MmsCost, 0)
+                - SBCES.FinalCost(SPU.PercentUsage, SPU.QtyReqd, SPU.CoreCost, 0)) AS TotalCost,
+            SUM(SBCES.FinalCost(SPU.PercentUsage, SPU.QtyReqd, SPU.MmsCost, 0)) AS TaxableCost
+        FROM SBCES.ScPartsUsed SPU
+        LEFT JOIN SBCES.CostCentres C ON C.CostCentre = SPU.CostCentre
+        WHERE SPU.LinkCode = @viIdnum
+          AND SPU.RebuiltPart = 'N'
+          AND SPU.LinkType = @viType
+        GROUP BY C.Name, SPU.CostCentre
+        UNION ALL
+        SELECT
+            ISNULL(C.Name, 'NONE') AS AssemblyArea,
+            ISNULL(NSPU.CostCentre, '0') AS CostCentre,
+            SUM(SBCES.FinalCost(NSPU.PercentUsage, NSPU.QtyReqd, NSCP.OemPartCost, 0)
+                - SBCES.FinalCost(NSPU.PercentUsage, NSPU.QtyReqd, NSPU.CoreCost, 0)) AS TotalCost,
+            SUM(SBCES.FinalCost(NSPU.PercentUsage, NSPU.QtyReqd, NSCP.OemPartCost, 0)) AS TaxableCost
+        FROM SBCES.NscPartsUsed NSPU
+        LEFT JOIN SBCES.NonStockCodedParts NSCP ON NSCP.ID = NSPU.ID
+        LEFT JOIN SBCES.CostCentres C ON C.CostCentre = NSPU.CostCentre
+        WHERE NSPU.LinkCode = @viIdnum
+          AND NSPU.LinkType = @viType
+        GROUP BY C.Name, NSPU.CostCentre
+    )
+    INSERT INTO SBCES.TempMaterialsList
+    SELECT
+        AssemblyArea,
+        CostCentre,
+        TotalCost,
+        TaxableCost,
+        @viIdnum,
+        TotalCost
+    FROM MaterialCTE;
+
+    SELECT @V_Price = COUNT(*)
+    FROM SBCES.ScPartsUsed
+    WHERE RebuiltPart = 'Y'
+      AND LinkType = @viType
+      AND LinkCode = @viIdnum;
+
+    IF @V_Price > 0
+    BEGIN
+        DECLARE @RebuiltCode VARCHAR(30), @Adj DECIMAL(20,10);
+        DECLARE rb_cursor CURSOR LOCAL FOR
+            SELECT DISTINCT MmsRebuiltCode, QtyReqd * PercentUsage / 100.0
+            FROM SBCES.ScPartsUsed
+            WHERE RebuiltPart = 'Y'
+              AND LinkType = @viType
+              AND LinkCode = @viIdnum;
+        OPEN rb_cursor;
+        FETCH NEXT FROM rb_cursor INTO @RebuiltCode, @Adj;
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            EXEC SBCES.WriteMaterials
+                @viIdnum = @RebuiltCode,
+                @viAdjustment = @Adj,
+                @viRbReference = @RebuiltCode,
+                @viAdjustment2 = 1;
+            FETCH NEXT FROM rb_cursor INTO @RebuiltCode, @Adj;
+        END
+        CLOSE rb_cursor;
+        DEALLOCATE rb_cursor;
+    END;
+
+    IF UPPER(@viType) = 'BUS'
+    BEGIN
+        SELECT @V_Kit_Total = COUNT(*) FROM SBCES.OemKitsTotal2 WHERE Link = @viIdnum;
+        IF @V_Kit_Total > 0
+        BEGIN
+            SELECT @V_Kit_Total = TotalKitCost FROM SBCES.OemKitsTotal2 WHERE Link = @viIdnum;
+            INSERT INTO SBCES.TempMaterialsList VALUES ('KITS', '05H7', @V_Kit_Total, @V_Kit_Total, @viIdnum, @V_Kit_Total);
+        END
+    END;
+
+    SELECT @V_Final_Price = ROUND(SUM(ISNULL(TotalCost, 0)), 2)
+    FROM SBCES.TempMaterialsList;
+
+    SET @voResult = ISNULL(@V_Final_Price, 0);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE SBCES.GetLabourCost
+    @viIdnum    VARCHAR(30),
+    @viType     VARCHAR(10),
+    @voResult   DECIMAL(20,10) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @V_Price DECIMAL(20,10) = 0;
+    DECLARE @V_Final_Price DECIMAL(20,10) = 0;
+
+    TRUNCATE TABLE SBCES.TempLabourList;
+
+    INSERT INTO SBCES.TempLabourList
+    SELECT
+        EL.LabourDefn,
+        EL.CostCentre,
+        EL.Task,
+        REPLACE(EL.Usage, ',', '.') AS Usage,
+        SBCES.HhmmToMinutes(EL.TimeAddition) AS TimeAddition,
+        ES.RatePerHour,
+        (ES.RatePerHour / 60.0) * SBCES.HhmmToMinutes(EL.TimeAddition) * (REPLACE(EL.Usage, ',', '.') / 100.0) AS TotalCost,
+        ROUND((REPLACE(EL.Usage, ',', '.') / 100.0) * SBCES.HhmmToMinutes(EL.TimeAddition), 0) AS WrenchTime,
+        @viType AS LinkType,
+        UPPER(@viIdnum),
+        ROUND((REPLACE(EL.Usage, ',', '.') / 100.0) * SBCES.HhmmToDecimal(EL.AdjHrs), 0) AS AdjustedWrenchTime
+    FROM SBCES.EmployeeLabour EL
+    INNER JOIN SBCES.EmplClass EC ON EL.LabourDefn = EC.LabourDefn
+    INNER JOIN SBCES.EmployeeSalaries ES ON ES.WageGroup = EC.WageGroup
+    WHERE EL.LinkNumber = @viIdnum
+      AND EL.TypeId = @viType;
+
+    SELECT @V_Price = COUNT(*)
+    FROM SBCES.ScPartsUsed
+    WHERE RebuiltPart = 'Y'
+      AND LinkType = @viType
+      AND LinkCode = @viIdnum;
+
+    IF @V_Price > 0
+    BEGIN
+        DECLARE @RebuiltCode VARCHAR(30), @Adj DECIMAL(20,10);
+        DECLARE rb_cursor CURSOR LOCAL FOR
+            SELECT DISTINCT MmsRebuiltCode, QtyReqd * PercentUsage / 100.0
+            FROM SBCES.ScPartsUsed
+            WHERE RebuiltPart = 'Y'
+              AND LinkType = @viType
+              AND LinkCode = @viIdnum;
+        OPEN rb_cursor;
+        FETCH NEXT FROM rb_cursor INTO @RebuiltCode, @Adj;
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            EXEC SBCES.WriteLabour @viIdnum = @RebuiltCode, @viAdjustment = @Adj;
+            FETCH NEXT FROM rb_cursor INTO @RebuiltCode, @Adj;
+        END
+        CLOSE rb_cursor;
+        DEALLOCATE rb_cursor;
+    END;
+
+    SELECT @V_Final_Price = ROUND(SUM(ISNULL(TotalCost, 0)), 2)
+    FROM SBCES.TempLabourList;
+
+    SET @voResult = ISNULL(@V_Final_Price, 0);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE SBCES.RptRbpCost
+    @viRbnum      VARCHAR(30),
+    @viLinkType   VARCHAR(10),
+    @voTotalCost  DECIMAL(20,10) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @LabourSubtotal DECIMAL(20,10) = 0;
+    DECLARE @LabourOverhead DECIMAL(20,10) = 0;
+    DECLARE @LabourTotal    DECIMAL(20,10) = 0;
+    DECLARE @MaterialsTotal DECIMAL(20,10) = 0;
+    DECLARE @CoreCost       DECIMAL(20,10) = 0;
+    DECLARE @CoreCostStr    VARCHAR(30);
+    DECLARE @V_Price        DECIMAL(20,10) = 0;
+
+    -- Get material cost
+    EXEC SBCES.GetMaterialCost
+        @viIdnum  = UPPER(@viRbnum),
+        @viType   = @viLinkType,
+        @voResult = @V_Price OUTPUT;
+
+    SELECT @MaterialsTotal = ISNULL(SUM(TotalCost), 0)
+    FROM SBCES.TempMaterialsList;
+
+    -- Get labour cost
+    EXEC SBCES.GetLabourCost
+        @viIdnum  = UPPER(@viRbnum),
+        @viType   = @viLinkType,
+        @voResult = @V_Price OUTPUT;
+
+    SELECT @LabourSubtotal = ISNULL(SUM(TotalCost), 0)
+    FROM SBCES.TempLabourList;
+
+    -- Labour overhead
+    SELECT @LabourOverhead = ISNULL(MAX(REPLACE(CS.Value, ',', '.')), 0) * @LabourSubtotal
+    FROM SBCES.CesSettings CS
+    WHERE CS.Parameter = 'OVERHEAD';
+
+    SET @LabourTotal = @LabourSubtotal + ISNULL(@LabourOverhead, 0);
+
+    -- Core cost
+    SELECT @CoreCostStr = CoreCharge
+    FROM SBCES.RbMasterlist
+    WHERE UPPER(RebuiltStockNum) = UPPER(@viRbnum);
+
+    IF @CoreCostStr IS NULL OR @CoreCostStr = '' OR @CoreCostStr = ' '
+        SET @CoreCost = 0;
+    ELSE
+        SET @CoreCost = CAST(REPLACE(REPLACE(@CoreCostStr, ',', '.'), '$', '') AS DECIMAL(20,10));
+
+    SET @voTotalCost = ROUND(ISNULL((@MaterialsTotal - @CoreCost + @LabourTotal), 0), 2);
+END;
+GO
+
+-- ======================================================================
+-- 5. MAIN ENTRY PROCEDURES
+-- ======================================================================
+
+CREATE OR ALTER PROCEDURE SBCES.InternalRbPrice
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    TRUNCATE TABLE SBCES.TempRbpCost;
+
+    DECLARE @RebuiltStockNum VARCHAR(30);
+    DECLARE @DetailedDesc VARCHAR(250);
+    DECLARE @BuyNewCost VARCHAR(30);
+    DECLARE @Active BIT;
+    DECLARE @Keyword VARCHAR(250);
+    DECLARE @TotalPrice DECIMAL(25,10);
+
+    DECLARE rb_cursor CURSOR LOCAL FOR
+        SELECT
+            RBM.RebuiltStockNum,
+            RBM.DetailedDesc,
+            ISNULL(REPLACE(REPLACE(ROUND(SCP.MmsNewCost, 2), ',', '.'), '$', ''), '0.00') AS BuyNewCost,
+            RBM.Active,
+            RBM.Keyword
+        FROM SBCES.RbMasterlist RBM
+        LEFT JOIN SBCES.StockCodedParts SCP ON RBM.MmsStockCode = SCP.MmsStockCode
+        ORDER BY RBM.RebuiltStockNum DESC;
+
+    OPEN rb_cursor;
+    FETCH NEXT FROM rb_cursor INTO @RebuiltStockNum, @DetailedDesc, @BuyNewCost, @Active, @Keyword;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        EXEC SBCES.RptRbpCost
+            @viRbnum = UPPER(@RebuiltStockNum),
+            @viLinkType = 'RB',
+            @voTotalCost = @TotalPrice OUTPUT;
+
+        INSERT INTO SBCES.TempRbpCost
+        VALUES (@RebuiltStockNum, @TotalPrice, @DetailedDesc, @BuyNewCost, @Active, @Keyword);
+
+        FETCH NEXT FROM rb_cursor INTO @RebuiltStockNum, @DetailedDesc, @BuyNewCost, @Active, @Keyword;
+    END
+
+    CLOSE rb_cursor;
+    DEALLOCATE rb_cursor;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE SBCES.RptCostVariance
+AS
+BEGIN
+    SET NOCOUNT ON;
+    EXEC SBCES.InternalRbPrice;
+    SELECT * FROM SBCES.TempRbpCost;
+END;
+GO
