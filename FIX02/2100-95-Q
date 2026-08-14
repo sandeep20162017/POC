@@ -1,0 +1,52 @@
+CREATE OR ALTER PROCEDURE SBCEs.InternalRbPrice
+	AS
+	BEGIN
+	    SET NOCOUNT ON;
+	
+	    TRUNCATE TABLE SBCES.TempRbpCost;
+	
+	    DECLARE @RebuiltStockNum VARCHAR(30);
+	    DECLARE @DetailedDesc VARCHAR(250);
+	    DECLARE @BuyNewCost VARCHAR(30);
+	    DECLARE @Active BIT;
+	    DECLARE @Keyword VARCHAR(250);
+	    DECLARE @TotalPrice DECIMAL(25,10);
+	
+	    DECLARE rb_cursor CURSOR LOCAL FOR
+	        SELECT
+	            RBM.RebuiltStockNum,
+	            RBM.DetailedDesc,
+	            ISNULL(REPLACE(REPLACE(ROUND(SCP.MmsNewCost, 2), ',', '.'), '$', ''), '0.00') AS BuyNewCost,
+	            RBM.Active,
+	            RBM.Keyword
+	        FROM SBCEs.RbMasterlist RBM
+	        LEFT JOIN SBCEs.StockCodedParts SCP ON RBM.MmsStockCode = SCP.MmsStockCode
+	        ORDER BY RBM.RebuiltStockNum DESC;
+	
+	    OPEN rb_cursor;
+	    FETCH NEXT FROM rb_cursor INTO @RebuiltStockNum, @DetailedDesc, @BuyNewCost, @Active, @Keyword;
+	
+	    WHILE @@FETCH_STATUS = 0
+	    BEGIN
+	        EXEC SBCES.RptRbpCost
+	            @viRbnum = UPPER(@RebuiltStockNum),
+	            @viLinkType = 'RB',
+	            @voTotalCost = @TotalPrice OUTPUT;
+	
+	        INSERT INTO SBCEs.TempRbpCost
+	        VALUES (@RebuiltStockNum, @TotalPrice, @DetailedDesc, @BuyNewCost, @Active, @Keyword);
+	
+	        FETCH NEXT FROM rb_cursor INTO @RebuiltStockNum, @DetailedDesc, @BuyNewCost, @Active, @Keyword;
+	    END
+	
+	    CLOSE rb_cursor;
+	    DEALLOCATE rb_cursor;
+	END;
+	GO
+
+  err
+  Msg 102, Level 15, State 1, Procedure InternalRbPrice, Line 32 [Batch Start Line 0]
+Incorrect syntax near '@RebuiltStockNum'.
+
+Completion time: 2026-08-14T14:54:20.8419304-04:00
+Anot
