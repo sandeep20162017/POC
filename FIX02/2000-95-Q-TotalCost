@@ -1,0 +1,3069 @@
+I need your help to add below details in _TotalCost.cshtml, give me full changes in model, view controller. Ask me if you need any details
+grid is VehicleGrid.
+Add below :
+From VehicleGrid Detailed Description, Vehicle Series, 
+FroLabour Task Summary, Labour Hours Summary,
+Material Cost Summary
+Let me know if you need any additional details.
+TotalCostController :
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Kendo.Mvc.Extensions;
+using Kendo.Mvc.UI;
+using BCES.Models.Parts;
+using BCES.Controllers.Base;
+using BCES.Data;
+using System.Data;
+using Dapper;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
+
+namespace BCES.Controllers.Parts
+{
+    public class TotalCostController : BaseController
+    {
+
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public TotalCostController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetTotalCostInEstimates([DataSourceRequest] DataSourceRequest request, [FromQuery] string id, [FromQuery] string gridType)
+        {
+            // Fetch data for the grid
+            
+            if (string.IsNullOrEmpty(id))
+            {
+                BadRequest("id is required for gridType :" + gridType);
+            }
+
+            //// Fetch data for the grid using the rebuiltPartNum
+            //var model = await GetMaterialCostSummaryInRbPartsData(rebuiltPartNum, gridType);
+            //return Json(model.ToDataSourceResult(request));
+            if (gridType == "RebuiltGrid")
+            {
+                var rbNscModel = await GetTotalCostInRBEstimates(id, gridType);
+                return Json(rbNscModel.ToDataSourceResult(request));
+            }
+            if (gridType == "VehicleGrid")
+            {
+                var vehNscmodel = await GetTotalCostInVehicleEstimates(id, gridType);
+
+                return Json(vehNscmodel.ToDataSourceResult(request));
+            }
+            if (gridType == "ArchivedVehicleGrid")
+            {
+                var vehArchNscmodel = await GetTotalCostInArchVehicleEstimates(id, gridType);
+
+                return Json(vehArchNscmodel.ToDataSourceResult(request));
+            }
+
+            if (gridType == "MakeVsBuyGrid")
+            {
+                var vehNscmodel = await GetTotalCostInMbEstimates(id, gridType);
+
+                return Json(vehNscmodel.ToDataSourceResult(request));
+                //return StatusCode(500, "An error occurred while fetching data. Implement this.");
+            }
+            if (gridType == "ArchivedMakeVsBuyGrid")
+            {
+                return StatusCode(500, "An error occurred while fetching data. Implement this.");
+            }
+            if (gridType == "ArchivedRebuiltGrid")
+            {
+                return StatusCode(500, "An error occurred while fetching data. Implement this.");
+            }
+            return StatusCode(500, "An error occurred while fetching data.");
+            
+        }
+
+        private async Task<IEnumerable<TotalCostInEstimates>> GetTotalCostInVehicleEstimates(string id, string gridType)
+        {
+            try
+            {
+                string query = " DECLARE @LinkCode VARCHAR(30) = '" + id + "'" +
+                               @"
+                                							--DECLARE @LinkCode VARCHAR(30) = 'MBH0096'
+                              --    DECLARE @LinkCode VARCHAR(30) = '4352';
+
+                                     BEGIN TRY
+
+                                        -- Get TaxRate (varchar to decimal)
+                                        DECLARE @TaxRate DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'TAX_RATE'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get Fringe (varchar to decimal)
+                                        DECLARE @Fringe DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'FRINGE'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get Benefit (varchar to decimal)
+                                        DECLARE @Benefit DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'BENEFIT'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get Overhead (varchar to decimal)
+                                        DECLARE @Overhead DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'OVERHEAD'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get NonProductiveAdjustment (varchar to decimal)
+                                        DECLARE @NonProductiveAdj DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- MATERIAL COST CTE 
+                                 
+						            WITH MaterialCost AS (
+
+                                    SELECT 
+                                        /* ============================================================
+                                           SC PARTS MATERIAL COST (RebuiltPart = 'N', LinkType = 'RB')
+                                           ============================================================ */
+                                        (
+                                            SELECT 
+                                                SUM(
+                                                    CASE 
+                                                        WHEN SUS.RebuiltPart = 'N'
+                                                             AND SUS.LinkType = 'BUS'
+                                                             AND SUS.LinkCode = @LinkCode
+                                                        THEN TRY_CAST(
+                                                                SBCES.FinalCost(
+                                                                    CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                                                                    CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                                                                    ISNULL(SCP.MmsNewCost, 0),   -- << NEW COST SOURCE
+                                                                    0
+                                                                ) AS DECIMAL(18,2)
+                                                            )
+                                                        ELSE 0 
+                                                    END
+                                                )
+                                            FROM SBCES.ScPartsUsed SUS
+                                            LEFT JOIN SBCES.StockCodedParts SCP 
+                                                ON SUS.MMSStockCode = SCP.MMSStockCode
+                                            WHERE SUS.LinkCode = @LinkCode
+                                        ) AS SCPartsMaterialCost,
+
+                                        /* ============================================================
+                                           RB PARTS MATERIAL COST (RebuiltPart = 'Y', LinkType = 'RB')
+                                           ============================================================ */
+                                        (
+                                            SELECT 
+                                                SUM(
+                                                    CASE 
+                                                        WHEN SUS.RebuiltPart = 'Y'
+                                                             AND SUS.LinkType = 'BUS'
+                                                             AND SUS.LinkCode = @LinkCode
+                                                        THEN TRY_CAST(
+                                                                SBCES.FinalCost(
+                                                                    CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                                                                    CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                                                                    ISNULL(SUS.MmsCost, 0),   
+                                                                    0
+                                                                ) AS DECIMAL(18,2)
+                                                            )
+                                                        ELSE 0 
+                                                    END
+                                                )
+                                            FROM SBCES.ScPartsUsed SUS
+                                            LEFT JOIN SBCES.StockCodedParts SCP 
+                                                ON SUS.MMSStockCode = SCP.MMSStockCode
+                                            WHERE SUS.LinkType = 'BUS'
+                                              AND SUS.LinkCode = @LinkCode
+                                        ) AS RBPartsMaterialCost,
+
+                                        /* ============================================================
+                                           NSC PARTS MATERIAL COST (LinkType = 'BUS')
+                                           ============================================================ */
+                                        (
+                                            SELECT 
+                                                SUM(
+                                                    CASE 
+                                                        WHEN NSUS.LinkType = 'BUS'
+                                                             AND NSUS.LinkCode = @LinkCode
+                                                        THEN TRY_CAST(
+                                                                SBCES.FinalCost(
+                                                                    CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)),
+                                                                    CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)),
+                                                                    ISNULL(NSUS.Cost, 0),
+                                                                    0
+                                                                ) AS DECIMAL(18,2)
+                                                            )
+                                                        ELSE 0 
+                                                    END
+                                                )
+                                            FROM SBCES.NscPartsUsed NSUS
+                                            WHERE 
+								            --NSUS.LinkType = 'BUS'
+                                             -- AND 
+								              NSUS.LinkCode = @LinkCode
+                                        ) AS NSCSCPartsMaterialCost
+                                ),
+
+                                        -- Labour calculation broken into row level first
+                                        LabourRows AS (
+                                            SELECT
+                                                -- Calculated Decimal Hrs
+                                                (
+                                                    CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                                    CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60
+                                                ) AS DecimalHrs,
+
+                                                -- Effective Hours
+                                                (
+                                                    (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                                     CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                                                    * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100
+                                                ) AS EffectiveHours,
+
+                                                -- Labour Rate
+                                                ISNULL((
+                                                    SELECT TOP 1 ES.RatePerHour 
+                                                    FROM CES.SBCES.EmployeeSalaries ES
+                                                    WHERE ES.WageGroup = (
+                                                        SELECT TOP 1 EC.WageGroup
+                                                        FROM CES.SBCES.EmplClass EC
+                                                        WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                                                ), 0) AS LabourRate,
+
+                                                -- Labour Cost per row
+                                                (
+                                                    (
+                                                        (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                                         CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                                                        * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100
+                                                    ) 
+                                                    / @NonProductiveAdj
+                                                    * ISNULL((
+                                                        SELECT TOP 1 ES.RatePerHour 
+                                                        FROM CES.SBCES.EmployeeSalaries ES
+                                                        WHERE ES.WageGroup = (
+                                                            SELECT TOP 1 EC.WageGroup
+                                                            FROM CES.SBCES.EmplClass EC
+                                                            WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                                                    ), 0)
+                                                ) AS LabourCost
+
+                                            FROM SBCES.EmployeeLabour EL
+                                            WHERE 
+                                             --EL.TypeId = 'BUS' AND 
+                                             EL.LinkNumber = @LinkCode
+                                        ),
+
+                                        LabourCost AS (
+                                            SELECT
+                                                SUM(LabourCost) AS TotalLabourCost
+                                            FROM LabourRows
+                                        ),
+
+                                        FinalCalc AS (
+                                            SELECT 
+                                                MC.*,
+                                                LC.TotalLabourCost,
+
+                                                -- Calculate LabourFringe
+                                                LC.TotalLabourCost * @Fringe AS LabourFringe,
+
+                                                -- Calculate LabourBenefits
+                                                (LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit AS LabourBenefits,
+
+                                                -- Blended Fringe and Benefits %
+                                                CASE WHEN LC.TotalLabourCost = 0 THEN 0 ELSE
+                                                ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) / LC.TotalLabourCost
+                                                END AS BlendedFringeBenefitPercent,
+
+                                                -- Blended Fringe and Benefits Cost ($)
+                                                ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) AS BlendedFringeBenefitCost,
+
+                                                -- LabourOverhead
+                                                LC.TotalLabourCost * @Overhead AS LabourOverhead,
+
+                                                -- FinalLabourCost
+                                                LC.TotalLabourCost 
+                                                + ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) 
+                                                + (LC.TotalLabourCost * @Overhead) AS FinalLabourCost
+
+                                            FROM MaterialCost MC
+                                            CROSS JOIN LabourCost LC
+                                        )
+
+                                        SELECT
+                                            @LinkCode AS LinkCode,
+											ISNULL(MC.SCPartsMaterialCost,0) as SCPartsMaterialCost,
+											ISNULL(MC.NSCSCPartsMaterialCost,0) as NSCSCPartsMaterialCost,
+											ISNULL(MC.RBPartsMaterialCost,0) as RBPartsMaterialCost,
+
+                                            -- Materials:
+                                            CAST(ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0) AS DECIMAL(18,2)) AS MaterialTotalCostNoTax,
+                                            CAST((ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0)) * @TaxRate AS DECIMAL(18,2)) AS MaterialTotalTaxAmount,
+                                            CAST((ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0)) * (1 + @TaxRate) AS DECIMAL(18,2)) AS MaterialTotalWithTax,
+
+                                            -- Labour:
+                                            CAST(FC.TotalLabourCost AS DECIMAL(18,2)) AS TotalLabourCost,
+                                            CAST(FC.LabourFringe AS DECIMAL(18,2)) AS LabourFringe,
+                                            CAST(FC.LabourBenefits AS DECIMAL(18,2)) AS LabourBenefits,
+                                            CAST(FC.BlendedFringeBenefitPercent * 100 AS DECIMAL(18,2)) AS BlendedFringeBenefitPercent, -- percent format
+                                            CAST(FC.BlendedFringeBenefitCost AS DECIMAL(18,2)) AS BlendedFringeBenefitCost,
+                                            CAST(FC.LabourOverhead AS DECIMAL(18,2)) AS LabourOverhead,
+                                            CAST(FC.FinalLabourCost AS DECIMAL(18,2)) AS FinalLabourCost,
+
+                                            -- Core Cost:
+                                            ISNULL((SELECT SUM(CoreCost) FROM SBCES.SCPartsUsed WHERE LinkCode = @LinkCode), 0) AS CoreCost,
+
+                                            -- Total without Tax
+                                            CAST(FC.FinalLabourCost + 
+                                                 (ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0))
+                                            AS DECIMAL(18,2)) AS TotalWithoutTax,
+
+                                            -- Total with Tax
+                                            CAST(FC.FinalLabourCost + 
+                                                 ((ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0)) * (1 + @TaxRate))
+                                            AS DECIMAL(18,2)) AS TotalWithTax
+
+                                        FROM MaterialCost MC
+                                        CROSS JOIN FinalCalc FC;
+
+                                    END TRY
+                                    BEGIN CATCH
+                                        PRINT 'Error: ' + ERROR_MESSAGE();
+                                    END CATCH;
+                                 
+                                     
+                                 
+                                     ";
+
+                var result = await _dbConnection.QueryAsync<TotalCostInEstimates>(
+                    query
+                // new { id = id }
+                );
+                return await _dbConnection.QueryAsync<TotalCostInEstimates>(query);
+
+
+            }
+            catch (Exception ex)   
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+                //throw;
+                return null;
+            }
+        }
+
+        //GetTotalCostInMbEstimates
+        private async Task<IEnumerable<TotalCostInEstimates>> GetTotalCostInMbEstimates(string id, string gridType)
+        {
+            try
+            {
+                string query = " DECLARE @LinkCode VARCHAR(30) = '" + id + "'" +
+                               @"
+                                 							--DECLARE @LinkCode VARCHAR(30) = 'MBH0096'
+                              --    DECLARE @LinkCode VARCHAR(30) = '4352';
+							 -- DECLARE @LinkCode VARCHAR(30) = '1107';
+    							--DECLARE @LinkCode VARCHAR(30) = 'MBH0096'
+                              --    DECLARE @LinkCode VARCHAR(30) = '4352';
+							 -- DECLARE @LinkCode VARCHAR(30) = '1107';
+
+                                    BEGIN TRY
+
+                                        -- Get TaxRate (varchar to decimal)
+                                        DECLARE @TaxRate DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'TAX_RATE'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get Fringe (varchar to decimal)
+                                        DECLARE @Fringe DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'FRINGE'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get Benefit (varchar to decimal)
+                                        DECLARE @Benefit DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'BENEFIT'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get Overhead (varchar to decimal)
+                                        DECLARE @Overhead DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'OVERHEAD'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get NonProductiveAdjustment (varchar to decimal)
+                                        DECLARE @NonProductiveAdj DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- MATERIAL COST CTE 
+                                 
+						            WITH MaterialCost AS (
+
+                                    SELECT 
+                                        /* ============================================================
+                                           SC PARTS MATERIAL COST (RebuiltPart = 'N', LinkType = 'RB')
+                                           ============================================================ */
+                                        (
+                                            SELECT 
+                                                SUM(
+                                                    CASE 
+                                                        WHEN SUS.RebuiltPart = 'N'
+                                                             AND SUS.LinkType = 'MB'
+                                                             AND SUS.LinkCode = @LinkCode
+                                                        THEN TRY_CAST(
+                                                                SBCES.FinalCost(
+                                                                    CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                                                                    CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                                                                    ISNULL(SCP.MmsNewCost, 0),   
+                                                                    0
+                                                                ) AS DECIMAL(18,2)
+                                                            )
+                                                        ELSE 0 
+                                                    END
+                                                )
+                                            FROM SBCES.ScPartsUsed SUS
+                                            LEFT JOIN SBCES.StockCodedParts SCP 
+                                                ON SUS.MMSStockCode = SCP.MMSStockCode
+                                            WHERE SUS.LinkCode = @LinkCode
+                                        ) AS SCPartsMaterialCost,
+
+                                        /* ============================================================
+                                           RB PARTS MATERIAL COST (RebuiltPart = 'Y', LinkType = 'RB')
+                                           ============================================================ */
+                                        (
+                                            SELECT 
+                                                SUM(
+                                                    CASE 
+                                                        WHEN SUS.RebuiltPart = 'Y'
+                                                             AND SUS.LinkType = 'MB'
+                                                             AND SUS.LinkCode = @LinkCode
+                                                        THEN TRY_CAST(
+                                                                SBCES.FinalCost(
+                                                                    CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                                                                    CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                                                                    ISNULL(SUS.MmsCost, 0),   
+                                                                    0
+                                                                ) AS DECIMAL(18,2)
+                                                            )
+                                                        ELSE 0 
+                                                    END
+                                                )
+                                            FROM SBCES.ScPartsUsed SUS
+                                            LEFT JOIN SBCES.StockCodedParts SCP 
+                                                ON SUS.MMSStockCode = SCP.MMSStockCode
+                                            WHERE SUS.LinkType = 'MB'
+                                              AND SUS.LinkCode = @LinkCode
+                                        ) AS RBPartsMaterialCost,
+
+                                        /* ============================================================
+                                           NSC PARTS MATERIAL COST (LinkType = 'RB')
+                                           ============================================================ */
+                                        (
+                                            SELECT 
+                                                SUM(
+                                                    CASE 
+                                                        WHEN NSUS.LinkType = 'MB'
+                                                             AND NSUS.LinkCode = @LinkCode
+                                                        THEN TRY_CAST(
+                                                                SBCES.FinalCost(
+                                                                    CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)),
+                                                                    CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)),
+                                                                    ISNULL(NSUS.Cost, 0),
+                                                                    0
+                                                                ) AS DECIMAL(18,2)
+                                                            )
+                                                        ELSE 0 
+                                                    END
+                                                )
+                                            FROM SBCES.NscPartsUsed NSUS
+                                            WHERE 
+								            --NSUS.LinkType = 'MB'
+                                             -- AND 
+								              NSUS.LinkCode = @LinkCode
+                                        ) AS NSCSCPartsMaterialCost
+                                ),
+
+                                        -- Labour calculation broken into row level first
+                                        LabourRows AS (
+                                            SELECT
+                                                -- Calculated Decimal Hrs
+                                                (
+                                                    CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                                    CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60
+                                                ) AS DecimalHrs,
+
+                                                -- Effective Hours
+                                                (
+                                                    (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                                     CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                                                    * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100
+                                                ) AS EffectiveHours,
+
+                                                -- Labour Rate
+                                                ISNULL((
+                                                    SELECT TOP 1 ES.RatePerHour 
+                                                    FROM CES.SBCES.EmployeeSalaries ES
+                                                    WHERE ES.WageGroup = (
+                                                        SELECT TOP 1 EC.WageGroup
+                                                        FROM CES.SBCES.EmplClass EC
+                                                        WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                                                ), 0) AS LabourRate,
+
+                                                -- Labour Cost per row
+                                                (
+                                                    (
+                                                        (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                                         CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                                                        * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100
+                                                    ) 
+                                                    / @NonProductiveAdj
+                                                    * ISNULL((
+                                                        SELECT TOP 1 ES.RatePerHour 
+                                                        FROM CES.SBCES.EmployeeSalaries ES
+                                                        WHERE ES.WageGroup = (
+                                                            SELECT TOP 1 EC.WageGroup
+                                                            FROM CES.SBCES.EmplClass EC
+                                                            WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                                                    ), 0)
+                                                ) AS LabourCost
+
+                                            FROM SBCES.EmployeeLabour EL
+                                            WHERE 
+                                             --EL.TypeId = 'MB' AND 
+                                             EL.LinkNumber = @LinkCode
+                                        ),
+
+                                        LabourCost AS (
+                                            SELECT
+                                                SUM(LabourCost) AS TotalLabourCost
+                                            FROM LabourRows
+                                        ),
+
+                                        FinalCalc AS (
+                                            SELECT 
+                                                MC.*,
+                                                LC.TotalLabourCost,
+
+                                                -- Calculate LabourFringe
+                                                LC.TotalLabourCost * @Fringe AS LabourFringe,
+
+                                                -- Calculate LabourBenefits
+                                                (LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit AS LabourBenefits,
+
+                                                -- Blended Fringe and Benefits %
+                                                CASE WHEN LC.TotalLabourCost = 0 THEN 0 ELSE
+                                                ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) / LC.TotalLabourCost
+                                                END AS BlendedFringeBenefitPercent,
+
+                                                -- Blended Fringe and Benefits Cost ($)
+                                                ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) AS BlendedFringeBenefitCost,
+
+                                                -- LabourOverhead
+                                                LC.TotalLabourCost * @Overhead AS LabourOverhead,
+
+                                                -- FinalLabourCost
+                                                LC.TotalLabourCost 
+                                                + ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) 
+                                                + (LC.TotalLabourCost * @Overhead) AS FinalLabourCost
+
+                                            FROM MaterialCost MC
+                                            CROSS JOIN LabourCost LC
+                                        )
+
+                                        SELECT
+                                            @LinkCode AS LinkCode,
+											ISNULL(MC.SCPartsMaterialCost,0) as SCPartsMaterialCost,
+											ISNULL(MC.NSCSCPartsMaterialCost,0) as NSCSCPartsMaterialCost,
+											ISNULL(MC.RBPartsMaterialCost,0) as RBPartsMaterialCost,
+
+                                            -- Materials:
+                                            CAST(ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0) AS DECIMAL(18,2)) AS MaterialTotalCostNoTax,
+                                            CAST((ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0)) * @TaxRate AS DECIMAL(18,2)) AS MaterialTotalTaxAmount,
+                                            CAST((ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0)) * (1 + @TaxRate) AS DECIMAL(18,2)) AS MaterialTotalWithTax,
+
+                                            -- Labour:
+                                            CAST(FC.TotalLabourCost AS DECIMAL(18,2)) AS TotalLabourCost,
+                                            CAST(FC.LabourFringe AS DECIMAL(18,2)) AS LabourFringe,
+                                            CAST(FC.LabourBenefits AS DECIMAL(18,2)) AS LabourBenefits,
+                                            CAST(FC.BlendedFringeBenefitPercent * 100 AS DECIMAL(18,2)) AS BlendedFringeBenefitPercent, -- percent format
+                                            CAST(FC.BlendedFringeBenefitCost AS DECIMAL(18,2)) AS BlendedFringeBenefitCost,
+                                            CAST(FC.LabourOverhead AS DECIMAL(18,2)) AS LabourOverhead,
+                                            CAST(FC.FinalLabourCost AS DECIMAL(18,2)) AS FinalLabourCost,
+
+                                            -- Core Cost:
+                                            ISNULL((SELECT SUM(CoreCost) FROM SBCES.SCPartsUsed WHERE LinkCode = @LinkCode), 0) AS CoreCost,
+
+                                            -- Total without Tax
+                                            CAST(FC.FinalLabourCost + 
+                                                 (ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0))
+                                            AS DECIMAL(18,2)) AS TotalWithoutTax,
+
+                                            -- Total with Tax
+                                            CAST(FC.FinalLabourCost + 
+                                                 ((ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0)) * (1 + @TaxRate))
+                                            AS DECIMAL(18,2)) AS TotalWithTax
+
+                                        FROM MaterialCost MC
+                                        CROSS JOIN FinalCalc FC;
+
+                                    END TRY
+                                    BEGIN CATCH
+                                        PRINT 'Error: ' + ERROR_MESSAGE();
+                                    END CATCH;
+                                     
+                                     ";
+
+                var result = await _dbConnection.QueryAsync<TotalCostInEstimates>(
+                    query
+                // new { id = id }
+                );
+                return await _dbConnection.QueryAsync<TotalCostInEstimates>(query);
+
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+                //throw;
+                return null;
+            }
+        }
+
+        private async Task<IEnumerable<TotalCostInEstimates>> GetTotalCostInArchVehicleEstimates(string id, string gridType)
+        {
+            try
+            {
+                string query = " DECLARE @ArchVehicleListId VARCHAR(30) = '" + id + "'" +
+                               @"
+                                --  DECLARE @LinkCode VARCHAR(30) = '4352';
+
+   BEGIN TRY
+
+                                        -- Get TaxRate (varchar to decimal)
+                                        DECLARE @TaxRate DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'TAX_RATE'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get Fringe (varchar to decimal)
+                                        DECLARE @Fringe DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'FRINGE'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get Benefit (varchar to decimal)
+                                        DECLARE @Benefit DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'BENEFIT'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get Overhead (varchar to decimal)
+                                        DECLARE @Overhead DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'OVERHEAD'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get NonProductiveAdjustment (varchar to decimal)
+                                        DECLARE @NonProductiveAdj DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- MATERIAL COST CTE (unchanged as per your request)
+                                        WITH MaterialCost AS (
+                                            SELECT 
+                                                SUM(CASE WHEN SUS.RebuiltPart = 'N' AND SUS.LinkType = 'BUS' AND SUS.ArchVehicleListId = @ArchVehicleListId
+                                                         THEN TRY_CAST(SBCES.FINALCOST(
+                                                                 CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                                                                 CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                                                                 ISNULL(SUS.MmsCost, 0), 0
+                                                             ) AS DECIMAL(18,2))
+                                                         ELSE 0 END) AS SCPartsMaterialCost,
+
+                                                SUM(CASE WHEN SUS.RebuiltPart = 'Y' AND SUS.LinkType = 'BUS' AND SUS.ArchVehicleListId = @ArchVehicleListId
+                                                         THEN TRY_CAST(SBCES.FINALCOST(
+                                                                 CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                                                                 CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                                                                 ISNULL(SUS.MmsCost, 0), 0
+                                                             ) AS DECIMAL(18,2))
+                                                         ELSE 0 END) AS RBPartsMaterialCost,
+
+                                                SUM(CASE WHEN NSUS.LinkType = 'BUS' AND NSUS.ArchVehicleListId = @ArchVehicleListId
+                                                         THEN TRY_CAST(SBCES.FINALCOST(
+                                                                 CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)),
+                                                                 CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)),
+                                                                 ISNULL(NSUS.Cost, 0), 0
+                                                             ) AS DECIMAL(18,2))
+                                                         ELSE 0 END) AS NSCSCPartsMaterialCost
+                                            FROM SBCES.ArchVehScPartsUsed SUS
+                                            FULL OUTER JOIN SBCES.ArchVehNscPartsUsed NSUS 
+                                                ON ISNULL(SUS.CostCentre, '') = ISNULL(NSUS.CostCentre, '')
+                                               AND ISNULL(SUS.LinkCode, '') = ISNULL(NSUS.LinkCode, '')
+                                               AND ISNULL(SUS.LinkType, '') = ISNULL(NSUS.LinkType, '')
+                                            WHERE 
+                                                (SUS.LinkType = 'BUS' AND SUS.ArchVehicleListId = @ArchVehicleListId)
+                                                OR (NSUS.LinkType = 'BUS' AND NSUS.ArchVehicleListId = @ArchVehicleListId)
+                                        ),
+
+                                        -- Labour calculation broken into row level first
+                                        LabourRows AS (
+                                            SELECT
+                                                -- Calculated Decimal Hrs
+                                                (
+                                                    CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                                    CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60
+                                                ) AS DecimalHrs,
+
+                                                -- Effective Hours
+                                                (
+                                                    (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                                     CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                                                    * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100
+                                                ) AS EffectiveHours,
+
+                                                -- Labour Rate
+                                                ISNULL((
+                                                    SELECT TOP 1 ES.RatePerHour 
+                                                    FROM CES.SBCES.EmployeeSalaries ES
+                                                    WHERE ES.WageGroup = (
+                                                        SELECT TOP 1 EC.WageGroup
+                                                        FROM CES.SBCES.EmplClass EC
+                                                        WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                                                ), 0) AS LabourRate,
+
+                                                -- Labour Cost per row
+                                                (
+                                                    (
+                                                        (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                                         CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                                                        * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100
+                                                    ) 
+                                                    / @NonProductiveAdj
+                                                    * ISNULL((
+                                                        SELECT TOP 1 ES.RatePerHour 
+                                                        FROM CES.SBCES.EmployeeSalaries ES
+                                                        WHERE ES.WageGroup = (
+                                                            SELECT TOP 1 EC.WageGroup
+                                                            FROM CES.SBCES.EmplClass EC
+                                                            WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                                                    ), 0)
+                                                ) AS LabourCost
+
+                                            FROM SBCES.ArchVehEmployeeLabour EL
+                                            WHERE EL.TypeId = 'BUS' AND EL.ArchVehicleListId = @ArchVehicleListId
+                                        ),
+
+                                        LabourCost AS (
+                                            SELECT
+                                                SUM(LabourCost) AS TotalLabourCost
+                                            FROM LabourRows
+                                        ),
+
+                                        FinalCalc AS (
+                                            SELECT 
+                                                MC.*,
+                                                LC.TotalLabourCost,
+
+                                                -- Calculate LabourFringe
+                                                LC.TotalLabourCost * @Fringe AS LabourFringe,
+
+                                                -- Calculate LabourBenefits
+                                                (LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit AS LabourBenefits,
+
+                                                -- Blended Fringe and Benefits %
+                                                CASE WHEN LC.TotalLabourCost = 0 THEN 0 ELSE
+                                                ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) / LC.TotalLabourCost
+                                                END AS BlendedFringeBenefitPercent,
+
+                                                -- Blended Fringe and Benefits Cost ($)
+                                                ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) AS BlendedFringeBenefitCost,
+
+                                                -- LabourOverhead
+                                                LC.TotalLabourCost * @Overhead AS LabourOverhead,
+
+                                                -- FinalLabourCost
+                                                LC.TotalLabourCost 
+                                                + ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) 
+                                                + (LC.TotalLabourCost * @Overhead) AS FinalLabourCost
+
+                                            FROM MaterialCost MC
+                                            CROSS JOIN LabourCost LC
+                                        )
+
+                                        SELECT
+                                            @ArchVehicleListId AS ArchVehicleListId,
+
+                                            -- Materials:
+                                            CAST(MC.SCPartsMaterialCost + MC.RBPartsMaterialCost + MC.NSCSCPartsMaterialCost AS DECIMAL(18,2)) AS MaterialTotalCostNoTax,
+                                            CAST((MC.SCPartsMaterialCost + MC.RBPartsMaterialCost + MC.NSCSCPartsMaterialCost) * @TaxRate AS DECIMAL(18,2)) AS MaterialTotalTaxAmount,
+                                            CAST((MC.SCPartsMaterialCost + MC.RBPartsMaterialCost + MC.NSCSCPartsMaterialCost) * (1 + @TaxRate) AS DECIMAL(18,2)) AS MaterialTotalWithTax,
+
+                                            -- Labour:
+                                            CAST(FC.TotalLabourCost AS DECIMAL(18,2)) AS TotalLabourCost,
+                                            CAST(FC.LabourFringe AS DECIMAL(18,2)) AS LabourFringe,
+                                            CAST(FC.LabourBenefits AS DECIMAL(18,2)) AS LabourBenefits,
+                                            CAST(FC.BlendedFringeBenefitPercent * 100 AS DECIMAL(18,2)) AS BlendedFringeBenefitPercent, -- percent format
+                                            CAST(FC.BlendedFringeBenefitCost AS DECIMAL(18,2)) AS BlendedFringeBenefitCost,
+                                            CAST(FC.LabourOverhead AS DECIMAL(18,2)) AS LabourOverhead,
+                                            CAST(FC.FinalLabourCost AS DECIMAL(18,2)) AS FinalLabourCost,
+
+                                            -- Core Cost:
+                                            ISNULL((SELECT SUM(CoreCost) FROM SBCES.ArchVehScPartsUsed WHERE ArchVehicleListId = @ArchVehicleListId), 0) AS CoreCost,
+
+                                            -- Total without Tax
+                                            CAST(FC.FinalLabourCost + 
+                                                 (MC.SCPartsMaterialCost + MC.RBPartsMaterialCost + MC.NSCSCPartsMaterialCost)
+                                            AS DECIMAL(18,2)) AS TotalWithoutTax,
+
+                                            -- Total with Tax
+                                            CAST(FC.FinalLabourCost + 
+                                                 ((MC.SCPartsMaterialCost + MC.RBPartsMaterialCost + MC.NSCSCPartsMaterialCost) * (1 + @TaxRate))
+                                            AS DECIMAL(18,2)) AS TotalWithTax
+
+                                        FROM MaterialCost MC
+                                        CROSS JOIN FinalCalc FC;
+
+                                    END TRY
+                                    BEGIN CATCH
+                                        PRINT 'Error: ' + ERROR_MESSAGE();
+                                    END CATCH;
+                                 
+                                     ";
+
+                var result = await _dbConnection.QueryAsync<TotalCostInEstimates>(
+                    query
+                // new { id = id }
+                );
+                return await _dbConnection.QueryAsync<TotalCostInEstimates>(query);
+
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+                //throw;
+                return null;
+            }
+        }
+
+        private async Task<IEnumerable<TotalCostInEstimates>> GetTotalCostInRBEstimates(string id, string gridType)
+        {
+            try
+            {
+                var linkCode = id?.ToUpper(); 
+                if (gridType == "RebuiltGrid")
+                {
+                    linkCode = await _dbConnection.QueryFirstOrDefaultAsync<string>(
+                       "SELECT RebuiltStockNum FROM sbces.RbMasterlist WHERE RbMasterlistId = @Id",
+                       new { Id = id }
+                   );
+
+                }
+                
+                string query = " DECLARE @LinkCode VARCHAR(30) = '" + linkCode + "'" +
+                               @"
+                               							--DECLARE @LinkCode VARCHAR(30) = 'MBH0096'
+                              --    DECLARE @LinkCode VARCHAR(30) = '4352';
+							 -- DECLARE @LinkCode VARCHAR(30) = '1107';
+    							--DECLARE @LinkCode VARCHAR(30) = 'MBH0096'
+                              --    DECLARE @LinkCode VARCHAR(30) = '4352';
+							 -- DECLARE @LinkCode VARCHAR(30) = '1107';
+
+                                    BEGIN TRY
+
+                                        -- Get TaxRate (varchar to decimal)
+                                        DECLARE @TaxRate DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'TAX_RATE'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get Fringe (varchar to decimal)
+                                        DECLARE @Fringe DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'FRINGE'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get Benefit (varchar to decimal)
+                                        DECLARE @Benefit DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'BENEFIT'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get Overhead (varchar to decimal)
+                                        DECLARE @Overhead DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'OVERHEAD'), '0'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- Get NonProductiveAdjustment (varchar to decimal)
+                                        DECLARE @NonProductiveAdj DECIMAL(18,6) =
+                                            TRY_CAST(REPLACE(
+                                                ISNULL(
+                                                    (SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'
+                                                ), ',', '.') AS DECIMAL(18,6));
+
+                                        -- MATERIAL COST CTE 
+                                 
+						            WITH MaterialCost AS (
+
+                                    SELECT 
+                                        /* ============================================================
+                                           SC PARTS MATERIAL COST (RebuiltPart = 'N', LinkType = 'RB')
+                                           ============================================================ */
+                                        (
+                                            SELECT 
+                                                SUM(
+                                                    CASE 
+                                                        WHEN SUS.RebuiltPart = 'N'
+                                                             AND SUS.LinkType = 'RB'
+                                                             AND SUS.LinkCode = @LinkCode
+                                                        THEN TRY_CAST(
+                                                                SBCES.FinalCost(
+                                                                    CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                                                                    CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                                                                    ISNULL(SCP.MmsNewCost, 0),   -- << NEW COST SOURCE
+                                                                    0
+                                                                ) AS DECIMAL(18,2)
+                                                            )
+                                                        ELSE 0 
+                                                    END
+                                                )
+                                            FROM SBCES.ScPartsUsed SUS
+                                            LEFT JOIN SBCES.StockCodedParts SCP 
+                                                ON SUS.MMSStockCode = SCP.MMSStockCode
+                                            WHERE SUS.LinkCode = @LinkCode
+                                        ) AS SCPartsMaterialCost,
+
+                                        /* ============================================================
+                                           RB PARTS MATERIAL COST (RebuiltPart = 'Y', LinkType = 'RB')
+                                           ============================================================ */
+                                        (
+                                            SELECT 
+                                                SUM(
+                                                    CASE 
+                                                        WHEN SUS.RebuiltPart = 'Y'
+                                                             AND SUS.LinkType = 'RB'
+                                                             AND SUS.LinkCode = @LinkCode
+                                                        THEN TRY_CAST(
+                                                                SBCES.FinalCost(
+                                                                    CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)),
+                                                                    CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)),
+                                                                    ISNULL(SUS.MmsCost, 0),   
+                                                                    0
+                                                                ) AS DECIMAL(18,2)
+                                                            )
+                                                        ELSE 0 
+                                                    END
+                                                )
+                                            FROM SBCES.ScPartsUsed SUS
+                                            LEFT JOIN SBCES.StockCodedParts SCP 
+                                                ON SUS.MMSStockCode = SCP.MMSStockCode
+                                            WHERE SUS.LinkType = 'RB'
+                                              AND SUS.LinkCode = @LinkCode
+                                        ) AS RBPartsMaterialCost,
+
+                                        /* ============================================================
+                                           NSC PARTS MATERIAL COST (LinkType = 'RB')
+                                           ============================================================ */
+                                        (
+                                            SELECT 
+                                                SUM(
+                                                    CASE 
+                                                        WHEN NSUS.LinkType = 'RB'
+                                                             AND NSUS.LinkCode = @LinkCode
+                                                        THEN TRY_CAST(
+                                                                SBCES.FinalCost(
+                                                                    CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)),
+                                                                    CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)),
+                                                                    ISNULL(NSUS.Cost, 0),
+                                                                    0
+                                                                ) AS DECIMAL(18,2)
+                                                            )
+                                                        ELSE 0 
+                                                    END
+                                                )
+                                            FROM SBCES.NscPartsUsed NSUS
+                                            WHERE 
+								            --NSUS.LinkType = 'RB'
+                                             -- AND 
+								              NSUS.LinkCode = @LinkCode
+                                        ) AS NSCSCPartsMaterialCost
+                                ),
+
+                                        -- Labour calculation broken into row level first
+                                        LabourRows AS (
+                                            SELECT
+                                                -- Calculated Decimal Hrs
+                                                (
+                                                    CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                                    CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60
+                                                ) AS DecimalHrs,
+
+                                                -- Effective Hours
+                                                (
+                                                    (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                                     CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                                                    * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100
+                                                ) AS EffectiveHours,
+
+                                                -- Labour Rate
+                                                ISNULL((
+                                                    SELECT TOP 1 ES.RatePerHour 
+                                                    FROM CES.SBCES.EmployeeSalaries ES
+                                                    WHERE ES.WageGroup = (
+                                                        SELECT TOP 1 EC.WageGroup
+                                                        FROM CES.SBCES.EmplClass EC
+                                                        WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                                                ), 0) AS LabourRate,
+
+                                                -- Labour Cost per row
+                                                (
+                                                    (
+                                                        (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                                                         CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                                                        * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100
+                                                    ) 
+                                                    / @NonProductiveAdj
+                                                    * ISNULL((
+                                                        SELECT TOP 1 ES.RatePerHour 
+                                                        FROM CES.SBCES.EmployeeSalaries ES
+                                                        WHERE ES.WageGroup = (
+                                                            SELECT TOP 1 EC.WageGroup
+                                                            FROM CES.SBCES.EmplClass EC
+                                                            WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')
+                                                    ), 0)
+                                                ) AS LabourCost
+
+                                            FROM SBCES.EmployeeLabour EL
+                                            WHERE 
+                                             --EL.TypeId = 'MB' AND 
+                                             EL.LinkNumber = @LinkCode
+                                        ),
+
+                                        LabourCost AS (
+                                            SELECT
+                                                SUM(LabourCost) AS TotalLabourCost
+                                            FROM LabourRows
+                                        ),
+
+                                        FinalCalc AS (
+                                            SELECT 
+                                                MC.*,
+                                                LC.TotalLabourCost,
+
+                                                -- Calculate LabourFringe
+                                                LC.TotalLabourCost * @Fringe AS LabourFringe,
+
+                                                -- Calculate LabourBenefits
+                                                (LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit AS LabourBenefits,
+
+                                                -- Blended Fringe and Benefits %
+                                                CASE WHEN LC.TotalLabourCost = 0 THEN 0 ELSE
+                                                ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) / LC.TotalLabourCost
+                                                END AS BlendedFringeBenefitPercent,
+
+                                                -- Blended Fringe and Benefits Cost ($)
+                                                ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) AS BlendedFringeBenefitCost,
+
+                                                -- LabourOverhead
+                                                LC.TotalLabourCost * @Overhead AS LabourOverhead,
+
+                                                -- FinalLabourCost
+                                                LC.TotalLabourCost 
+                                                + ((LC.TotalLabourCost * @Fringe) + ((LC.TotalLabourCost + (LC.TotalLabourCost * @Fringe)) * @Benefit)) 
+                                                + (LC.TotalLabourCost * @Overhead) AS FinalLabourCost
+
+                                            FROM MaterialCost MC
+                                            CROSS JOIN LabourCost LC
+                                        )
+
+                                        SELECT
+                                            @LinkCode AS LinkCode,
+											ISNULL(MC.SCPartsMaterialCost,0) as SCPartsMaterialCost,
+											ISNULL(MC.NSCSCPartsMaterialCost,0) as NSCSCPartsMaterialCost,
+											ISNULL(MC.RBPartsMaterialCost,0) as RBPartsMaterialCost,
+
+                                            -- Materials:
+                                            CAST(ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0) AS DECIMAL(18,2)) AS MaterialTotalCostNoTax,
+                                            CAST((ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0)) * @TaxRate AS DECIMAL(18,2)) AS MaterialTotalTaxAmount,
+                                            CAST((ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0)) * (1 + @TaxRate) AS DECIMAL(18,2)) AS MaterialTotalWithTax,
+
+                                            -- Labour:
+                                            CAST(FC.TotalLabourCost AS DECIMAL(18,2)) AS TotalLabourCost,
+                                            CAST(FC.LabourFringe AS DECIMAL(18,2)) AS LabourFringe,
+                                            CAST(FC.LabourBenefits AS DECIMAL(18,2)) AS LabourBenefits,
+                                            CAST(FC.BlendedFringeBenefitPercent * 100 AS DECIMAL(18,2)) AS BlendedFringeBenefitPercent, -- percent format
+                                            CAST(FC.BlendedFringeBenefitCost AS DECIMAL(18,2)) AS BlendedFringeBenefitCost,
+                                            CAST(FC.LabourOverhead AS DECIMAL(18,2)) AS LabourOverhead,
+                                            CAST(FC.FinalLabourCost AS DECIMAL(18,2)) AS FinalLabourCost,
+
+                                            -- Core Cost:
+                                            ISNULL((SELECT SUM(CoreCost) FROM SBCES.SCPartsUsed WHERE LinkCode = @LinkCode), 0) AS CoreCost,
+
+                                            -- Total without Tax
+                                            CAST(FC.FinalLabourCost + 
+                                                 (ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0))
+                                            AS DECIMAL(18,2)) AS TotalWithoutTax,
+
+                                            -- Total with Tax
+                                            CAST(FC.FinalLabourCost + 
+                                                 ((ISNULL(MC.SCPartsMaterialCost,0) + ISNULL(MC.RBPartsMaterialCost,0) + ISNULL(MC.NSCSCPartsMaterialCost,0)) * (1 + @TaxRate))
+                                            AS DECIMAL(18,2)) AS TotalWithTax
+
+                                        FROM MaterialCost MC
+                                        CROSS JOIN FinalCalc FC;
+
+                                    END TRY
+                                    BEGIN CATCH
+                                        PRINT 'Error: ' + ERROR_MESSAGE();
+                                    END CATCH;
+                                 
+                                     ";
+
+                var result = await _dbConnection.QueryAsync<TotalCostInEstimates>(
+                    query
+                //new { id = id }
+                );
+                return await _dbConnection.QueryAsync<TotalCostInEstimates>(query);
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+                //throw;
+                return null;
+            }
+        }
+    }
+
+}
+
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
+using DataSourceRequest = Kendo.Mvc.UI.DataSourceRequest;
+using BCES.Data;
+using Telerik.SvgIcons;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using BCES.Controllers.Base;
+using BCES.Models.Parts;
+using  BCES.Models.Vehicle;
+using BCES.Models.Common;
+using BCES.Models.Parts;
+using System.Data;
+using OfficeOpenXml;
+using System.IO;
+using MailKit.Net.Smtp;
+using MimeKit;
+using MailKit.Security;
+
+
+
+using Newtonsoft.Json.Linq;
+using static System.Net.Mime.MediaTypeNames;
+using Azure.Core;
+using BCES.Controllers.Admin;
+using System.Net.Mail;
+using Multipart = MimeKit.Multipart;
+using SmtpClient = MailKit.Net.Smtp.SmtpClient;
+using System.Data.SqlClient;
+using Microsoft.AspNetCore.Authorization;
+using System.Text.Encodings.Web;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
+using System.Reflection;
+using CommandType = System.Data.CommandType;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using Microsoft.VisualStudio.Web.CodeGenerators.Mvc.Templates.Blazor;
+using BCES.Models.ArchVehicle;
+using System.Security.Cryptography;
+
+//using System.Net.Mime;
+//using CES.Views.Shared;
+namespace BCES.Controllers.Parts
+{
+    // [Route("api/[controller]")]
+    public class VehiclesController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IServiceProvider _serviceProvider;
+        private readonly BusesController _busesController;
+        private readonly LabourDetailsController _labourDetailsController;
+        private static List<string> _selectedBuses = new List<string>();
+
+
+        public VehiclesController(DapperContext dapper, IHttpContextAccessor httpContextAccessor,
+                                      IServiceProvider serviceProvider, BusesController busesController,
+                                      LabourDetailsController labourDetailsController
+                                    ) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+            _httpContextAccessor = httpContextAccessor;
+            _serviceProvider = serviceProvider;
+            _busesController = busesController;
+            _labourDetailsController = labourDetailsController;
+        }
+
+        [HttpGet("VehiclesIndex")]
+        [AllowAnonymous]
+        public IActionResult VehiclesIndex()
+        {
+            // return View();
+            //GetRebuiltPartsData();
+            return View("~/Views/Vehicles/Index.cshtml");
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public IActionResult ArchivedIndex()
+        {
+            // return View();
+            //GetRebuiltPartsData();
+            return View("~/Views/Vehicles/_ArchivedVehicleIndex.cshtml");
+           // return View("~/Views/Vehicles/ArchivedIndex.cshtml");
+        }
+
+        //[AllowAnonymous]
+        //public IActionResult ArchivedIndex()
+        //{
+        //    // return View();
+        //    return View("~/Views/Vehicles/ArchivedIndex.cshtml");
+        //}
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<JsonResult> GetVehiclesView([DataSourceRequest] DataSourceRequest request)
+        {
+            try
+            {
+                var model = await GetVehiclesData();
+                return Json(model.ToDataSourceResult(request));
+            }
+            catch (Exception ex)
+            {
+                return Json(new { error = ex.Message });
+            }
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<JsonResult> GetArchivedVehiclesView([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid 
+            try
+            {
+                var model = await GetArchivedVehiclesData();
+
+                return Json(model.ToDataSourceResult(request));
+            }
+            catch (Exception ex)
+            {
+                return Json(ex);
+            }
+        }
+
+        public ActionResult GetVehicleById(int id, bool readOnly = false)
+        {
+           
+            var vehicle = id == 0
+                ? new VehicleViewModel() // Add mode
+                : _dbConnection.QueryFirstOrDefault<VehicleViewModel>(@"
+            SELECT  [VehicleListId]
+                                              ,[VehSeriesCode]
+                                              ,[NumOfVehicles]
+                                              ,[ProjDesc]
+                                              ,[DateEntered]
+                                              ,[EnteredBy]
+                                              ,[ModifiedLastBy]
+                                              ,[ModifiedLastDate]
+                                              ,[Make]
+                                              ,[Model]
+                                              ,[Year]
+                                              ,[Engine]
+                                              ,[Transmission]
+                                              ,[Differential]
+                                              ,[Sopnumber]
+                                          FROM [CES].[SBCES].[VehicleList] WHERE VehicleListId = @Id", new { Id = id });
+
+            if (vehicle == null)
+                return Content("Vehicle not found");
+
+            ViewBag.ReadOnly = readOnly;
+            ViewBag.ParentId = id;  /*save parent id*/
+            ViewBag.FormattedDate = vehicle.ModifiedLastDate;
+
+            return PartialView("~/Views/Shared/_VehPopUp.cshtml", vehicle);
+        }
+        [AllowAnonymous]
+        private async Task<IEnumerable<VehicleViewModel>> GetVehiclesData()
+        {
+            try
+            {
+                var vehiclesQuery = @"
+                                         SELECT  [VehicleListId]
+                                              ,[VehSeriesCode]
+                                              ,[NumOfVehicles]
+                                              ,[ProjDesc]
+                                              ,[DateEntered]
+                                              ,[EnteredBy]
+                                              ,[ModifiedLastBy]
+                                              ,[ModifiedLastDate]
+                                              ,[Make]
+                                              ,[Model]
+                                              ,[Year]
+                                              ,[Engine]
+                                              ,[Transmission]
+                                              ,[Differential]
+                                              ,[Sopnumber]
+                                          FROM [CES].[SBCES].[VehicleList]
+                                         
+                                          ORDER BY VehicleListId DESC   
+                                                                    ";
+
+
+                var vehicles = _dbConnection.Query<VehicleViewModel>(vehiclesQuery).ToList();
+
+
+                return vehicles.Distinct().ToList();
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error fetching vehicles data: {ex.Message}");
+                return Enumerable.Empty<VehicleViewModel>();
+            }
+        }
+
+
+
+        [HttpPost]
+        public async Task<IActionResult> UpdateVehiclesView([FromBody] VehicleViewModel vehicleViewModel)
+        {
+            if (vehicleViewModel == null)
+                return BadRequest("Model binding failed.");
+
+            try
+            {
+                await UpdateVehiclesAsync(vehicleViewModel);
+
+                var updated = await GetVehicleJsonByIdAsync(vehicleViewModel.VehicleListId);
+
+                // return Ok(updated);
+                return Ok(new { VehicleListId = vehicleViewModel.VehicleListId, Success = true });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "Update failed: " + ex.Message);
+            }
+        }
+
+        [AllowAnonymous]
+        private async Task UpdateVehiclesAsync(VehicleViewModel vehicleViewModel)
+        {
+            var userName = ViewBag.UserName;
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Update the [VehicleListId] table
+                    var updateVehiclelistQuery = @"
+                                                    UPDATE SBCES.[VehicleList]
+                                                    SET 
+                                                        Sopnumber = @Sopnumber,
+                                                        ProjDesc =@ProjDesc,
+                                                        Differential = @Differential,
+                                                        Engine = @Engine,
+                                                        NumOfVehicles = @NumOfVehicles,
+                                                        
+                                                        Make = @Make,
+                                                        Model = @VehModel,
+                                                        Transmission = @Transmission,
+                                                        VehSeriesCode = @VehSeriesCode,
+                                                        Year = @Year,
+                                                        
+
+                                                        ModifiedLastBy = @LastModifiedBy,
+                                                        ModifiedLastDate = @ModifiedLastDate
+                    
+                                                    WHERE VehicleListId = @VehicleListId;
+                                                ";
+
+                    await _dbConnection.ExecuteAsync(updateVehiclelistQuery, new
+                    {
+                        vehicleViewModel.Sopnumber,
+                        vehicleViewModel.ProjDesc,
+                        vehicleViewModel.Differential,
+                        vehicleViewModel.Engine,
+                        vehicleViewModel.NumOfVehicles,
+
+
+                        vehicleViewModel.Make,
+                        vehicleViewModel.VehModel,
+                        vehicleViewModel.Transmission,
+                        vehicleViewModel.VehSeriesCode,
+                        vehicleViewModel.Year,
+
+                        LastModifiedBy = userName,
+                        ModifiedLastDate = DateTime.Now,
+                        vehicleViewModel.VehicleListId
+
+                    }, transaction);
+
+
+                    // Commit the transaction
+                    transaction.Commit();
+
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of an error
+                    transaction.Rollback();
+                    Console.WriteLine($"Error updating vehicle estimate: {ex.Message}");
+                    throw; // Re-throw the exception to propagate it
+                }
+            }
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> DeleteVehicle(string VehicleListId)
+        {
+
+            try
+            {
+                if (string.IsNullOrEmpty(VehicleListId))
+                {
+                    return BadRequest("Invalid data.");
+                }
+
+                var deletePartSql = "DELETE FROM SBCES.[VehicleList] WHERE VehicleListId = '" + VehicleListId + "'";
+
+                await _dbConnection.ExecuteAsync(deletePartSql, new { VehicleListId });
+
+                //Delete Labour
+                string deleteLabourQuery = @"
+                    DELETE FROM SBCES.EmployeeLabour 
+                    WHERE LINKNUMBER = '" + VehicleListId + "' AND TypeId = 'BUS'";
+
+                await _dbConnection.ExecuteAsync(deleteLabourQuery, new { VehicleListId });
+
+                //Delete SC Parts
+                string deleteScPartsQuery = @"DELETE FROM SBCES.SCPartsUsed
+                                            WHERE
+                                                LINKTYPE = 'BUS'
+                                                AND RebuiltPart = 'N'
+                                                AND LinkCode = '" + VehicleListId + "'";
+                await _dbConnection.ExecuteAsync(deleteScPartsQuery, new { VehicleListId });
+
+                //Delete NSC Parts
+                string deleteNscPartsQuery = @"
+                              DELETE FROM SBCES.NSCPartsUsed 
+                              WHERE  LINKTYPE = 'BUS'                                                
+                             AND LinkCode = '" + VehicleListId + "'";
+                await _dbConnection.ExecuteAsync(deleteNscPartsQuery, new { VehicleListId });
+
+                //Delete SC Parts
+                string deleteRbPartsQuery = @"DELETE FROM SBCES.SCPartsUsed
+                                            WHERE
+                                                LINKTYPE = 'BUS'
+                                                AND RebuiltPart = 'Y'
+                                                AND LinkCode = '" + VehicleListId + "'";
+                await _dbConnection.ExecuteAsync(deleteRbPartsQuery, new { VehicleListId });
+
+
+                return Json(new { success = true });
+                //return RedirectToAction("VehiclesIndex");
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = $"Internal server error: {ex.Message}" });
+            }
+        }
+
+
+        [AllowAnonymous]
+        private async Task<IEnumerable<VehicleViewModel>> GetArchivedVehiclesData()
+        {
+            try
+            {
+                // Base query for rebuilt parts data
+                var vehQuery = @"            
+                                        SELECT         
+                                               
+                             ROW_NUMBER() OVER (
+                                        PARTITION BY OldId
+                                        ORDER BY DateEntered ASC
+                                  ) AS VersionNo,
+
+                                  [OldId],
+                                  [ArchVehicleListId],
+                                  [VehSeriesCode],
+                                  [NumOfVehicles],
+                                  [ProjDesc],
+                                  [DateEntered],
+                                  [EnteredBy],
+                                  [Make],
+                                  [Model],
+                                  [Year],
+                                  [Engine],
+                                  [Transmission],
+                                  [Differential],
+                                  [LabourCost],
+                                  [LabourOverheadAmount],
+                                  [LabourTotal],
+                                  [MaterialsTotal],
+                                  [TotalBusEstimateCost],
+                                  [TotalTax],
+                                  [TotalCostTax],
+                                  [OemKitsTotal],
+                                  [Sopnumber]     
+                            FROM [CES].[SBCES].[ArchVehicleList]
+                            ORDER BY Oldid desc, VersionNo desc;
+                                            ";
+
+                var vehArchived = (await _dbConnection.QueryAsync<VehicleViewModel>(vehQuery)).ToList();
+
+
+                return vehArchived;
+            }
+            catch (Exception ex)
+            {
+                // Handle errors gracefully
+                return null;
+            }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> AddVehiclesView([FromBody] VehicleViewModel vehicleViewModel)
+        {
+            if (vehicleViewModel == null)
+                return BadRequest("Unable to save. Model data is missing.");
+
+            if (!ModelState.IsValid)
+            {
+                return BadRequest("Unable to save. Required fields are missing.");
+            }
+
+            try
+            {
+                var newId = await AddVehicleAsync(vehicleViewModel);
+
+                // Re-fetch full model from DB
+                var updated = await GetVehicleJsonByIdAsync(newId);
+
+                // return Ok(updated);
+                return Ok(new { VehicleListId = newId, Success = true });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "Add failed: " + ex.Message);
+            }
+        }
+
+      
+
+        private async Task<VehicleViewModel> GetVehicleJsonByIdAsync(int id)
+        {
+            var model = new List<BCES.Models.Parts.StockCodedPartsViewModel> { };
+            return await _dbConnection.QueryFirstOrDefaultAsync<VehicleViewModel>(
+           @"
+            SELECT 
+                VehicleListId,                
+                VehSeriesCode,
+                NumOfVehicles,
+                ProjDesc,
+                DateEntered,
+                EnteredBy,
+                ModifiedLastBy,
+                ModifiedLastDate,
+                Make,
+                Model AS VehModel,
+                Year,
+                Engine,
+                Transmission,
+                Differential,
+                Sopnumber                
+            FROM SBCES.VehicleList
+            WHERE VehicleListId = @id", new { id });
+          }
+
+        [HttpGet] 
+        public ActionResult GetVehicleEstimatePopup(int id)
+        {
+            try
+            {
+                if (id == 0)
+                {
+                    // Create a new vehicle for add mode
+                    var newVehicle = new VehicleViewModel();
+                    ViewBag.ParentId = 0;
+                    ViewBag.FormattedDate = "System Generated";
+                    return PartialView("_VehEstimatePopUp", newVehicle);
+                }
+
+                // Get existing vehicle data using Dapper
+                var vehicle = _dbConnection.QueryFirstOrDefault<VehicleViewModel>(@"
+                SELECT  
+                    [VehicleListId],
+                    [VehSeriesCode],
+                    [NumOfVehicles],
+                    [ProjDesc],
+                    [Sopnumber],
+                    [Make],
+                    [Model],
+                    [Year],
+                    [Engine],
+                    [Transmission],
+                    [Differential],
+                    [ModifiedLastBy],
+                    [ModifiedLastDate]
+                FROM [CES].[SBCES].[VehicleList] 
+                WHERE VehicleListId = @Id",
+                            new { Id = id });
+
+                if (vehicle == null)
+                {
+                    return Content("Vehicle not found");
+                }
+
+                ViewBag.ParentId = id;
+                ViewBag.FormattedDate = vehicle.ModifiedLastDate ;
+
+                return PartialView("_VehPopUp", vehicle);
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+            
+        }
+        private async Task<int> AddVehicleAsync([FromBody] VehicleViewModel vehicleViewModel)
+        {
+            //if (!ModelState.IsValid)
+            //{
+            //    var errors = ModelState.Values
+            //        .SelectMany(v => v.Errors)
+            //        .Select(e => e.ErrorMessage);
+            //    return BadRequest(new { Errors = errors }); <---- How to send errors to user
+            //}
+            var userName = ViewBag.UserName;
+            var maxVehicleListId =
+                        _dbConnection.QueryFirstOrDefault<int>(@"SELECT MAX(VehicleListId) + 1  FROM SBCES.VehicleList");
+
+            _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                    // Insert into the main RbMasterlist table
+                    var insertVehlistQuery = @"
+                                                        INSERT INTO SBCES.VehicleList ( VehicleListId,NumOfVehicles,
+                                                            Sopnumber, ProjDesc, Differential, Engine, 
+                                                             Make, Model, VehSeriesCode, Year, Transmission,  EnteredBy,
+                                                            DateEntered, ModifiedLastBy, ModifiedLastDate
+                                                        )
+                                                        VALUES (
+                                                            @VehicleListId,@NumOfVehicles, @Sopnumber, @ProjDesc, @Differential, @Engine, 
+                                                             @Make, @VehModel, @VehSeriesCode, @Year, @Transmission, @EnteredBy,
+                                                            @DateEntered, @ModifiedLastBy, @ModifiedLastDate
+                                                        );
+                                                        
+                                                    ";
+
+                    await _dbConnection.ExecuteAsync(insertVehlistQuery, new
+                    {
+                        VehicleListId = maxVehicleListId,
+                        vehicleViewModel.NumOfVehicles,
+                        vehicleViewModel.Sopnumber,
+                        vehicleViewModel.ProjDesc,
+                        vehicleViewModel.Differential,
+                        vehicleViewModel.Engine,
+
+                        vehicleViewModel.Make,
+                        vehicleViewModel.VehModel,
+                        vehicleViewModel.Transmission,
+                        vehicleViewModel.VehSeriesCode,
+                        vehicleViewModel.Year,
+
+
+                        EnteredBy = userName,
+                        DateEntered = DateTime.Now,
+                        ModifiedLastBy = userName,
+                        ModifiedLastDate = DateTime.Now
+
+                    }, transaction);
+
+
+
+                    // Commit the transaction
+                    transaction.Commit();
+
+                    return maxVehicleListId;
+
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of an error
+                    // transaction.Rollback();
+                    Console.WriteLine($"Error creating Vehicle data: {ex.Message}");
+                    throw; // Re-throw the exception to propagate it
+                }
+            }
+
+        }
+
+        [HttpGet]
+        public ActionResult GetLabourDetailsTabContent(int vehicleId)
+        {
+            // Fetch data for labour details
+            var labourDetails = _dbConnection.Query<LabourDetailsRebuiltPartsViewModel>(
+                "SELECT * FROM LabourDetails WHERE VehicleId = @VehicleId",
+                new { VehicleId = vehicleId });
+
+            return PartialView("_LabourDetails", labourDetails);
+        }
+
+        [AllowAnonymous]
+        public IActionResult LabourDetailsPartial( string id,  string gridType)
+        {
+            ViewBag.PartNum = id;
+            ViewBag.ParenId = id;
+            ViewBag.GridType = gridType ?? "VehicleGrid";
+            return PartialView("_LabourDetails", new List<LabourDetailsRebuiltPartsViewModel>());
+        }
+
+        [AllowAnonymous]
+        [HttpPost]
+        public IActionResult ScDetailsPartial([FromForm] string id, string gridType)
+        {
+            ViewBag.ParentId = id;
+            ViewBag.PartNum = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+
+            var model = new List<BCES.Models.Parts.StockCodedPartsViewModel> { };
+
+            return PartialView("_ScPartsUsed", model);
+
+        }
+
+        [AllowAnonymous]
+        public IActionResult LabourHourSummaryPartial(string id, string gridType)
+        {
+            ViewBag.PartNum = id;
+            ViewBag.ParentId = id;
+            ViewBag.GridType = gridType ?? "VehicleGrid";
+            return PartialView("_LabourHourSummary", new List<LabourDetailsRebuiltPartsViewModel>());
+        }
+
+        [AllowAnonymous]
+        public IActionResult AllLabourInRBPartial(string id, string gridType)
+        {
+            ViewBag.PartNum = id;
+            ViewBag.ParentId = id;
+            ViewBag.GridType = gridType ?? "VehicleGrid";
+            
+            return PartialView("_AllLabour", new List<LabourDetailsRebuiltPartsViewModel>());
+        }
+
+
+        [AllowAnonymous]
+        public IActionResult MaterialCostSummaryPartial(string id, string gridType)
+        {
+            ViewBag.PartNum = id;
+            ViewBag.ParentId = id;
+            ViewBag.GridType = gridType ?? "VehicleGrid";
+            return PartialView("_MaterialCostSummary", new List<MaterialCostSummaryInRbViewModel>());
+        }
+
+        [AllowAnonymous]
+        public IActionResult NonStockPartsPartial(string id, string gridType)
+        {
+            ViewBag.PartNum = id;
+            ViewBag.ParentId = id;
+            ViewBag.GridType = gridType ?? "VehicleGrid";
+            return PartialView("_NscPartsUsed", new List<NscPartsUsedViewModel>());
+
+        }
+
+
+        [AllowAnonymous]
+        public IActionResult RebuiltPartsPartial(string id, string gridType)
+        {
+            ViewBag.PartNum = id;
+            ViewBag.ParenId = id;
+            ViewBag.GridType = gridType ?? "VehicleGrid";
+            return PartialView("_RbPartsUsed", new List<RebuiltPartsViewModel>());
+        }
+
+        [AllowAnonymous]
+        public IActionResult TotalCostPartial(string id, string gridType)
+        {
+            ViewBag.PartNum = id;
+            ViewBag.ParenId = id;
+            if (gridType == null)
+            {
+                ViewBag.GridType = "VehicleGrid";
+            }
+            else
+            {
+                ViewBag.GridType = gridType;
+
+            }
+            var model = new List<BCES.Models.Parts.TotalCostInEstimates> { };
+            return PartialView("_TotalCost", model);
+        }
+
+        private async Task<IEnumerable<NscPartsUsedViewModel>> GetNonStockParts(string id)
+        {
+            try
+            {
+                return await _dbConnection.QueryAsync<NscPartsUsedViewModel>(@"
+            SELECT * 
+            FROM SBCES.NSCPartsUsed 
+            WHERE LinkCode = @Id AND LinkType = 'BUS'",
+                    new { Id = id });
+            }
+            catch
+            {
+                return new List<NscPartsUsedViewModel>();
+            }
+        }
+
+        private async Task<IEnumerable<RebuiltPartsViewModel>> GetRebuiltParts(string id)
+        {
+            try
+            {
+                return await _dbConnection.QueryAsync<RebuiltPartsViewModel>(@"
+            SELECT * 
+            FROM SBCES.SCPartsUsed 
+            WHERE LinkCode = @Id AND LinkType = 'BUS' AND RebuiltPart = 'Y'",
+                    new { Id = id });
+            }
+            catch
+            {
+                return new List<RebuiltPartsViewModel>();
+            }
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public IActionResult SaveDetails()
+        {
+            // Save logic here
+            return Json(new { success = true, message = "Saved Details successfully." });
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public IActionResult CancelDetails(int vehicleListId)
+        {
+            try
+            {
+                // Return a success response
+                return Json(new { success = true, message = "Changes discarded successfully." });
+            }
+            catch (Exception ex)
+            {
+
+                return Json(new { success = false, message = "An error occurred while discarding changes. Please try again." });
+            }
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> ArchiveVehicleDetails([FromBody] ArchiveVehicleRequestModel payload)
+        {
+            try
+            {
+                var parameters = new DynamicParameters();
+                parameters.Add("@VehicleListId", payload.VehicleListId);
+                parameters.Add("@ReturnValue", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
+
+                await _dbConnection.ExecuteAsync(
+                    "[SBCES].[ArchiveVehicleV2]",
+                    parameters,
+                    commandType: CommandType.StoredProcedure
+                );
+
+                var retVal = parameters.Get<int>("@ReturnValue");
+
+                return Json(new
+                {
+                    success = retVal == 0,
+                    message = retVal == 0
+                        ? $"Archived Vehicle List Id: {payload.VehicleListId}"
+                        : $"Archive failed with return value: {retVal}"
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new
+                {
+                    success = false,
+                    message = $"Archive failed: {ex.Message}"
+                });
+            }
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> SendEmail(string to, string subject, string body, string rebuiltPartNum)
+        {
+            try
+            {
+                // Resolve the ExportController from the service provider
+                var exportController = _serviceProvider.GetRequiredService<ExportController>();
+
+                // Generate the Excel file in memory by calling SaveToExcel
+                var memoryStream = await exportController.SaveToExcel(rebuiltPartNum);
+
+
+                // Send the email with the attached Excel file
+                var message = new MimeMessage();
+                message.From.Add(new MailboxAddress("Sandeep Kanao", "sandeep.kanao@ttc.ca"));
+                message.To.Add(new MailboxAddress("Sandeep.Kanao@ttc.ca", to));
+                message.Subject = subject;
+                message.Body = new TextPart("plain") { Text = body };
+
+                var attachment = new MimePart("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                {
+                    Content = new MimeContent((Stream)memoryStream),
+                    ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+                    ContentTransferEncoding = ContentEncoding.Base64,
+                    FileName = $"{rebuiltPartNum}_Vehicle_Estimate.xlsx"
+                };
+
+                var multipart = new Multipart("mixed");
+                multipart.Add(message.Body);
+                multipart.Add(attachment);
+                message.Body = multipart;
+
+                using (var client = new SmtpClient())
+                {
+                    await client.ConnectAsync("smtp.freesmtpservers.com", 25, SecureSocketOptions.StartTls);
+                    // await client.AuthenticateAsync("sandeep.kanao@gmail.com", "Perf4you@");
+                    await client.SendAsync(message);
+                    await client.DisconnectAsync(true);
+                }
+
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                // Log the exception 
+                Console.WriteLine($"Error sending email: {ex.Message}");
+
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        [AllowAnonymous]
+        public IActionResult DownloadExcel(string filePath)
+        {
+            var fileBytes = System.IO.File.ReadAllBytes(filePath);
+            return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Path.GetFileName(filePath));
+        }
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public IActionResult CopyEstimate(
+        [FromBody] CopyEstimateRequest request) // Create this DTO class
+        {
+            try
+            {
+                var parameters = new DynamicParameters();
+                parameters.Add("@VehicleListId", request.vehicleListId, DbType.Int32);
+                parameters.Add("@BusSeriesCode", request.newVehSeriesCode, DbType.String);
+                parameters.Add("@ProjDesc", request.newprojDesc, DbType.String);
+                parameters.Add("@EnteredBy", ViewBag.UserName, DbType.String);
+                parameters.Add("@EstimateType", "BUS", DbType.String);
+                parameters.Add("@NewVehicleListId", dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+                _dbConnection.Execute("SBCES.CopyEstimate", parameters, commandType: CommandType.StoredProcedure);
+
+                int newVehicleListId = parameters.Get<int>("@NewVehicleListId");
+                return Json(new { success = true, newVehicleListId });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+        public class CopyEstimateRequest
+        {
+            public int vehicleListId { get; set; }
+            public string oldVehSeriesCode { get; set; }
+            public string newVehSeriesCode { get; set; }
+            public string oldprojDesc { get; set; }
+            public string newprojDesc { get; set; }
+        }
+
+        //////////////////////////////////////////////////
+       
+        // === Popup Details Action ===
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<IActionResult> ArchiveDetails(int id)
+        {
+            try
+            {
+                var vm = await GetArchVehiclePopup(id);
+                return PartialView("_ArchVehiclePopup", vm);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        private async Task<ArchVehiclePopupViewModel> GetArchVehiclePopup(int id)
+        {
+            try
+            {
+                // Master
+                var masterSql = @"SELECT TOP (1000) [ArchVehicleListId]
+                      ,[VehSeriesCode]
+                      ,[NumOfVehicles]
+                      ,[ProjDesc]
+                      ,[DateEntered] as ArchivedDate
+                      ,[EnteredBy] as ArchivedBy
+                      ,[Make]
+                      ,[Model]
+                      ,[Year]
+                      ,[Engine]
+                      ,[Transmission]
+                      ,[Differential]
+                      ,[LabourCost]
+                      ,[LabourOverheadAmount]
+                      ,[LabourTotal]
+                      ,[MaterialsTotal]
+                      ,[TotalBusEstimateCost]
+                      ,[TotalTax]
+                      ,[TotalCostTax]
+                      ,[OemKitsTotal]
+                      ,[Sopnumber]
+                      ,[OldId]
+                  FROM [CES].[SBCES].[ArchVehicleList] WHERE ARCHVEHICLELISTID =" + id;
+                var master = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(masterSql, new { id });
+
+                // SC Parts
+                var scSql = @"SELECT MMSSTOCKCODE, SCDESCRIPTION, QTYREQD, TOTALCOST, REBUILTPART, LINKTYPE, LINKCODE
+                              FROM SBCES.ARCHVEHSCPARTSUSED
+                              WHERE REBUILTPART = 'N' and ARCHVEHICLELISTID =" + id;
+                var scParts = await _dbConnection.QueryAsync<ScPartUsedViewModel>(scSql, new { id });
+
+                // NSC Parts
+                var nscSql = @"SELECT ORIGSUPPNUM, ORIGSUPPLIERNAME, QTYREQD, TOTALCOST, LINKTYPE, LINKCODE
+                               FROM [SBCES].[ArchVehNscPartsUsed]
+                               WHERE [ArchVehicleListId] =" + id;
+                var nscParts = await _dbConnection.QueryAsync<NscPartUsedViewModel>(nscSql, new { id });
+
+                var rbSql = @"SELECT MMSSTOCKCODE, SCDESCRIPTION, QTYREQD, TOTALCOST, REBUILTPART, LINKTYPE, LINKCODE
+                              FROM SBCES.ARCHVEHSCPARTSUSE
+                              WHERE REBUILTPART ='Y' and ARCHVEHICLELISTID =" + id;
+                var rbParts = await _dbConnection.QueryAsync<ScPartUsedViewModel>(scSql, new { id });
+
+                // Employee Labour
+                var labourSql = @"SELECT LABOURDEFN, TASK, HRSREQD, ADJHRS, TIMEADDITION
+                                  FROM SBCES.ARCHVEHEMPLOYEELABOUR
+                                  WHERE ARCHVEHICLELISTID =" + id;
+                var labour = await _dbConnection.QueryAsync<EmployeeLabourViewModel>(labourSql, new { id });
+
+                // Labour Totals
+                var labourTotalsSql = @"SELECT COSTCENTRE, TOTALHOURS
+                                        FROM SBCES.ARCHVEHLABOURCCTOTAL
+                                        WHERE ARCHVEHICLELISTID =" +  id;
+                var labourTotals = await _dbConnection.QueryAsync<LabourCcTotalViewModel>(labourTotalsSql, new { id });
+
+                ArchVehiclePopupViewModel archVehiclePopupViewModel =  new ArchVehiclePopupViewModel
+                {
+                    ArchVehicleListId = master.ArchVehicleListId,
+                    Make = master.Make,
+                    Model = master.Model,
+                    Year = master.Year,
+                    Engine = master.Engine,
+                    Transmission = master.Transmission,
+                    Differential = master.Differential,
+                    LabourTotal = master.LabourTotal,
+                    MaterialsTotal = master.MaterialsTotal,
+                    TotalBusEstimateCost = master.TotalBusEstimateCost,
+                    ScPartsUsed = scParts,
+                    NscPartsUsed = nscParts,
+                    EmployeeLabours = labour,
+                    LinkCode = master.LinkCode,
+                    LinkType = master.LinkType,
+                    LabourCcTotals = labourTotals,
+                    ArchivedBy = master.ArchivedBy,
+                    ArchivedDate = master.ArchivedDate
+                };
+
+                return new ArchVehiclePopupViewModel
+                {
+                    ArchVehicleListId = master.ArchVehicleListId,
+                    OldId = master.OldId,
+                    VehSeriesCode = master.VehSeriesCode,
+                    NumOfVehicles = master.NumOfVehicles,
+                    ProjDesc = master.ProjDesc,
+                    Make = master.Make,
+                    Model = master.Model,
+                    Year = master.Year,
+                    Engine = master.Engine,
+                    Transmission = master.Transmission,
+                    Differential = master.Differtial,
+                    LabourCost = master.LabourCost,
+                    LabourOverheadAmount = master.LabourOverheadAmount,
+                    LabourTotal = master.labourTotal,
+
+                    MaterialsTotal = master.MaterialsTotal,
+                    TotalBusEstimateCost = master.TotalBusEstimateCost,
+                    TotalTax = master.TotalTax,
+                    TotalCostTax = master.TotalCostTax,
+                    ScPartsUsed = scParts,
+                    NscPartsUsed = nscParts,
+                    RbPartsUsed = rbParts,
+                    EmployeeLabours = labour,
+                    LabourCcTotals = labourTotals,
+                    ArchivedBy = master.ArchivedBy,
+                    ArchivedDate = master.ArchivedDate
+
+                };
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error fetching archive details: {ex.Message}");
+                return new ArchVehiclePopupViewModel();
+            }
+        }
+
+        ///////////////////////////////////////////////////
+    }
+
+}
+@{
+    ViewData["Title"] = "Total Cost Summary";
+    string gridName = $"LabourDetailsGrid_{ViewBag.PartNum}";
+}
+
+<style>
+    /* Print Styles - for full page printing */
+    @@media print {
+        /* Reset body for printing */
+        body {
+            background: white;
+            margin: 0 !important;
+            padding: 0 !important;
+            height: auto !important;
+            overflow: visible !important;
+        }
+        /* Hide print button and other non-print elements */
+        .no-print {
+            display: none !important;
+        }
+        /* Main container - ensure full content prints */
+        .report-container {
+            box-shadow: none;
+            padding: 0.2in;
+            margin: 0;
+            max-width: 100% !important;
+            overflow: visible !important;
+            height: auto !important;
+        }
+        /* Ensure side-by-side layout prints correctly */
+        .side-by-side {
+            display: flex !important;
+            gap: 20px;
+            page-break-inside: avoid;
+            break-inside: avoid;
+            overflow: visible !important;
+        }
+        /* Individual sections */
+        .material-section, .labour-section {
+            break-inside: avoid;
+            page-break-inside: avoid;
+            overflow: visible !important;
+        }
+        /* Tables - ensure they don't get cut off */
+        .info-table {
+            break-inside: avoid;
+            page-break-inside: avoid;
+            width: 100%;
+        }
+        /* Grand total section */
+        .grand-total-section {
+            break-inside: avoid;
+            page-break-inside: avoid;
+            margin-top: 20px;
+        }
+        /* Totals row */
+        .totals-row {
+            display: flex !important;
+            gap: 20px;
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+        /* Force full height printing */
+        html, body {
+            height: auto !important;
+            overflow: visible !important;
+        }
+        /* Remove any scrollbar-related styles */
+        ::-webkit-scrollbar {
+            display: none;
+        }
+        /* Ensure all content is visible */
+        .report-footer {
+            margin-top: 20px;
+            break-inside: avoid;
+        }
+    }
+
+    /* Screen Styles */
+    * {
+        box-sizing: border-box;
+    }
+
+    /* Override body styles for this partial view only */
+    .total-cost-body {
+        font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
+        background: #eef2f5;
+        margin: 0;
+        padding: 20px;
+        overflow-y: auto;
+    }
+
+    .report-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+        padding: 25px 30px 35px 30px;
+    }
+
+    .report-header {
+        text-align: center;
+        margin-bottom: 25px;
+        padding-bottom: 15px;
+        border-bottom: 3px solid #2c3e50;
+    }
+
+        .report-header h1 {
+            margin: 0 0 8px 0;
+            color: #1a5276;
+            font-size: 28px;
+            letter-spacing: 1px;
+        }
+
+        .report-header .subtitle {
+            color: #5d6d7e;
+            font-size: 13px;
+            font-family: monospace;
+        }
+
+    /* Side by Side Layout */
+    .side-by-side {
+        display: flex;
+        gap: 30px;
+        margin-bottom: 30px;
+        flex-wrap: wrap;
+    }
+
+    /* Material Section (Left) */
+    .material-section {
+        flex: 1;
+        min-width: 350px;
+        background: #ffffff;
+        border: 2px solid #2c3e50;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .material-header {
+        background-color: #2c3e50;
+        color: white;
+        padding: 14px 20px;
+        font-size: 18px;
+        font-weight: bold;
+        text-align: center;
+        letter-spacing: 1px;
+    }
+
+    .material-body {
+        padding: 20px;
+    }
+
+    /* Labour Section (Right) */
+    .labour-section {
+        flex: 1;
+        min-width: 350px;
+        background: #ffffff;
+        border: 2px solid #2c3e50;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .labour-header {
+        background-color: #2c3e50;
+        color: white;
+        padding: 14px 20px;
+        font-size: 18px;
+        font-weight: bold;
+        text-align: center;
+        letter-spacing: 1px;
+    }
+
+    .labour-body {
+        padding: 20px;
+    }
+
+    /* Table styles */
+    .info-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+        .info-table tr {
+            border-bottom: 1px solid #e0e4e8;
+        }
+
+            .info-table tr:last-child {
+                border-bottom: none;
+            }
+
+        .info-table td {
+            padding: 12px 8px;
+            vertical-align: middle;
+        }
+
+    .label-col {
+        font-weight: 600;
+        color: #2c3e50;
+        width: 55%;
+    }
+
+    .value-col {
+        font-weight: 500;
+        color: #1a5276;
+        text-align: right;
+        width: 45%;
+    }
+
+    .total-row td {
+        padding-top: 15px;
+        border-top: 2px solid #cbd5e1;
+    }
+
+    .total-row .label-col {
+        font-weight: 800;
+        font-size: 1.05em;
+        color: #0b3b5f;
+    }
+
+    .total-row .value-col {
+        font-weight: 800;
+        font-size: 1.05em;
+        color: #0b3b5f;
+    }
+
+    .tax-row .label-col {
+        color: #e67e22;
+    }
+
+    .tax-row .value-col {
+        color: #e67e22;
+        font-weight: 600;
+    }
+
+    .empty-row td {
+        padding: 12px 8px;
+        border-bottom: 1px solid #e0e4e8;
+    }
+
+    .empty-row .label-col {
+        color: transparent;
+    }
+
+    .empty-row .value-col {
+        color: transparent;
+    }
+
+    /* Grand Total Section */
+    .grand-total-section {
+        margin-top: 20px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border: 2px solid #1a5276;
+    }
+
+    .grand-total-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+        .grand-total-table td {
+            padding: 18px 25px;
+        }
+
+    .grand-total-label {
+        font-weight: 800;
+        font-size: 1.2em;
+        color: #1a5276;
+        background-color: #e8f0fe;
+    }
+
+    .grand-total-value {
+        font-weight: 800;
+        font-size: 1.3em;
+        color: #1a5276;
+        text-align: right;
+        background-color: #e8f0fe;
+    }
+
+    /* Totals Row (Material and Labour totals on same line) */
+    .totals-row {
+        display: flex;
+        gap: 30px;
+        margin: 20px 0;
+        flex-wrap: wrap;
+    }
+
+    .total-box {
+        flex: 1;
+        background: #e8f0fe;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 15px 20px;
+        text-align: center;
+    }
+
+    .total-box-label {
+        font-weight: 700;
+        font-size: 1em;
+        color: #2c3e50;
+        margin-bottom: 8px;
+    }
+
+    .total-box-value {
+        font-weight: 800;
+        font-size: 1.3em;
+        color: #1a5276;
+    }
+
+    /* Print button */
+    .print-button {
+        background-color: #2c3e50;
+        color: white;
+        border: none;
+        padding: 10px 24px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        float: right;
+        transition: background 0.2s;
+    }
+
+        .print-button:hover {
+            background-color: #1a5276;
+        }
+
+    .clearfix::after {
+        content: "";
+        clear: both;
+        display: table;
+    }
+
+    /* Loading & no data */
+    .loading-spinner {
+        text-align: center;
+        padding: 60px;
+        color: #5d6d7e;
+        font-size: 16px;
+    }
+
+    .no-data-message {
+        text-align: center;
+        padding: 50px;
+        background: #fef9e6;
+        border-radius: 8px;
+    }
+
+    .warning-icon {
+        font-size: 48px;
+        margin-bottom: 10px;
+    }
+
+    .retry-btn {
+        background-color: #2c3e50;
+        color: white;
+        border: none;
+        padding: 8px 20px;
+        border-radius: 4px;
+        margin-top: 15px;
+        cursor: pointer;
+    }
+
+    .report-footer {
+        margin-top: 25px;
+        padding: 10px;
+        background: #f8f9fa;
+        font-size: 11px;
+        color: #5d6d7e;
+        text-align: center;
+        border-radius: 4px;
+        border-top: 1px solid #dee2e6;
+    }
+
+    .report-toolbar {
+        position: absolute;
+        top: 8px;
+        right: 12px;
+        z-index: 1000;
+    }
+
+    #reportActions {
+        width: 30px;
+        height: 30px;
+        min-width: 30px;
+        border-radius: 50%;
+    }
+
+    #reportMenu {
+        width: 160px; /* adjust as needed */
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+</style>
+
+<div class="report-toolbar">
+
+    <button id="reportActions"
+            class="k-button k-button-icon"
+            title="Report actions"
+            style="width:32px; padding:4px;">
+        <span class="k-icon k-i-more-vertical"></span>
+    </button>
+
+
+</div>
+<ul id="reportMenu">
+    <li id="copyReport">
+        <span class="k-icon k-i-copy"></span>
+        Copy to Clipboard
+    </li>
+
+    <li id="saveReport">
+        <span class="k-icon k-i-image"></span>
+        Save as PNG
+    </li>
+</ul>
+
+<div class="report-container">
+    @* <div class="clearfix">
+        <button class="print-button no-print" onclick="printFullPage();">🖨️ Print Full Report</button>
+    </div>
+ *@
+    <div class="report-header">
+        <h1>TOTAL COST SUMMARY REPORT</h1>
+        <div class="subtitle">Estimate ID: @ViewBag.PartNum</div>
+    </div>
+    
+    <!-- Loading Indicator -->
+    <div id="loadingIndicator" class="loading-spinner">
+        <span>⏳ Loading cost data...</span>
+    </div>
+
+    <!-- Cost Summary Content - Side by Side -->
+    <div id="costSummaryContent" style="display: none;">
+
+        <!-- SIDE BY SIDE: Material Cost (6 rows) | Labour Cost (6 rows with empty first row) -->
+        <div class="side-by-side">
+
+            <!-- LEFT: MATERIAL COST (6 rows) -->
+            <div class="material-section">
+                <div class="material-header">📦 MATERIAL COST</div>
+                <div class="material-body">
+                    <table class="info-table">
+                        <!-- Row 1: Stock Coded Parts -->
+                        <tr>
+                            <td class="label-col"><strong>Stock Coded Parts</strong></td>
+                            <td class="value-col" id="scPartsDisplay">$0.00</td>
+                        </tr>
+                        <!-- Row 2: Non-Stock Coded Parts -->
+                        <tr>
+                            <td class="label-col"><strong>Non-Stock Coded Parts</strong></td>
+                            <td class="value-col" id="nscPartsDisplay">$0.00</td>
+                        </tr>
+                        <!-- Row 3: Rebuilt Parts -->
+                        <tr>
+                            <td class="label-col"><strong>Rebuilt Parts</strong></td>
+                            <td class="value-col" id="rbCostDisplay">$0.00</td>
+                        </tr>
+                        <!-- Row 4: Parts Total (No Tax) -->
+                        <tr class="total-row">
+                            <td class="label-col"><strong>Parts Total (No Tax)</strong></td>
+                            <td class="value-col" id="partsTotalDisplay">$0.00</td>
+                        </tr>
+                        <!-- Row 5: Material Tax -->
+                        <tr class="tax-row">
+                            <td class="label-col"><strong>+ Material Tax</strong></td>
+                            <td class="value-col" id="materialTaxDisplay">$0.00</td>
+                        </tr>
+                        <!-- Row 6: Total Material Cost (With Tax) -->
+                        <tr class="total-row">
+                            <td class="label-col"><strong>= Total Material Cost (With Tax)</strong></td>
+                            <td class="value-col" id="materialWithTaxDisplay">$0.00</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- RIGHT: LABOUR COST (6 rows with empty first row) -->
+            <div class="labour-section">
+                <div class="labour-header">🔧 LABOUR COST</div>
+                <div class="labour-body">
+                    <table class="info-table">
+                        <!-- Row 1: EMPTY ROW (to align with Material's first row) -->
+                        <tr class="empty-row">
+                            <td class="label-col">&nbsp;</td>
+                            <td class="value-col">&nbsp;</td>
+                        </tr>
+                        <!-- Row 2: Fringe -->
+                        <tr>
+                            <td class="label-col"><strong>Fringe</strong></td>
+                            <td class="value-col" id="labourFringeDisplay">$0.00</td>
+                        </tr>
+                        <!-- Row 3: Benefits -->
+                        <tr>
+                            <td class="label-col"><strong>Benefits</strong></td>
+                            <td class="value-col" id="labourBenefitsDisplay">$0.00</td>
+                        </tr>
+                        <!-- Row 4: Blended Fringe & Benefits -->
+                        <tr>
+                            <td class="label-col"><strong>Blended Fringe & Benefits</strong></td>
+                            <td class="value-col" id="blendedFringeCostDisplay">$0.00</td>
+                        </tr>
+                        <!-- Row 5: Overhead -->
+                        <tr>
+                            <td class="label-col"><strong>Overhead</strong></td>
+                            <td class="value-col" id="labourOverheadDisplay">$0.00</td>
+                        </tr>
+                        <!-- Row 6: Total Labour Cost -->
+                        <tr class="total-row">
+                            <td class="label-col"><strong>= Total Labour Cost</strong></td>
+                            <td class="value-col" id="totalLabourCostDisplay">$0.00</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TOTALS ROW: Material Total and Labour Total on Same Row -->
+        <div class="totals-row">
+            <div class="total-box">
+                <div class="total-box-label">TOTAL MATERIAL COST (With Tax)</div>
+                <div class="total-box-value" id="totalMaterialBoxDisplay">$0.00</div>
+            </div>
+            <div class="total-box">
+                <div class="total-box-label">TOTAL LABOUR COST</div>
+                <div class="total-box-value" id="totalLabourBoxDisplay">$0.00</div>
+            </div>
+        </div>
+
+        <!-- GRAND TOTAL SECTION -->
+        <div class="grand-total-section">
+            <table class="grand-total-table">
+                <tr>
+                    <td class="grand-total-label"><strong>💰 GRAND TOTAL (Material + Labour)</strong></td>
+                    <td class="grand-total-value" id="totalWithTaxDisplay">$0.00</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- Footer Note -->
+        <div class="report-footer">
+            Estimate Generated On: @DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+        </div>
+    </div>
+
+    <!-- No data message -->
+    <div id="noDataMessage" class="no-data-message" style="display: none;">
+        <div class="warning-icon">⚠️</div>
+        <p style="font-size: 16px; margin: 10px 0;"><strong>No cost data available</strong></p>
+        <p>No cost data found for Estimate ID: @ViewBag.PartNum</p>
+        <button id="retryButton" class="retry-btn">⟳ Retry Loading</button>
+    </div>
+</div>
+
+<script type="text/javascript">
+    // IMPORTANT: No jQuery or Kendo script tags here - they are already loaded from _Layout.cshtml
+
+    // Use jQuery from the existing layout (version 3.7.1)
+    // Store parameters from ViewBag
+    var partNum = '@ViewBag.PartNum';
+    var gridType = '@ViewBag.GridType';
+
+    // Build URL with proper parameter encoding
+    var totalCostDataUrl = '@Url.Action("GetTotalCostInEstimates", "TotalCost")' +
+                           '?id=' + encodeURIComponent(partNum) +
+                           '&gridType=' + encodeURIComponent(gridType);
+
+    // Safe document ready - using existing jQuery
+    $(document).ready(function() {
+        console.log("TotalCostTab initialized - using jQuery version: " + $.fn.jquery);
+
+        // Check if Kendo is available (should be from layout)
+        if (typeof $.fn.kendoGrid !== 'undefined') {
+            console.log("Kendo Grid is available");
+        } else {
+            console.warn("Kendo Grid not available - this may affect other tabs");
+        }
+
+        fetchTotalCostData();
+
+        $("#retryButton").on('click', function() {
+            $("#noDataMessage").hide();
+            $("#loadingIndicator").show();
+            $("#costSummaryContent").hide();
+            fetchTotalCostData();
+        });
+    });
+
+    // Enhanced print function to ensure full page prints
+    function printFullPage() {
+        setTimeout(function() {
+            window.print();
+        }, 100);
+    }
+
+    function fetchTotalCostData() {
+        console.log("Fetching data from:", totalCostDataUrl);
+
+        $.ajax({
+            url: totalCostDataUrl,
+            type: 'GET',
+            dataType: 'json',
+            timeout: 30000,
+            success: function(response) {
+                console.log("Response received:", response);
+
+                if (response && response.Data && response.Data.length > 0) {
+                    var costData = response.Data[0];
+                    console.log("Cost data:", costData);
+                    populateCostSummary(costData);
+                    $("#loadingIndicator").hide();
+                    $("#costSummaryContent").show();
+                    $("#noDataMessage").hide();
+                } else {
+                    console.log("No data in response");
+                    showNoDataMessage();
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error("Error fetching cost data:", status, error);
+                showNoDataMessage();
+            }
+        });
+    }
+
+    function populateCostSummary(costData) {
+        // Helper to get numeric values
+        function getVal(value) {
+            if (value === null || value === undefined) return 0;
+            var num = parseFloat(value);
+            return isNaN(num) ? 0 : num;
+        }
+
+        // Format currency
+        function formatMoney(val) {
+            return '$' + val.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+        }
+
+        // Helper to set text
+        function setText(id, value) {
+            $(id).text(formatMoney(value));
+        }
+
+        // Extract values from costData
+        var scParts = getVal(costData.SCPartsMaterialCost);
+        var nscParts = getVal(costData.NSCSCPartsMaterialCost);
+        var rbParts = getVal(costData.RBPartsMaterialCost);
+        var partsTotalNoTax = getVal(costData.MaterialTotalCostNoTax);
+        var materialTax = getVal(costData.MaterialTotalTaxAmount);
+        var materialWithTax = getVal(costData.MaterialTotalWithTax);
+
+        // Labour values
+        var labourFringe = getVal(costData.LabourFringe);
+        var labourBenefits = getVal(costData.LabourBenefits);
+        var blendedFringeCost = getVal(costData.BlendedFringeBenefitCost);
+        var labourOverhead = getVal(costData.LabourOverhead);
+        var totalLabour = getVal(costData.FinalLabourCost);
+
+        // Grand total
+        //var totalWithTax = getVal(costData.TotalWithTax);
+        var totalWithTax = materialWithTax + totalLabour;
+
+        // Populate Material Section (Left - 6 rows)
+        setText("#scPartsDisplay", scParts);
+        setText("#nscPartsDisplay", nscParts);
+        setText("#rbCostDisplay", rbParts);
+        setText("#partsTotalDisplay", partsTotalNoTax);
+        setText("#materialTaxDisplay", materialTax);
+        setText("#materialWithTaxDisplay", materialWithTax);
+
+        // Populate Labour Section (Right - 5 rows + 1 empty row)
+        setText("#labourFringeDisplay", labourFringe);
+        setText("#labourBenefitsDisplay", labourBenefits);
+        setText("#blendedFringeCostDisplay", blendedFringeCost);
+        setText("#labourOverheadDisplay", labourOverhead);
+        setText("#totalLabourCostDisplay", totalLabour);
+
+        // Populate Totals Row (Side by Side)
+        setText("#totalMaterialBoxDisplay", materialWithTax);
+        setText("#totalLabourBoxDisplay", totalLabour);
+
+        // Populate Grand Total
+        setText("#totalWithTaxDisplay", totalWithTax);
+
+        // Console log for verification
+        console.log("=== COST SUMMARY VERIFICATION ===");
+        console.log("MATERIAL (6 rows):");
+        console.log("  Row 1 - Stock Coded Parts:", scParts);
+        console.log("  Row 2 - Non-Stock Coded Parts:", nscParts);
+        console.log("  Row 3 - Rebuilt Parts:", rbParts);
+        console.log("  Row 4 - Parts Total (no tax):", partsTotalNoTax);
+        console.log("  Row 5 - Material Tax:", materialTax);
+        console.log("  Row 6 - Material Total (with tax):", materialWithTax);
+        console.log("LABOUR (6 rows with empty first row):");
+        console.log("  Row 1 - EMPTY");
+        console.log("  Row 2 - Fringe:", labourFringe);
+        console.log("  Row 3 - Benefits:", labourBenefits);
+        console.log("  Row 4 - Blended Fringe & Benefits:", blendedFringeCost);
+        console.log("  Row 5 - Overhead:", labourOverhead);
+        console.log("  Row 6 - Total Labour:", totalLabour);
+        console.log("GRAND TOTAL (with tax):", totalWithTax);
+    }
+
+    function showNoDataMessage() {
+        $("#loadingIndicator").hide();
+        $("#costSummaryContent").hide();
+        $("#noDataMessage").show();
+    }
+</script>
+<script>
+        $(function () {
+
+        /////////////////////////////////////////////
+        // Context menu
+        /////////////////////////////////////////////
+
+        $("#reportMenu").kendoContextMenu({
+
+            target: "#reportActions",
+
+            showOn: "mouseenter",
+
+            alignToAnchor: true,
+
+            select: function (e) {
+
+                var id = $(e.item).attr("id");
+
+                if (id === "saveReport") {
+
+                    saveReportAsPng();
+
+                }
+
+                if (id === "copyReport") {
+
+                    copyReportToClipboard();
+
+                }
+            }
+
+        });
+
+    });
+
+    function saveReportAsPng() {
+
+    kendo.drawing.drawDOM($("#costSummaryContent"), {
+
+        paperSize: "auto",
+        margin: "1cm",
+        scale: 1
+
+    })
+    .then(function (group) {
+
+        return kendo.drawing.exportImage(group);
+
+    })
+    .done(function (data) {
+
+        kendo.saveAs({
+
+            dataURI: data,
+            fileName: "TotalCostSummary.png"
+
+        });
+
+    });
+
+}
+
+    function copyReportToClipboard() {
+
+        kendo.drawing.drawDOM($("#costSummaryContent"), {
+
+            paperSize: "auto",
+            margin: "1cm",
+            scale: 1
+
+        })
+        .then(function (group) {
+
+            return kendo.drawing.exportImage(group);
+
+        })
+        .done(function (data) {
+
+            fetch(data)
+                .then(res => res.blob())
+                .then(blob => {
+
+                    navigator.clipboard.write([
+
+                        new ClipboardItem({
+                            "image/png": blob
+                        })
+
+                    ]);
+
+                    kendo.alert("Report copied to clipboard.");
+
+                });
+
+        });
+
+    }
+</script>
+using System.ComponentModel.DataAnnotations;
+
+namespace BCES.Models.Parts
+{
+   
+        public class TotalCostInEstimates
+    {
+           //public decimal CoreCost
+            public string LinkCode { get; set; }
+            public decimal Tax { get; set; }
+
+            public decimal CoreCost { get; set; }
+            public decimal TotalLabourOverheadCost { get; set; }
+            public decimal TotalLabourCost{ get; set; }
+            public decimal MaterialTotalCostNoTax { get; set; }
+            public decimal MaterialTotalTaxAmount { get; set; }
+            public decimal MaterialTotalWithTax { get; set; }
+
+        //  Labour Fringe ($)
+        public decimal LabourFringe { get; set; }
+
+        //  Labour Benefits ($)
+        public decimal LabourBenefits { get; set; }
+
+        // Blended Fringe and Benefit Percent (%)
+        public decimal BlendedFringeBenefitPercent { get; set; }
+
+        // Blended Fringe and Benefit Cost ($)
+        public decimal BlendedFringeBenefitCost { get; set; }
+
+        // 5. Labour Overhead ($)
+        public decimal LabourOverhead { get; set; }
+
+        // Final Labour Cost ($)
+        public decimal FinalLabourCost { get; set; }
+
+        // Total Without Tax ($)
+        public decimal TotalWithoutTax { get; set; }
+
+        // Total With Tax ($)
+        public decimal TotalWithTax { get; set; }
+
+        public decimal SCPartsMaterialCost { get; set; }
+        public decimal NSCSCPartsMaterialCost { get; set; }
+        public decimal RBPartsMaterialCost { get; set; }
+    }
+    
+}
