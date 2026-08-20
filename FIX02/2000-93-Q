@@ -1,6 +1,281 @@
 TotalCostTab initialized
-VM523:66 Fetching data from: /TotalCost/GetTotalCostInEstimates?id=4524&gridType=VehicleGrid
-TotalCost/GetTotalCostInEstimates?id=4524&gridType=VehicleGrid:1  Failed to load resource: the server responded with a status of 500 (Internal Server Error)
+VM523:66 Fetching data from: /TotalCost/GetTotalCostInEstimates?id=4523&gridType=VehicleGrid
+TotalCost/GetTotalCostInEstimates?id=4523&gridType=VehicleGrid:1  Failed to load resource: the server responded with a status of 500 (Internal Server Error)
 VM523:88 Error fetching cost data: error Internal Server Error
+error @ VM523:88
+{"error":"Cannot perform an aggregate function on an expression containing an aggregate or a subquery.","stack":"   at Microsoft.Data.SqlClient.SqlCommand.<>c.<ExecuteDbDataReaderAsync>b__195_0(Task`1 result)\r\n   at System.Threading.Tasks.ContinuationResultTaskFromResultTask`2.InnerInvoke()\r\n   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)\r\n--- End of stack trace from previous location ---\r\n   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)\r\n   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)\r\n--- End of stack trace from previous location ---\r\n   at Dapper.SqlMapper.QueryRowAsync[T](IDbConnection cnn, Row row, Type effectiveType, CommandDefinition command) in /_/Dapper/SqlMapper.Async.cs:line 489\r\n   at BCES.Controllers.Parts.TotalCostController.GetTotalCostInVehicleEstimatesWithDetails(String id, String gridType) in C:\\ttc2020\\0105-Cost Estimate System\\Dev\\CES\\Controllers\\Parts\\TotalCostController.cs:line 112\r\n   at BCES.Controllers.Parts.TotalCostController.GetTotalCostInEstimates(DataSourceRequest request, String id, String gridType) in C:\\ttc2020\\0105-Cost Estimate System\\Dev\\CES\\Controllers\\Parts\\TotalCostController.cs:line 49"}
 
-{"error":"Cannot perform an aggregate function on an expression containing an aggregate or a subquery.\r\nCannot perform an aggregate function on an expression containing an aggregate or a subquery.\r\nCannot perform an aggregate function on an expression containing an aggregate or a subquery.","stack":"   at Microsoft.Data.SqlClient.SqlCommand.<>c.<ExecuteDbDataReaderAsync>b__195_0(Task`1 result)\r\n   at System.Threading.Tasks.ContinuationResultTaskFromResultTask`2.InnerInvoke()\r\n   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)\r\n--- End of stack trace from previous location ---\r\n   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)\r\n   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)\r\n--- End of stack trace from previous location ---\r\n   at Dapper.SqlMapper.QueryAsync[T](IDbConnection cnn, Type effectiveType, CommandDefinition command) in /_/Dapper/SqlMapper.Async.cs:line 434\r\n   at BCES.Controllers.Parts.TotalCostController.GetTotalCostInVehicleEstimatesWithDetails(String id, String gridType) in C:\\ttc2020\\0105-Cost Estimate System\\Dev\\CES\\Controllers\\Parts\\TotalCostController.cs:line 104\r\n   at BCES.Controllers.Parts.TotalCostController.GetTotalCostInEstimates(DataSourceRequest request, String id, String gridType) in C:\\ttc2020\\0105-Cost Estimate System\\Dev\\CES\\Controllers\\Parts\\TotalCostController.cs:line 50"}
+my code :
+ private async Task<IEnumerable<TotalCostInEstimates>> GetTotalCostInVehicleEstimatesWithDetails(string id, string gridType)
+ {
+     try
+     {
+         var result = new List<TotalCostInEstimates>();
+         var vehicleId = id;
+
+         // STEP 1: Get Vehicle Details
+         var vehicleDetails = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(
+             @"SELECT ISNULL(ProjDesc, 'N/A') AS ProjDesc, ISNULL(VehSeriesCode, 'N/A') AS VehSeriesCode 
+               FROM SBCES.VehicleList WHERE VehicleListId = @Id",
+             new { Id = vehicleId });
+
+         // STEP 2: Get Material Costs
+         var materialCosts = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(
+             @"
+             SELECT 
+                 ISNULL((SELECT SUM(TRY_CAST(SBCES.FinalCost(CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(SCP.MmsNewCost, 0), 0) AS DECIMAL(18,2)))
+                         FROM SBCES.ScPartsUsed SUS
+                         LEFT JOIN SBCES.StockCodedParts SCP ON SUS.MMSStockCode = SCP.MMSStockCode
+                         WHERE SUS.LinkCode = @Id AND SUS.LinkType = 'BUS' AND SUS.RebuiltPart = 'N'), 0) AS SCPartsMaterialCost,
+                 ISNULL((SELECT SUM(TRY_CAST(SBCES.FinalCost(CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(SUS.MmsCost, 0), 0) AS DECIMAL(18,2)))
+                         FROM SBCES.ScPartsUsed SUS
+                         LEFT JOIN SBCES.StockCodedParts SCP ON SUS.MMSStockCode = SCP.MMSStockCode
+                         WHERE SUS.LinkCode = @Id AND SUS.LinkType = 'BUS' AND SUS.RebuiltPart = 'Y'), 0) AS RBPartsMaterialCost,
+                 ISNULL((SELECT SUM(TRY_CAST(SBCES.FinalCost(CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(NSUS.Cost, 0), 0) AS DECIMAL(18,2)))
+                         FROM SBCES.NscPartsUsed NSUS 
+                         WHERE NSUS.LinkCode = @Id AND NSUS.LinkType = 'BUS'), 0) AS NSCSCPartsMaterialCost,
+                 ISNULL((SELECT SUM(CoreCost) FROM SBCES.SCPartsUsed WHERE LinkCode = @Id AND LinkType = 'BUS'), 0) AS CoreCost",
+             new { Id = vehicleId });
+
+         // STEP 3: Get Labour Costs
+         var labourCosts = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(
+             @"
+             DECLARE @NonProductiveAdj DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'), ',', '.') AS DECIMAL(18,6));
+             DECLARE @Fringe DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'FRINGE'), '0'), ',', '.') AS DECIMAL(18,6));
+             DECLARE @Benefit DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'BENEFIT'), '0'), ',', '.') AS DECIMAL(18,6));
+             DECLARE @Overhead DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'OVERHEAD'), '0'), ',', '.') AS DECIMAL(18,6));
+             DECLARE @TaxRate DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'TAX_RATE'), '0'), ',', '.') AS DECIMAL(18,6));
+
+             SELECT 
+                 ISNULL(SUM(
+                     ((CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                       CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                       * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) 
+                       / @NonProductiveAdj
+                       * ISNULL((SELECT TOP 1 ES.RatePerHour FROM CES.SBCES.EmployeeSalaries ES
+                                 WHERE ES.WageGroup = (SELECT TOP 1 EC.WageGroup FROM CES.SBCES.EmplClass EC
+                                                       WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')), 0)
+                 ), 0) AS TotalLabourCost,
+                 @Fringe AS FringeRate,
+                 @Benefit AS BenefitRate,
+                 @Overhead AS OverheadRate,
+                 @TaxRate AS TaxRate
+             FROM SBCES.EmployeeLabour EL
+             WHERE EL.LinkNumber = @Id AND EL.TypeId = 'BUS'",
+             new { Id = vehicleId });
+
+         // STEP 4: Get Labour Tasks
+         var labourTasks = await _dbConnection.QueryAsync<LabourTaskSummary>(
+             @"
+             DECLARE @NonProductiveAdj DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'), ',', '.') AS DECIMAL(18,6));
+
+             SELECT 
+                 ISNULL(EL.Task, 'Unnamed Task') AS Task,
+                 ISNULL(EL.LabourDefn, 'N/A') AS LabourDefinition,
+                 COUNT(*) AS Count,
+                 SUM(CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                     CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) AS Hours,
+                 SUM(((CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                     CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                     * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100)) AS EffectiveHours,
+                 SUM(((CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                     CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                     / @NonProductiveAdj)) AS AdjustedHours,
+                 ISNULL((SELECT TOP 1 ES.RatePerHour FROM CES.SBCES.EmployeeSalaries ES
+                         WHERE ES.WageGroup = (SELECT TOP 1 EC.WageGroup FROM CES.SBCES.EmplClass EC
+                                               WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')), 0) AS RatePerHour,
+                 SUM(((CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+                     CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60)
+                     * CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) / 100) 
+                     / @NonProductiveAdj
+                     * ISNULL((SELECT TOP 1 ES.RatePerHour FROM CES.SBCES.EmployeeSalaries ES
+                             WHERE ES.WageGroup = (SELECT TOP 1 EC.WageGroup FROM CES.SBCES.EmplClass EC
+                                                   WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')), 0)) AS TotalCost
+             FROM SBCES.EmployeeLabour EL
+             WHERE EL.LinkNumber = @Id AND EL.TypeId = 'BUS'
+             GROUP BY EL.Task, EL.LabourDefn
+             ORDER BY EL.Task",
+             new { Id = vehicleId });
+
+         // STEP 5: Get Stock Parts (Material Lines)
+         var stockParts = await _dbConnection.QueryAsync<dynamic>(
+             @"
+             SELECT 
+                 'Stock' AS Type,
+                 SUS.MMSStockCode AS StockCode,
+                 ISNULL(SCP.SCDescription, 'N/A') AS Description,
+                 SUS.QtyReqd AS Quantity,
+                 ISNULL(SCP.MmsNewCost, 0) AS UnitCost,
+                 SUS.PercentUsage,
+                 TRY_CAST(SBCES.FinalCost(CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(SCP.MmsNewCost, 0), 0) AS DECIMAL(18,2)) AS TotalCost,
+                 '' AS Supplier
+             FROM SBCES.ScPartsUsed SUS
+             LEFT JOIN SBCES.StockCodedParts SCP ON SUS.MMSStockCode = SCP.MMSStockCode
+             WHERE SUS.LinkCode = @Id AND SUS.LinkType = 'BUS' AND SUS.RebuiltPart = 'N'
+             ORDER BY SUS.MMSStockCode",
+             new { Id = vehicleId });
+
+         // STEP 6: Get Rebuilt Parts (Material Lines)
+         var rebuiltParts = await _dbConnection.QueryAsync<dynamic>(
+             @"
+             SELECT 
+                 'Rebuilt' AS Type,
+                 SUS.MMSStockCode AS StockCode,
+                 ISNULL(SCP.SCDescription, 'N/A') AS Description,
+                 SUS.QtyReqd AS Quantity,
+                 ISNULL(SUS.MmsCost, 0) AS UnitCost,
+                 SUS.PercentUsage,
+                 TRY_CAST(SBCES.FinalCost(CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(SUS.MmsCost, 0), 0) AS DECIMAL(18,2)) AS TotalCost,
+                 '' AS Supplier
+             FROM SBCES.ScPartsUsed SUS
+             LEFT JOIN SBCES.StockCodedParts SCP ON SUS.MMSStockCode = SCP.MMSStockCode
+             WHERE SUS.LinkCode = @Id AND SUS.LinkType = 'BUS' AND SUS.RebuiltPart = 'Y'
+             ORDER BY SUS.MMSStockCode",
+             new { Id = vehicleId });
+
+         // STEP 7: Get Non-Stock Parts (Material Lines)
+         var nonStockParts = await _dbConnection.QueryAsync<dynamic>(
+             @"
+             SELECT 
+                 'Non-Stock' AS Type,
+                 NSUS.OrigSuppNum AS StockCode,
+                 ISNULL(NSUS.OrigSupplierName, 'N/A') AS Description,
+                 NSUS.QtyReqd AS Quantity,
+                 ISNULL(NSUS.Cost, 0) AS UnitCost,
+                 NSUS.PercentUsage,
+                 TRY_CAST(SBCES.FinalCost(CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(NSUS.Cost, 0), 0) AS DECIMAL(18,2)) AS TotalCost,
+                 ISNULL(NSUS.OrigSupplierName, '') AS Supplier
+             FROM SBCES.NscPartsUsed NSUS
+             WHERE NSUS.LinkCode = @Id AND NSUS.LinkType = 'BUS'
+             ORDER BY NSUS.OrigSuppNum",
+             new { Id = vehicleId });
+
+         // STEP 8: Build the result object
+         var totalCost = new TotalCostInEstimates
+         {
+             LinkCode = vehicleId,
+             VehicleDescription = vehicleDetails?.ProjDesc ?? "N/A",
+             VehicleSeries = vehicleDetails?.VehSeriesCode ?? "N/A",
+
+             // Material Costs
+             SCPartsMaterialCost = Convert.ToDecimal(materialCosts?.SCPartsMaterialCost ?? 0),
+             NSCSCPartsMaterialCost = Convert.ToDecimal(materialCosts?.NSCSCPartsMaterialCost ?? 0),
+             RBPartsMaterialCost = Convert.ToDecimal(materialCosts?.RBPartsMaterialCost ?? 0),
+             CoreCost = Convert.ToDecimal(materialCosts?.CoreCost ?? 0),
+
+             // Material Summary
+             TotalStockPartsCount = stockParts.Count(),
+             TotalNonStockPartsCount = nonStockParts.Count(),
+             TotalRebuiltPartsCount = rebuiltParts.Count(),
+         };
+
+         // Calculate material totals
+         var scPartsCost = totalCost.SCPartsMaterialCost;
+         var rbPartsCost = totalCost.RBPartsMaterialCost;
+         var nscPartsCost = totalCost.NSCSCPartsMaterialCost;
+         var materialTotalNoTax = scPartsCost + rbPartsCost + nscPartsCost;
+         var taxRate = Convert.ToDecimal(labourCosts?.TaxRate ?? 0);
+         var materialTax = materialTotalNoTax * taxRate;
+         var materialTotalWithTax = materialTotalNoTax + materialTax;
+
+         totalCost.MaterialTotalCostNoTax = materialTotalNoTax;
+         totalCost.MaterialTotalTaxAmount = materialTax;
+         totalCost.MaterialTotalWithTax = materialTotalWithTax;
+
+         // Calculate averages
+         totalCost.AverageStockPartCost = stockParts.Any() ? Convert.ToDecimal(stockParts.Average(p => (decimal?)p.UnitCost) ?? 0) : 0;
+         totalCost.AverageNonStockPartCost = nonStockParts.Any() ? Convert.ToDecimal(nonStockParts.Average(p => (decimal?)p.UnitCost) ?? 0) : 0;
+         totalCost.AverageRebuiltPartCost = rebuiltParts.Any() ? Convert.ToDecimal(rebuiltParts.Average(p => (decimal?)p.UnitCost) ?? 0) : 0;
+
+         // Labour Costs
+         var totalLabourCost = Convert.ToDecimal(labourCosts?.TotalLabourCost ?? 0);
+         var fringeRate = Convert.ToDecimal(labourCosts?.FringeRate ?? 0);
+         var benefitRate = Convert.ToDecimal(labourCosts?.BenefitRate ?? 0);
+         var overheadRate = Convert.ToDecimal(labourCosts?.OverheadRate ?? 0);
+
+         var labourFringe = totalLabourCost * fringeRate;
+         var labourBenefits = (totalLabourCost + labourFringe) * benefitRate;
+         var blendedFringeBenefitPercent = totalLabourCost > 0 ? ((labourFringe + labourBenefits) / totalLabourCost) * 100 : 0;
+         var blendedFringeBenefitCost = labourFringe + labourBenefits;
+         var labourOverhead = totalLabourCost * overheadRate;
+         var finalLabourCost = totalLabourCost + labourFringe + labourBenefits + labourOverhead;
+
+         totalCost.TotalLabourCost = totalLabourCost;
+         totalCost.LabourFringe = labourFringe;
+         totalCost.LabourBenefits = labourBenefits;
+         totalCost.BlendedFringeBenefitPercent = blendedFringeBenefitPercent;
+         totalCost.BlendedFringeBenefitCost = blendedFringeBenefitCost;
+         totalCost.LabourOverhead = labourOverhead;
+         totalCost.FinalLabourCost = finalLabourCost;
+
+         // Labour Hours Summary
+         totalCost.LabourTasks = labourTasks.ToList();
+         totalCost.TotalLabourHours = labourTasks.Sum(t => t.Hours);
+         totalCost.TotalEffectiveHours = labourTasks.Sum(t => t.EffectiveHours);
+         totalCost.TotalAdjustedHours = labourTasks.Sum(t => t.AdjustedHours);
+
+         // Material Lines
+         var materialLines = new List<MaterialLineItem>();
+         foreach (var p in stockParts)
+         {
+             materialLines.Add(new MaterialLineItem
+             {
+                 Type = p.Type,
+                 StockCode = p.StockCode,
+                 Description = p.Description,
+                 Quantity = Convert.ToDecimal(p.Quantity ?? 0),
+                 UnitCost = Convert.ToDecimal(p.UnitCost ?? 0),
+                 PercentUsage = Convert.ToDecimal(p.PercentUsage ?? 0),
+                 TotalCost = Convert.ToDecimal(p.TotalCost ?? 0),
+                 Supplier = p.Supplier
+             });
+         }
+         foreach (var p in rebuiltParts)
+         {
+             materialLines.Add(new MaterialLineItem
+             {
+                 Type = p.Type,
+                 StockCode = p.StockCode,
+                 Description = p.Description,
+                 Quantity = Convert.ToDecimal(p.Quantity ?? 0),
+                 UnitCost = Convert.ToDecimal(p.UnitCost ?? 0),
+                 PercentUsage = Convert.ToDecimal(p.PercentUsage ?? 0),
+                 TotalCost = Convert.ToDecimal(p.TotalCost ?? 0),
+                 Supplier = p.Supplier
+             });
+         }
+         foreach (var p in nonStockParts)
+         {
+             materialLines.Add(new MaterialLineItem
+             {
+                 Type = p.Type,
+                 StockCode = p.StockCode,
+                 Description = p.Description,
+                 Quantity = Convert.ToDecimal(p.Quantity ?? 0),
+                 UnitCost = Convert.ToDecimal(p.UnitCost ?? 0),
+                 PercentUsage = Convert.ToDecimal(p.PercentUsage ?? 0),
+                 TotalCost = Convert.ToDecimal(p.TotalCost ?? 0),
+                 Supplier = p.Supplier
+             });
+         }
+
+         totalCost.MaterialLines = materialLines
+             .Where(m => m.TotalCost > 0)
+             .OrderBy(m => m.Type)
+             .ThenBy(m => m.StockCode)
+             .ToList();
+
+         // Grand Totals
+         totalCost.TotalWithoutTax = finalLabourCost + materialTotalNoTax;
+         totalCost.TotalWithTax = finalLabourCost + materialTotalWithTax;
+
+         result.Add(totalCost);
+         return result;
+     }
+     catch (Exception ex)
+     {
+         Console.WriteLine($"Error in GetTotalCostInVehicleEstimatesWithDetails: {ex.Message}");
+         Console.WriteLine($"Stack Trace: {ex.StackTrace}");
+         throw;
+     }
+ }
