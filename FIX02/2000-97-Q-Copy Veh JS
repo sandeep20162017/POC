@@ -1,0 +1,79 @@
+When user closes popup and opens again, newVehSeriesCode drop down shows cached value (previously selected). For each new open it should set to "-- Select Vehicle Series --"
+ <div id="copyEstimateDialog" style="display:none;">
+     <div class="k-form">
+         <div class="k-form-field"><label>Estimate #</label><input id="vehicleListId" class="k-textbox" readonly /></div>
+         <div class="k-form-field"><label>Old Series</label><input id="oldVehSeriesCode" class="k-textbox" readonly /></div>
+         <div class="k-form-field"><label>Old Description</label><input id="oldprojDesc" class="k-textbox" readonly /></div>
+         <div class="k-form-field">
+             <label>New Vehicle Series<span style="color:red">*</span></label>@* <input id="newVehSeriesCode" class="k-textbox" required /></div> *@
+             @(Html.Kendo().DropDownList()
+                             .Name("newVehSeriesCode")
+                             .DataTextField("VehSeriesCode")        // display text
+                             .DataValueField("VehSeriesCode")      // actual value posted
+                             .OptionLabel("-- Select Vehicle Series --")
+                             .Filter("contains")
+                             .DataSource(source =>
+                             {
+                                 source.Read(read =>
+                                 {
+                                     read.Url("/AutoComplete/GetVehSeries").Type(HttpVerbs.Get); // leading slash
+                                 })
+                                 .ServerFiltering(false);
+                             })
+                             .HtmlAttributes(new { required = "required", style = "width:100%" })
+                             )
+                             ....
+// ── Copy estimate handler
+window.onCopyEstimate = function (e) {
+    e.preventDefault();
+    var grid = $("#VehicleGrid").data("kendoGrid");
+    var item = grid.dataItem($(e.currentTarget).closest("tr"));
+    var win = $("#copyEstimateDialog").kendoWindow({
+        title: "Copy Estimate",
+        modal: true,
+        width: 400,
+        visible: false
+    }).data("kendoWindow");
+
+    $("#vehicleListId").val(item.VehicleListId);
+    $("#oldVehSeriesCode").val(item.VehSeriesCode);
+    $("#oldprojDesc").val(item.ProjDesc);
+    $("#newVehSeriesCode, #newprojDesc").val("");
+
+    win.center().open();
+
+    // Wire up copy button
+    $("#copyEstimateBtn").off("click").on("click", function () {
+        var payload = {
+            vehicleListId: $("#vehicleListId").val(),
+            oldVehSeriesCode: $("#oldVehSeriesCode").val(),
+            newVehSeriesCode: $("#newVehSeriesCode").val(),
+            oldprojDesc: $("#oldprojDesc").val(),
+            newprojDesc: $("#newprojDesc").val()
+        };
+
+        if (!payload.newVehSeriesCode || !payload.newprojDesc) {
+            return kendo.alert("Please fill required fields.");
+        }
+
+        $.ajax({
+            url: '@Url.Action("CopyEstimate", "Vehicles")',
+            type: 'POST',
+            contentType: "application/json",
+            data: JSON.stringify(payload),
+            success: function (response) {
+                if (response.success) {
+                    kendo.alert("Estimate copied successfully! New ID: " + response.newVehicleListId);
+                    $("#VehicleGrid").data("kendoGrid").dataSource.read();
+                    win.close();
+                } else {
+                    kendo.alert("Copy failed: " + response.message);
+                }
+            }
+        });
+    });
+
+    $("#cancelCopyBtn").off("click").on("click", function () {
+        win.close();
+    });
+};
