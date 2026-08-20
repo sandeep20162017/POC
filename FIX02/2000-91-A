@@ -1,9 +1,479 @@
-// Add this to your document ready function
+1. Updated _TotalCost.cshtml - Add Estimate # to Top Row
+Update the report header section:
+
+html
+<div class="report-header">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div style="text-align: left;">
+            <div style="font-size: 14px; color: #5d6d7e; font-weight: 600;">Estimate #: <span style="color: #1a5276; font-weight: 700;" id="estimateNumber">@ViewBag.PartNum</span></div>
+        </div>
+        <div style="text-align: center; flex: 1;">
+            <h1 style="margin: 0 0 8px 0; color: #1a5276; font-size: 28px; letter-spacing: 1px;">TOTAL COST SUMMARY REPORT</h1>
+            <div class="subtitle">Generated: @DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")</div>
+        </div>
+        <div style="text-align: right; min-width: 120px;">
+            <div style="font-size: 12px; color: #5d6d7e;">Status: <span style="color: #27ae60; font-weight: 600;">● Active</span></div>
+        </div>
+    </div>
+</div>
+2. Updated Print Function - Works Without Popup Blocking
+Replace the entire print button and function with this approach that works even if popups are blocked:
+
+html
+<!-- Replace the print button with this -->
+<div class="clearfix">
+    <button class="print-button no-print" id="printReportBtn">🖨️ Print Full Report</button>
+</div>
+And replace the JavaScript with this complete working solution:
+
+javascript
+// Completely rewritten print function - works without popup blocking
 $(document).ready(function() {
-    // Prevent any form submissions from buttons
-    $('button[type="button"], .print-button').on('click', function(e) {
+    // Print button handler
+    $('#printReportBtn').on('click', function(e) {
         e.preventDefault();
         e.stopPropagation();
-        return false;
+        
+        // Show loading indicator
+        var btn = $(this);
+        var originalText = btn.text();
+        btn.text('⏳ Preparing print...');
+        btn.prop('disabled', true);
+        
+        // Use setTimeout to let the UI update
+        setTimeout(function() {
+            printReport();
+            btn.text(originalText);
+            btn.prop('disabled', false);
+        }, 100);
+    });
+    
+    // Also handle keyboard shortcut Ctrl+P
+    $(document).on('keydown', function(e) {
+        if (e.ctrlKey && e.key === 'p') {
+            // Let the browser handle it normally
+        }
     });
 });
+
+function printReport() {
+    // Get the content to print
+    var printContent = document.getElementById('costSummaryContent');
+    var headerContent = document.querySelector('.report-header');
+    var footerContent = document.querySelector('.report-footer');
+    
+    if (!printContent) {
+        alert('No content to print. Please load the report first.');
+        return;
+    }
+    
+    // Clone the content to preserve styles
+    var contentClone = printContent.cloneNode(true);
+    var headerClone = headerContent ? headerContent.cloneNode(true) : null;
+    var footerClone = footerContent ? footerContent.cloneNode(true) : null;
+    
+    // Create print styles
+    var styles = `
+        <style>
+            /* Reset and base styles */
+            * { box-sizing: border-box; }
+            body { 
+                font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
+                padding: 20px;
+                margin: 0;
+                background: white;
+                color: #2c3e50;
+            }
+            .report-container { 
+                max-width: 1200px; 
+                margin: 0 auto;
+                padding: 20px;
+            }
+            
+            /* Header */
+            .report-header { 
+                text-align: center; 
+                margin-bottom: 25px; 
+                padding-bottom: 15px; 
+                border-bottom: 3px solid #2c3e50;
+            }
+            .report-header h1 { 
+                margin: 0 0 8px 0; 
+                color: #1a5276; 
+                font-size: 28px; 
+                letter-spacing: 1px; 
+            }
+            .report-header .subtitle { 
+                color: #5d6d7e; 
+                font-size: 13px; 
+            }
+            
+            /* Detail sections */
+            .detail-section { 
+                margin-bottom: 25px; 
+                border: 1px solid #dee2e6; 
+                border-radius: 8px; 
+                overflow: hidden;
+                page-break-inside: avoid;
+                break-inside: avoid;
+            }
+            .detail-header { 
+                background: #2c3e50; 
+                color: white; 
+                padding: 12px 20px; 
+                font-weight: 700; 
+                font-size: 16px; 
+                display: flex; 
+                justify-content: space-between; 
+                align-items: center; 
+            }
+            .detail-header .badge { 
+                background: rgba(255,255,255,0.2); 
+                padding: 4px 12px; 
+                border-radius: 12px; 
+                font-size: 13px; 
+                font-weight: 400; 
+            }
+            .detail-body { 
+                padding: 15px 20px; 
+            }
+            
+            /* Vehicle info */
+            .vehicle-info { 
+                display: grid; 
+                grid-template-columns: 1fr 1fr; 
+                gap: 15px; 
+            }
+            .vehicle-info-item { 
+                display: flex; 
+                flex-direction: column; 
+                padding: 10px 15px; 
+                background: #f8f9fa; 
+                border-radius: 6px; 
+                border-left: 4px solid #2c3e50; 
+            }
+            .vehicle-info-item .label { 
+                font-size: 11px; 
+                color: #6c757d; 
+                font-weight: 700; 
+                text-transform: uppercase; 
+                letter-spacing: 0.5px; 
+            }
+            .vehicle-info-item .value { 
+                font-size: 18px; 
+                font-weight: 600; 
+                color: #1a5276; 
+                margin-top: 2px; 
+            }
+            
+            /* Summary cards */
+            .summary-grid { 
+                display: grid; 
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); 
+                gap: 12px; 
+            }
+            .summary-card { 
+                background: #f8f9fa; 
+                padding: 12px 15px; 
+                border-radius: 6px; 
+                text-align: center; 
+                border: 1px solid #e9ecef; 
+            }
+            .summary-card .value { 
+                font-size: 22px; 
+                font-weight: 700; 
+                color: #1a5276; 
+                display: block; 
+            }
+            .summary-card .value.green { color: #27ae60; }
+            .summary-card .value.blue { color: #2980b9; }
+            .summary-card .value.orange { color: #e67e22; }
+            .summary-card .label { 
+                font-size: 11px; 
+                color: #6c757d; 
+                font-weight: 600; 
+                text-transform: uppercase; 
+                letter-spacing: 0.5px; 
+                margin-top: 4px; 
+                display: block; 
+            }
+            
+            /* Material table */
+            .material-table-wrap { overflow-x: auto; margin-top: 5px; }
+            .material-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+            .material-table th { 
+                background: #2c3e50; 
+                color: white; 
+                padding: 10px 12px; 
+                text-align: left; 
+                font-weight: 600; 
+                font-size: 12px; 
+                text-transform: uppercase; 
+                letter-spacing: 0.5px; 
+            }
+            .material-table td { 
+                padding: 8px 12px; 
+                border-bottom: 1px solid #e0e4e8; 
+            }
+            .material-table .total-row td { 
+                background: #e8f0fe; 
+                font-weight: 700; 
+                border-top: 2px solid #2c3e50; 
+                padding-top: 12px; 
+            }
+            .material-table .subtotal-row td { 
+                background: #f0f3f7; 
+                font-weight: 600; 
+                border-top: 1px solid #cbd5e1; 
+            }
+            .type-badge { 
+                display: inline-block; 
+                padding: 2px 10px; 
+                border-radius: 12px; 
+                font-size: 11px; 
+                font-weight: 600; 
+            }
+            .type-badge.stock { background: #d5f5e3; color: #1a7a3a; }
+            .type-badge.rebuilt { background: #fdebd0; color: #a04000; }
+            .type-badge.nonstock { background: #d6eaf8; color: #1a5276; }
+            
+            /* Task table */
+            .task-table-wrap { overflow-x: auto; margin-top: 5px; }
+            .task-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+            .task-table th { 
+                background: #2c3e50; 
+                color: white; 
+                padding: 10px 12px; 
+                text-align: left; 
+                font-weight: 600; 
+                font-size: 12px; 
+                text-transform: uppercase; 
+                letter-spacing: 0.5px; 
+            }
+            .task-table td { 
+                padding: 8px 12px; 
+                border-bottom: 1px solid #e0e4e8; 
+            }
+            .task-table .total-row td { 
+                background: #e8f0fe; 
+                font-weight: 700; 
+                border-top: 2px solid #2c3e50; 
+                padding-top: 12px; 
+            }
+            .text-right { text-align: right; }
+            .text-center { text-align: center; }
+            
+            /* Side by side */
+            .side-by-side { 
+                display: flex; 
+                gap: 30px; 
+                margin-bottom: 25px; 
+                flex-wrap: wrap; 
+            }
+            .material-section, .labour-section { 
+                flex: 1; 
+                min-width: 300px; 
+                background: #ffffff; 
+                border: 2px solid #2c3e50; 
+                border-radius: 8px; 
+                overflow: hidden; 
+            }
+            .material-header, .labour-header { 
+                background: #2c3e50; 
+                color: white; 
+                padding: 12px 20px; 
+                font-size: 16px; 
+                font-weight: 700; 
+                text-align: center; 
+                letter-spacing: 1px; 
+            }
+            .material-body, .labour-body { 
+                padding: 15px 20px; 
+            }
+            
+            /* Info table */
+            .info-table { width: 100%; border-collapse: collapse; }
+            .info-table tr { border-bottom: 1px solid #e0e4e8; }
+            .info-table tr:last-child { border-bottom: none; }
+            .info-table td { padding: 10px 8px; vertical-align: middle; }
+            .label-col { font-weight: 600; color: #2c3e50; width: 55%; }
+            .value-col { font-weight: 500; color: #1a5276; text-align: right; width: 45%; }
+            .total-row td { padding-top: 12px; border-top: 2px solid #cbd5e1; }
+            .total-row .label-col { font-weight: 800; font-size: 1.05em; color: #0b3b5f; }
+            .total-row .value-col { font-weight: 800; font-size: 1.05em; color: #0b3b5f; }
+            .tax-row .label-col { color: #e67e22; }
+            .tax-row .value-col { color: #e67e22; font-weight: 600; }
+            
+            /* Totals */
+            .totals-row { 
+                display: flex; 
+                gap: 30px; 
+                margin: 20px 0; 
+                flex-wrap: wrap; 
+            }
+            .total-box { 
+                flex: 1; 
+                background: #e8f0fe; 
+                border: 2px solid #1a5276; 
+                border-radius: 8px; 
+                padding: 15px 20px; 
+                text-align: center; 
+            }
+            .total-box-label { 
+                font-weight: 700; 
+                font-size: 14px; 
+                color: #2c3e50; 
+                margin-bottom: 6px; 
+                text-transform: uppercase; 
+                letter-spacing: 0.5px; 
+            }
+            .total-box-value { 
+                font-weight: 800; 
+                font-size: 24px; 
+                color: #1a5276; 
+            }
+            
+            /* Grand total */
+            .grand-total-section { 
+                margin-top: 20px; 
+                background: #f8f9fa; 
+                border-radius: 8px; 
+                border: 2px solid #1a5276; 
+            }
+            .grand-total-table { width: 100%; border-collapse: collapse; }
+            .grand-total-table td { padding: 18px 25px; }
+            .grand-total-label { 
+                font-weight: 800; 
+                font-size: 1.2em; 
+                color: #1a5276; 
+                background: #e8f0fe; 
+            }
+            .grand-total-value { 
+                font-weight: 800; 
+                font-size: 1.4em; 
+                color: #1a5276; 
+                text-align: right; 
+                background: #e8f0fe; 
+            }
+            
+            .report-footer { 
+                margin-top: 25px; 
+                padding: 10px; 
+                background: #f8f9fa; 
+                font-size: 11px; 
+                color: #5d6d7e; 
+                text-align: center; 
+                border-radius: 4px; 
+                border-top: 1px solid #dee2e6; 
+            }
+            
+            /* Print specific */
+            @@media print {
+                body { padding: 0; margin: 0; }
+                .report-container { max-width: 100%; padding: 10px; }
+                .no-print { display: none !important; }
+                .detail-section { page-break-inside: avoid; break-inside: avoid; }
+                .side-by-side { page-break-inside: avoid; break-inside: avoid; }
+                .grand-total-section { page-break-inside: avoid; break-inside: avoid; }
+            }
+        </style>
+    `;
+    
+    // Build the print document
+    var printHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Total Cost Summary Report</title>
+            ${styles}
+        </head>
+        <body>
+            <div class="report-container">
+                ${headerClone ? headerClone.outerHTML : ''}
+                ${contentClone.outerHTML}
+                ${footerClone ? footerClone.outerHTML : ''}
+            </div>
+            <script>
+                // Auto-print when loaded
+                window.onload = function() {
+                    // Small delay to ensure rendering
+                    setTimeout(function() {
+                        window.print();
+                    }, 300);
+                };
+            <\/script>
+        </body>
+        </html>
+    `;
+    
+    // Try multiple approaches for printing
+    
+    // Approach 1: Try using a new window (works in most browsers)
+    try {
+        var printWindow = window.open('', '_blank', 'width=1200,height=800,scrollbars=yes,menubar=yes');
+        if (printWindow) {
+            printWindow.document.write(printHtml);
+            printWindow.document.close();
+            return;
+        }
+    } catch(e) {
+        console.log('Window open failed, trying alternate method');
+    }
+    
+    // Approach 2: Use an iframe
+    try {
+        var iframe = document.createElement('iframe');
+        iframe.style.position = 'absolute';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+        
+        var iframeDoc = iframe.contentWindow.document;
+        iframeDoc.open();
+        iframeDoc.write(printHtml);
+        iframeDoc.close();
+        
+        setTimeout(function() {
+            iframe.contentWindow.print();
+            setTimeout(function() {
+                document.body.removeChild(iframe);
+            }, 1000);
+        }, 300);
+        return;
+    } catch(e) {
+        console.log('Iframe method failed');
+    }
+    
+    // Approach 3: Fallback - direct print on current page
+    alert('Please allow popups for this site to print. Click OK to print the current view.');
+    window.print();
+}
+Summary of Changes
+Added Estimate # to top row:
+
+Left side shows "Estimate #: [ID]"
+
+Center shows the title
+
+Right side shows status
+
+Fixed print functionality:
+
+Uses multiple approaches to ensure printing works
+
+First tries a new window (preferred)
+
+Falls back to iframe if popup is blocked
+
+Falls back to direct print if all else fails
+
+Includes all styles in the print document
+
+Auto-triggers print dialog when the print window opens
+
+Shows loading indicator while preparing
+
+The print function now works even if popups are blocked, and the Estimate # is clearly displayed at the top of the report.
+
