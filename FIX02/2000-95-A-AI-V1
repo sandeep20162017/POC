@@ -1,0 +1,1345 @@
+Step 1: Create ASP.NET Core 6 MVC Project
+Open Visual Studio 2022
+
+File → New → Project
+
+Select "ASP.NET Core Web App (Model-View-Controller)"
+
+Name: BCES.AI
+
+Location: Your preferred directory
+
+Framework: .NET 6.0 (Long-term support)
+
+Configure for HTTPS: Yes
+
+Click Create
+
+Step 2: Install NuGet Packages
+Run these commands in Package Manager Console:
+
+powershell
+Install-Package Dapper
+Install-Package Microsoft.Data.SqlClient
+Install-Package Telerik.UI.for.AspNet.Core
+Install-Package Microsoft.SemanticKernel -Version 1.0.1
+Install-Package System.Text.Json
+Step 3: Project Structure
+Create this folder structure in your project:
+
+text
+BCES.AI/
+├── Agents/
+│   ├── IAgent.cs
+│   ├── BaseAgent.cs
+│   ├── SqlAgent.cs
+│   ├── RebuiltPartsAgent.cs
+│   └── LabourAgent.cs
+├── Services/
+│   ├── OllamaClient.cs
+│   ├── SchemaProvider.cs
+│   └── Orchestrator.cs
+├── Models/
+│   └── ChatModel.cs
+├── Controllers/
+│   └── ChatController.cs
+├── Views/
+│   └── Chat/
+│       └── Index.cshtml
+├── wwwroot/
+│   └── css/
+│       └── chat.css
+└── schema.json (generated)
+Complete Implementation
+Step 4: Schema Extraction Console App
+Create a new file SchemaExtractor.cs in root:
+
+csharp
+using Dapper;
+using Microsoft.Data.SqlClient;
+using System.Text.Json;
+
+namespace BCES.AI
+{
+    public static class SchemaExtractor
+    {
+        public static async Task GenerateSchemaJson(string connectionString, string outputPath = "schema.json")
+        {
+            try
+            {
+                using var conn = new SqlConnection(connectionString);
+                await conn.OpenAsync();
+
+                // Get all tables
+                var tables = await conn.QueryAsync<string>(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'"
+                );
+
+                var schemaDict = new Dictionary<string, List<string>>();
+
+                foreach (var table in tables)
+                {
+                    var columns = await conn.QueryAsync<string>(
+                        @"SELECT COLUMN_NAME 
+                          FROM INFORMATION_SCHEMA.COLUMNS 
+                          WHERE TABLE_NAME = @TableName 
+                          ORDER BY ORDINAL_POSITION",
+                        new { TableName = table }
+                    );
+
+                    schemaDict[table] = columns.ToList();
+                }
+
+                var options = new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                };
+
+                var json = JsonSerializer.Serialize(schemaDict, options);
+                await File.WriteAllTextAsync(outputPath, json);
+
+                Console.WriteLine($"Schema generated successfully at {outputPath}");
+                Console.WriteLine($"Tables found: {schemaDict.Count}");
+                foreach (var table in schemaDict)
+                {
+                    Console.WriteLine($"- {table.Key}: {table.Value.Count} columns");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error generating schema: {ex.Message}");
+                throw;
+            }
+        }
+    }
+}
+Add this to Program.cs for one-time schema generation:
+
+csharp
+// Add this code to Program.cs temporarily
+// Remove after schema.json is generated
+
+// var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+// await SchemaExtractor.GenerateSchemaJson(connectionString);
+Add to appsettings.json:
+
+json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost;Database=YourDatabase;Trusted_Connection=True;MultipleActiveResultSets=true;TrustServerCertificate=True;"
+  },
+  "Ollama": {
+    "BaseUrl": "http://localhost:11434",
+    "Model": "phi3"
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*"
+}
+Step 5: Ollama Client Implementation
+Create Services/OllamaClient.cs:
+
+csharp
+using System.Text;
+using System.Text.Json;
+
+namespace BCES.AI.Services
+{
+    public class OllamaClient
+    {
+        private readonly HttpClient _httpClient;
+        private readonly string _model;
+
+        public OllamaClient(HttpClient httpClient, IConfiguration configuration)
+        {
+            _httpClient = httpClient;
+            _model = configuration.GetValue<string>("Ollama:Model") ?? "phi3";
+            _httpClient.BaseAddress = new Uri(configuration.GetValue<string>("Ollama:BaseUrl") ?? "http://localhost:11434");
+        }
+
+        public async Task<string> CompleteAsync(string prompt, bool useJson = false)
+        {
+            try
+            {
+                var payload = new
+                {
+                    model = _model,
+                    prompt = prompt,
+                    stream = false,
+                    temperature = 0.1,
+                    top_p = 0.9
+                };
+
+                var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                });
+
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var response = await _httpClient.PostAsync("/api/generate", content);
+                response.EnsureSuccessStatusCode();
+
+                var responseJson = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(responseJson);
+                return doc.RootElement.GetProperty("response").GetString() ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Ollama API error: {ex.Message}", ex);
+            }
+        }
+
+        public async Task<T> CompleteAsync<T>(string prompt)
+        {
+            var response = await CompleteAsync(prompt, true);
+            try
+            {
+                return JsonSerializer.Deserialize<T>(response, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                }) ?? throw new Exception("Failed to deserialize response");
+            }
+            catch
+            {
+                // If response isn't valid JSON, throw with clear error
+                throw new Exception($"Expected JSON response but got: {response}");
+            }
+        }
+    }
+}
+Step 6: Schema Provider
+Create Services/SchemaProvider.cs:
+
+csharp
+using System.Text.Json;
+
+namespace BCES.AI.Services
+{
+    public class SchemaProvider
+    {
+        public string SchemaText { get; }
+        public Dictionary<string, List<string>> SchemaDict { get; }
+
+        public SchemaProvider(IWebHostEnvironment environment)
+        {
+            var path = Path.Combine(environment.ContentRootPath, "schema.json");
+            
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Schema file not found at {path}. Please run schema extraction first.");
+            }
+
+            var json = File.ReadAllText(path);
+            SchemaDict = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(json) ?? new();
+            
+            // Generate human-readable schema description
+            SchemaText = string.Join("\n", SchemaDict.Select(t =>
+                $"{t.Key}: {string.Join(", ", t.Value)}"
+            ));
+        }
+
+        public string GetTableSchema(string tableName)
+        {
+            if (SchemaDict.TryGetValue(tableName, out var columns))
+            {
+                return $"{tableName}({string.Join(", ", columns)})";
+            }
+            return string.Empty;
+        }
+
+        public string GetFilteredSchema(List<string> tableNames)
+        {
+            var filtered = SchemaDict
+                .Where(kvp => tableNames.Contains(kvp.Key))
+                .Select(kvp => $"{kvp.Key}: {string.Join(", ", kvp.Value)}");
+            
+            return string.Join("\n", filtered);
+        }
+    }
+}
+Step 7: Agent Interfaces
+Create Agents/IAgent.cs:
+
+csharp
+namespace BCES.AI.Agents
+{
+    public interface IAgent
+    {
+        string Name { get; }
+        string Description { get; }
+        Task<string> HandleAsync(string userQuestion, string context = "");
+        bool CanHandle(string userQuestion);
+    }
+}
+Create Agents/BaseAgent.cs:
+
+csharp
+using BCES.AI.Services;
+
+namespace BCES.AI.Agents
+{
+    public abstract class BaseAgent : IAgent
+    {
+        protected readonly OllamaClient _ollamaClient;
+        protected readonly SchemaProvider _schemaProvider;
+        protected readonly IConfiguration _configuration;
+
+        public abstract string Name { get; }
+        public abstract string Description { get; }
+
+        protected BaseAgent(OllamaClient ollamaClient, SchemaProvider schemaProvider, IConfiguration configuration)
+        {
+            _ollamaClient = ollamaClient;
+            _schemaProvider = schemaProvider;
+            _configuration = configuration;
+        }
+
+        public abstract Task<string> HandleAsync(string userQuestion, string context = "");
+        public abstract bool CanHandle(string userQuestion);
+    }
+}
+Step 8: SQL Agent Implementation
+Create Agents/SqlAgent.cs:
+
+csharp
+using Dapper;
+using Microsoft.Data.SqlClient;
+using System.Text.Json;
+
+namespace BCES.AI.Agents
+{
+    public class SqlAgent : BaseAgent
+    {
+        public override string Name => "SqlAgent";
+        public override string Description => "Executes SQL queries on the database and returns results";
+
+        public SqlAgent(OllamaClient ollamaClient, SchemaProvider schemaProvider, IConfiguration configuration)
+            : base(ollamaClient, schemaProvider, configuration)
+        {
+        }
+
+        public override async Task<string> HandleAsync(string userQuestion, string context = "")
+        {
+            try
+            {
+                // Step 1: Generate SQL from question
+                var sqlPrompt = $@"
+                    You are a SQL generation expert for SQL Server.
+
+                    Database Schema:
+                    {_schemaProvider.SchemaText}
+
+                    User Question: {userQuestion}
+
+                    Generate T-SQL query to answer this question.
+                    Return ONLY JSON in this format:
+                    {{
+                        ""query"": ""YOUR SQL QUERY""
+                    }}
+                    
+                    Rules:
+                    - Use proper SQL Server syntax
+                    - Use table aliases
+                    - Include appropriate WHERE clauses
+                    - Use TOP/LIMIT when appropriate
+                    - Return only the JSON, no explanations";
+
+                var sqlResponse = await _ollamaClient.CompleteAsync(sqlPrompt);
+                var sqlJson = JsonDocument.Parse(sqlResponse);
+                var sqlQuery = sqlJson.RootElement.GetProperty("query").GetString() ?? throw new Exception("Failed to parse SQL query");
+
+                // Step 2: Execute SQL
+                var connectionString = _configuration.GetConnectionString("DefaultConnection") ?? 
+                    throw new Exception("DefaultConnection not found in configuration");
+
+                using var connection = new SqlConnection(connectionString);
+                await connection.OpenAsync();
+
+                // Determine if it's a SELECT query
+                var isSelect = sqlQuery.Trim().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase);
+                
+                object? result;
+                if (isSelect)
+                {
+                    var rows = await connection.QueryAsync(sqlQuery);
+                    result = rows;
+                }
+                else
+                {
+                    // For non-SELECT queries, return count
+                    var affectedRows = await connection.ExecuteAsync(sqlQuery);
+                    result = new { AffectedRows = affectedRows };
+                }
+
+                var resultJson = JsonSerializer.Serialize(result, new JsonSerializerOptions
+                {
+                    WriteIndented = true
+                });
+
+                // Step 3: Summarize results
+                var summaryPrompt = $@"
+                    User Question: {userQuestion}
+
+                    SQL Query Executed: {sqlQuery}
+
+                    Query Results (JSON): {resultJson}
+
+                    Provide a clear, natural language answer to the user's question.
+                    Be concise and friendly.
+                    Include relevant numbers and details from the results.
+                    If there were no results, say so politely.
+                    Format as plain text with no markdown.";
+
+                var summary = await _ollamaClient.CompleteAsync(summaryPrompt);
+                return summary;
+            }
+            catch (Exception ex)
+            {
+                return $"I encountered an error processing your question: {ex.Message}";
+            }
+        }
+
+        public override bool CanHandle(string userQuestion)
+        {
+            // Ask LLM if this is a data question
+            // Simple approach - check for data-related keywords
+            var keywords = new[] { "show", "list", "find", "get", "select", "query", "database", "table", "data" };
+            return keywords.Any(k => userQuestion.Contains(k, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+}
+Step 9: Rebuilt Parts Agent
+Create Agents/RebuiltPartsAgent.cs:
+
+csharp
+using Dapper;
+using Microsoft.Data.SqlClient;
+using System.Text.Json;
+
+namespace BCES.AI.Agents
+{
+    public class RebuiltPartsAgent : BaseAgent
+    {
+        public override string Name => "RebuiltPartsAgent";
+        public override string Description => "Handles queries about rebuilt parts, including recursive queries for part hierarchy";
+
+        public RebuiltPartsAgent(OllamaClient ollamaClient, SchemaProvider schemaProvider, IConfiguration configuration)
+            : base(ollamaClient, schemaProvider, configuration)
+        {
+        }
+
+        public override async Task<string> HandleAsync(string userQuestion, string context = "")
+        {
+            try
+            {
+                // Generate optimized SQL for rebuilt parts queries
+                var sqlPrompt = $@"
+                    You are a SQL expert for rebuilt parts queries.
+
+                    Database Schema:
+                    {_schemaProvider.SchemaText}
+
+                    User Question: {userQuestion}
+
+                    Generate T-SQL that handles rebuilt parts with recursive CTE if needed.
+                    Return ONLY JSON:
+                    {{
+                        ""query"": ""SQL QUERY""
+                    }}
+
+                    Rules:
+                    - Include recursive CTE for part hierarchies
+                    - Show part numbers, descriptions, and rebuilt status
+                    - Include costs and quantities if available";
+
+                var sqlResponse = await _ollamaClient.CompleteAsync(sqlPrompt);
+                var sqlJson = JsonDocument.Parse(sqlResponse);
+                var sqlQuery = sqlJson.RootElement.GetProperty("query").GetString() ?? throw new Exception("Failed to parse SQL");
+
+                var connectionString = _configuration.GetConnectionString("DefaultConnection") ?? 
+                    throw new Exception("DefaultConnection not found");
+
+                using var connection = new SqlConnection(connectionString);
+                await connection.OpenAsync();
+
+                var rows = await connection.QueryAsync(sqlQuery);
+                var resultJson = JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true });
+
+                var summaryPrompt = $@"
+                    Rebuilt Parts Query Results: {resultJson}
+                    
+                    Original Question: {userQuestion}
+                    
+                    Provide a clear summary of:
+                    1. What rebuilt parts were found
+                    2. Their costs and quantities
+                    3. Any dependencies or hierarchies
+                    4. Overall recommendation if applicable
+                    
+                    Keep it concise and business-friendly.";
+
+                return await _ollamaClient.CompleteAsync(summaryPrompt);
+            }
+            catch (Exception ex)
+            {
+                return $"Error processing rebuilt parts query: {ex.Message}";
+            }
+        }
+
+        public override bool CanHandle(string userQuestion)
+        {
+            var keywords = new[] { "rebuilt", "rebuild", "part", "component", "assembly", "hierarchy" };
+            return keywords.Any(k => userQuestion.Contains(k, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+}
+Step 10: Labour Agent
+Create Agents/LabourAgent.cs:
+
+csharp
+using Dapper;
+using Microsoft.Data.SqlClient;
+using System.Text.Json;
+
+namespace BCES.AI.Agents
+{
+    public class LabourAgent : BaseAgent
+    {
+        public override string Name => "LabourAgent";
+        public override string Description => "Handles labour cost queries including operations, hours, and rates";
+
+        public LabourAgent(OllamaClient ollamaClient, SchemaProvider schemaProvider, IConfiguration configuration)
+            : base(ollamaClient, schemaProvider, configuration)
+        {
+        }
+
+        public override async Task<string> HandleAsync(string userQuestion, string context = "")
+        {
+            try
+            {
+                var sqlPrompt = $@"
+                    Generate SQL for labour cost analysis.
+
+                    Schema: {_schemaProvider.SchemaText}
+                    Question: {userQuestion}
+
+                    Return JSON:
+                    {{
+                        ""query"": ""SQL""
+                    }}
+
+                    Focus on:
+                    - Labour hours and rates
+                    - Operations and tasks
+                    - Cost calculations
+                    - Employee or resource allocation";
+
+                var sqlResponse = await _ollamaClient.CompleteAsync(sqlPrompt);
+                var sqlJson = JsonDocument.Parse(sqlResponse);
+                var sqlQuery = sqlJson.RootElement.GetProperty("query").GetString() ?? throw new Exception("Failed to parse SQL");
+
+                var connectionString = _configuration.GetConnectionString("DefaultConnection") ?? 
+                    throw new Exception("DefaultConnection not found");
+
+                using var connection = new SqlConnection(connectionString);
+                await connection.OpenAsync();
+
+                var rows = await connection.QueryAsync(sqlQuery);
+                var resultJson = JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true });
+
+                var summaryPrompt = $@"
+                    Labour Analysis Results: {resultJson}
+                    
+                    Question: {userQuestion}
+                    
+                    Provide summary of:
+                    1. Total labour costs
+                    2. Hours breakdown
+                    3. Rates and efficiency
+                    4. Recommendations for optimization
+                    
+                    Keep it business-friendly and clear.";
+
+                return await _ollamaClient.CompleteAsync(summaryPrompt);
+            }
+            catch (Exception ex)
+            {
+                return $"Error processing labour query: {ex.Message}";
+            }
+        }
+
+        public override bool CanHandle(string userQuestion)
+        {
+            var keywords = new[] { "labour", "labor", "operation", "hour", "rate", "resource", "time" };
+            return keywords.Any(k => userQuestion.Contains(k, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+}
+Step 11: MakeVsBuy Agent
+Create Agents/MakeVsBuyAgent.cs:
+
+csharp
+using Dapper;
+using Microsoft.Data.SqlClient;
+using System.Text.Json;
+
+namespace BCES.AI.Agents
+{
+    public class MakeVsBuyAgent : BaseAgent
+    {
+        public override string Name => "MakeVsBuyAgent";
+        public override string Description => "Analyzes make vs buy decisions with cost comparison";
+
+        public MakeVsBuyAgent(OllamaClient ollamaClient, SchemaProvider schemaProvider, IConfiguration configuration)
+            : base(ollamaClient, schemaProvider, configuration)
+        {
+        }
+
+        public override async Task<string> HandleAsync(string userQuestion, string context = "")
+        {
+            try
+            {
+                var sqlPrompt = $@"
+                    Generate SQL for make vs buy analysis.
+
+                    Schema: {_schemaProvider.SchemaText}
+                    Question: {userQuestion}
+
+                    Return JSON:
+                    {{
+                        ""query"": ""SQL""
+                    }}
+
+                    Include:
+                    - In-house costs (labour, materials, overhead)
+                    - External costs (purchase price, shipping, etc.)
+                    - Volume comparisons
+                    - Break-even analysis";
+
+                var sqlResponse = await _ollamaClient.CompleteAsync(sqlPrompt);
+                var sqlJson = JsonDocument.Parse(sqlResponse);
+                var sqlQuery = sqlJson.RootElement.GetProperty("query").GetString() ?? throw new Exception("Failed to parse SQL");
+
+                var connectionString = _configuration.GetConnectionString("DefaultConnection") ?? 
+                    throw new Exception("DefaultConnection not found");
+
+                using var connection = new SqlConnection(connectionString);
+                await connection.OpenAsync();
+
+                var rows = await connection.QueryAsync(sqlQuery);
+                var resultJson = JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true });
+
+                var summaryPrompt = $@"
+                    Make vs Buy Analysis: {resultJson}
+                    
+                    Question: {userQuestion}
+                    
+                    Provide analysis including:
+                    1. Cost comparison
+                    2. Recommended decision
+                    3. Reasoning and factors
+                    4. Volume considerations
+                    
+                    Make it actionable and clear.";
+
+                return await _ollamaClient.CompleteAsync(summaryPrompt);
+            }
+            catch (Exception ex)
+            {
+                return $"Error processing make vs buy query: {ex.Message}";
+            }
+        }
+
+        public override bool CanHandle(string userQuestion)
+        {
+            var keywords = new[] { "make", "buy", "purchase", "manufacture", "cost", "compare", "decision" };
+            return keywords.Any(k => userQuestion.Contains(k, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+}
+Step 12: Semantic Kernel Orchestrator
+Create Services/Orchestrator.cs:
+
+csharp
+using BCES.AI.Agents;
+using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.AI.ChatCompletion;
+using Microsoft.SemanticKernel.Connectors.AI.OpenAI;
+using System.Text.Json;
+
+namespace BCES.AI.Services
+{
+    public class Orchestrator
+    {
+        private readonly IReadOnlyList<IAgent> _agents;
+        private readonly OllamaClient _ollamaClient;
+        private readonly SchemaProvider _schemaProvider;
+        private readonly IKernel _kernel;
+
+        public Orchestrator(IEnumerable<IAgent> agents, OllamaClient ollamaClient, SchemaProvider schemaProvider)
+        {
+            _agents = agents.ToList();
+            _ollamaClient = ollamaClient;
+            _schemaProvider = schemaProvider;
+
+            // Setup Semantic Kernel
+            var builder = new KernelBuilder();
+            builder.WithOpenAIChatCompletionService(
+                modelId: "phi3",
+                apiKey: "not-needed" // We'll use Ollama instead
+            );
+            _kernel = builder.Build();
+
+            // Register agents as functions
+            foreach (var agent in _agents)
+            {
+                _kernel.RegisterSemanticFunction(
+                    promptTemplate: $"{{{{$input}}}}\n\nAgent: {agent.Name}",
+                    functionName: agent.Name,
+                    description: agent.Description
+                );
+            }
+        }
+
+        public async Task<string> HandleAsync(string userQuestion)
+        {
+            try
+            {
+                // Step 1: Use Semantic Kernel to determine which agent to use
+                var selectionPrompt = $@"
+                    You are an intelligent orchestrator.
+                    
+                    Available Agents:
+                    {string.Join("\n", _agents.Select(a => $"- {a.Name}: {a.Description}"))}
+                    
+                    Database Schema:
+                    {_schemaProvider.SchemaText}
+                    
+                    User Question: {userQuestion}
+                    
+                    Select the best agent to handle this question.
+                    Consider the nature of the question, what data is needed, and which agent has the right expertise.
+                    
+                    Return ONLY JSON with this format:
+                    {{
+                        ""agent"": ""[agent name]"",
+                        ""reasoning"": ""[brief explanation]""
+                    }}";
+
+                var selectionResponse = await _ollamaClient.CompleteAsync(selectionPrompt);
+                var selectionJson = JsonDocument.Parse(selectionResponse);
+                var agentName = selectionJson.RootElement.GetProperty("agent").GetString() ?? throw new Exception("No agent selected");
+
+                // Step 2: Find the selected agent
+                var selectedAgent = _agents.FirstOrDefault(a => a.Name == agentName);
+                if (selectedAgent == null)
+                {
+                    return $"I couldn't find a suitable agent. Available agents: {string.Join(", ", _agents.Select(a => a.Name))}";
+                }
+
+                // Step 3: Let the agent handle the question
+                return await selectedAgent.HandleAsync(userQuestion);
+            }
+            catch (Exception ex)
+            {
+                // Fallback to direct LLM response
+                try
+                {
+                    var fallbackPrompt = $@"
+                        I couldn't route your question to a specific agent. 
+                        Please answer this question directly using your knowledge:
+                        
+                        User Question: {userQuestion}
+                        
+                        Database Schema: {_schemaProvider.SchemaText}
+                        
+                        Provide a helpful response, acknowledging the limitation.";
+
+                    return await _ollamaClient.CompleteAsync(fallbackPrompt);
+                }
+                catch
+                {
+                    return $"I encountered an error processing your question. Please try again with a different question.";
+                }
+            }
+        }
+    }
+}
+Step 13: Chat Model
+Create Models/ChatModel.cs:
+
+csharp
+namespace BCES.AI.Models
+{
+    public class ChatModel
+    {
+        public string Question { get; set; } = string.Empty;
+        public string Answer { get; set; } = string.Empty;
+        public DateTime Timestamp { get; set; } = DateTime.Now;
+        public string AgentUsed { get; set; } = string.Empty;
+        public string QueryExecuted { get; set; } = string.Empty;
+        public List<ChatHistory> History { get; set; } = new();
+    }
+
+    public class ChatHistory
+    {
+        public string Role { get; set; } = string.Empty; // "User" or "Assistant"
+        public string Message { get; set; } = string.Empty;
+        public DateTime Timestamp { get; set; } = DateTime.Now;
+    }
+}
+Step 14: Chat Controller
+Create Controllers/ChatController.cs:
+
+csharp
+using BCES.AI.Models;
+using BCES.AI.Services;
+using Microsoft.AspNetCore.Mvc;
+
+namespace BCES.AI.Controllers
+{
+    public class ChatController : Controller
+    {
+        private readonly Orchestrator _orchestrator;
+        private readonly ILogger<ChatController> _logger;
+
+        public ChatController(Orchestrator orchestrator, ILogger<ChatController> logger)
+        {
+            _orchestrator = orchestrator;
+            _logger = logger;
+        }
+
+        [HttpGet]
+        public IActionResult Index()
+        {
+            var model = new ChatModel();
+            return View(model);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Ask(string question)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(question))
+                {
+                    return Json(new { error = "Please enter a question." });
+                }
+
+                _logger.LogInformation($"Processing question: {question}");
+                var answer = await _orchestrator.HandleAsync(question);
+                _logger.LogInformation($"Generated answer: {answer.Substring(0, Math.Min(50, answer.Length))}...");
+
+                return Json(new { answer });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing chat question");
+                return Json(new { error = "An error occurred processing your question." });
+            }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> AnalyzeQuery(string sqlQuery)
+        {
+            try
+            {
+                // Simple validation and analysis
+                return Json(new { 
+                    isValid = !string.IsNullOrWhiteSpace(sqlQuery),
+                    message = "Query received for analysis"
+                });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { error = ex.Message });
+            }
+        }
+    }
+}
+Step 15: Telerik UI Chat View
+Create Views/Chat/Index.cshtml:
+
+html
+@model BCES.AI.Models.ChatModel
+@{
+    ViewData["Title"] = "BCES AI Assistant";
+    Layout = "_Layout";
+}
+
+<div class="chat-container">
+    <div class="chat-header">
+        <h2>BCES AI Assistant</h2>
+        <p class="text-muted">Ask questions about your database</p>
+    </div>
+
+    <div class="chat-messages" id="chatMessages">
+        <div class="message assistant">
+            <div class="message-content">
+                Welcome to BCES AI Assistant! I can help you query your database using natural language.
+                <br/>
+                <small>Try asking questions like:</small>
+                <ul>
+                    <li>"Show all parts in inventory"</li>
+                    <li>"What's the total labour cost?"</li>
+                    <li>"Find rebuilt parts for vehicle"</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="chat-input">
+        <div class="input-group">
+            <textarea id="questionInput" class="form-control" rows="2" placeholder="Type your question here..."></textarea>
+            <button id="sendButton" class="btn btn-primary" onclick="sendQuestion()">
+                <i class="fas fa-paper-plane"></i> Send
+            </button>
+        </div>
+        <div class="chat-actions">
+            <button class="btn btn-sm btn-outline-secondary" onclick="clearChat()">Clear Chat</button>
+            <span class="text-muted small">Press Ctrl+Enter to send</span>
+        </div>
+    </div>
+</div>
+
+<style>
+    .chat-container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 20px;
+        height: calc(100vh - 150px);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .chat-header {
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        min-height: 300px;
+    }
+
+    .message {
+        margin-bottom: 15px;
+        display: flex;
+        animation: slideIn 0.3s ease-out;
+    }
+
+    .message.user {
+        justify-content: flex-end;
+    }
+
+    .message.assistant {
+        justify-content: flex-start;
+    }
+
+    .message-content {
+        max-width: 80%;
+        padding: 12px 16px;
+        border-radius: 12px;
+        background: white;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .message.user .message-content {
+        background: #007bff;
+        color: white;
+    }
+
+    .message.assistant .message-content {
+        background: white;
+        border: 1px solid #dee2e6;
+    }
+
+    .chat-input {
+        padding-top: 15px;
+        border-top: 1px solid #dee2e6;
+    }
+
+    .input-group {
+        display: flex;
+        gap: 10px;
+    }
+
+    .input-group textarea {
+        flex: 1;
+        resize: none;
+    }
+
+    .chat-actions {
+        margin-top: 10px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+
+    .typing-indicator {
+        display: none;
+        padding: 10px;
+        color: #6c757d;
+    }
+
+    .typing-indicator .dots {
+        display: inline-block;
+        animation: dotAnimation 1.4s infinite;
+    }
+
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    @keyframes dotAnimation {
+        0%, 20% { content: '.'; }
+        40% { content: '..'; }
+        60% { content: '...'; }
+        80% { content: '..'; }
+        100% { content: '.'; }
+    }
+
+    .error-message {
+        color: #dc3545;
+        padding: 10px;
+        background: #f8d7da;
+        border-radius: 4px;
+        margin: 10px 0;
+    }
+</style>
+
+<script>
+    let isProcessing = false;
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const input = document.getElementById('questionInput');
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                sendQuestion();
+            }
+        });
+    });
+
+    async function sendQuestion() {
+        if (isProcessing) return;
+
+        const input = document.getElementById('questionInput');
+        const question = input.value.trim();
+
+        if (!question) {
+            alert('Please enter a question.');
+            return;
+        }
+
+        // Add user message
+        addMessage('user', question);
+        input.value = '';
+
+        // Show typing indicator
+        showTypingIndicator();
+
+        isProcessing = true;
+        document.getElementById('sendButton').disabled = true;
+
+        try {
+            const formData = new FormData();
+            formData.append('question', question);
+
+            const response = await fetch('@Url.Action("Ask", "Chat")', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            hideTypingIndicator();
+
+            if (data.error) {
+                addMessage('assistant', 'Error: ' + data.error, true);
+            } else {
+                addMessage('assistant', data.answer);
+            }
+
+        } catch (error) {
+            hideTypingIndicator();
+            addMessage('assistant', 'Error connecting to server. Please try again.', true);
+            console.error('Error:', error);
+        } finally {
+            isProcessing = false;
+            document.getElementById('sendButton').disabled = false;
+            document.getElementById('questionInput').focus();
+        }
+    }
+
+    function addMessage(role, content, isError = false) {
+        const messagesContainer = document.getElementById('chatMessages');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${role}`;
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+
+        if (isError) {
+            contentDiv.className = 'message-content error-message';
+        }
+
+        // Parse content for formatting (basic)
+        const formattedContent = content
+            .replace(/\n/g, '<br/>')
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+        contentDiv.innerHTML = formattedContent;
+        messageDiv.appendChild(contentDiv);
+        messagesContainer.appendChild(messageDiv);
+
+        // Scroll to bottom
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function showTypingIndicator() {
+        const messagesContainer = document.getElementById('chatMessages');
+        const indicatorDiv = document.createElement('div');
+        indicatorDiv.id = 'typingIndicator';
+        indicatorDiv.className = 'message assistant';
+        indicatorDiv.innerHTML = `
+            <div class="message-content">
+                <span class="typing-indicator" style="display: inline-block;">
+                    Thinking<span class="dots">...</span>
+                </span>
+            </div>
+        `;
+        messagesContainer.appendChild(indicatorDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function hideTypingIndicator() {
+        const indicator = document.getElementById('typingIndicator');
+        if (indicator) {
+            indicator.remove();
+        }
+    }
+
+    function clearChat() {
+        const container = document.getElementById('chatMessages');
+        container.innerHTML = `
+            <div class="message assistant">
+                <div class="message-content">
+                    Chat cleared. Ask me anything about your database!
+                </div>
+            </div>
+        `;
+    }
+</script>
+Step 16: Program.cs Configuration
+Update Program.cs:
+
+csharp
+using BCES.AI.Agents;
+using BCES.AI.Services;
+using Telerik.UI.AspNet.Core;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container.
+builder.Services.AddControllersWithViews();
+
+// Add Telerik UI
+builder.Services.AddKendoUI();
+
+// Register services
+builder.Services.AddHttpClient<OllamaClient>((serviceProvider, client) =>
+{
+    var configuration = serviceProvider.GetRequiredService<IConfiguration>();
+    var baseUrl = configuration.GetValue<string>("Ollama:BaseUrl") ?? "http://localhost:11434";
+    client.BaseAddress = new Uri(baseUrl);
+    client.Timeout = TimeSpan.FromMinutes(5); // Ollama might take a while
+});
+
+builder.Services.AddSingleton<SchemaProvider>();
+builder.Services.AddSingleton<Orchestrator>();
+
+// Register agents
+builder.Services.AddSingleton<IAgent, SqlAgent>();
+builder.Services.AddSingleton<IAgent, RebuiltPartsAgent>();
+builder.Services.AddSingleton<IAgent, LabourAgent>();
+builder.Services.AddSingleton<IAgent, MakeVsBuyAgent>();
+
+// Add logging
+builder.Services.AddLogging();
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Home/Error");
+    app.UseHsts();
+}
+
+// Run schema extraction if needed
+// Uncomment to generate schema.json
+// using (var scope = app.Services.CreateScope())
+// {
+//     var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+//     var connectionString = config.GetConnectionString("DefaultConnection");
+//     await SchemaExtractor.GenerateSchemaJson(connectionString);
+// }
+
+app.UseHttpsRedirection();
+app.UseStaticFiles();
+
+app.UseRouting();
+
+app.UseAuthorization();
+
+app.MapControllerRoute(
+    name: "default",
+    pattern: "{controller=Chat}/{action=Index}/{id?}");
+
+app.Run();
+Step 17: Startup Tasks
+Create a startup task to ensure Ollama is running. Add this to Program.cs:
+
+csharp
+// Check Ollama is running
+try
+{
+    using var client = new HttpClient();
+    var response = await client.GetAsync("http://localhost:11434/api/tags");
+    if (!response.IsSuccessStatusCode)
+    {
+        Console.WriteLine("Warning: Ollama is not running. Please start Ollama and pull models.");
+    }
+    else
+    {
+        Console.WriteLine("Ollama is running.");
+    }
+}
+catch
+{
+    Console.WriteLine("Warning: Ollama is not accessible. Please ensure Ollama is running.");
+}
+Step 18: Use Telerik UI Components
+For a more polished UI, install Telerik UI for ASP.NET Core and update the view:
+
+csharp
+// Install Telerik UI
+// In Package Manager Console:
+// Install-Package Telerik.UI.for.AspNet.Core
+
+// In Program.cs:
+builder.Services.AddKendoUI();
+
+// In View, use Telerik Chat component:
+@using Kendo.Mvc.UI
+@(Html.Kendo().Chat()
+    .Name("chat")
+    .User(user => user
+        .Name("You")
+        .IconUrl("~/images/user.png")
+    )
+    .Messages(messages =>
+    {
+        messages.Post(message =>
+        {
+            message.Action("SendMessage", "Chat");
+        });
+    })
+)
+Step 19: Error Handling and Logging
+Create Middleware/ErrorHandlingMiddleware.cs:
+
+csharp
+using System.Net;
+using System.Text.Json;
+
+namespace BCES.AI.Middleware
+{
+    public class ErrorHandlingMiddleware
+    {
+        private readonly RequestDelegate _next;
+        private readonly ILogger<ErrorHandlingMiddleware> _logger;
+
+        public ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorHandlingMiddleware> logger)
+        {
+            _next = next;
+            _logger = logger;
+        }
+
+        public async Task InvokeAsync(HttpContext context)
+        {
+            try
+            {
+                await _next(context);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unhandled exception occurred");
+                await HandleExceptionAsync(context, ex);
+            }
+        }
+
+        private static async Task HandleExceptionAsync(HttpContext context, Exception exception)
+        {
+            context.Response.ContentType = "application/json";
+            context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+
+            var response = new
+            {
+                error = "An error occurred processing your request.",
+                details = exception.Message
+            };
+
+            await context.Response.WriteAsync(JsonSerializer.Serialize(response));
+        }
+    }
+}
+Add to Program.cs:
+
+csharp
+app.UseMiddleware<ErrorHandlingMiddleware>();
+Step 20: Running the Application
+Start Ollama:
+
+bash
+ollama pull phi3
+ollama serve
+Generate schema.json:
+
+Uncomment schema extraction code in Program.cs
+
+Run the application once
+
+Verify schema.json is created
+
+Comment out the schema extraction code
+
+Run the application:
+
+Press F5 in Visual Studio
+
+Navigate to /Chat
+
+Start asking questions
+
+Step 21: Test Questions
