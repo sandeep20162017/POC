@@ -1,0 +1,1491 @@
+1. Database migration
+
+Your current Users table has no Department column.
+
+Your current VehicleList table also has no Department column.
+
+Run this migration.
+
+USE [CES];
+GO
+
+SET ANSI_NULLS ON;
+GO
+
+SET QUOTED_IDENTIFIER ON;
+GO
+
+/* ============================================================
+   1. USERS.Department
+   ============================================================ */
+
+IF COL_LENGTH('SBCES.Users', 'Department') IS NULL
+BEGIN
+    ALTER TABLE [SBCES].[Users]
+    ADD [Department] VARCHAR(20) NULL;
+END
+GO
+
+/* Existing users default to BUS */
+UPDATE [SBCES].[Users]
+SET [Department] = 'BUS'
+WHERE [Department] IS NULL;
+GO
+
+/* Default for all future users */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.default_constraints dc
+    INNER JOIN sys.columns c
+        ON dc.parent_object_id = c.object_id
+       AND dc.parent_column_id = c.column_id
+    WHERE dc.parent_object_id = OBJECT_ID('SBCES.Users')
+      AND c.name = 'Department'
+)
+BEGIN
+    ALTER TABLE [SBCES].[Users]
+    ADD CONSTRAINT [DF_Users_Department]
+        DEFAULT ('BUS') FOR [Department];
+END
+GO
+
+/* Make Department mandatory */
+ALTER TABLE [SBCES].[Users]
+ALTER COLUMN [Department] VARCHAR(20) NOT NULL;
+GO
+
+/* Valid department values only */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID('SBCES.Users')
+      AND name = 'CK_Users_Department'
+)
+BEGIN
+    ALTER TABLE [SBCES].[Users]
+    ADD CONSTRAINT [CK_Users_Department]
+        CHECK ([Department] IN ('BUS', 'STREETCAR'));
+END
+GO
+
+
+/* ============================================================
+   2. VehicleList.Department
+   ============================================================ */
+
+IF COL_LENGTH('SBCES.VehicleList', 'Department') IS NULL
+BEGIN
+    ALTER TABLE [SBCES].[VehicleList]
+    ADD [Department] VARCHAR(20) NULL;
+END
+GO
+
+/* Existing estimates are BUS */
+UPDATE [SBCES].[VehicleList]
+SET [Department] = 'BUS'
+WHERE [Department] IS NULL;
+GO
+
+/* Default for future estimates */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.default_constraints dc
+    INNER JOIN sys.columns c
+        ON dc.parent_object_id = c.object_id
+       AND dc.parent_column_id = c.column_id
+    WHERE dc.parent_object_id = OBJECT_ID('SBCES.VehicleList')
+      AND c.name = 'Department'
+)
+BEGIN
+    ALTER TABLE [SBCES].[VehicleList]
+    ADD CONSTRAINT [DF_VehicleList_Department]
+        DEFAULT ('BUS') FOR [Department];
+END
+GO
+
+/* Make Department mandatory */
+ALTER TABLE [SBCES].[VehicleList]
+ALTER COLUMN [Department] VARCHAR(20) NOT NULL;
+GO
+
+/* Valid department values only */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID('SBCES.VehicleList')
+      AND name = 'CK_VehicleList_Department'
+)
+BEGIN
+    ALTER TABLE [SBCES].[VehicleList]
+    ADD CONSTRAINT [CK_VehicleList_Department]
+        CHECK ([Department] IN ('BUS', 'STREETCAR'));
+END
+GO
+
+
+/* ============================================================
+   3. Optional indexes
+   ============================================================ */
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE object_id = OBJECT_ID('SBCES.Users')
+      AND name = 'IX_Users_Department'
+)
+BEGIN
+    CREATE INDEX [IX_Users_Department]
+        ON [SBCES].[Users] ([Department]);
+END
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE object_id = OBJECT_ID('SBCES.VehicleList')
+      AND name = 'IX_VehicleList_Department'
+)
+BEGIN
+    CREATE INDEX [IX_VehicleList_Department]
+        ON [SBCES].[VehicleList] ([Department]);
+END
+GO
+Verify
+SELECT
+    UserID,
+    UserADId,
+    UserName,
+    RoleID,
+    Department
+FROM SBCES.Users
+ORDER BY UserID;
+GO
+
+SELECT
+    VehicleListId,
+    VehSeriesCode,
+    ProjDesc,
+    EnteredBy,
+    Department
+FROM SBCES.VehicleList
+ORDER BY VehicleListId DESC;
+GO
+2. UserViewModel
+
+Add Department.
+
+Your existing model currently ends with the site-related properties.
+
+Add:
+
+[Required(ErrorMessage = "Department is required.")]
+public string Department { get; set; } = "BUS";
+
+So the relevant section becomes:
+
+public class UserViewModel
+{
+    public int UserID { get; set; }
+
+    [Required(ErrorMessage = "This field is required.")]
+    [RegularExpression(
+        @"^[^<>\;:""'{}\*\^%#@\]\[}{&/+\-!?$=#]*$",
+        ErrorMessage = "Invalid characters used.")]
+    public string UserADId { get; set; }
+
+    [Required(ErrorMessage = "This field is required.")]
+    [RegularExpression(
+        @"^[^<>\;:""'{}\*\^%#@\]\[}{&/+\()!$?#]*$",
+        ErrorMessage = "Invalid characters used.")]
+    public string UserName { get; set; }
+
+    public string? UserEmail { get; set; }
+    public string? UserContactNo { get; set; }
+    public string? Location { get; set; }
+
+    [Required(ErrorMessage = "This field is required.")]
+    public int RoleId { get; set; }
+
+    public string RoleName { get; set; }
+
+    [Required(ErrorMessage = "Department is required.")]
+    public string Department { get; set; } = "BUS";
+
+    public List<SiteModel>? Sites { get; set; } = new List<SiteModel>();
+
+    public List<string>? SelectedSites { get; set; }
+
+    public string? SiteId { get; set; }
+
+    public string? SiteName { get; set; }
+
+    public List<int>? SiteIds { get; set; } = new();
+
+    public List<string>? SiteNames { get; set; } = new();
+}
+3. Create Department dropdown editor
+
+Create:
+
+Views
+ └── Shared
+      └── EditorTemplates
+           └── DepartmentDropDown.cshtml
+
+Use:
+
+@model string?
+
+@(Html.Kendo().DropDownListFor(m => m)
+    .DataValueField("Value")
+    .DataTextField("Text")
+    .OptionLabel("Select Department")
+    .Value(Model ?? "BUS")
+    .HtmlAttributes(new
+    {
+        style = "width:100%",
+        required = "required"
+    })
+    .AutoBind(true)
+    .DataSource(source =>
+    {
+        source.Read(read =>
+        {
+            read.Action("GetDepartmentOptions", "UserManagementGrid");
+        });
+    })
+)
+
+This follows the same pattern as your existing RoleTypeDropDown.
+
+4. Department controller endpoint
+
+Add this to UserManagementGridController:
+
+[HttpGet]
+[AllowAnonymous]
+public IActionResult GetDepartmentOptions()
+{
+    var options = new[]
+    {
+        new
+        {
+            Value = "BUS",
+            Text = "Bus"
+        },
+        new
+        {
+            Value = "STREETCAR",
+            Text = "StreetCar"
+        }
+    };
+
+    return Json(options);
+}
+
+I prefer this over creating another database table because you explicitly have only two fixed values.
+
+5. User grid — add Department column
+
+You currently have:
+
+columns.Bound(u => u.RoleName)
+    .Title("Role Name")
+    .HeaderHtmlAttributes(new { @class = "required-header" })
+    .ClientTemplate("#: RoleName #")
+    .EditorTemplateName("RoleTypeDropDown");
+
+//add Department here (drop down))
+
+Replace that comment with:
+
+columns.Bound(u => u.Department)
+    .Title("Department")
+    .HeaderHtmlAttributes(new { @class = "required-header" })
+    .ClientTemplate("#: Department == 'STREETCAR' ? 'StreetCar' : 'Bus' #")
+    .EditorTemplateName("DepartmentDropDown");
+
+So:
+
+columns.Bound(u => u.RoleName)
+    .Title("Role Name")
+    .HeaderHtmlAttributes(new { @class = "required-header" })
+    .ClientTemplate("#: RoleName #")
+    .EditorTemplateName("RoleTypeDropDown");
+
+columns.Bound(u => u.Department)
+    .Title("Department")
+    .HeaderHtmlAttributes(new { @class = "required-header" })
+    .ClientTemplate("#: Department == 'STREETCAR' ? 'StreetCar' : 'Bus' #")
+    .EditorTemplateName("DepartmentDropDown");
+6. Kendo model configuration
+
+Your current Kendo model has:
+
+model.Field(u => u.RoleId).DefaultValue(0); 
+model.Field(u => u.RoleName);
+
+Add Department:
+
+model.Field(u => u.RoleId).DefaultValue(0);
+model.Field(u => u.RoleName);
+
+model.Field(u => u.Department)
+     .DefaultValue("BUS");
+
+Therefore:
+
+.Model(model =>
+{
+    model.Id(u => u.UserID);
+
+    model.Field(u => u.UserADId).Editable(true);
+    model.Field(u => u.UserName).Editable(true);
+
+    model.Field(u => u.RoleId).DefaultValue(0);
+    model.Field(u => u.RoleName);
+
+    model.Field(u => u.Department)
+         .DefaultValue("BUS");
+})
+
+This ensures Add User gets BUS automatically.
+
+7. User edit JavaScript
+
+You currently explicitly enable the Role dropdown in onUserEdit.
+
+Add Department:
+
+function onUserEdit(e) {
+
+    var isNew = e.model.isNew();
+
+    // UserADId
+    var userAdIdInput = e.container.find("input[name='UserADId']");
+    userAdIdInput.prop("disabled", !isNew);
+
+    // UserName
+    var userNameInput = e.container.find("input[name='UserName']");
+    userNameInput.prop("disabled", !isNew);
+
+    // RoleId
+    var roleDropDown =
+        e.container.find("input[name='RoleId']")
+                  .data("kendoDropDownList");
+
+    if (roleDropDown) {
+        roleDropDown.enable(true);
+    }
+
+    // Department
+    var departmentDropDown =
+        e.container.find("input[name='Department']")
+                  .data("kendoDropDownList");
+
+    if (departmentDropDown) {
+
+        departmentDropDown.enable(true);
+
+        // New users default to BUS
+        if (isNew && !e.model.get("Department")) {
+            e.model.set("Department", "BUS");
+            departmentDropDown.value("BUS");
+        }
+    }
+}
+8. GetUsers — return Department
+
+Your current query is:
+
+SELECT u.UserId, u.UserName, u.userADId, u.RoleId, r.RoleName,
+       ...
+FROM SBCES.[Users] u
+
+Change it to:
+
+const string query = @"
+    SELECT
+        u.UserId,
+        u.UserName,
+        u.UserADId,
+        u.RoleId,
+        r.RoleName,
+        u.Department,
+
+        STRING_AGG(CAST(us.SiteId AS VARCHAR), ',') AS SiteId,
+        STRING_AGG(s.SiteName, ',') AS SiteName
+
+    FROM SBCES.Users u
+
+    INNER JOIN SBCES.Roles r
+        ON u.RoleId = r.RoleId
+
+    LEFT JOIN SBCES.UserSites us
+        ON u.UserId = us.UserId
+
+    LEFT JOIN SBCES.Sites s
+        ON us.SiteId = s.SiteId
+
+    GROUP BY
+        u.UserADId,
+        u.UserId,
+        u.UserName,
+        u.RoleId,
+        r.RoleName,
+        u.Department
+
+    ORDER BY u.UserADId;
+";
+9. AddUser — use Department
+
+Your current INSERT is:
+
+INSERT INTO SBCES.Users (UserADId, UserName, RoleId)
+VALUES (@UserADId, @UserName, @RoleId);
+
+Change it to:
+
+var insertUserQuery = @"
+    INSERT INTO SBCES.Users
+    (
+        UserADId,
+        UserName,
+        RoleId,
+        Department
+    )
+    VALUES
+    (
+        @UserADId,
+        @UserName,
+        @RoleId,
+        @Department
+    );
+
+    SELECT CAST(SCOPE_IDENTITY() AS INT);
+";
+
+And:
+
+var userId = await _dbConnection.QuerySingleAsync<int>(
+    insertUserQuery,
+    new
+    {
+        UserName = userViewModel.UserName,
+        UserADId = userViewModel.UserADId,
+        RoleId = userViewModel.RoleId,
+        Department = NormalizeDepartment(userViewModel.Department)
+    },
+    transaction);
+10. Add Department validation helper
+
+Add this to the controller:
+
+private static string NormalizeDepartment(string? department)
+{
+    if (string.Equals(department, "STREETCAR",
+        StringComparison.OrdinalIgnoreCase))
+    {
+        return "STREETCAR";
+    }
+
+    return "BUS";
+}
+
+However, for production I would not silently convert an invalid value to BUS. Better:
+
+private static string NormalizeDepartment(string? department)
+{
+    if (string.Equals(department, "BUS",
+        StringComparison.OrdinalIgnoreCase))
+    {
+        return "BUS";
+    }
+
+    if (string.Equals(department, "STREETCAR",
+        StringComparison.OrdinalIgnoreCase))
+    {
+        return "STREETCAR";
+    }
+
+    throw new ArgumentException("Invalid Department.");
+}
+
+Use this version.
+
+11. UpdateUser — save Department
+
+Your current update ultimately does:
+
+UPDATE SBCES.Users
+SET RoleId = ...
+   ,UserName = ...
+   ,UserADId = ...
+WHERE UserId = ...
+
+Replace that entire update with parameterized Dapper SQL:
+
+var updateUserQuery = @"
+    UPDATE SBCES.Users
+    SET
+        RoleId = @RoleId,
+        UserName = @UserName,
+        UserADId = @UserADId,
+        Department = @Department
+    WHERE UserId = @UserID;
+";
+
+await _dbConnection.ExecuteAsync(
+    updateUserQuery,
+    new
+    {
+        RoleId = userViewModel.RoleId,
+        UserName = userViewModel.UserName,
+        UserADId = userViewModel.UserADId,
+        Department = NormalizeDepartment(userViewModel.Department),
+        UserID = userViewModel.UserID
+    },
+    transaction);
+
+This also fixes a significant issue in the existing code: several of your current SQL statements concatenate user input directly into SQL.
+
+For example, the existing code constructs SQL with UserName, UserADId, and IDs concatenated into strings.
+
+For this change, I strongly recommend using Dapper parameters everywhere.
+
+12. VehicleViewModel
+
+Add:
+
+public string Department { get; set; } = "BUS";
+
+For example:
+
+public class VehicleViewModel
+{
+    public int VehicleListId { get; set; }
+
+    public string VehSeriesCode { get; set; }
+
+    public string NumOfVehicles { get; set; }
+
+    public string ProjDesc { get; set; }
+
+    public DateTime DateEntered { get; set; }
+
+    public string EnteredBy { get; set; }
+
+    public string ModifiedLastBy { get; set; }
+
+    public DateTime ModifiedLastDate { get; set; }
+
+    public string? Make { get; set; }
+
+    public string? Model { get; set; }
+
+    public string? Year { get; set; }
+
+    public string? Engine { get; set; }
+
+    public string? Transmission { get; set; }
+
+    public string? Differential { get; set; }
+
+    public string? Sopnumber { get; set; }
+
+    public string Department { get; set; } = "BUS";
+}
+13. VehicleList query
+
+Your current query doesn't select Department.
+
+Change:
+
+SELECT
+    VehicleListId,
+    VehSeriesCode,
+    NumOfVehicles,
+    ProjDesc,
+    DateEntered,
+    EnteredBy,
+    ModifiedLastBy,
+    ModifiedLastDate,
+    Make,
+    Model,
+    Year,
+    Engine,
+    Transmission,
+    Differential,
+    Sopnumber,
+    Department
+FROM SBCES.VehicleList
+ORDER BY VehicleListId DESC;
+14. CRITICAL — New VehicleList record
+
+This is the most important part of your requirement.
+
+When creating the estimate:
+
+Logged-in user
+      ↓
+SBCES.Users.Department
+      ↓
+SBCES.VehicleList.Department
+
+Do not accept Department from the browser for this operation.
+
+Instead, query the logged-in user.
+
+For example:
+
+private async Task<string> GetCurrentUserDepartmentAsync()
+{
+    var userADId = User?.Identity?.Name;
+
+    if (string.IsNullOrWhiteSpace(userADId))
+    {
+        throw new UnauthorizedAccessException(
+            "Unable to determine logged-in user.");
+    }
+
+    const string sql = @"
+        SELECT Department
+        FROM SBCES.Users
+        WHERE UserADId = @UserADId;
+    ";
+
+    var department =
+        await _dbConnection.QuerySingleOrDefaultAsync<string>(
+            sql,
+            new { UserADId = userADId });
+
+    if (string.IsNullOrWhiteSpace(department))
+    {
+        throw new UnauthorizedAccessException(
+            "Logged-in user does not have a Department.");
+    }
+
+    return NormalizeDepartment(department);
+}
+Important
+
+If your AD authentication returns a value such as:
+
+DOMAIN\jsmith
+
+while Users.UserADId contains:
+
+jsmith
+
+then adjust this one lookup to match your actual authentication claim.
+
+Do not take Department from JavaScript or the posted VehicleViewModel when creating an estimate.
+
+15. Vehicle INSERT
+
+Wherever you currently have your VehicleList INSERT, change it to:
+
+var department = await GetCurrentUserDepartmentAsync();
+
+const string insertVehicleQuery = @"
+    INSERT INTO SBCES.VehicleList
+    (
+        VehicleListId,
+        VehSeriesCode,
+        NumOfVehicles,
+        ProjDesc,
+        DateEntered,
+        EnteredBy,
+        ModifiedLastBy,
+        ModifiedLastDate,
+        Make,
+        Model,
+        Year,
+        Engine,
+        Transmission,
+        Differential,
+        Sopnumber,
+        Department
+    )
+    VALUES
+    (
+        @VehicleListId,
+        @VehSeriesCode,
+        @NumOfVehicles,
+        @ProjDesc,
+        @DateEntered,
+        @EnteredBy,
+        @ModifiedLastBy,
+        @ModifiedLastDate,
+        @Make,
+        @Model,
+        @Year,
+        @Engine,
+        @Transmission,
+        @Differential,
+        @Sopnumber,
+        @Department
+    );
+";
+
+await _dbConnection.ExecuteAsync(
+    insertVehicleQuery,
+    new
+    {
+        vehicleViewModel.VehicleListId,
+        vehicleViewModel.VehSeriesCode,
+        vehicleViewModel.NumOfVehicles,
+        vehicleViewModel.ProjDesc,
+        DateEntered = DateTime.Now,
+        EnteredBy = currentUserName,
+        ModifiedLastBy = currentUserName,
+        ModifiedLastDate = DateTime.Now,
+        vehicleViewModel.Make,
+        vehicleViewModel.Model,
+        vehicleViewModel.Year,
+        vehicleViewModel.Engine,
+        vehicleViewModel.Transmission,
+        vehicleViewModel.Differential,
+        vehicleViewModel.Sopnumber,
+        Department = department
+    });
+
+The important line is:
+
+Department = department
+
+where department came from SBCES.Users, not the browser.
+
+16. Even better: let SQL obtain Department
+
+For your application, I actually prefer this approach.
+
+Instead of:
+
+C# gets Department
+       ↓
+C# INSERT Department
+
+you can make SQL do:
+
+C# passes UserADId
+       ↓
+SQL looks up Users.Department
+       ↓
+SQL inserts VehicleList.Department
+
+Example:
+
+INSERT INTO SBCES.VehicleList
+(
+    VehicleListId,
+    VehSeriesCode,
+    NumOfVehicles,
+    ProjDesc,
+    DateEntered,
+    EnteredBy,
+    ModifiedLastBy,
+    ModifiedLastDate,
+    Make,
+    Model,
+    Year,
+    Engine,
+    Transmission,
+    Differential,
+    Sopnumber,
+    Department
+)
+SELECT
+    @VehicleListId,
+    @VehSeriesCode,
+    @NumOfVehicles,
+    @ProjDesc,
+    @DateEntered,
+    @EnteredBy,
+    @ModifiedLastBy,
+    @ModifiedLastDate,
+    @Make,
+    @Model,
+    @Year,
+    @Engine,
+    @Transmission,
+    @Differential,
+    @Sopnumber,
+    u.Department
+FROM SBCES.Users u
+WHERE u.UserADId = @UserADId;
+
+Then verify:
+
+var rows = await _dbConnection.ExecuteAsync(
+    insertVehicleQuery,
+    new
+    {
+        vehicleViewModel.VehicleListId,
+        vehicleViewModel.VehSeriesCode,
+        vehicleViewModel.NumOfVehicles,
+        vehicleViewModel.ProjDesc,
+        DateEntered = DateTime.Now,
+        EnteredBy = currentUserName,
+        ModifiedLastBy = currentUserName,
+        ModifiedLastDate = DateTime.Now,
+        vehicleViewModel.Make,
+        vehicleViewModel.Model,
+        vehicleViewModel.Year,
+        vehicleViewModel.Engine,
+        vehicleViewModel.Transmission,
+        vehicleViewModel.Differential,
+        vehicleViewModel.Sopnumber,
+        UserADId = currentUserADId
+    });
+
+I recommend this version because it makes the rule much harder to bypass.
+
+17. Delete authorization — server side
+
+This is the key requirement:
+
+Bus can't delete StreetCar estimate.
+StreetCar can't delete Bus estimate.
+
+Your current DeleteUser pattern is a controller → private method structure.
+
+Use the same pattern for VehicleList.
+
+Controller
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> DeleteVehicle(int vehicleListId)
+{
+    try
+    {
+        if (vehicleListId <= 0)
+        {
+            return BadRequest("Invalid VehicleListId.");
+        }
+
+        var currentUserDepartment =
+            await GetCurrentUserDepartmentAsync();
+
+        var vehicleDepartment =
+            await GetVehicleDepartmentAsync(vehicleListId);
+
+        if (vehicleDepartment == null)
+        {
+            return NotFound("Estimate not found.");
+        }
+
+        if (!string.Equals(
+                currentUserDepartment,
+                vehicleDepartment,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                $"You cannot delete a {FormatDepartment(vehicleDepartment)} estimate.");
+        }
+
+        await DeleteVehicleAsync(vehicleListId);
+
+        return Json(new
+        {
+            success = true
+        });
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        return StatusCode(
+            StatusCodes.Status401Unauthorized,
+            ex.Message);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine(
+            $"Error deleting VehicleListId {vehicleListId}: {ex}");
+
+        return StatusCode(
+            StatusCodes.Status500InternalServerError,
+            "An error occurred while deleting the estimate.");
+    }
+}
+18. Get estimate Department
+private async Task<string?> GetVehicleDepartmentAsync(
+    int vehicleListId)
+{
+    const string sql = @"
+        SELECT Department
+        FROM SBCES.VehicleList
+        WHERE VehicleListId = @VehicleListId;
+    ";
+
+    return await _dbConnection.QuerySingleOrDefaultAsync<string>(
+        sql,
+        new { VehicleListId = vehicleListId });
+}
+19. Delete method
+private async Task DeleteVehicleAsync(int vehicleListId)
+{
+    _dbConnection.Open();
+
+    using var transaction =
+        _dbConnection.BeginTransaction();
+
+    try
+    {
+        /*
+         * IMPORTANT:
+         * Do not allow deletion of a vehicle estimate
+         * from another department.
+         *
+         * Authorization has already been checked by
+         * DeleteVehicle(), but we check again inside
+         * the transaction to prevent race conditions.
+         */
+
+        var currentUserDepartment =
+            await GetCurrentUserDepartmentAsync();
+
+        const string deleteSql = @"
+            DELETE FROM SBCES.VehicleList
+            WHERE VehicleListId = @VehicleListId
+              AND Department = @Department;
+        ";
+
+        var rows = await _dbConnection.ExecuteAsync(
+            deleteSql,
+            new
+            {
+                VehicleListId = vehicleListId,
+                Department = currentUserDepartment
+            },
+            transaction);
+
+        if (rows == 0)
+        {
+            throw new UnauthorizedAccessException(
+                "The estimate does not belong to your Department " +
+                "or it no longer exists.");
+        }
+
+        transaction.Commit();
+    }
+    catch
+    {
+        transaction.Rollback();
+        throw;
+    }
+    finally
+    {
+        _dbConnection.Close();
+    }
+}
+20. Better — perform authorization and delete in ONE SQL statement
+
+I actually recommend this version instead of the previous two-step check.
+
+It eliminates the small race window between:
+
+SELECT Department
+DELETE
+
+Use:
+
+private async Task DeleteVehicleAsync(
+    int vehicleListId,
+    string currentUserDepartment)
+{
+    const string deleteSql = @"
+        DELETE FROM SBCES.VehicleList
+        WHERE VehicleListId = @VehicleListId
+          AND Department = @Department;
+    ";
+
+    var rows = await _dbConnection.ExecuteAsync(
+        deleteSql,
+        new
+        {
+            VehicleListId = vehicleListId,
+            Department = currentUserDepartment
+        });
+
+    if (rows == 0)
+    {
+        throw new UnauthorizedAccessException(
+            "Estimate not found or it belongs to another Department.");
+    }
+}
+
+Then the controller:
+
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> DeleteVehicle(int vehicleListId)
+{
+    try
+    {
+        if (vehicleListId <= 0)
+        {
+            return BadRequest("Invalid VehicleListId.");
+        }
+
+        var department =
+            await GetCurrentUserDepartmentAsync();
+
+        await DeleteVehicleAsync(
+            vehicleListId,
+            department);
+
+        return Json(new
+        {
+            success = true
+        });
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        return StatusCode(
+            StatusCodes.Status403Forbidden,
+            ex.Message);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine(
+            $"DeleteVehicle failed for {vehicleListId}: {ex}");
+
+        return StatusCode(
+            StatusCodes.Status500InternalServerError,
+            "Delete failed.");
+    }
+}
+
+This is the version I would put into production.
+
+21. Vehicle Grid — hide Delete button
+
+You also requested the Delete button to be hidden based on Department.
+
+Don't rely solely on hiding the button. The server-side authorization above is mandatory.
+
+But for the UI, return the current user's Department from the Vehicle page.
+
+For example in your Vehicle controller:
+
+ViewBag.UserDepartment =
+    await GetCurrentUserDepartmentAsync();
+
+Then in Index.cshtml:
+
+@{
+    var userDepartment =
+        (ViewBag.UserDepartment as string ?? "BUS")
+        .ToUpperInvariant();
+}
+22. Kendo Delete command
+
+If your existing grid has:
+
+command.Custom("Delete")
+    .Click("showDeleteConfirmation")
+    .Text("Delete")
+    .IconClass("k-icon k-i-delete")
+
+you can add a client-side condition.
+
+However, because Kendo's command template doesn't naturally know the current user department per row, I prefer adding the department as a data attribute and using JavaScript.
+
+Example:
+
+columns.Bound(v => v.Department)
+    .Title("Department")
+    .Hidden(true);
+
+Then:
+
+function showDeleteConfirmation(e) {
+
+    e.preventDefault();
+
+    var grid = $("#vehicleGrid").data("kendoGrid");
+
+    var dataItem =
+        grid.dataItem($(e.currentTarget).closest("tr"));
+
+    var userDepartment =
+        "@userDepartment";
+
+    var estimateDepartment =
+        (dataItem.Department || "BUS").toUpperCase();
+
+    if (userDepartment !== estimateDepartment) {
+
+        var notification =
+            $("#notification").data("kendoNotification");
+
+        if (notification) {
+            notification.error(
+                "You cannot delete a " +
+                (estimateDepartment === "STREETCAR"
+                    ? "StreetCar"
+                    : "Bus") +
+                " estimate."
+            );
+        }
+
+        return;
+    }
+
+    // Existing confirmation dialog
+    deleteDialog.dataItem = dataItem;
+    deleteDialog.center().open();
+}
+23. But I recommend hiding the command completely
+
+If you want the UI to behave exactly as requested:
+
+Current user = BUS
+
+BUS estimate       Delete visible
+STREETCAR estimate Delete hidden
+
+
+Current user = STREETCAR
+
+STREETCAR estimate Delete visible
+BUS estimate       Delete hidden
+
+Add:
+
+function departmentCanDelete(
+    userDepartment,
+    estimateDepartment) {
+
+    return userDepartment &&
+           estimateDepartment &&
+           userDepartment.toUpperCase() ===
+           estimateDepartment.toUpperCase();
+}
+
+Then in the Kendo dataBound event:
+
+function onVehicleGridDataBound(e) {
+
+    var grid = e.sender;
+
+    var userDepartment =
+        "@userDepartment".toUpperCase();
+
+    grid.tbody.find("tr").each(function () {
+
+        var row = $(this);
+
+        var dataItem = grid.dataItem(row);
+
+        if (!dataItem) {
+            return;
+        }
+
+        var estimateDepartment =
+            (dataItem.Department || "BUS").toUpperCase();
+
+        if (userDepartment !== estimateDepartment) {
+
+            row.find(".k-grid-delete")
+               .remove();
+
+            row.find(".delete-estimate-btn")
+               .remove();
+        }
+    });
+}
+
+And:
+
+.Events(e => e.DataBound("onVehicleGridDataBound"))
+
+If your delete command is a custom command rather than .Destroy(), target its CSS class instead.
+
+24. Important security issue with AllowAnonymous
+
+I noticed your existing controllers use:
+
+[AllowAnonymous]
+
+for user and vehicle operations. Your supplied code contains this pattern repeatedly.
+
+For Department-based authorization, this is potentially dangerous.
+
+If the application already has authentication globally and [AllowAnonymous] is intentional for an internal reason, you can retain it temporarily.
+
+But production authorization should ideally be:
+
+[Authorize]
+
+rather than:
+
+[AllowAnonymous]
+
+Especially for:
+
+AddUser
+UpdateUser
+DeleteUser
+CreateEstimate
+DeleteVehicle
+
+The Department restriction should be enforced server-side regardless.
+
+25. One more improvement — never trust posted Department for users
+
+For User Management, it is okay to post:
+
+Department = BUS
+
+or:
+
+Department = STREETCAR
+
+because Admin/SuperAdmin is intentionally allowed to edit it.
+
+But for VehicleList:
+
+do not allow the browser to decide the Department.
+
+Bad:
+
+Department = vehicleViewModel.Department
+
+Good:
+
+Department = departmentFromUsersTable
+
+or even better:
+
+INSERT ...
+SELECT ..., u.Department
+FROM SBCES.Users u
+WHERE u.UserADId = @UserADId
+26. Final architecture
+
+The resulting data model is:
+
+SBCES.Users
+────────────────────────────
+UserID
+UserADId
+UserName
+RoleId
+Department
+           │
+           │ Department at creation
+           ▼
+SBCES.VehicleList
+────────────────────────────
+VehicleListId
+VehSeriesCode
+ProjDesc
+EnteredBy
+Department
+...
+
+Example:
+
+Users
+
+jsmith       BUS
+adoe         STREETCAR
+
+Creates:
+
+VehicleList
+
+Estimate 1001    jsmith    BUS
+Estimate 1002    adoe      STREETCAR
+Estimate 1003    jsmith    BUS
+Estimate 1004    adoe      STREETCAR
+
+Then:
+
+Logged-in user	Estimate	Delete
+BUS	BUS	✅
+BUS	STREETCAR	❌
+STREETCAR	STREETCAR	✅
+STREETCAR	BUS	❌
+
+And importantly, this remains true even if somebody bypasses the Kendo UI and manually POSTs:
+
+DeleteVehicle(1002)
+
+The SQL:
+
+DELETE FROM SBCES.VehicleList
+WHERE VehicleListId = @VehicleListId
+  AND Department = @Department;
+
+prevents the unauthorized deletion.
+
+One change I strongly recommend to your existing code
+
+Your current AddUser/UpdateUser implementation contains SQL string concatenation such as:
+
+"where RoleName = '" + userViewModel.RoleName + "'";
+
+and:
+
+" ,UserName = '" + userViewModel.UserName + "'"
+
+as shown in the supplied controller.
+
+Since we're touching this code anyway, use:
+
+const string sql = @"
+    SELECT RoleId
+    FROM SBCES.Roles
+    WHERE RoleName = @RoleName;
+";
+
+userViewModel.RoleId =
+    await _dbConnection.QuerySingleOrDefaultAsync<int>(
+        sql,
+        new
+        {
+            userViewModel.RoleName
+        });
+
+That is safer and also makes the new Department implementation consistent with production Dapper practices.
+
+The database migration + User Department + VehicleList Department + server-side delete restriction are the essential pieces. The Kendo hiding is only a usability layer; it must not be treated as the security mechanism.
+Yes. For _Layout.cshtml, I recommend displaying it as:
+
+John Smith | Administrator | BUS
+
+or, for example:
+
+John Smith | User | STREETCAR
+
+The cleanest approach is to expose Department alongside the existing user/role information through the same mechanism your layout already uses.
+
+_Layout.cshtml
+
+If your current layout has something similar to:
+
+<span class="user-name">
+    @User.Identity?.Name
+</span>
+
+and you already have the role available through User.IsInRole(...), you can use:
+
+@{
+    var displayUserName = User.Identity?.Name ?? string.Empty;
+
+    var displayRole =
+        User.IsInRole("Admin") ? "Admin" :
+        User.IsInRole("SuperAdmin") ? "SuperAdmin" :
+        User.IsInRole("User") ? "User" :
+        string.Empty;
+
+    var displayDepartment =
+        ViewBag.Department as string ?? string.Empty;
+}
+
+Then:
+
+<div class="user-info">
+    <span class="user-name">
+        @displayUserName
+    </span>
+
+    @if (!string.IsNullOrWhiteSpace(displayRole))
+    {
+        <span class="user-role">
+            @displayRole
+        </span>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(displayDepartment))
+    {
+        <span class="user-department">
+            @displayDepartment
+        </span>
+    }
+</div>
+
+However, I would not recommend ViewBag.Department in _Layout.cshtml, because the layout is rendered by many different controllers/actions and you'd have to populate it everywhere.
+
+Better approach: View Component / claims
+
+Since Department is a user-level property like Role, it should ideally be available as an authentication claim.
+
+When the user logs in, add:
+
+new Claim("Department", user.Department)
+
+Then _Layout.cshtml becomes very simple:
+
+@using System.Security.Claims
+
+@{
+    var userName = User.Identity?.Name ?? "";
+
+    var role = User.FindFirst(ClaimTypes.Role)?.Value ?? "";
+
+    var department =
+        User.FindFirst("Department")?.Value ?? "";
+}
+
+Display:
+
+<div class="user-info">
+    <span class="user-name">@userName</span>
+
+    @if (!string.IsNullOrWhiteSpace(role))
+    {
+        <span class="user-role">@role</span>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(department))
+    {
+        <span class="user-department">@department</span>
+    }
+</div>
+
+For nicer presentation:
+
+<div class="user-info">
+    <span class="user-name">@userName</span>
+
+    <span class="user-role">
+        @role
+    </span>
+
+    <span class="user-department">
+        @(department == "STREETCAR" ? "StreetCar" : "Bus")
+    </span>
+</div>
+CSS
+
+If your current layout already has styling for the user name/role, add:
+
+.user-department {
+    margin-left: 8px;
+    font-size: 0.9em;
+    opacity: 0.85;
+}
+
+.user-department::before {
+    content: "|";
+    margin-right: 8px;
+}
+
+This produces:
+
+John Smith | Administrator | Bus
+
+or:
+
+John Smith | User | StreetCar
+Important
