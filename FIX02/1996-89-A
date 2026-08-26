@@ -1159,7 +1159,7 @@
     });
 
     // ============================================================
-    // DATA FETCHING
+    // DATA FETCHING - FIXED: Looking for response directly
     // ============================================================
     function fetchTotalCostData() {
         console.log("Fetching data from:", totalCostDataUrl);
@@ -1171,8 +1171,12 @@
             timeout: 30000,
             success: function(response) {
                 console.log("Response received:", response);
-                if (response && response.Data && response.Data.length > 0) {
-                    var costData = response.Data[0];
+                // Check if response is an array directly (not wrapped in Data property)
+                var dataArray = Array.isArray(response) ? response : (response.Data || []);
+                console.log("Data array:", dataArray);
+                
+                if (dataArray && dataArray.length > 0) {
+                    var costData = dataArray[0];
                     console.log("Cost data:", costData);
                     populateAllSections(costData);
                     $("#loadingIndicator").hide();
@@ -1466,15 +1470,12 @@
     function saveReportAsPdf() {
         var content = document.getElementById('reportContainer');
         
-        // Show loading
         var btn = $('#savePdfBtn');
         var originalText = btn.html();
         btn.html('⏳ Generating...');
         btn.prop('disabled', true);
 
-        // Use html2canvas and jsPDF
         if (typeof html2canvas === 'undefined') {
-            // Load html2canvas dynamically
             var script = document.createElement('script');
             script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
             script.onload = function() {
@@ -1494,46 +1495,60 @@
             backgroundColor: '#ffffff'
         }).then(function(canvas) {
             var imgData = canvas.toDataURL('image/png');
-            var pdf = new jspdf.jsPDF('p', 'mm', 'a4');
-            var pdfWidth = pdf.internal.pageSize.getWidth();
-            var pdfHeight = (canvas.height * pdfWidth) / canvas.width;
             
-            var pageHeight = pdf.internal.pageSize.getHeight();
-            var remainingHeight = pdfHeight;
-            var yPosition = 0;
-            
-            while (remainingHeight > 0) {
-                var currentPageHeight = Math.min(remainingHeight, pageHeight);
-                var srcY = (pdfHeight - remainingHeight) * (canvas.width / pdfWidth);
-                var srcHeight = currentPageHeight * (canvas.width / pdfWidth);
-                
-                var pageCanvas = document.createElement('canvas');
-                pageCanvas.width = canvas.width;
-                pageCanvas.height = canvas.height;
-                var ctx = pageCanvas.getContext('2d');
-                ctx.drawImage(canvas, 0, srcY, canvas.width, srcHeight, 0, 0, canvas.width, srcHeight);
-                
-                var pageImgData = pageCanvas.toDataURL('image/png');
-                
-                if (yPosition > 0) {
-                    pdf.addPage();
-                }
-                pdf.addImage(pageImgData, 'PNG', 0, 0, pdfWidth, currentPageHeight);
-                
-                remainingHeight -= currentPageHeight;
-                yPosition += currentPageHeight;
+            if (typeof jspdf === 'undefined') {
+                var script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+                script.onload = function() {
+                    createPdf(imgData, canvas, btn, originalText);
+                };
+                document.head.appendChild(script);
+            } else {
+                createPdf(imgData, canvas, btn, originalText);
             }
-            
-            pdf.save('VehicleCostSummary_' + partNum + '.pdf');
-            
-            btn.html(originalText);
-            btn.prop('disabled', false);
         }).catch(function(err) {
             console.error('PDF generation error:', err);
             btn.html(originalText);
             btn.prop('disabled', false);
             alert('Error generating PDF: ' + err.message);
         });
+    }
+
+    function createPdf(imgData, canvas, btn, originalText) {
+        var pdf = new jspdf.jsPDF('p', 'mm', 'a4');
+        var pdfWidth = pdf.internal.pageSize.getWidth();
+        var pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+        
+        var pageHeight = pdf.internal.pageSize.getHeight();
+        var remainingHeight = pdfHeight;
+        var yPosition = 0;
+        
+        while (remainingHeight > 0) {
+            var currentPageHeight = Math.min(remainingHeight, pageHeight);
+            var srcY = (pdfHeight - remainingHeight) * (canvas.width / pdfWidth);
+            var srcHeight = currentPageHeight * (canvas.width / pdfWidth);
+            
+            var pageCanvas = document.createElement('canvas');
+            pageCanvas.width = canvas.width;
+            pageCanvas.height = canvas.height;
+            var ctx = pageCanvas.getContext('2d');
+            ctx.drawImage(canvas, 0, srcY, canvas.width, srcHeight, 0, 0, canvas.width, srcHeight);
+            
+            var pageImgData = pageCanvas.toDataURL('image/png');
+            
+            if (yPosition > 0) {
+                pdf.addPage();
+            }
+            pdf.addImage(pageImgData, 'PNG', 0, 0, pdfWidth, currentPageHeight);
+            
+            remainingHeight -= currentPageHeight;
+            yPosition += currentPageHeight;
+        }
+        
+        pdf.save('VehicleCostSummary_' + partNum + '.pdf');
+        
+        btn.html(originalText);
+        btn.prop('disabled', false);
     }
 
     // ============================================================
@@ -1599,41 +1614,8 @@
         $("#costSummaryContent").hide();
         $("#noDataMessage").show();
     }
-
-    // ============================================================
-    // Load html2canvas and jsPDF if not already loaded
-    // ============================================================
-    function loadLibrary(url) {
-        return new Promise(function(resolve, reject) {
-            var script = document.createElement('script');
-            script.src = url;
-            script.onload = resolve;
-            script.onerror = reject;
-            document.head.appendChild(script);
-        });
-    }
-
-    // Check if libraries are loaded, if not load them
-    $(document).ready(function() {
-        var needsLoading = false;
-        if (typeof html2canvas === 'undefined') {
-            needsLoading = true;
-            var script1 = document.createElement('script');
-            script1.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-            document.head.appendChild(script1);
-        }
-        if (typeof jspdf === 'undefined') {
-            needsLoading = true;
-            var script2 = document.createElement('script');
-            script2.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-            document.head.appendChild(script2);
-        }
-        if (needsLoading) {
-            console.log('Loading PDF libraries...');
-        }
-    });
 </script>
 
-<!-- ===== Load html2canvas and jsPDF for PDF generation ===== -->
+<!-- Load html2canvas and jsPDF for PDF generation -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
