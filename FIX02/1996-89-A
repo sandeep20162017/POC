@@ -1064,4 +1064,554 @@
                 <div class="labour-body">
                     <table class="info-table">
                         <tr><td class="label-col"><strong>Fringe</strong></td><td class="value-col" id="labourFringeDisplay">$0.00</td></tr>
-                        <tr><td class="label-col"><strong>Benefits</strong></td><td class="value-col" id="labourBenefitsDisplay">$
+                        <tr><td class="label-col"><strong>Benefits</strong></td><td class="value-col" id="labourBenefitsDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Blended Fringe & Benefits</strong></td><td class="value-col" id="blendedFringeCostDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Overhead</strong></td><td class="value-col" id="labourOverheadDisplay">$0.00</td></tr>
+                        <tr class="total-row"><td class="label-col"><strong>= Total Labour Cost</strong></td><td class="value-col" id="totalLabourCostDisplay">$0.00</td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TOTALS ROW ===== -->
+        <div class="totals-row">
+            <div class="total-box">
+                <div class="total-box-label">TOTAL MATERIAL COST (With Tax)</div>
+                <div class="total-box-value" id="totalMaterialBoxDisplay">$0.00</div>
+            </div>
+            <div class="total-box">
+                <div class="total-box-label">TOTAL LABOUR COST</div>
+                <div class="total-box-value" id="totalLabourBoxDisplay">$0.00</div>
+            </div>
+        </div>
+
+        <!-- ===== GRAND TOTAL ===== -->
+        <div class="grand-total-section">
+            <table class="grand-total-table">
+                <tr>
+                    <td class="grand-total-label"><strong>💰 GRAND TOTAL (Material + Labour)</strong></td>
+                    <td class="grand-total-value" id="totalWithTaxDisplay">$0.00</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- ===== FOOTER - UPDATED with ModifiedBy and ModifiedDate ===== -->
+        <div class="report-footer">
+            <div class="footer-left">
+                <span class="footer-label">Modified Last By:</span>
+                <span class="footer-value" id="modifiedBy">-</span>
+                <span style="margin-left: 15px;" class="footer-label">Modified Last Date:</span>
+                <span class="footer-value" id="modifiedDate">-</span>
+            </div>
+            <div class="footer-right">
+                <span class="footer-label">Entered By:</span>
+                <span class="footer-value" id="enteredBy">-</span>
+                <span style="margin-left: 15px;" class="footer-label">Date Entered:</span>
+                <span class="footer-value" id="dateEntered">-</span>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ===== NO DATA MESSAGE ===== -->
+    <div id="noDataMessage" class="no-data-message" style="display: none;">
+        <div class="warning-icon">⚠️</div>
+        <p style="font-size:16px; margin:10px 0;"><strong>No cost data available</strong></p>
+        <p>No cost data found for Estimate ID: @ViewBag.PartNum</p>
+        <button id="retryButton" class="retry-btn">⟳ Retry Loading</button>
+    </div>
+
+</div>
+
+<script type="text/javascript">
+    // ============================================================
+    // CONFIGURATION
+    // ============================================================
+    var partNum = '@ViewBag.PartNum';
+    var gridType = '@ViewBag.GridType';
+    var totalCostDataUrl = '@Url.Action("GetTotalCostInEstimates", "TotalCost")' +
+                           '?id=' + encodeURIComponent(partNum) +
+                           '&gridType=' + encodeURIComponent(gridType);
+
+    // ============================================================
+    // DOCUMENT READY
+    // ============================================================
+    $(document).ready(function() {
+        console.log("TotalCostTab initialized");
+        fetchTotalCostData();
+
+        $("#retryButton").on('click', function() {
+            $("#noDataMessage").hide();
+            $("#loadingIndicator").show();
+            $("#costSummaryContent").hide();
+            fetchTotalCostData();
+        });
+
+        // PDF Save Button
+        $("#savePdfBtn").on('click', function() {
+            saveReportAsPdf();
+        });
+
+        // Copy Button
+        $("#copyReportBtn").on('click', function() {
+            copyReportToClipboard();
+        });
+    });
+
+    // ============================================================
+    // DATA FETCHING
+    // ============================================================
+    function fetchTotalCostData() {
+        console.log("Fetching data from:", totalCostDataUrl);
+
+        $.ajax({
+            url: totalCostDataUrl,
+            type: 'GET',
+            dataType: 'json',
+            timeout: 30000,
+            success: function(response) {
+                console.log("Response received:", response);
+                if (response && response.Data && response.Data.length > 0) {
+                    var costData = response.Data[0];
+                    console.log("Cost data:", costData);
+                    populateAllSections(costData);
+                    $("#loadingIndicator").hide();
+                    $("#costSummaryContent").show();
+                    $("#noDataMessage").hide();
+                } else {
+                    console.log("No data in response");
+                    showNoDataMessage();
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error("Error fetching cost data:", status, error);
+                showNoDataMessage();
+            }
+        });
+    }
+
+    // ============================================================
+    // HELPER FUNCTIONS
+    // ============================================================
+    function getVal(value) {
+        if (value === null || value === undefined) return 0;
+        var num = parseFloat(value);
+        return isNaN(num) ? 0 : num;
+    }
+
+    function formatMoney(val) {
+        return '$' + val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function setText(id, value) {
+        $(id).text(formatMoney(value));
+    }
+
+    function setNumber(id, value) {
+        var num = getVal(value);
+        $(id).text(num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }));
+    }
+
+    function setNumberDecimal(id, value) {
+        var num = getVal(value);
+        $(id).text(num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    }
+
+    // ============================================================
+    // MAIN POPULATE FUNCTION - UPDATED with new fields
+    // ============================================================
+    function populateAllSections(costData) {
+        // SECTION 1: Vehicle Details - NEW fields
+        $('#vehicleMake').text(costData.Make || '-');
+        $('#vehicleModel').text(costData.Model || '-');
+        $('#vehicleYear').text(costData.Year || '-');
+        $('#vehicleCount').text(costData.NumOfVehicles || '-');
+        $('#vehicleEngine').text(costData.Engine || '-');
+        $('#vehicleTransmission').text(costData.Transmission || '-');
+        $('#vehicleDifferential').text(costData.Differential || '-');
+        $('#vehicleDescription').text(costData.VehicleDescription || '-');
+        $('#vehicleSeries').text(costData.VehicleSeries || '-');
+        $('#vehicleIdBadge').text('ID: ' + (costData.LinkCode || partNum));
+
+        // SECTION 2: Material Cost Summary - UPDATED labels
+        var totalParts = (costData.TotalStockPartsCount || 0) + 
+                         (costData.TotalNonStockPartsCount || 0) + 
+                         (costData.TotalRebuiltPartsCount || 0);
+        $('#materialCountBadge').text(totalParts + ' parts');
+        
+        setNumber('#stockPartsCount', costData.TotalStockPartsCount);
+        setNumber('#nonStockPartsCount', costData.TotalNonStockPartsCount);
+        setNumber('#rebuiltPartsCount', costData.TotalRebuiltPartsCount);
+        
+        // UPDATED: Stock Cost, Total Non-Stock Cost, Total Rebuilt Cost
+        setText('#stockCost', costData.SCPartsMaterialCost);
+        setText('#nonStockCost', costData.NSCSCPartsMaterialCost);
+        setText('#rebuiltCost', costData.RBPartsMaterialCost);
+
+        // SECTION 3: Material Lines
+        populateMaterialLines(costData.MaterialLines || []);
+
+        // SECTION 4: Labour Hours Summary
+        setNumberDecimal('#totalHours', costData.TotalLabourHours);
+        setNumberDecimal('#totalEffectiveHours', costData.TotalEffectiveHours);
+        setNumberDecimal('#totalAdjustedHours', costData.TotalAdjustedHours);
+
+        // SECTION 5: Labour Task Summary
+        populateTaskSummary(costData.LabourTasks || []);
+
+        // Material Section (side by side)
+        var scParts = getVal(costData.SCPartsMaterialCost);
+        var nscParts = getVal(costData.NSCSCPartsMaterialCost);
+        var rbParts = getVal(costData.RBPartsMaterialCost);
+        var coreCost = getVal(costData.CoreCost);
+        var partsTotalNoTax = getVal(costData.MaterialTotalCostNoTax);
+        var materialTax = getVal(costData.MaterialTotalTaxAmount);
+        var materialWithTax = getVal(costData.MaterialTotalWithTax);
+
+        // Labour values
+        var labourFringe = getVal(costData.LabourFringe);
+        var labourBenefits = getVal(costData.LabourBenefits);
+        var blendedFringeCost = getVal(costData.BlendedFringeBenefitCost);
+        var labourOverhead = getVal(costData.LabourOverhead);
+        var totalLabour = getVal(costData.FinalLabourCost);
+        var totalWithTax = materialWithTax + totalLabour;
+
+        setText("#scPartsDisplay", scParts);
+        setText("#nscPartsDisplay", nscParts);
+        setText("#rbCostDisplay", rbParts);
+        setText("#coreCostDisplay", coreCost);
+        setText("#partsTotalDisplay", partsTotalNoTax);
+        setText("#materialTaxDisplay", materialTax);
+        setText("#materialWithTaxDisplay", materialWithTax);
+
+        setText("#labourFringeDisplay", labourFringe);
+        setText("#labourBenefitsDisplay", labourBenefits);
+        setText("#blendedFringeCostDisplay", blendedFringeCost);
+        setText("#labourOverheadDisplay", labourOverhead);
+        setText("#totalLabourCostDisplay", totalLabour);
+
+        setText("#totalMaterialBoxDisplay", materialWithTax);
+        setText("#totalLabourBoxDisplay", totalLabour);
+        setText("#totalWithTaxDisplay", totalWithTax);
+
+        // FOOTER - UPDATED with ModifiedBy and ModifiedDate
+        $('#modifiedBy').text(costData.ModifiedLastBy || '-');
+        var modDate = costData.ModifiedLastDate;
+        if (modDate) {
+            var d = new Date(modDate);
+            if (!isNaN(d)) {
+                $('#modifiedDate').text(d.toLocaleString('en-US', { 
+                    year: 'numeric', month: '2-digit', day: '2-digit', 
+                    hour: '2-digit', minute: '2-digit', second: '2-digit' 
+                }));
+            } else {
+                $('#modifiedDate').text(modDate);
+            }
+        } else {
+            $('#modifiedDate').text('-');
+        }
+
+        $('#enteredBy').text(costData.EnteredBy || '-');
+        var enterDate = costData.DateEntered;
+        if (enterDate) {
+            var d2 = new Date(enterDate);
+            if (!isNaN(d2)) {
+                $('#dateEntered').text(d2.toLocaleString('en-US', { 
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit' 
+                }));
+            } else {
+                $('#dateEntered').text(enterDate);
+            }
+        } else {
+            $('#dateEntered').text('-');
+        }
+    }
+
+    // ============================================================
+    // POPULATE MATERIAL LINES
+    // ============================================================
+    function populateMaterialLines(lines) {
+        var tbody = $('#materialLinesBody');
+        var badge = $('#materialLinesBadge');
+        var totalItems = lines.length;
+        badge.text(totalItems + ' items');
+
+        if (totalItems === 0) {
+            tbody.html('<tr><td colspan="9" style="text-align:center; color:#6c757d; padding:20px;">No material items found</td></tr>');
+            return;
+        }
+
+        var html = '';
+        var typeTotals = { Stock: 0, Rebuilt: 0, 'Non-Stock': 0 };
+        var grandTotal = 0;
+
+        lines.forEach(function(item) {
+            var type = item.Type || 'Stock';
+            var typeClass = type.toLowerCase().replace('-', '');
+            var badgeClass = typeClass === 'nonstock' ? 'nonstock' : typeClass;
+            var totalCost = getVal(item.TotalCost);
+
+            if (typeTotals[type] !== undefined) {
+                typeTotals[type] += totalCost;
+            }
+            grandTotal += totalCost;
+
+            html += '<tr class="type-' + typeClass + '">' +
+                '<td><span class="type-badge ' + badgeClass + '">' + type + '</span></td>' +
+                '<td>' + (item.StockCode || '-') + '</td>' +
+                '<td>' + (item.CC || '-') + '</td>' +
+                '<td>' + (item.Description || 'N/A') + '</td>' +
+                '<td style="text-align:right;">' + getVal(item.Quantity).toFixed(2) + '</td>' +
+                '<td style="text-align:right;">' + formatMoney(getVal(item.UnitCost)) + '</td>' +
+                '<td style="text-align:right;">' + getVal(item.PercentUsage).toFixed(1) + '%</td>' +
+                '<td style="text-align:right; font-weight:600;">' + formatMoney(totalCost) + '</td>' +
+                '<td>' + (item.Supplier || '') + '</td>' +
+                '</tr>';
+        });
+
+        // Add type subtotals
+        var typeOrder = ['Stock', 'Rebuilt', 'Non-Stock'];
+        typeOrder.forEach(function(type) {
+            if (typeTotals[type] > 0) {
+                html += '<tr class="subtotal-row">' +
+                    '<td colspan="8" style="text-align:right; font-weight:600;">Subtotal - ' + type + '</td>' +
+                    '<td style="text-align:right; font-weight:600;">' + formatMoney(typeTotals[type]) + '</td>' +
+                    '</tr>';
+            }
+        });
+
+        // Add grand total
+        html += '<tr class="total-row">' +
+            '<td colspan="8" style="text-align:right; font-weight:800; font-size:1.05em;">GRAND TOTAL</td>' +
+            '<td style="text-align:right; font-weight:800; font-size:1.05em;">' + formatMoney(grandTotal) + '</td>' +
+            '</tr>';
+
+        tbody.html(html);
+    }
+
+    // ============================================================
+    // POPULATE TASK SUMMARY
+    // ============================================================
+    function populateTaskSummary(tasks) {
+        var tbody = $('#taskSummaryBody');
+        var badge = $('#taskCountBadge');
+
+        tasks = Array.isArray(tasks) ? tasks : [];
+
+        badge.text(tasks.length + ' tasks');
+
+        if (tasks.length === 0) {
+            tbody.html(
+                '<tr>' +
+                    '<td colspan="9" style="text-align:center; color:#6c757d; padding:20px;">' +
+                        'No labour tasks found' +
+                    '</td>' +
+                '</tr>'
+            );
+            return;
+        }
+
+        var html = '';
+        var totalHours = 0;
+        var totalEffective = 0;
+        var totalAdjusted = 0;
+        var totalCost = 0;
+        var totalCount = 0;
+
+        tasks.forEach(function(task) {
+            var hours = getVal(task.Hours);
+            var effective = getVal(task.EffectiveHours);
+            var adjusted = getVal(task.AdjustedHours);
+            var ratePerHour = getVal(task.RatePerHour);
+            var cost = getVal(task.TotalCost);
+            var count = getVal(task.Count);
+
+            totalHours += hours;
+            totalEffective += effective;
+            totalAdjusted += adjusted;
+            totalCost += cost;
+            totalCount += count;
+
+            html += '<tr>' +
+                '<td>' + (task.Task || 'Unnamed') + '</td>' +
+                '<td>' + (task.LabourDefinition || 'N/A') + '</td>' +
+                '<td>' + (task.CC || '-') + '</td>' +
+                '<td style="text-align:right;">' + hours.toFixed(2) + '</td>' +
+                '<td style="text-align:right;">' + effective.toFixed(2) + '</td>' +
+                '<td style="text-align:right;">' + adjusted.toFixed(2) + '</td>' +
+                '<td style="text-align:right;">' + formatMoney(ratePerHour) + '</td>' +
+                '<td style="text-align:right; font-weight:600;">' + formatMoney(cost) + '</td>' +
+                '<td style="text-align:center;">' + count + '</td>' +
+                '</tr>';
+        });
+
+        // Total row
+        html += '<tr class="total-row">' +
+            '<td colspan="3"><strong>TOTAL</strong></td>' +
+            '<td style="text-align:right;"><strong>' + totalHours.toFixed(2) + '</strong></td>' +
+            '<td style="text-align:right;"><strong>' + totalEffective.toFixed(2) + '</strong></td>' +
+            '<td style="text-align:right;"><strong>' + totalAdjusted.toFixed(2) + '</strong></td>' +
+            '<td style="text-align:right;"></td>' +
+            '<td style="text-align:right;"><strong>' + formatMoney(totalCost) + '</strong></td>' +
+            '<td style="text-align:center;"><strong>' + totalCount + '</strong></td>' +
+            '</tr>';
+
+        tbody.html(html);
+    }
+
+    // ============================================================
+    // SAVE AS PDF
+    // ============================================================
+    function saveReportAsPdf() {
+        var content = document.getElementById('reportContainer');
+        
+        var btn = $('#savePdfBtn');
+        var originalText = btn.html();
+        btn.html('⏳ Generating...');
+        btn.prop('disabled', true);
+
+        if (typeof html2canvas === 'undefined') {
+            var script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+            script.onload = function() {
+                generatePdf(content, btn, originalText);
+            };
+            document.head.appendChild(script);
+        } else {
+            generatePdf(content, btn, originalText);
+        }
+    }
+
+    function generatePdf(content, btn, originalText) {
+        html2canvas(content, {
+            scale: 2,
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#ffffff'
+        }).then(function(canvas) {
+            var imgData = canvas.toDataURL('image/png');
+            
+            if (typeof jspdf === 'undefined') {
+                var script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+                script.onload = function() {
+                    createPdf(imgData, canvas, btn, originalText);
+                };
+                document.head.appendChild(script);
+            } else {
+                createPdf(imgData, canvas, btn, originalText);
+            }
+        }).catch(function(err) {
+            console.error('PDF generation error:', err);
+            btn.html(originalText);
+            btn.prop('disabled', false);
+            alert('Error generating PDF: ' + err.message);
+        });
+    }
+
+    function createPdf(imgData, canvas, btn, originalText) {
+        var pdf = new jspdf.jsPDF('p', 'mm', 'a4');
+        var pdfWidth = pdf.internal.pageSize.getWidth();
+        var pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+        
+        var pageHeight = pdf.internal.pageSize.getHeight();
+        var remainingHeight = pdfHeight;
+        var yPosition = 0;
+        
+        while (remainingHeight > 0) {
+            var currentPageHeight = Math.min(remainingHeight, pageHeight);
+            var srcY = (pdfHeight - remainingHeight) * (canvas.width / pdfWidth);
+            var srcHeight = currentPageHeight * (canvas.width / pdfWidth);
+            
+            var pageCanvas = document.createElement('canvas');
+            pageCanvas.width = canvas.width;
+            pageCanvas.height = canvas.height;
+            var ctx = pageCanvas.getContext('2d');
+            ctx.drawImage(canvas, 0, srcY, canvas.width, srcHeight, 0, 0, canvas.width, srcHeight);
+            
+            var pageImgData = pageCanvas.toDataURL('image/png');
+            
+            if (yPosition > 0) {
+                pdf.addPage();
+            }
+            pdf.addImage(pageImgData, 'PNG', 0, 0, pdfWidth, currentPageHeight);
+            
+            remainingHeight -= currentPageHeight;
+            yPosition += currentPageHeight;
+        }
+        
+        pdf.save('VehicleCostSummary_' + partNum + '.pdf');
+        
+        btn.html(originalText);
+        btn.prop('disabled', false);
+    }
+
+    // ============================================================
+    // COPY TO CLIPBOARD
+    // ============================================================
+    function copyReportToClipboard() {
+        var content = document.getElementById('reportContainer');
+        
+        var btn = $('#copyReportBtn');
+        var originalText = btn.html();
+        btn.html('⏳ Copying...');
+        btn.prop('disabled', true);
+
+        if (typeof html2canvas === 'undefined') {
+            var script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+            script.onload = function() {
+                copyToClipboard(content, btn, originalText);
+            };
+            document.head.appendChild(script);
+        } else {
+            copyToClipboard(content, btn, originalText);
+        }
+    }
+
+    function copyToClipboard(content, btn, originalText) {
+        html2canvas(content, {
+            scale: 2,
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#ffffff'
+        }).then(function(canvas) {
+            canvas.toBlob(function(blob) {
+                navigator.clipboard.write([
+                    new ClipboardItem({
+                        'image/png': blob
+                    })
+                ]).then(function() {
+                    btn.html('✅ Copied!');
+                    setTimeout(function() {
+                        btn.html(originalText);
+                        btn.prop('disabled', false);
+                    }, 2000);
+                }).catch(function(err) {
+                    btn.html(originalText);
+                    btn.prop('disabled', false);
+                    alert('Error copying to clipboard: ' + err.message);
+                });
+            });
+        }).catch(function(err) {
+            console.error('Copy error:', err);
+            btn.html(originalText);
+            btn.prop('disabled', false);
+            alert('Error copying report: ' + err.message);
+        });
+    }
+
+    // ============================================================
+    // SHOW NO DATA MESSAGE
+    // ============================================================
+    function showNoDataMessage() {
+        $("#loadingIndicator").hide();
+        $("#costSummaryContent").hide();
+        $("#noDataMessage").show();
+    }
+</script>
+
+<!-- Load html2canvas and jsPDF for PDF generation -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
