@@ -1004,9 +1004,9 @@
 
     // ===== SAVE AS PDF =====
     function saveReportAsPdf() {
-        var sourceReport = document.querySelector('.report-container');
+        var report = document.querySelector('.report-container');
 
-        if (!sourceReport) {
+        if (!report) {
             kendo.alert('Unable to find the estimate report.');
             return;
         }
@@ -1021,95 +1021,101 @@
         }
 
         var sourceContent = document.getElementById('costSummaryContent');
-        if (!sourceContent || $(sourceContent).is(':hidden')) {
-            kendo.alert('Please wait until the estimate has finished loading, then try Save as PDF again.');
+
+        // The report must actually be visible. Do not clone it into a hidden
+        // or transparent container: Kendo drawDOM can produce blank pages
+        // when the DOM being measured is hidden/collapsed.
+        if (!sourceContent ||
+            $(sourceContent).is(':hidden') ||
+            report.offsetWidth <= 0 ||
+            report.offsetHeight <= 0) {
+            kendo.alert(
+                'Please wait until the estimate has finished loading and the ' +
+                'Total Cost report is visible, then try Save as PDF again.'
+            );
             return;
         }
 
-        var wrapper = null;
-        var finished = false;
+        var button = document.querySelector('[onclick="saveReportAsPdf()"]');
+        var originalText = button ? button.innerHTML : '';
+        var hiddenElements = [];
+        var drawRequest = null;
+        var pdfRequest = null;
 
         try {
-            // Clone the complete report. Do NOT put the clone at a negative
-            // off-screen coordinate: Kendo can calculate zero dimensions for
-            // that layout in some browser/Kendo combinations.
-            wrapper = sourceReport.cloneNode(true);
-            wrapper.id = 'pdfExportWrapper';
-
-            wrapper.style.display = 'block';
-            wrapper.style.visibility = 'visible';
-            wrapper.style.position = 'fixed';
-            wrapper.style.left = '0';
-            wrapper.style.top = '0';
-            wrapper.style.width = '1200px';
-            wrapper.style.maxWidth = '1200px';
-            wrapper.style.height = 'auto';
-            wrapper.style.minHeight = '1px';
-            wrapper.style.backgroundColor = '#ffffff';
-            wrapper.style.opacity = '0.01';
-            wrapper.style.zIndex = '-9999';
-            wrapper.style.pointerEvents = 'none';
-            wrapper.style.overflow = 'visible';
-            wrapper.style.boxSizing = 'border-box';
-
-            document.body.appendChild(wrapper);
-
-            // costSummaryContent is initially display:none in the source.
-            var content = wrapper.querySelector('#costSummaryContent');
-            if (content) {
-                content.style.display = 'block';
-                content.style.visibility = 'visible';
-                content.style.height = 'auto';
-                content.style.maxHeight = 'none';
-                content.style.overflow = 'visible';
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = 'Generating PDF...';
             }
 
-            // Remove screen-only controls from the PDF.
-            $(wrapper).find(
-                '#reportMenu, #reportActions, .report-actions, .no-print, ' +
-                '.loading-spinner, button, .k-button, .k-context-menu'
-            ).remove();
+            /*
+             * IMPORTANT:
+             * Render the ACTUAL visible report rather than a clone.
+             *
+             * The previous implementation cloned .report-container and
+             * placed the clone at opacity/z-index values intended to hide it.
+             * That allowed drawDOM/exportPDF to complete but resulted in
+             * blank PDF pages in this Kendo/browser combination.
+             */
 
-            // Make all report content printable regardless of screen CSS.
-            $(wrapper).find(
+            // Make sure the full report content is expanded for printing.
+            sourceContent.style.display = 'block';
+            sourceContent.style.visibility = 'visible';
+            sourceContent.style.height = 'auto';
+            sourceContent.style.maxHeight = 'none';
+            sourceContent.style.overflow = 'visible';
+
+            $(report).find(
                 '.detail-section, .summary-section, .summary-grid, ' +
                 '.material-section, .labour-section'
             ).each(function () {
-                this.style.display = '';
                 this.style.visibility = 'visible';
                 this.style.height = 'auto';
                 this.style.maxHeight = 'none';
                 this.style.overflow = 'visible';
             });
 
-            // Modified By / Modified Date are intentionally the LAST row of
-            // Vehicle Details. Keep the row together in the PDF.
-            $(wrapper).find('.vehicle-audit-row').css({
+            // Hide ONLY UI controls. Do not use opacity, visibility:hidden,
+            // negative z-index, or display:none on the report itself.
+            $(report).find(
+                '#reportMenu, #reportActions, .report-actions, .no-print, ' +
+                '.loading-spinner, button, .k-button, .k-context-menu'
+            ).each(function () {
+                hiddenElements.push({
+                    element: this,
+                    display: this.style.display
+                });
+                this.style.display = 'none';
+            });
+
+            // Keep Modified By / Modified Date together as the final
+            // Vehicle Details row.
+            $(report).find('.vehicle-audit-row').css({
                 'display': 'grid',
                 'page-break-inside': 'avoid',
                 'break-inside': 'avoid'
             });
 
-            // Force layout. The clone is fixed and has a real width/height,
-            // unlike the previous -100000px implementation.
-            void wrapper.offsetWidth;
-            void wrapper.offsetHeight;
+            // Force a real browser layout before Kendo measures the DOM.
+            void report.offsetWidth;
+            void report.offsetHeight;
 
             console.log('PDF export target:', {
-                width: wrapper.offsetWidth,
-                height: wrapper.offsetHeight,
-                contentWidth: content ? content.offsetWidth : 0,
-                contentHeight: content ? content.offsetHeight : 0
+                width: report.offsetWidth,
+                height: report.offsetHeight,
+                contentWidth: sourceContent.offsetWidth,
+                contentHeight: sourceContent.offsetHeight
             });
 
-            if (wrapper.offsetWidth <= 0 || wrapper.offsetHeight <= 0) {
+            if (report.offsetWidth <= 0 || report.offsetHeight <= 0) {
                 throw new Error('PDF export target has zero width or height.');
             }
 
-            // Kendo uses jQuery Deferred. Do not mix native Promise .then()
-            // with Kendo's Deferred chain; that was the source of the
-            // "...done is not a function" error.
-            var drawRequest = kendo.drawing.drawDOM(wrapper, {
+            /*
+             * Kendo returns a jQuery Deferred.
+             * Use .done/.fail consistently.
+             */
+            drawRequest = kendo.drawing.drawDOM(report, {
                 paperSize: 'Letter',
                 landscape: true,
                 margin: {
@@ -1125,13 +1131,16 @@
             });
 
             drawRequest.done(function (group) {
-                if (!group) {
-                    throw new Error('Kendo returned an empty drawing group.');
-                }
-
                 console.log('Kendo drawing group created successfully.');
 
-                var pdfRequest = kendo.drawing.exportPDF(group, {
+                if (!group) {
+                    console.error('Kendo returned null drawing group.');
+                    restorePdfControls();
+                    kendo.alert('Kendo did not return printable report content.');
+                    return;
+                }
+
+                pdfRequest = kendo.drawing.exportPDF(group, {
                     paperSize: 'Letter',
                     landscape: true,
                     margin: {
@@ -1147,54 +1156,77 @@
                         throw new Error('Kendo returned empty PDF data.');
                     }
 
-                    var estimateNumber = ($('#estimateNumber').text() || '').trim();
-                    estimateNumber = estimateNumber || 'Estimate';
-                    estimateNumber = estimateNumber.replace(/[^a-z0-9_.-]/gi, '_');
+                    var estimateNumber =
+                        ($('#estimateNumber').text() || '').trim() ||
+                        ($('#linkCode').text() || '').trim() ||
+                        'Estimate';
 
-                    var fileName = 'FinalEstimate_' + estimateNumber + '.pdf';
+                    estimateNumber =
+                        estimateNumber.replace(/[^a-z0-9_.-]/gi, '_');
+
+                    var fileName =
+                        'FinalEstimate_' + estimateNumber + '.pdf';
+
+                    // Restore the UI BEFORE starting the browser download.
+                    restorePdfControls();
 
                     kendo.saveAs({
                         dataURI: dataUri,
                         fileName: fileName
                     });
 
-                    finished = true;
                     console.log('PDF created successfully:', fileName);
                 });
 
                 pdfRequest.fail(function (err) {
+                    restorePdfControls();
+
                     console.error('Kendo PDF export error:', err);
-                    kendo.alert('Error generating PDF: ' +
-                        (err && err.message ? err.message : 'Unknown error.'));
+
+                    kendo.alert(
+                        'Error generating PDF: ' +
+                        (err && err.message
+                            ? err.message
+                            : 'Unknown error.')
+                    );
                 });
             });
 
             drawRequest.fail(function (err) {
-                console.error('Kendo drawDOM error:', err);
-                kendo.alert('Error preparing PDF: ' +
-                    (err && err.message ? err.message : 'Unknown error.'));
-            });
+                restorePdfControls();
 
-            // Kendo drawing is asynchronous. Cleanup after the Deferred
-            // completes instead of immediately removing the target.
-            drawRequest.always(function () {
-                setTimeout(function () {
-                    var pdfWrapper = document.getElementById('pdfExportWrapper');
-                    if (pdfWrapper && pdfWrapper.parentNode) {
-                        pdfWrapper.parentNode.removeChild(pdfWrapper);
-                    }
-                }, 0);
+                console.error('Kendo drawDOM error:', err);
+
+                kendo.alert(
+                    'Error preparing PDF: ' +
+                    (err && err.message
+                        ? err.message
+                        : 'Unknown error.')
+                );
             });
 
         } catch (err) {
+            restorePdfControls();
+
             console.error('PDF export setup error:', err);
 
-            if (wrapper && wrapper.parentNode) {
-                wrapper.parentNode.removeChild(wrapper);
-            }
+            kendo.alert(
+                'Error generating PDF: ' +
+                (err && err.message
+                    ? err.message
+                    : 'Unknown error.')
+            );
+        }
 
-            kendo.alert('Error generating PDF: ' +
-                (err && err.message ? err.message : 'Unknown error.'));
+        function restorePdfControls() {
+            hiddenElements.forEach(function (item) {
+                item.element.style.display = item.display;
+            });
+
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
         }
     }
 
