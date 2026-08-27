@@ -1014,36 +1014,47 @@
         if (typeof kendo === 'undefined' ||
             !kendo.drawing ||
             !kendo.drawing.drawDOM ||
-            !kendo.drawing.exportPDF) {
+            !kendo.drawing.exportPDF ||
+            !kendo.saveAs) {
             kendo.alert('Kendo PDF export is not available on this page.');
             return;
         }
 
-        // The important fix: export ONE clone of the complete report-container.
-        // The previous implementation cloned costSummaryContent while it still
-        // had its inline display:none style, which can result in a blank PDF.
-        var wrapper = sourceReport.cloneNode(true);
-        wrapper.id = 'pdfExportWrapper';
-        wrapper.style.display = 'block';
-        wrapper.style.visibility = 'visible';
-        wrapper.style.position = 'absolute';
-        wrapper.style.left = '-100000px';
-        wrapper.style.top = '0';
-        wrapper.style.width = '1100px';
-        wrapper.style.maxWidth = '1100px';
-        wrapper.style.height = 'auto';
-        wrapper.style.minHeight = '1px';
-        wrapper.style.background = '#ffffff';
-        wrapper.style.padding = '0';
-        wrapper.style.margin = '0';
-        wrapper.style.boxSizing = 'border-box';
-        wrapper.style.overflow = 'visible';
+        var sourceContent = document.getElementById('costSummaryContent');
+        if (!sourceContent || $(sourceContent).is(':hidden')) {
+            kendo.alert('Please wait until the estimate has finished loading, then try Save as PDF again.');
+            return;
+        }
 
-        document.body.appendChild(wrapper);
+        var wrapper = null;
+        var finished = false;
 
         try {
-            // costSummaryContent is hidden on initial page load. The cloned
-            // element retains that inline style, so explicitly make it visible.
+            // Clone the complete report. Do NOT put the clone at a negative
+            // off-screen coordinate: Kendo can calculate zero dimensions for
+            // that layout in some browser/Kendo combinations.
+            wrapper = sourceReport.cloneNode(true);
+            wrapper.id = 'pdfExportWrapper';
+
+            wrapper.style.display = 'block';
+            wrapper.style.visibility = 'visible';
+            wrapper.style.position = 'fixed';
+            wrapper.style.left = '0';
+            wrapper.style.top = '0';
+            wrapper.style.width = '1200px';
+            wrapper.style.maxWidth = '1200px';
+            wrapper.style.height = 'auto';
+            wrapper.style.minHeight = '1px';
+            wrapper.style.backgroundColor = '#ffffff';
+            wrapper.style.opacity = '0.01';
+            wrapper.style.zIndex = '-9999';
+            wrapper.style.pointerEvents = 'none';
+            wrapper.style.overflow = 'visible';
+            wrapper.style.boxSizing = 'border-box';
+
+            document.body.appendChild(wrapper);
+
+            // costSummaryContent is initially display:none in the source.
             var content = wrapper.querySelector('#costSummaryContent');
             if (content) {
                 content.style.display = 'block';
@@ -1053,15 +1064,17 @@
                 content.style.overflow = 'visible';
             }
 
-            // Remove anything that is UI-only or should never appear in the PDF.
+            // Remove screen-only controls from the PDF.
             $(wrapper).find(
                 '#reportMenu, #reportActions, .report-actions, .no-print, ' +
                 '.loading-spinner, button, .k-button, .k-context-menu'
             ).remove();
 
-            // Make every report section visible in the exported clone.
-            $(wrapper).find('.detail-section, .summary-section, .summary-grid, ' +
-                '.material-section, .labour-section').each(function () {
+            // Make all report content printable regardless of screen CSS.
+            $(wrapper).find(
+                '.detail-section, .summary-section, .summary-grid, ' +
+                '.material-section, .labour-section'
+            ).each(function () {
                 this.style.display = '';
                 this.style.visibility = 'visible';
                 this.style.height = 'auto';
@@ -1069,108 +1082,117 @@
                 this.style.overflow = 'visible';
             });
 
-            // Modified By / Modified Date must remain the final Vehicle Details row.
+            // Modified By / Modified Date are intentionally the LAST row of
+            // Vehicle Details. Keep the row together in the PDF.
             $(wrapper).find('.vehicle-audit-row').css({
+                'display': 'grid',
                 'page-break-inside': 'avoid',
-                'break-inside': 'avoid',
-                'display': 'grid'
+                'break-inside': 'avoid'
             });
 
-            // Force browser layout before Kendo measures the clone.
+            // Force layout. The clone is fixed and has a real width/height,
+            // unlike the previous -100000px implementation.
+            void wrapper.offsetWidth;
             void wrapper.offsetHeight;
 
-            var fontsReady = document.fonts && document.fonts.ready
-                ? document.fonts.ready
-                : Promise.resolve();
+            console.log('PDF export target:', {
+                width: wrapper.offsetWidth,
+                height: wrapper.offsetHeight,
+                contentWidth: content ? content.offsetWidth : 0,
+                contentHeight: content ? content.offsetHeight : 0
+            });
 
-            fontsReady
-                .then(function () {
-                    return new Promise(function (resolve) {
-                        requestAnimationFrame(function () {
-                            requestAnimationFrame(resolve);
-                        });
-                    });
-                })
-                .then(function () {
-                    // Confirm that Kendo has a real, measurable export target.
-                    console.log('PDF export target:', {
-                        width: wrapper.offsetWidth,
-                        height: wrapper.offsetHeight,
-                        contentHeight: content ? content.offsetHeight : 0
-                    });
+            if (wrapper.offsetWidth <= 0 || wrapper.offsetHeight <= 0) {
+                throw new Error('PDF export target has zero width or height.');
+            }
 
-                    if (wrapper.offsetWidth === 0 || wrapper.offsetHeight === 0) {
-                        throw new Error('PDF export target has zero width or height.');
+            // Kendo uses jQuery Deferred. Do not mix native Promise .then()
+            // with Kendo's Deferred chain; that was the source of the
+            // "...done is not a function" error.
+            var drawRequest = kendo.drawing.drawDOM(wrapper, {
+                paperSize: 'Letter',
+                landscape: true,
+                margin: {
+                    top: '0.35in',
+                    bottom: '0.35in',
+                    left: '0.35in',
+                    right: '0.35in'
+                },
+                scale: 0.78,
+                multiPage: true,
+                avoidLinks: true,
+                keepTogether: '.vehicle-audit-row, .summary-card'
+            });
+
+            drawRequest.done(function (group) {
+                if (!group) {
+                    throw new Error('Kendo returned an empty drawing group.');
+                }
+
+                console.log('Kendo drawing group created successfully.');
+
+                var pdfRequest = kendo.drawing.exportPDF(group, {
+                    paperSize: 'Letter',
+                    landscape: true,
+                    margin: {
+                        top: '0.35in',
+                        bottom: '0.35in',
+                        left: '0.35in',
+                        right: '0.35in'
                     }
+                });
 
-                    return kendo.drawing.drawDOM(wrapper, {
-                        paperSize: 'Letter',
-                        landscape: true,
-                        margin: {
-                            top: '0.35in',
-                            bottom: '0.35in',
-                            left: '0.35in',
-                            right: '0.35in'
-                        },
-                        scale: 0.78,
-                        multiPage: true,
-                        repeatHeaders: true,
-                        avoidLinks: true,
-                        keepTogether: '.vehicle-audit-row, .summary-card'
-                    });
-                })
-                .then(function (group) {
-                    if (!group) {
-                        throw new Error('Kendo returned an empty drawing group.');
-                    }
-
-                    return kendo.drawing.exportPDF(group, {
-                        paperSize: 'Letter',
-                        landscape: true,
-                        margin: {
-                            top: '0.35in',
-                            bottom: '0.35in',
-                            left: '0.35in',
-                            right: '0.35in'
-                        }
-                    });
-                })
-                .done(function (data) {
-                    if (!data || data.length < 100) {
-                        throw new Error('Kendo returned an empty PDF data URI.');
+                pdfRequest.done(function (dataUri) {
+                    if (!dataUri || dataUri.length < 100) {
+                        throw new Error('Kendo returned empty PDF data.');
                     }
 
                     var estimateNumber = ($('#estimateNumber').text() || '').trim();
-                    var fileName = 'FinalEstimate_' +
-                        (estimateNumber || 'Estimate') + '.pdf';
+                    estimateNumber = estimateNumber || 'Estimate';
+                    estimateNumber = estimateNumber.replace(/[^a-z0-9_.-]/gi, '_');
 
-                    fileName = fileName.replace(/[^a-z0-9_.-]/gi, '_');
+                    var fileName = 'FinalEstimate_' + estimateNumber + '.pdf';
 
                     kendo.saveAs({
-                        dataURI: data,
+                        dataURI: dataUri,
                         fileName: fileName
                     });
 
+                    finished = true;
                     console.log('PDF created successfully:', fileName);
-                })
-                .fail(function (err) {
-                    console.error('PDF export error:', err);
+                });
+
+                pdfRequest.fail(function (err) {
+                    console.error('Kendo PDF export error:', err);
                     kendo.alert('Error generating PDF: ' +
                         (err && err.message ? err.message : 'Unknown error.'));
-                })
-                .always(function () {
+                });
+            });
+
+            drawRequest.fail(function (err) {
+                console.error('Kendo drawDOM error:', err);
+                kendo.alert('Error preparing PDF: ' +
+                    (err && err.message ? err.message : 'Unknown error.'));
+            });
+
+            // Kendo drawing is asynchronous. Cleanup after the Deferred
+            // completes instead of immediately removing the target.
+            drawRequest.always(function () {
+                setTimeout(function () {
                     var pdfWrapper = document.getElementById('pdfExportWrapper');
                     if (pdfWrapper && pdfWrapper.parentNode) {
                         pdfWrapper.parentNode.removeChild(pdfWrapper);
                     }
-                });
+                }, 0);
+            });
 
         } catch (err) {
             console.error('PDF export setup error:', err);
-            var pdfWrapper = document.getElementById('pdfExportWrapper');
-            if (pdfWrapper && pdfWrapper.parentNode) {
-                pdfWrapper.parentNode.removeChild(pdfWrapper);
+
+            if (wrapper && wrapper.parentNode) {
+                wrapper.parentNode.removeChild(wrapper);
             }
+
             kendo.alert('Error generating PDF: ' +
                 (err && err.message ? err.message : 'Unknown error.'));
         }
@@ -1395,7 +1417,7 @@
             html += '<tr class="type-' + typeClass + '">' +
                 '<td><span class="type-badge ' + badgeClass + '">' + type + '</span></td>' +
                 '<td>' + (item.StockCode || '-') + '</td>' +
-                '<td>' + (task.CC || '-') + '</td>' +
+                '<td>' + (item.CC || '-') + '</td>' +
                 '<td>' + (item.Description || 'N/A') + '</td>' +
                 '<td style="text-align:right;">' + getVal(item.Quantity).toFixed(2) + '</td>' +
                 '<td style="text-align:right;">' + formatMoney(getVal(item.UnitCost)) + '</td>' +
