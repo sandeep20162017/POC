@@ -1,0 +1,185 @@
+Task 1 — SQL SELECT for MBList
+
+For the single-record lookup equivalent to your MbList sample, I recommend this:
+
+SELECT
+    ISNULL(rbm.[RebuiltStockNum], 'N/A') AS [MBNumber],
+    ISNULL(rbm.[DetailedDesc], 'N/A') AS [Description],
+    ISNULL(rbm.[Keyword], 'N/A') AS [Keyword],
+    ISNULL(rbm.[MmsStockCode], 'N/A') AS [MmsStockCode],
+    ISNULL(rbm.[ItemRefNumber], 'N/A') AS [ItemRefNumber],
+    ISNULL(rbm.[CorePartNum], 'N/A') AS [CorePartNum],
+    ISNULL(rbm.[CoreCharge], 'N/A') AS [CoreCharge],
+    ISNULL(rbm.[JobNumber], 'N/A') AS [JobNumber],
+    ISNULL(rbm.[EstimatedCost], 0) AS [EstimatedCost],
+    ISNULL(rbm.[BuyNewCost], 'N/A') AS [BuyNewCost],
+    ISNULL(rbm.[RemanCost], 'N/A') AS [RemanCost],
+    ISNULL(rbm.[ExternalCost], 'N/A') AS [ExternalCost],
+    ISNULL(rbm.[SopNumber], 'N/A') AS [SopNumber],
+    ISNULL(rbm.[Active], 0) AS [Active],
+    ISNULL(
+        STRING_AGG(lb.[description], ', '),
+        'N/A'
+    ) AS [RBListOfBuses],
+    ISNULL(rbm.[DateEntered], GETDATE()) AS [DateEntered],
+    ISNULL(rbm.[LastModifiedBy], 'N/A') AS [LastModifiedBy]
+FROM [SBCES].[RbMasterlist] rbm
+LEFT JOIN [SBCES].[RBLISTOFBUSES] rbl
+    ON rbm.[RebuiltStockNum] = rbl.[RebuiltStockNum]
+LEFT JOIN [SBCES].[LISTOFBUSES] lb
+    ON rbl.[listid] = lb.[listid]
+WHERE rbm.[RebuiltStockNum] = @Id
+GROUP BY
+    rbm.[RebuiltStockNum],
+    rbm.[DetailedDesc],
+    rbm.[Keyword],
+    rbm.[MmsStockCode],
+    rbm.[ItemRefNumber],
+    rbm.[CorePartNum],
+    rbm.[CoreCharge],
+    rbm.[JobNumber],
+    rbm.[EstimatedCost],
+    rbm.[BuyNewCost],
+    rbm.[RemanCost],
+    rbm.[ExternalCost],
+    rbm.[SopNumber],
+    rbm.[Active],
+    rbm.[DateEntered],
+    rbm.[LastModifiedBy];
+Important point about RBListOfBuses
+
+This:
+
+STRING_AGG(lb.[description], ', ')
+
+returns the actual bus names, for example:
+
+Ford F-150, Ford F-250, Ford F-350
+
+rather than:
+
+1,2,3
+
+I used LEFT JOIN intentionally. This means an MB record will still be returned even if it currently has no entry in RBLISTOFBUSES.
+
+Task 2 — C# Model
+
+Based on the SQL above, your model can be:
+
+public class MBList
+{
+    public string? MBNumber { get; set; }
+    public string? Description { get; set; }
+    public string? Keyword { get; set; }
+    public string? MmsStockCode { get; set; }
+    public string? ItemRefNumber { get; set; }
+    public string? CorePartNum { get; set; }
+    public string? CoreCharge { get; set; }
+    public string? JobNumber { get; set; }
+
+    public decimal? EstimatedCost { get; set; }
+
+    public string? BuyNewCost { get; set; }
+    public string? RemanCost { get; set; }
+    public string? ExternalCost { get; set; }
+    public string? SopNumber { get; set; }
+
+    public int? Active { get; set; }
+
+    public string? RBListOfBuses { get; set; }
+
+    public DateTime DateEntered { get; set; }
+
+    public string? LastModifiedBy { get; set; }
+}
+
+Because the SQL already does:
+
+ISNULL(rbm.[DateEntered], GETDATE()) AS [DateEntered]
+
+DateEntered can safely be:
+
+public DateTime DateEntered { get; set; }
+
+rather than nullable.
+
+If you prefer the model to exactly mirror the database nullability instead, use:
+
+public DateTime? DateEntered { get; set; }
+
+but in your case I would keep it non-nullable because the SQL guarantees a value.
+
+Task 3 — CSHTML changes
+
+You already have:
+
+<div class="detail-body">
+    <div class="vehicle-info">
+        <div class="vehicle-info-item vehicle-description">
+            <span class="label">Detailed Description</span>
+            <span class="value" id="vehicleDescription">-</span>
+        </div>
+
+        <div class="vehicle-info-item">
+            <span class="label">Vehicle Series</span>
+            <span class="value" id="vehicleSeries">-</span>
+        </div>
+
+Add the RB buses field here:
+
+<div class="detail-body">
+    <div class="vehicle-info">
+
+        <div class="vehicle-info-item vehicle-description">
+            <span class="label">Detailed Description</span>
+            <span class="value" id="vehicleDescription">-</span>
+        </div>
+
+        <div class="vehicle-info-item">
+            <span class="label">Vehicle Series</span>
+            <span class="value" id="vehicleSeries">-</span>
+        </div>
+
+        <div class="vehicle-info-item">
+            <span class="label">RB List of Buses</span>
+            <span class="value" id="rbListOfBuses">-</span>
+        </div>
+
+    </div>
+</div>
+
+Then update your JavaScript populateAllSections():
+
+function populateAllSections(costData) {
+
+    // SECTION 1: Vehicle Details
+    $('#vehicleSeries').text(costData.VehicleSeries || '-');
+    $('#vehicleDescription').text(costData.VehicleDescription || '-');
+
+    // RB List of Buses
+    $('#rbListOfBuses').text(costData.RBListOfBuses || '-');
+
+    // ...existing code...
+}
+If your API uses PascalCase
+
+Based on your sample response and ASP.NET Core JSON configuration, if the JSON property is actually:
+
+{
+    "RBListOfBuses": "Ford F-150, Ford F-250"
+}
+
+then the above is correct:
+
+costData.RBListOfBuses
+
+If your API is configured for camelCase and returns:
+
+{
+    "rbListOfBuses": "Ford F-150, Ford F-250"
+}
+
+then use:
+
+$('#rbListOfBuses').text(costData.rbListOfBuses || '-');
+One improvement I recommend
