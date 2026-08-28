@@ -1,295 +1,36 @@
-USE [CES]
-GO
+Logs :  Can you also print how manyb rows have issues and rejected. Add total # of rows, and reason for errors
 
-SET ANSI_NULLS ON
-GO
-
-SET QUOTED_IDENTIFIER ON
-GO
-
-ALTER PROCEDURE [SBCES].[InternalRbPrice]
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    -------------------------------------------------------------------------
-    -- Counters
-    -------------------------------------------------------------------------
-    DECLARE @ProcessedCount INT = 0;
-    DECLARE @SkippedCount   INT = 0;
-    DECLARE @InsertErrors   INT = 0;
-
-    -------------------------------------------------------------------------
-    -- Variables
-    -------------------------------------------------------------------------
-    DECLARE @RebuiltStockNum VARCHAR(30);
-    DECLARE @MmsStockCode    VARCHAR(30);
-    DECLARE @DetailedDesc    VARCHAR(250);
-    DECLARE @RawBuyNewCost   VARCHAR(100);
-    DECLARE @BuyNewCost      VARCHAR(30);
-    DECLARE @Active          BIT;
-    DECLARE @Keyword         VARCHAR(250);
-
-    DECLARE @TotalPrice      DECIMAL(25,10);
-    DECLARE @BuyNewCostNumeric DECIMAL(25,10);
-
-    -------------------------------------------------------------------------
-    -- Debug message variable
-    -------------------------------------------------------------------------
-    DECLARE @DebugMessage VARCHAR(2047);
-
-    -------------------------------------------------------------------------
-    -- Clear destination table
-    -------------------------------------------------------------------------
-    TRUNCATE TABLE SBCES.TempRbpCost;
-
-    -------------------------------------------------------------------------
-    -- Cursor
-    --
-    -- IMPORTANT:
-    -- We intentionally DO NOT use ROUND(SCP.MmsNewCost, 2) here.
-    -- MmsNewCost is treated as VARCHAR first.
-    -------------------------------------------------------------------------
-    DECLARE rb_cursor CURSOR LOCAL FAST_FORWARD FOR
-        SELECT
-            RBM.RebuiltStockNum,
-            SCP.MmsStockCode,
-            RBM.DetailedDesc,
-            CONVERT(VARCHAR(100), SCP.MmsNewCost) AS RawBuyNewCost,
-            RBM.Active,
-            RBM.Keyword
-        FROM SBCES.RbMasterlist RBM
-        LEFT JOIN SBCES.StockCodedParts SCP
-            ON RBM.MmsStockCode = SCP.MmsStockCode
-        ORDER BY RBM.RebuiltStockNum DESC;
-
-    -------------------------------------------------------------------------
-    -- Open cursor
-    -------------------------------------------------------------------------
-    OPEN rb_cursor;
-
-    FETCH NEXT FROM rb_cursor
-    INTO
-        @RebuiltStockNum,
-        @MmsStockCode,
-        @DetailedDesc,
-        @RawBuyNewCost,
-        @Active,
-        @Keyword;
-
-    -------------------------------------------------------------------------
-    -- Process rows
-    -------------------------------------------------------------------------
-    WHILE @@FETCH_STATUS = 0
-    BEGIN
-
-        SET @ProcessedCount = @ProcessedCount + 1;
-
-        ---------------------------------------------------------------------
-        -- Reset values
-        ---------------------------------------------------------------------
-        SET @BuyNewCost = NULL;
-        SET @BuyNewCostNumeric = NULL;
-        SET @TotalPrice = NULL;
-
-        ---------------------------------------------------------------------
-        -- Debug: current row
-        ---------------------------------------------------------------------
-        SET @DebugMessage =
-            '[InternalRbPrice] Processing #' +
-            CAST(@ProcessedCount AS VARCHAR(20)) +
-            ' | RebuiltStockNum=' +
-            ISNULL(@RebuiltStockNum, '<NULL>') +
-            ' | MmsStockCode=' +
-            ISNULL(@MmsStockCode, '<NULL>') +
-            ' | RawMmsNewCost=[' +
-            ISNULL(@RawBuyNewCost, '<NULL>') +
-            ']';
-
-        RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
-
-        ---------------------------------------------------------------------
-        -- Attempt to convert MmsNewCost to numeric
-        --
-        -- First remove $ and spaces.
-        --
-        -- NOTE:
-        -- This assumes comma is being used as the decimal separator,
-        -- as in your original Oracle migration.
-        ---------------------------------------------------------------------
-        SET @BuyNewCostNumeric =
-            TRY_CONVERT(
-                DECIMAL(25,10),
-                REPLACE(
-                    REPLACE(
-                        LTRIM(RTRIM(ISNULL(@RawBuyNewCost, ''))),
-                        '$',
-                        ''
-                    ),
-                    ',',
-                    '.'
-                )
-            );
-
-        ---------------------------------------------------------------------
-        -- BAD NUMERIC VALUE
-        ---------------------------------------------------------------------
-        IF @RawBuyNewCost IS NOT NULL
-           AND LTRIM(RTRIM(@RawBuyNewCost)) <> ''
-           AND @BuyNewCostNumeric IS NULL
-        BEGIN
-
-            SET @SkippedCount = @SkippedCount + 1;
-
-            SET @DebugMessage =
-                '*** BAD ROW - SKIPPED ***' +
-                ' | RebuiltStockNum=' +
-                ISNULL(@RebuiltStockNum, '<NULL>') +
-                ' | MmsStockCode=' +
-                ISNULL(@MmsStockCode, '<NULL>') +
-                ' | RawMmsNewCost=[' +
-                ISNULL(@RawBuyNewCost, '<NULL>') +
-                ']' +
-                ' | Reason=Cannot convert MmsNewCost to DECIMAL';
-
-            RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
-
-            -----------------------------------------------------------------
-            -- Get next row
-            -----------------------------------------------------------------
-            FETCH NEXT FROM rb_cursor
-            INTO
-                @RebuiltStockNum,
-                @MmsStockCode,
-                @DetailedDesc,
-                @RawBuyNewCost,
-                @Active,
-                @Keyword;
-
-            CONTINUE;
-        END;
-
-        ---------------------------------------------------------------------
-        -- NULL / blank cost
-        ---------------------------------------------------------------------
-        IF @RawBuyNewCost IS NULL
-           OR LTRIM(RTRIM(@RawBuyNewCost)) = ''
-        BEGIN
-
-            SET @BuyNewCost = '0.00';
-            SET @BuyNewCostNumeric = 0;
-
-            SET @DebugMessage =
-                '[InternalRbPrice] NULL/blank MmsNewCost -> using 0.00' +
-                ' | RebuiltStockNum=' +
-                ISNULL(@RebuiltStockNum, '<NULL>') +
-                ' | MmsStockCode=' +
-                ISNULL(@MmsStockCode, '<NULL>');
-
-            RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
-        END
-        ELSE
-        BEGIN
-
-            -----------------------------------------------------------------
-            -- Valid numeric value
-            -----------------------------------------------------------------
-            SET @BuyNewCost =
-                CONVERT(
-                    VARCHAR(30),
-                    CAST(
-                        ROUND(@BuyNewCostNumeric, 2)
-                        AS DECIMAL(25,2)
-                    )
-                );
-
-            SET @BuyNewCost = LTRIM(RTRIM(@BuyNewCost));
-
-        END;
-
-        ---------------------------------------------------------------------
-        -- Existing RptRbpCost call
-        ---------------------------------------------------------------------
-        /*
-        EXEC SBCES.RptRbpCost
-            @viRbnum     = UPPER(@RebuiltStockNum),
-            @viLinkType  = 'RB',
-            @voTotalCost = @TotalPrice OUTPUT;
-        */
-
-        ---------------------------------------------------------------------
-        -- INSERT
-        ---------------------------------------------------------------------
-        BEGIN TRY
-
-            INSERT INTO SBCES.TempRbpCost
-            VALUES
-            (
-                @RebuiltStockNum,
-                @TotalPrice,
-                @DetailedDesc,
-                @BuyNewCost,
-                @Active,
-                @Keyword
-            );
-
-        END TRY
-        BEGIN CATCH
-
-            SET @InsertErrors = @InsertErrors + 1;
-
-            SET @DebugMessage =
-                '*** INSERT ERROR - ROW SKIPPED ***' +
-                ' | RebuiltStockNum=' +
-                ISNULL(@RebuiltStockNum, '<NULL>') +
-                ' | MmsStockCode=' +
-                ISNULL(@MmsStockCode, '<NULL>') +
-                ' | RawMmsNewCost=[' +
-                ISNULL(@RawBuyNewCost, '<NULL>') +
-                ']' +
-                ' | BuyNewCost=[' +
-                ISNULL(@BuyNewCost, '<NULL>') +
-                ']' +
-                ' | Error=' +
-                ISNULL(ERROR_MESSAGE(), '<UNKNOWN ERROR>');
-
-            RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
-
-        END CATCH;
-
-        ---------------------------------------------------------------------
-        -- Next row
-        ---------------------------------------------------------------------
-        FETCH NEXT FROM rb_cursor
-        INTO
-            @RebuiltStockNum,
-            @MmsStockCode,
-            @DetailedDesc,
-            @RawBuyNewCost,
-            @Active,
-            @Keyword;
-
-    END;
-
-    -------------------------------------------------------------------------
-    -- Cleanup
-    -------------------------------------------------------------------------
-    CLOSE rb_cursor;
-    DEALLOCATE rb_cursor;
-
-    -------------------------------------------------------------------------
-    -- Final summary
-    -------------------------------------------------------------------------
-    SET @DebugMessage =
-        '[InternalRbPrice] COMPLETE' +
-        ' | Processed=' +
-        CAST(@ProcessedCount AS VARCHAR(20)) +
-        ' | BadCostSkipped=' +
-        CAST(@SkippedCount AS VARCHAR(20)) +
-        ' | InsertErrors=' +
-        CAST(@InsertErrors AS VARCHAR(20));
-
-    RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
-
-END;
-GO
+[InternalRbPrice] Processing #1 | RebuiltStockNum=ZF AXLE DRAFT | MmsStockCode=063213 | RawMmsNewCost=[40877.75000]
+*** INSERT ERROR - ROW SKIPPED *** | RebuiltStockNum=ZF AXLE DRAFT | MmsStockCode=063213 | RawMmsNewCost=[40877.75000] | BuyNewCost=[40877.75] | Error=Error converting data type varchar to numeric.
+[InternalRbPrice] Processing #2 | RebuiltStockNum=X430 WITH CLUTCH | MmsStockCode=035413 | RawMmsNewCost=[4971.08000]
+*** INSERT ERROR - ROW SKIPPED *** | RebuiltStockNum=X430 WITH CLUTCH | MmsStockCode=035413 | RawMmsNewCost=[4971.08000] | BuyNewCost=[4971.08] | Error=Error converting data type varchar to numeric.
+[InternalRbPrice] Processing #3 | RebuiltStockNum=TST1302023 | MmsStockCode=<NULL> | RawMmsNewCost=[<NULL>]
+[InternalRbPrice] NULL/blank MmsNewCost -> using 0.00 | RebuiltStockNum=TST1302023 | MmsStockCode=<NULL>
+....
+[InternalRbPrice] Processing #921 | RebuiltStockNum=007664 | MmsStockCode=<NULL> | RawMmsNewCost=[<NULL>]
+[InternalRbPrice] NULL/blank MmsNewCost -> using 0.00 | RebuiltStockNum=007664 | MmsStockCode=<NULL>
+[InternalRbPrice] Processing #922 | RebuiltStockNum=007663 | MmsStockCode=<NULL> | RawMmsNewCost=[<NULL>]
+[InternalRbPrice] NULL/blank MmsNewCost -> using 0.00 | RebuiltStockNum=007663 | MmsStockCode=<NULL>
+[InternalRbPrice] Processing #923 | RebuiltStockNum=007662 | MmsStockCode=<NULL> | RawMmsNewCost=[<NULL>]
+[InternalRbPrice] NULL/blank MmsNewCost -> using 0.00 | RebuiltStockNum=007662 | MmsStockCode=<NULL>
+[InternalRbPrice] Processing #924 | RebuiltStockNum=007660 | MmsStockCode=<NULL> | RawMmsNewCost=[<NULL>]
+[InternalRbPrice] NULL/blank MmsNewCost -> using 0.00 | RebuiltStockNum=007660 | MmsStockCode=<NULL>
+[InternalRbPrice] Processing #925 | RebuiltStockNum=007659 | MmsStockCode=007981 | RawMmsNewCost=[506.76000]
+[InternalRbPrice] Processing #926 | RebuiltStockNum=007658 | MmsStockCode=007978 | RawMmsNewCost=[434.27000]
+[InternalRbPrice] Processing #927 | RebuiltStockNum=007657 | MmsStockCode=007976 | RawMmsNewCost=[227.45000]
+[InternalRbPrice] Processing #928 | RebuiltStockNum=007656 | MmsStockCode=007976 | RawMmsNewCost=[227.45000]
+[InternalRbPrice] Processing #929 | RebuiltStockNum=007655 | MmsStockCode=007972 | RawMmsNewCost=[388.98000]
+[InternalRbPrice] Processing #930 | RebuiltStockNum=007633 | MmsStockCode=007970 | RawMmsNewCost=[0.00000]
+[InternalRbPrice] Processing #931 | RebuiltStockNum=007632 | MmsStockCode=007969 | RawMmsNewCost=[1709.90000]
+[InternalRbPrice] Processing #932 | RebuiltStockNum=007630 | MmsStockCode=007982 | RawMmsNewCost=[1873.40000]
+[InternalRbPrice] Processing #933 | RebuiltStockNum=007629 | MmsStockCode=<NULL> | RawMmsNewCost=[<NULL>]
+[InternalRbPrice] NULL/blank MmsNewCost -> using 0.00 | RebuiltStockNum=007629 | MmsStockCode=<NULL>
+[InternalRbPrice] Processing #934 | RebuiltStockNum=007627 | MmsStockCode=007628 | RawMmsNewCost=[1455.87000]
+[InternalRbPrice] Processing #935 | RebuiltStockNum=007620 | MmsStockCode=005746 | RawMmsNewCost=[202.14000]
+[InternalRbPrice] Processing #936 | RebuiltStockNum=007619 | MmsStockCode=005746 | RawMmsNewCost=[202.14000]
+[InternalRbPrice] Processing #937 | RebuiltStockNum=00002 | MmsStockCode=<NULL> | RawMmsNewCost=[<NULL>]
+[InternalRbPrice] NULL/blank MmsNewCost -> using 0.00 | RebuiltStockNum=00002 | MmsStockCode=<NULL>
+[InternalRbPrice] Processing #938 | RebuiltStockNum=000004 | MmsStockCode=006765 | RawMmsNewCost=[119.56000]
+[InternalRbPrice] Processing #939 | RebuiltStockNum=000001 | MmsStockCode=<NULL> | RawMmsNewCost=[<NULL>]
+[InternalRbPrice] NULL/blank MmsNewCost -> using 0.00 | RebuiltStockNum=000001 | MmsStockCode=<NULL>
+[InternalRbPrice] COMPLETE | Processed=939 | BadCostSkipped=0 | InsertErrors=220
