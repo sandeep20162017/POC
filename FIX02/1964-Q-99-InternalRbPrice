@@ -1,0 +1,64 @@
+You are MS SQL expert.
+I have migrated below stored proc from Oracle toMS SQL, getting below error.
+I need tofind which row is throwing the error and why. can you add debug logs?
+Msg 8114, Level 16, State 5, Procedure SBCES.InternalRbPrice, Line 37 [Batch Start Line 2]
+Error converting data type varchar to numeric.
+Script should ignore error ro and log it (may be print)
+
+USE [CES]
+GO
+
+/****** Object:  StoredProcedure [SBCES].[InternalRbPrice]    Script Date: 8/28/2026 6:59:51 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER   PROCEDURE [SBCES].[InternalRbPrice]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    TRUNCATE TABLE SBCES.TempRbpCost;
+
+    DECLARE @RebuiltStockNum VARCHAR(30);
+    DECLARE @DetailedDesc     VARCHAR(250);
+    DECLARE @BuyNewCost       VARCHAR(30);
+    DECLARE @Active           BIT;
+    DECLARE @Keyword          VARCHAR(250);
+    DECLARE @TotalPrice       DECIMAL(25,10);
+
+    DECLARE rb_cursor CURSOR LOCAL FOR
+        SELECT
+            RBM.RebuiltStockNum,
+            RBM.DetailedDesc,
+           ISNULL(REPLACE(REPLACE(ROUND(SCP.MmsNewCost, 2), ',', '.'), '$', ''), '0.00') AS BuyNewCost, --error thrown here
+            RBM.Active,
+            RBM.Keyword
+        FROM SBCES.RbMasterlist RBM
+        LEFT JOIN SBCES.StockCodedParts SCP ON RBM.MmsStockCode = SCP.MmsStockCode
+        ORDER BY RBM.RebuiltStockNum DESC;
+
+    OPEN rb_cursor;
+    FETCH NEXT FROM rb_cursor INTO @RebuiltStockNum, @DetailedDesc, @BuyNewCost, @Active, @Keyword;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        --EXEC SBCES.RptRbpCost
+        --    @viRbnum     = UPPER(@RebuiltStockNum),
+        --    @viLinkType  = 'RB',
+        --    @voTotalCost = @TotalPrice OUTPUT;
+
+        INSERT INTO SBCES.TempRbpCost
+        VALUES (@RebuiltStockNum, @TotalPrice, @DetailedDesc, @BuyNewCost, @Active, @Keyword);
+
+        FETCH NEXT FROM rb_cursor INTO @RebuiltStockNum, @DetailedDesc, @BuyNewCost, @Active, @Keyword;
+    END
+
+    CLOSE rb_cursor;
+    DEALLOCATE rb_cursor;
+END;
+GO
+
+
