@@ -1,8 +1,4 @@
-Logs :  Can you also print how manyb rows have issues and rejected. Add total # of rows, and reason for errors
-
-[InternalRbPrice] Processing #1 | RebuiltStockNum=ZF AXLE DRAFT | MmsStockCode=063213 | RawMmsNewCost=[40877.75000]
-*** INSERT ERROR - ROW SKIPPED *** | RebuiltStockNum=ZF AXLE DRAFT | MmsStockCode=063213 | RawMmsNewCost=[40877.75000] | BuyNewCost=[40877.75] | Error=Error converting data type varchar to numeric.
-[InternalRbPrice] Processing #2 | RebuiltStockNum=X430 WITH CLUTCH | MmsStockCode=035413 | RawMmsNewCost=[4971.08000]
+| MmsStockCode=035413 | RawMmsNewCost=[4971.08000]
 *** INSERT ERROR - ROW SKIPPED *** | RebuiltStockNum=X430 WITH CLUTCH | MmsStockCode=035413 | RawMmsNewCost=[4971.08000] | BuyNewCost=[4971.08] | Error=Error converting data type varchar to numeric.
 [InternalRbPrice] Processing #3 | RebuiltStockNum=TST1302023 | MmsStockCode=<NULL> | RawMmsNewCost=[<NULL>]
 [InternalRbPrice] NULL/blank MmsNewCost -> using 0.00 | RebuiltStockNum=TST1302023 | MmsStockCode=<NULL>
@@ -34,3 +30,507 @@ Logs :  Can you also print how manyb rows have issues and rejected. Add total # 
 [InternalRbPrice] Processing #939 | RebuiltStockNum=000001 | MmsStockCode=<NULL> | RawMmsNewCost=[<NULL>]
 [InternalRbPrice] NULL/blank MmsNewCost -> using 0.00 | RebuiltStockNum=000001 | MmsStockCode=<NULL>
 [InternalRbPrice] COMPLETE | Processed=939 | BadCostSkipped=0 | InsertErrors=220
+
+Yes. The logs tell us something important:
+
+Total source rows: 939
+Bad MmsNewCost conversion: 0
+Insert errors: 220
+Rows successfully inserted: 719
+The 220 failures occur after MmsNewCost has already been successfully converted to 40877.75, 4971.08, etc.
+
+So the problem is almost certainly another VARCHAR → NUMERIC conversion during the INSERT INTO SBCES.TempRbpCost.
+
+Your current insert is:
+
+INSERT INTO SBCES.TempRbpCost
+VALUES
+(
+    @RebuiltStockNum,
+    @TotalPrice,
+    @DetailedDesc,
+    @BuyNewCost,
+    @Active,
+    @Keyword
+);
+
+Because there is no column list, SQL Server relies on the physical column order of TempRbpCost. If its column order differs from these six variables, SQL Server can easily try to put something like @RebuiltStockNum or @DetailedDesc into a numeric column.
+
+I would modify the procedure so the final output clearly tells us:
+
+TOTAL ROWS
+SUCCESSFUL
+REJECTED
+SOURCE CONVERSION ERRORS
+INSERT ERRORS
+ERROR REASON
+
+And for every rejected row, it will print all six values being inserted, not just BuyNewCost.
+
+Revised debug version
+USE [CES]
+GO
+
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [SBCES].[InternalRbPrice]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -------------------------------------------------------------------------
+    -- Counters
+    -------------------------------------------------------------------------
+    DECLARE @TotalRows          INT = 0;
+    DECLARE @SuccessfulRows     INT = 0;
+    DECLARE @RejectedRows       INT = 0;
+    DECLARE @SourceErrors       INT = 0;
+    DECLARE @InsertErrors       INT = 0;
+    DECLARE @NullCostRows       INT = 0;
+
+    -------------------------------------------------------------------------
+    -- Variables
+    -------------------------------------------------------------------------
+    DECLARE @RebuiltStockNum      VARCHAR(30);
+    DECLARE @MmsStockCode         VARCHAR(30);
+    DECLARE @DetailedDesc         VARCHAR(250);
+    DECLARE @RawBuyNewCost        VARCHAR(100);
+    DECLARE @BuyNewCost           VARCHAR(30);
+    DECLARE @Active               BIT;
+    DECLARE @Keyword              VARCHAR(250);
+
+    DECLARE @TotalPrice           DECIMAL(25,10);
+    DECLARE @BuyNewCostNumeric    DECIMAL(25,10);
+
+    DECLARE @DebugMessage         VARCHAR(2047);
+
+    -------------------------------------------------------------------------
+    -- Clear target
+    -------------------------------------------------------------------------
+    TRUNCATE TABLE SBCES.TempRbpCost;
+
+    -------------------------------------------------------------------------
+    -- Cursor
+    -------------------------------------------------------------------------
+    DECLARE rb_cursor CURSOR LOCAL FAST_FORWARD FOR
+
+        SELECT
+            RBM.RebuiltStockNum,
+            SCP.MmsStockCode,
+            RBM.DetailedDesc,
+
+            -- Keep source value as VARCHAR.
+            -- Do not perform numeric conversion here.
+            CONVERT(VARCHAR(100), SCP.MmsNewCost) AS RawBuyNewCost,
+
+            RBM.Active,
+            RBM.Keyword
+
+        FROM SBCES.RbMasterlist RBM
+
+        LEFT JOIN SBCES.StockCodedParts SCP
+            ON RBM.MmsStockCode = SCP.MmsStockCode
+
+        ORDER BY RBM.RebuiltStockNum DESC;
+
+    -------------------------------------------------------------------------
+    -- Open cursor
+    -------------------------------------------------------------------------
+    OPEN rb_cursor;
+
+    FETCH NEXT FROM rb_cursor
+    INTO
+        @RebuiltStockNum,
+        @MmsStockCode,
+        @DetailedDesc,
+        @RawBuyNewCost,
+        @Active,
+        @Keyword;
+
+    -------------------------------------------------------------------------
+    -- Process rows
+    -------------------------------------------------------------------------
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+
+        SET @TotalRows = @TotalRows + 1;
+
+        ---------------------------------------------------------------------
+        -- Reset
+        ---------------------------------------------------------------------
+        SET @BuyNewCost = NULL;
+        SET @BuyNewCostNumeric = NULL;
+        SET @TotalPrice = NULL;
+
+        ---------------------------------------------------------------------
+        -- Current row
+        ---------------------------------------------------------------------
+        SET @DebugMessage =
+            '[InternalRbPrice] Processing #' +
+            CAST(@TotalRows AS VARCHAR(20)) +
+            ' | RebuiltStockNum=[' +
+            ISNULL(@RebuiltStockNum, '<NULL>') +
+            '] | MmsStockCode=[' +
+            ISNULL(@MmsStockCode, '<NULL>') +
+            '] | RawMmsNewCost=[' +
+            ISNULL(@RawBuyNewCost, '<NULL>') +
+            ']';
+
+        RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+
+        ---------------------------------------------------------------------
+        -- Convert MmsNewCost safely
+        ---------------------------------------------------------------------
+        SET @BuyNewCostNumeric =
+            TRY_CONVERT(
+                DECIMAL(25,10),
+                REPLACE(
+                    REPLACE(
+                        LTRIM(RTRIM(ISNULL(@RawBuyNewCost, ''))),
+                        '$',
+                        ''
+                    ),
+                    ',',
+                    '.'
+                )
+            );
+
+        ---------------------------------------------------------------------
+        -- BAD SOURCE COST
+        ---------------------------------------------------------------------
+        IF @RawBuyNewCost IS NOT NULL
+           AND LTRIM(RTRIM(@RawBuyNewCost)) <> ''
+           AND @BuyNewCostNumeric IS NULL
+        BEGIN
+
+            SET @SourceErrors = @SourceErrors + 1;
+            SET @RejectedRows = @RejectedRows + 1;
+
+            SET @DebugMessage =
+                '*** REJECTED - SOURCE NUMERIC ERROR ***' +
+                ' | RebuiltStockNum=[' +
+                ISNULL(@RebuiltStockNum, '<NULL>') +
+                ']' +
+                ' | MmsStockCode=[' +
+                ISNULL(@MmsStockCode, '<NULL>') +
+                ']' +
+                ' | RawMmsNewCost=[' +
+                ISNULL(@RawBuyNewCost, '<NULL>') +
+                ']' +
+                ' | Reason=[MmsNewCost cannot be converted to DECIMAL]';
+
+            RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+
+            FETCH NEXT FROM rb_cursor
+            INTO
+                @RebuiltStockNum,
+                @MmsStockCode,
+                @DetailedDesc,
+                @RawBuyNewCost,
+                @Active,
+                @Keyword;
+
+            CONTINUE;
+        END;
+
+        ---------------------------------------------------------------------
+        -- NULL / BLANK SOURCE COST
+        ---------------------------------------------------------------------
+        IF @RawBuyNewCost IS NULL
+           OR LTRIM(RTRIM(@RawBuyNewCost)) = ''
+        BEGIN
+
+            SET @NullCostRows = @NullCostRows + 1;
+
+            SET @BuyNewCost = '0.00';
+            SET @BuyNewCostNumeric = 0;
+
+            SET @DebugMessage =
+                '[InternalRbPrice] NULL/BLANK COST -> 0.00' +
+                ' | RebuiltStockNum=[' +
+                ISNULL(@RebuiltStockNum, '<NULL>') +
+                ']' +
+                ' | MmsStockCode=[' +
+                ISNULL(@MmsStockCode, '<NULL>') +
+                ']';
+
+            RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+        END
+        ELSE
+        BEGIN
+
+            -----------------------------------------------------------------
+            -- Valid numeric cost
+            -----------------------------------------------------------------
+            SET @BuyNewCost =
+                CONVERT(
+                    VARCHAR(30),
+                    CAST(
+                        ROUND(@BuyNewCostNumeric, 2)
+                        AS DECIMAL(25,2)
+                    )
+                );
+
+            SET @BuyNewCost = LTRIM(RTRIM(@BuyNewCost));
+
+        END;
+
+        ---------------------------------------------------------------------
+        -- RptRbpCost
+        ---------------------------------------------------------------------
+        /*
+        EXEC SBCES.RptRbpCost
+            @viRbnum     = UPPER(@RebuiltStockNum),
+            @viLinkType  = 'RB',
+            @voTotalCost = @TotalPrice OUTPUT;
+        */
+
+        ---------------------------------------------------------------------
+        -- INSERT
+        ---------------------------------------------------------------------
+        BEGIN TRY
+
+            INSERT INTO SBCES.TempRbpCost
+            VALUES
+            (
+                @RebuiltStockNum,
+                @TotalPrice,
+                @DetailedDesc,
+                @BuyNewCost,
+                @Active,
+                @Keyword
+            );
+
+            SET @SuccessfulRows = @SuccessfulRows + 1;
+
+        END TRY
+        BEGIN CATCH
+
+            SET @InsertErrors = @InsertErrors + 1;
+            SET @RejectedRows = @RejectedRows + 1;
+
+            -----------------------------------------------------------------
+            -- VERY IMPORTANT:
+            -- Print every value participating in the INSERT.
+            -----------------------------------------------------------------
+            SET @DebugMessage =
+                '*** REJECTED - INSERT ERROR ***' +
+                ' | Row#=' +
+                CAST(@TotalRows AS VARCHAR(20)) +
+
+                ' | RebuiltStockNum=[' +
+                ISNULL(@RebuiltStockNum, '<NULL>') +
+                ']' +
+
+                ' | MmsStockCode=[' +
+                ISNULL(@MmsStockCode, '<NULL>') +
+                ']' +
+
+                ' | DetailedDesc=[' +
+                ISNULL(@DetailedDesc, '<NULL>') +
+                ']' +
+
+                ' | RawMmsNewCost=[' +
+                ISNULL(@RawBuyNewCost, '<NULL>') +
+                ']' +
+
+                ' | BuyNewCost=[' +
+                ISNULL(@BuyNewCost, '<NULL>') +
+                ']' +
+
+                ' | BuyNewCostNumeric=[' +
+                ISNULL(CONVERT(VARCHAR(50), @BuyNewCostNumeric), '<NULL>') +
+                ']' +
+
+                ' | TotalPrice=[' +
+                ISNULL(CONVERT(VARCHAR(50), @TotalPrice), '<NULL>') +
+                ']' +
+
+                ' | Active=[' +
+                ISNULL(CONVERT(VARCHAR(10), @Active), '<NULL>') +
+                ']' +
+
+                ' | Keyword=[' +
+                ISNULL(@Keyword, '<NULL>') +
+                ']' +
+
+                ' | ERROR=[' +
+                ISNULL(ERROR_MESSAGE(), '<UNKNOWN>') +
+                ']';
+
+            RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+
+        END CATCH;
+
+        ---------------------------------------------------------------------
+        -- Next row
+        ---------------------------------------------------------------------
+        FETCH NEXT FROM rb_cursor
+        INTO
+            @RebuiltStockNum,
+            @MmsStockCode,
+            @DetailedDesc,
+            @RawBuyNewCost,
+            @Active,
+            @Keyword;
+
+    END;
+
+    -------------------------------------------------------------------------
+    -- Cleanup
+    -------------------------------------------------------------------------
+    CLOSE rb_cursor;
+    DEALLOCATE rb_cursor;
+
+    -------------------------------------------------------------------------
+    -- FINAL SUMMARY
+    -------------------------------------------------------------------------
+    RAISERROR('', 10, 1) WITH NOWAIT;
+
+    SET @DebugMessage =
+        '============================================================';
+
+    RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+
+    SET @DebugMessage =
+        '[InternalRbPrice] FINAL SUMMARY';
+
+    RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+
+    SET @DebugMessage =
+        'Total Rows Processed       = ' +
+        CAST(@TotalRows AS VARCHAR(20));
+
+    RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+
+    SET @DebugMessage =
+        'Successfully Inserted      = ' +
+        CAST(@SuccessfulRows AS VARCHAR(20));
+
+    RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+
+    SET @DebugMessage =
+        'Total Rejected             = ' +
+        CAST(@RejectedRows AS VARCHAR(20));
+
+    RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+
+    SET @DebugMessage =
+        'Source Conversion Errors   = ' +
+        CAST(@SourceErrors AS VARCHAR(20));
+
+    RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+
+    SET @DebugMessage =
+        'Insert Errors              = ' +
+        CAST(@InsertErrors AS VARCHAR(20));
+
+    RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+
+    SET @DebugMessage =
+        'NULL/Blank Cost Rows       = ' +
+        CAST(@NullCostRows AS VARCHAR(20));
+
+    RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+
+    SET @DebugMessage =
+        '============================================================';
+
+    RAISERROR('%s', 10, 1, @DebugMessage) WITH NOWAIT;
+
+END;
+GO
+Expected final output
+
+Based on your current run, it should look approximately like:
+
+============================================================
+[InternalRbPrice] FINAL SUMMARY
+Total Rows Processed       = 939
+Successfully Inserted      = 719
+Total Rejected             = 220
+Source Conversion Errors   = 0
+Insert Errors              = 220
+NULL/Blank Cost Rows       = XXX
+============================================================
+
+The important part is that the individual rejected row will now look like:
+
+*** REJECTED - INSERT ERROR ***
+| Row#=1
+| RebuiltStockNum=[ZF AXLE DRAFT]
+| MmsStockCode=[063213]
+| DetailedDesc=[...]
+| RawMmsNewCost=[40877.75000]
+| BuyNewCost=[40877.75]
+| BuyNewCostNumeric=[40877.7500000000]
+| TotalPrice=[<NULL>]
+| Active=[1]
+| Keyword=[...]
+| ERROR=[Error converting data type varchar to numeric.]
+But I think we've now found where to look
+
+The fact that:
+
+RawMmsNewCost=[40877.75000]
+BuyNewCost=[40877.75]
+
+is valid means MmsNewCost is not the problem.
+
+I am particularly suspicious of this:
+
+INSERT INTO SBCES.TempRbpCost
+VALUES
+(
+    @RebuiltStockNum,
+    @TotalPrice,
+    @DetailedDesc,
+    @BuyNewCost,
+    @Active,
+    @Keyword
+);
+Please run this next
+EXEC sp_help 'SBCES.TempRbpCost';
+
+Or, even better:
+
+SELECT
+    c.column_id,
+    c.name AS ColumnName,
+    t.name AS DataType,
+    c.max_length,
+    c.precision,
+    c.scale,
+    c.is_nullable
+FROM sys.columns c
+INNER JOIN sys.types t
+    ON c.user_type_id = t.user_type_id
+WHERE c.object_id = OBJECT_ID('SBCES.TempRbpCost')
+ORDER BY c.column_id;
+
+Paste that result to me.
+
+I strongly suspect the physical column order/types of TempRbpCost don't match the six values you're supplying. If that's the case, I'll change the procedure to use an explicit column list, which is the correct production implementation:
+
+INSERT INTO SBCES.TempRbpCost
+(
+    Column1,
+    Column2,
+    Column3,
+    Column4,
+    Column5,
+    Column6
+)
+VALUES
+(
+    @RebuiltStockNum,
+    @TotalPrice,
+    @DetailedDesc,
+    @BuyNewCost,
+    @Active,
+    @Keyword
+);
