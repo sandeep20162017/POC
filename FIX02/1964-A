@@ -1,0 +1,385 @@
+Does not change your existing RptRbpCost logic
+USE [CES]
+GO
+
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [SBCES].[InternalRbPrice]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -------------------------------------------------------------------------
+    -- DEBUG / CONTROL VARIABLES
+    -------------------------------------------------------------------------
+    DECLARE @ProcessedCount INT = 0;
+    DECLARE @SkippedCount   INT = 0;
+    DECLARE @ErrorCount     INT = 0;
+
+    -------------------------------------------------------------------------
+    -- Clear previous results
+    -------------------------------------------------------------------------
+    TRUNCATE TABLE SBCES.TempRbpCost;
+
+    -------------------------------------------------------------------------
+    -- Variables
+    -------------------------------------------------------------------------
+    DECLARE @RebuiltStockNum VARCHAR(30);
+    DECLARE @MmsStockCode    VARCHAR(30);
+    DECLARE @DetailedDesc    VARCHAR(250);
+
+    -- Raw value from StockCodedParts
+    DECLARE @RawBuyNewCost   VARCHAR(100);
+
+    -- Cleaned/display value
+    DECLARE @BuyNewCost      VARCHAR(30);
+
+    DECLARE @Active           BIT;
+    DECLARE @Keyword          VARCHAR(250);
+
+    DECLARE @TotalPrice       DECIMAL(25,10);
+
+    -- Parsed numeric value used ONLY for validation
+    DECLARE @BuyNewCostNumeric DECIMAL(25,10);
+
+    -------------------------------------------------------------------------
+    -- Cursor
+    --
+    -- IMPORTANT:
+    -- Do NOT call ROUND() directly on SCP.MmsNewCost here.
+    -- Convert it to VARCHAR first so one bad value cannot kill the cursor.
+    -------------------------------------------------------------------------
+    DECLARE rb_cursor CURSOR LOCAL FAST_FORWARD FOR
+        SELECT
+            RBM.RebuiltStockNum,
+            SCP.MmsStockCode,
+            RBM.DetailedDesc,
+
+            -- Keep original value as VARCHAR.
+            -- This prevents SQL Server from performing an implicit
+            -- VARCHAR -> NUMERIC conversion in the cursor SELECT.
+            CONVERT(VARCHAR(100), SCP.MmsNewCost) AS RawBuyNewCost,
+
+            RBM.Active,
+            RBM.Keyword
+        FROM SBCES.RbMasterlist RBM
+        LEFT JOIN SBCES.StockCodedParts SCP
+            ON RBM.MmsStockCode = SCP.MmsStockCode
+        ORDER BY RBM.RebuiltStockNum DESC;
+
+    -------------------------------------------------------------------------
+    -- Open cursor
+    -------------------------------------------------------------------------
+    OPEN rb_cursor;
+
+    FETCH NEXT FROM rb_cursor
+    INTO
+        @RebuiltStockNum,
+        @MmsStockCode,
+        @DetailedDesc,
+        @RawBuyNewCost,
+        @Active,
+        @Keyword;
+
+    -------------------------------------------------------------------------
+    -- Process rows
+    -------------------------------------------------------------------------
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+
+        SET @ProcessedCount = @ProcessedCount + 1;
+
+        ---------------------------------------------------------------------
+        -- Reset variables for current row
+        ---------------------------------------------------------------------
+        SET @BuyNewCost = NULL;
+        SET @BuyNewCostNumeric = NULL;
+        SET @TotalPrice = NULL;
+
+        ---------------------------------------------------------------------
+        -- DEBUG: Show current row
+        ---------------------------------------------------------------------
+        RAISERROR(
+            '[InternalRbPrice] Processing #%d | RebuiltStockNum=%s | MmsStockCode=%s | RawMmsNewCost=%s',
+            10,
+            1,
+            @ProcessedCount,
+            ISNULL(@RebuiltStockNum, '<NULL>'),
+            ISNULL(@MmsStockCode, '<NULL>'),
+            ISNULL(@RawBuyNewCost, '<NULL>')
+        ) WITH NOWAIT;
+
+        ---------------------------------------------------------------------
+        -- Convert / validate Buy New Cost
+        --
+        -- Remove:
+        --   $
+        --   comma
+        --
+        -- Then attempt numeric conversion.
+        ---------------------------------------------------------------------
+        SET @BuyNewCostNumeric =
+            TRY_CONVERT(
+                DECIMAL(25,10),
+                REPLACE(
+                    REPLACE(
+                        LTRIM(RTRIM(ISNULL(@RawBuyNewCost, ''))),
+                        '$',
+                        ''
+                    ),
+                    ',',
+                    '.'
+                )
+            );
+
+        ---------------------------------------------------------------------
+        -- BAD DATA
+        ---------------------------------------------------------------------
+        IF @RawBuyNewCost IS NOT NULL
+           AND LTRIM(RTRIM(@RawBuyNewCost)) <> ''
+           AND @BuyNewCostNumeric IS NULL
+        BEGIN
+
+            SET @SkippedCount = @SkippedCount + 1;
+
+            RAISERROR(
+                '[InternalRbPrice] *** SKIPPED BAD ROW *** | RebuiltStockNum=%s | MmsStockCode=%s | RawMmsNewCost=[%s] | Reason=Cannot convert to numeric',
+                10,
+                1,
+                ISNULL(@RebuiltStockNum, '<NULL>'),
+                ISNULL(@MmsStockCode, '<NULL>'),
+                ISNULL(@RawBuyNewCost, '<NULL>')
+            ) WITH NOWAIT;
+
+            -----------------------------------------------------------------
+            -- Skip this row
+            -----------------------------------------------------------------
+            FETCH NEXT FROM rb_cursor
+            INTO
+                @RebuiltStockNum,
+                @MmsStockCode,
+                @DetailedDesc,
+                @RawBuyNewCost,
+                @Active,
+                @Keyword;
+
+            CONTINUE;
+        END;
+
+        ---------------------------------------------------------------------
+        -- NULL cost
+        --
+        -- Your original SQL converted NULL to '0.00'.
+        ---------------------------------------------------------------------
+        IF @RawBuyNewCost IS NULL
+           OR LTRIM(RTRIM(@RawBuyNewCost)) = ''
+        BEGIN
+
+            SET @BuyNewCost = '0.00';
+            SET @BuyNewCostNumeric = 0;
+
+            RAISERROR(
+                '[InternalRbPrice] NULL/BLANK cost -> using 0.00 | RebuiltStockNum=%s | MmsStockCode=%s',
+                10,
+                1,
+                ISNULL(@RebuiltStockNum, '<NULL>'),
+                ISNULL(@MmsStockCode, '<NULL>')
+            ) WITH NOWAIT;
+        END
+        ELSE
+        BEGIN
+
+            -----------------------------------------------------------------
+            -- Format the validated numeric value to 2 decimals.
+            -----------------------------------------------------------------
+            SET @BuyNewCost =
+                CONVERT(
+                    VARCHAR(30),
+                    CAST(ROUND(@BuyNewCostNumeric, 2) AS DECIMAL(25,2))
+                );
+
+            -----------------------------------------------------------------
+            -- Remove possible leading/trailing spaces
+            -----------------------------------------------------------------
+            SET @BuyNewCost = LTRIM(RTRIM(@BuyNewCost));
+
+        END;
+
+        ---------------------------------------------------------------------
+        -- Existing RptRbpCost call
+        ---------------------------------------------------------------------
+        /*
+        EXEC SBCES.RptRbpCost
+            @viRbnum     = UPPER(@RebuiltStockNum),
+            @viLinkType  = 'RB',
+            @voTotalCost = @TotalPrice OUTPUT;
+        */
+
+        ---------------------------------------------------------------------
+        -- INSERT
+        --
+        -- Protect INSERT as well. There may be another VARCHAR -> NUMERIC
+        -- conversion in TempRbpCost itself.
+        ---------------------------------------------------------------------
+        BEGIN TRY
+
+            INSERT INTO SBCES.TempRbpCost
+            VALUES
+            (
+                @RebuiltStockNum,
+                @TotalPrice,
+                @DetailedDesc,
+                @BuyNewCost,
+                @Active,
+                @Keyword
+            );
+
+        END TRY
+        BEGIN CATCH
+
+            SET @ErrorCount = @ErrorCount + 1;
+
+            RAISERROR(
+                '[InternalRbPrice] *** INSERT ERROR - ROW SKIPPED *** | RebuiltStockNum=%s | MmsStockCode=%s | RawMmsNewCost=[%s] | BuyNewCost=[%s] | Error=%s',
+                10,
+                1,
+                ISNULL(@RebuiltStockNum, '<NULL>'),
+                ISNULL(@MmsStockCode, '<NULL>'),
+                ISNULL(@RawBuyNewCost, '<NULL>'),
+                ISNULL(@BuyNewCost, '<NULL>'),
+                ERROR_MESSAGE()
+            ) WITH NOWAIT;
+
+        END CATCH;
+
+        ---------------------------------------------------------------------
+        -- Next row
+        ---------------------------------------------------------------------
+        FETCH NEXT FROM rb_cursor
+        INTO
+            @RebuiltStockNum,
+            @MmsStockCode,
+            @DetailedDesc,
+            @RawBuyNewCost,
+            @Active,
+            @Keyword;
+
+    END;
+
+    -------------------------------------------------------------------------
+    -- Cleanup
+    -------------------------------------------------------------------------
+    CLOSE rb_cursor;
+    DEALLOCATE rb_cursor;
+
+    -------------------------------------------------------------------------
+    -- FINAL SUMMARY
+    -------------------------------------------------------------------------
+    RAISERROR(
+        '[InternalRbPrice] COMPLETE | Processed=%d | BadCostSkipped=%d | InsertErrors=%d',
+        10,
+        1,
+        @ProcessedCount,
+        @SkippedCount,
+        @ErrorCount
+    ) WITH NOWAIT;
+
+END;
+GO
+What you should see
+
+When you run:
+
+EXEC SBCES.InternalRbPrice;
+
+you should get messages similar to:
+
+[InternalRbPrice] Processing #125 | RebuiltStockNum=RB12345 | MmsStockCode=ABC123 | RawMmsNewCost=$125.50
+
+[InternalRbPrice] Processing #126 | RebuiltStockNum=RB12344 | MmsStockCode=ABC124 | RawMmsNewCost=N/A
+
+[InternalRbPrice] *** SKIPPED BAD ROW *** |
+RebuiltStockNum=RB12344 |
+MmsStockCode=ABC124 |
+RawMmsNewCost=[N/A] |
+Reason=Cannot convert to numeric
+
+[InternalRbPrice] Processing #127 | RebuiltStockNum=RB12343 | MmsStockCode=ABC125 | RawMmsNewCost=$200.00
+
+[InternalRbPrice] COMPLETE | Processed=127 | BadCostSkipped=1 | InsertErrors=0
+
+That gives you the exact offending row.
+
+One important concern with your original conversion
+
+Your original expression:
+
+REPLACE(REPLACE(ROUND(SCP.MmsNewCost, 2), ',', '.'), '$', '')
+
+has a potential second problem.
+
+If your source contains:
+
+$1,234.56
+
+then blindly replacing comma with . produces:
+
+1.234.56
+
+which is not a valid decimal.
+
+So before deciding the final production conversion, we should determine what SCP.MmsNewCost actually contains.
+
+Run this diagnostic query:
+
+SELECT
+    SCP.MmsStockCode,
+    SCP.MmsNewCost,
+    DATALENGTH(SCP.MmsNewCost) AS DataLength,
+    TRY_CONVERT(
+        DECIMAL(25,10),
+        REPLACE(
+            REPLACE(
+                LTRIM(RTRIM(CONVERT(VARCHAR(100), SCP.MmsNewCost))),
+                '$',
+                ''
+            ),
+            ',',
+            '.'
+        )
+    ) AS ParsedValue
+FROM SBCES.StockCodedParts SCP
+WHERE SCP.MmsNewCost IS NOT NULL
+  AND TRY_CONVERT(
+        DECIMAL(25,10),
+        REPLACE(
+            REPLACE(
+                LTRIM(RTRIM(CONVERT(VARCHAR(100), SCP.MmsNewCost))),
+                '$',
+                ''
+            ),
+            ',',
+            '.'
+        )
+      ) IS NULL;
+
+This will give you the bad MmsStockCode and actual MmsNewCost values without throwing an error.
+
+Also check the destination table
+
+There is another possibility: the error may not be coming from SCP.MmsNewCost. It could be coming from this:
+
+INSERT INTO SBCES.TempRbpCost
+VALUES (...)
+
+For example, if TempRbpCost.BuyNewCost is DECIMAL while your @BuyNewCost is VARCHAR, SQL Server could throw the same Msg 8114.
+
+So I strongly recommend checking:
+
+EXEC sp_help 'SBCES.TempRbpCost';
+
+If you paste the output/schema of SBCES.TempRbpCost and SBCES.StockCodedParts, I can pinpoint whether the 8114 is from the cursor SELECT or the INSERT and give you the final production version without unnecessary conversions.
