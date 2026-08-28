@@ -1,0 +1,211 @@
+Project Parameters
+
+In your SSIS project, remove these four parameters:
+
+CES_ConnectionString
+IFS_ConnectionString
+CES_Password
+IFS_Password
+
+Create these six Project Parameters:
+
+Parameter	Data type	Sensitive
+CES_SQL_Server_Name	String	No
+CES_SQL_Login	String	No
+CES_SQL_Password	String	Yes
+IFS_ORACLE_Server_Name	String	No
+IFS_ORACLE_Login	String	No
+IFS_ORACLE_Password	String	Yes
+
+I strongly recommend marking both password parameters Sensitive = True.
+
+Do not put actual passwords into the DTSX file.
+
+2. Important Oracle detail
+
+There is one important point with the name IFS_ORACLE_Server_Name.
+
+Your current package contains this Oracle connection information:
+
+HOST=ocipp-dqcof-scan.ttcociclientsub.ttcocivcn.oraclevcn.com
+PORT=1521
+SERVICE_NAME=ifsread1cs_svc.int.ttc.ca
+
+The original ODBC connection therefore contains considerably more information than just a server/host name.
+
+For the new design, I recommend setting:
+
+IFS_ORACLE_Server_Name
+
+to the complete Oracle Easy Connect identifier, for example:
+
+ocipp-dqcof-scan.ttcociclientsub.ttcocivcn.oraclevcn.com:1521/ifsread1cs_svc.int.ttc.ca
+
+Then the generated connection string is:
+
+Driver={Oracle in OraClient19Home1};
+Dbq=ocipp-dqcof-scan.ttcociclientsub.ttcocivcn.oraclevcn.com:1521/ifsread1cs_svc.int.ttc.ca;
+Uid=<login>;
+Pwd=<password>;
+
+This is preferable to hard-coding the Oracle host/service name into the DTSX.
+
+So your environments could simply have:
+
+DEV
+
+IFS_ORACLE_Server_Name = dev-host:1521/dev-service
+
+QA
+
+IFS_ORACLE_Server_Name = qa-host:1521/qa-service
+
+PROD
+
+IFS_ORACLE_Server_Name = prod-host:1521/prod-service
+
+while the DTSX remains identical.
+
+3. CES connection
+
+Your existing CES connection is currently an OLE DB connection using MSOLEDBSQL.1, and the destinations and Execute SQL task all reference CES_Connection.
+
+That is good architecture.
+
+Do not change the connection manager name.
+
+Keep:
+
+CES_Connection
+
+The only change is how its ConnectionString is populated.
+
+Likewise, keep:
+
+IFS_Connection
+
+because all of your Oracle ODBC source components reference that connection manager. For example, DFT_Load_PartMaster references IFS_Connection for its ODBC source.
+
+Therefore you don't need to edit the individual Data Flow Tasks.
+
+4. One important SSIS deployment issue
+
+Because you are deploying to SSISDB, configure the six project parameters through the SSISDB Environment rather than embedding environment-specific values in the DTSX.
+
+Recommended structure:
+
+SSISDB
+└── CES_IFS_Interface
+    ├── Environments
+    │   ├── DEV
+    │   ├── QA
+    │   └── PROD
+    └── Projects
+        └── CES_IFS_Interface
+            └── Packages
+                └── pkg_CES_IFS_Interface.dtsx
+
+For example, PROD environment:
+
+CES_SQL_Server_Name
+CES_SQL_Login
+CES_SQL_Password
+
+IFS_ORACLE_Server_Name
+IFS_ORACLE_Login
+IFS_ORACLE_Password
+
+The package then remains environment-independent.
+
+5. What I intentionally did NOT change
+
+I preserved the existing package processing logic.
+
+The package still:
+
+TRUNCATE_CES_Tables
+        ↓
+DFT_Load_VendorPartDesc
+        ↓
+DFT_Load_PartOrder
+        ↓
+DFT_Load_PartMaster
+        ↓
+DFT_Load_TextData
+
+The existing precedence constraints are still present.
+
+I also left the existing RunDate package parameter/variable untouched. The package currently has a RunDate package parameter and corresponding variable.
+
+The existing error handler continues to use the CES connection manager, which is appropriate because the error is logged into the CES database.
+
+6. Deployment checklist
+In Visual Studio / SSDT
+Open the SSIS project.
+Open Project.params.
+
+Delete:
+
+CES_ConnectionString
+IFS_ConnectionString
+CES_Password
+IFS_Password
+
+Add:
+
+CES_SQL_Server_Name
+CES_SQL_Login
+CES_SQL_Password
+
+IFS_ORACLE_Server_Name
+IFS_ORACLE_Login
+IFS_ORACLE_Password
+
+Mark:
+
+CES_SQL_Password
+IFS_ORACLE_Password
+
+as Sensitive.
+
+Replace your package with the downloaded DTSX.
+Open the package in SSDT.
+Verify both connection managers.
+Build the .ispac.
+Deploy to SSISDB.
+In SSISDB
+
+Create/configure the environment values.
+
+For example:
+
+CES_SQL_Server_Name       = <SQL Server name>
+CES_SQL_Login             = <CES login>
+CES_SQL_Password          = <CES password>
+
+IFS_ORACLE_Server_Name    = <Oracle host:port/service>
+IFS_ORACLE_Login          = <Oracle login>
+IFS_ORACLE_Password       = <Oracle password>
+
+Then create project parameter references from the environment variables.
+
+One production recommendation
+
+I would not use a connection string parameter anymore. Your requested six-parameter design is better:
+
+Environment
+     │
+     ├── Server
+     ├── Login
+     └── Password
+          │
+          ▼
+   SSIS Project Parameter
+          │
+          ▼
+   Connection Manager
+          │
+          ├── CES SQL Server
+          └── Oracle IFS
+
+That gives you one .ispac that can be deployed to DEV/QA/PROD without editing the DTSX.
