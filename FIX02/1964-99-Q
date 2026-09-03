@@ -1,0 +1,90 @@
+MS SQL 2022
+Fi erros and give me full block
+BeginExecuteNonQuery requires the command to have a transaction when the connection assigned to the command is in a pending local transaction.  The Transaction property of the command has not been initialized.
+
+  private async Task UpdateRebuiltPartsAsync(RebuiltPartsViewModel rebuiltPartsViewModel)
+  {
+      rebuiltPartsViewModel.LastModifiedBy = ViewBag.UserName;
+      rebuiltPartsViewModel.EnteredBy = ViewBag.UserName;
+      rebuiltPartsViewModel.DateEntered = DateTime.Now.ToString();
+      _dbConnection.Open();
+      using (var transaction = _dbConnection.BeginTransaction())
+      {
+          try
+          {
+              // Update the main RbMasterlist table
+              var updateRbMasterlistQuery = @"
+                                              UPDATE SBCES.RbMasterlist
+                                              SET 
+                                                  MmsStockCode = @MmsStockCode,
+                                                  RebuiltStockNum =@RebuiltStockNum,
+                                                  DetailedDesc = @Description,
+                                                  Keyword = @Keyword, 
+                                                  JobNumber = @JobNumber,
+                                                  CoreCharge = @CoreCharge,
+                                                  CorePartNum = @CorePartNum,
+                                                  BuyNewCost = @BuyNewCost,
+                                                  RemanCost = @RemanCost,
+                                                  LastModifiedBy = @LastModifiedBy,
+                                                  DateEntered = @LastModifiedDate
+              
+                                              WHERE RbMasterlistId =" + rebuiltPartsViewModel.RebuiltId 
+                                          ;
+
+              await _dbConnection.ExecuteAsync(updateRbMasterlistQuery, new
+              {
+                  rebuiltPartsViewModel.MmsStockCode,
+                  rebuiltPartsViewModel.RebuiltStockNum,
+                  rebuiltPartsViewModel.Description,
+                  rebuiltPartsViewModel.KeyWord,
+                  rebuiltPartsViewModel.JobNumber,
+                  rebuiltPartsViewModel.CoreCharge,
+                  rebuiltPartsViewModel.CorePartNum,
+                  rebuiltPartsViewModel.BuyNewCost,
+                  rebuiltPartsViewModel.RemanCost,
+                  rebuiltPartsViewModel.LastModifiedBy,
+                 rebuiltPartsViewModel.LastModifiedDate,
+                 
+                  rebuiltPartsViewModel.RebuiltId
+              }, transaction);
+
+
+              //if user doesn't change any vehicle _selectedBuses = 0
+              if (_selectedBuses.Count > 0)
+              {
+                  // Delete existing bus associations for the rebuilt part
+                  var deleteBusesQuery = @"
+                                      DELETE FROM SBCES.RBLISTOFBUSES
+                                      WHERE RebuiltStockNum = @RebuiltStockNum;
+                                  ";
+
+                  await _dbConnection.ExecuteAsync(deleteBusesQuery, new
+                  {
+                      rebuiltPartsViewModel.RebuiltStockNum
+                  });
+
+                  // Insert new bus associations
+                  var insertBusesQuery = "";
+                  foreach (var bus in rebuiltPartsViewModel.Buses)
+                  {
+                      int i = 0;
+                      insertBusesQuery = @"
+                                      INSERT INTO SBCES.RBLISTOFBUSES (RebuiltStockNum, listid)
+                                      VALUES ('" + rebuiltPartsViewModel.RebuiltId + "', '"  + rebuiltPartsViewModel.Buses[i].BusId + "');";
+                      await _dbConnection.ExecuteAsync(insertBusesQuery);
+                      i ++;
+
+                  }
+              }
+
+             
+          }
+          catch (Exception ex)
+          {
+              // Rollback the transaction in case of an error
+               transaction.Rollback();
+              Console.WriteLine($"Error updating rebuilt parts data: {ex.Message}");
+              throw; // Re-throw the exception to propagate it
+          }
+      }
+  }
