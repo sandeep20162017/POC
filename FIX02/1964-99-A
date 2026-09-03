@@ -1,0 +1,92 @@
+private async Task UpdateRebuiltPartsAsync(RebuiltPartsViewModel rebuiltPartsViewModel)
+{
+    rebuiltPartsViewModel.LastModifiedBy = ViewBag.UserName;
+    rebuiltPartsViewModel.EnteredBy = ViewBag.UserName;
+    rebuiltPartsViewModel.DateEntered = DateTime.Now;   // FIX: use DateTime, not string
+
+    _dbConnection.Open();
+
+    using (var transaction = _dbConnection.BeginTransaction())
+    {
+        try
+        {
+            // -----------------------------
+            // UPDATE MAIN TABLE
+            // -----------------------------
+            var updateSql = @"
+                UPDATE SBCES.RbMasterlist
+                SET 
+                    MmsStockCode     = @MmsStockCode,
+                    RebuiltStockNum  = @RebuiltStockNum,
+                    DetailedDesc     = @Description,
+                    Keyword          = @Keyword, 
+                    JobNumber        = @JobNumber,
+                    CoreCharge       = @CoreCharge,
+                    CorePartNum      = @CorePartNum,
+                    BuyNewCost       = @BuyNewCost,
+                    RemanCost        = @RemanCost,
+                    LastModifiedBy   = @LastModifiedBy,
+                    DateEntered      = @DateEntered
+                WHERE RbMasterlistId = @RebuiltId;
+            ";
+
+            await _dbConnection.ExecuteAsync(updateSql, new
+            {
+                rebuiltPartsViewModel.MmsStockCode,
+                rebuiltPartsViewModel.RebuiltStockNum,
+                rebuiltPartsViewModel.Description,
+                rebuiltPartsViewModel.KeyWord,
+                rebuiltPartsViewModel.JobNumber,
+                rebuiltPartsViewModel.CoreCharge,
+                rebuiltPartsViewModel.CorePartNum,
+                rebuiltPartsViewModel.BuyNewCost,
+                rebuiltPartsViewModel.RemanCost,
+                rebuiltPartsViewModel.LastModifiedBy,
+                rebuiltPartsViewModel.DateEntered,
+                rebuiltPartsViewModel.RebuiltId
+            }, transaction);   // FIX: transaction passed
+
+
+            // -----------------------------
+            // UPDATE BUS LIST
+            // -----------------------------
+            if (_selectedBuses.Count > 0)
+            {
+                // DELETE old buses
+                var deleteSql = @"
+                    DELETE FROM SBCES.RBLISTOFBUSES
+                    WHERE RebuiltStockNum = @RebuiltStockNum;
+                ";
+
+                await _dbConnection.ExecuteAsync(deleteSql,
+                    new { rebuiltPartsViewModel.RebuiltStockNum },
+                    transaction);   // FIX: transaction passed
+
+
+                // INSERT new buses
+                var insertSql = @"
+                    INSERT INTO SBCES.RBLISTOFBUSES (RebuiltStockNum, listid)
+                    VALUES (@RebuiltStockNum, @BusId);
+                ";
+
+                foreach (var bus in rebuiltPartsViewModel.Buses)
+                {
+                    await _dbConnection.ExecuteAsync(insertSql, new
+                    {
+                        RebuiltStockNum = rebuiltPartsViewModel.RebuiltStockNum,
+                        BusId = bus.BusId
+                    }, transaction);   // FIX: transaction passed
+                }
+            }
+
+            // COMMIT
+            transaction.Commit();
+        }
+        catch (Exception ex)
+        {
+            transaction.Rollback();
+            Console.WriteLine($"Error updating rebuilt parts data: {ex.Message}");
+            throw;
+        }
+    }
+}
