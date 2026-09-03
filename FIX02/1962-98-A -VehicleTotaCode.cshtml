@@ -1,0 +1,692 @@
+@{
+    ViewData["Title"] = "Vehicle Cost Summary";
+}
+
+@section Styles {
+    <link rel="stylesheet" href="~/css/_VehicleReportStyles.css" asp-append-version="true" />
+}
+
+<style>
+    /* Additional page-specific styles */
+    .report-toolbar {
+        position: absolute;
+        top: 8px;
+        right: 12px;
+        z-index: 1000;
+    }
+
+    .loading-spinner {
+        text-align: center;
+        padding: 60px;
+        color: #5d6d7e;
+        font-size: 16px;
+    }
+
+    .no-data-message {
+        text-align: center;
+        padding: 50px;
+        background: #fef9e6;
+        border-radius: 8px;
+    }
+
+    .retry-btn {
+        background-color: #2c3e50;
+        color: white;
+        border: none;
+        padding: 8px 20px;
+        border-radius: 4px;
+        margin-top: 15px;
+        cursor: pointer;
+    }
+
+    .retry-btn:hover {
+        background-color: #1a5276;
+    }
+
+    .warning-icon {
+        font-size: 48px;
+        margin-bottom: 10px;
+    }
+
+    .no-print {
+        display: block;
+    }
+</style>
+
+<div class="report-toolbar no-print">
+    <button id="reportActions" class="k-button k-button-icon" title="Report actions" style="width:32px; padding:4px;">
+        <span class="k-icon k-i-more-vertical"></span>
+    </button>
+</div>
+
+<ul id="reportMenu" class="no-print">
+    <!-- View Options -->
+    <li id="viewFullReport"><span class="k-icon k-i-preview"></span> View Full Vehicle Estimate Report</li>
+    <li id="viewVehicleEstimate"><span class="k-icon k-i-preview"></span> View Vehicle Estimate Report</li>
+    <li id="viewLabourDetails"><span class="k-icon k-i-preview"></span> View Labour Details Report</li>
+    <li id="viewMaterialsEstimate"><span class="k-icon k-i-preview"></span> View Materials Estimate Report</li>
+    <li class="k-separator"></li>
+    <!-- Copy Options -->
+    <li id="copyFullReport"><span class="k-icon k-i-copy"></span> Copy to Clipboard - Full Vehicle Estimate Report</li>
+    <li id="copyVehicleEstimate"><span class="k-icon k-i-copy"></span> Copy to Clipboard - Vehicle Estimate Report</li>
+    <li id="copyLabourDetails"><span class="k-icon k-i-copy"></span> Copy to Clipboard - Labour Details Report</li>
+    <li id="copyMaterialsEstimate"><span class="k-icon k-i-copy"></span> Copy to Clipboard - Materials Estimate Report</li>
+    <li class="k-separator"></li>
+    <!-- PDF Options -->
+    <li id="saveFullReportPdf"><span class="k-icon k-i-file-pdf"></span> Save as PDF - Full Vehicle Estimate Report</li>
+    <li id="saveVehicleEstimatePdf"><span class="k-icon k-i-file-pdf"></span> Save as PDF - Vehicle Estimate Report</li>
+    <li id="saveLabourDetailsPdf"><span class="k-icon k-i-file-pdf"></span> Save as PDF - Labour Details Report</li>
+    <li id="saveMaterialsEstimatePdf"><span class="k-icon k-i-file-pdf"></span> Save as PDF - Materials Estimate Report</li>
+</ul>
+
+<div class="report-container" id="reportContainer">
+    <!-- HEADER -->
+    <div class="report-header" id="reportHeader">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="text-align: left;">
+                <div class="estimate-number">Vehicle Estimate #: <span id="estimateNumber">@ViewBag.PartNum</span></div>
+            </div>
+            <div style="text-align: center; flex: 1;">
+                <h1 id="reportTitle">VEHICLE COST SUMMARY REPORT</h1>
+                <div class="subtitle" id="generatedDate">Generated: @DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")</div>
+            </div>
+            <div style="text-align: right; min-width: 120px;">
+                <div class="status-badge">Status: <span class="active">● Active</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loadingIndicator" class="loading-spinner">
+        <span>⏳ Loading cost data...</span>
+    </div>
+
+    <!-- Content -->
+    <div id="costSummaryContent" style="display: none;">
+        <!-- SECTION 1: VEHICLE DETAILS -->
+        <div class="detail-section" id="vehicleDetailsSection">
+            <div class="detail-header">
+                <span>🚗 VEHICLE DETAILS</span>
+            </div>
+            <div class="detail-body">
+                <div class="vehicle-info">
+                    <div class="vehicle-info-item vehicle-description">
+                        <span class="label">Detailed Description</span>
+                        <span class="value" id="vehicleDescription">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Vehicle Series</span>
+                        <span class="value" id="vehicleSeries">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Make</span>
+                        <span class="value" id="vehicleMake">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Model</span>
+                        <span class="value" id="vehicleModel">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Year</span>
+                        <span class="value" id="vehicleYear">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label"># of Vehicles</span>
+                        <span class="value" id="numberOfVehicles">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Engine</span>
+                        <span class="value" id="vehicleEngine">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Transmission</span>
+                        <span class="value" id="vehicleTransmission">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Differential</span>
+                        <span class="value" id="vehicleDifferential">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 2: MATERIAL COST SUMMARY -->
+        <div class="detail-section" id="materialSummarySection">
+            <div class="detail-header">
+                <span>📦 MATERIAL COST SUMMARY</span>
+                <span class="badge" id="materialCountBadge">0 parts</span>
+            </div>
+            <div class="detail-body">
+                <div class="summary-grid summary-grid-6">
+                    <div class="summary-card">
+                        <span class="value" id="stockPartsCount">0</span>
+                        <span class="label">Stock Parts</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="nonStockPartsCount">0</span>
+                        <span class="label">Non-Stock Parts</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="rebuiltPartsCount">0</span>
+                        <span class="label">Rebuilt Parts</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="stockCost">$0.00</span>
+                        <span class="label">Total Stock Cost</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="totalNonStockCost">$0.00</span>
+                        <span class="label">Total Non-Stock Cost</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="totalRebuiltCost">$0.00</span>
+                        <span class="label">Total Rebuilt Cost</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 3: MATERIAL LINES -->
+        <div class="detail-section" id="materialLinesSection">
+            <div class="detail-header">
+                <span>📋 MATERIAL</span>
+                <span class="badge" id="materialLinesBadge">0 items</span>
+            </div>
+            <div class="detail-body">
+                <div class="material-table-wrap">
+                    <table class="material-table" id="materialLinesTable">
+                        <thead>
+                            <tr>
+                                <th style="width:90px;">Type</th>
+                                <th style="width:120px;">Stock Code</th>
+                                <th style="width:120px;">CC</th>
+                                <th>Desc/Supp Name</th>
+                                <th style="width:70px;text-align:right;">Qty</th>
+                                <th style="width:100px;text-align:right;">Unit Cost</th>
+                                <th style="width:80px;text-align:right;">Usage %</th>
+                                <th style="width:110px;text-align:right;">Total Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody id="materialLinesBody">
+                            <tr><td colspan="8" style="text-align:center; color:#6c757d; padding:20px;">No material items found</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 4: LABOUR HOURS SUMMARY -->
+        <div class="detail-section" id="labourHoursSection">
+            <div class="detail-header">
+                <span>⏱️ LABOUR HOURS SUMMARY</span>
+            </div>
+            <div class="detail-body">
+                <div class="summary-grid summary-grid-3">
+                    <div class="summary-card">
+                        <span class="value" id="totalHours">0.00</span>
+                        <span class="label">Total Hours</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="totalEffectiveHours">0.00</span>
+                        <span class="label">Effective Hours</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="totalAdjustedHours">0.00</span>
+                        <span class="label">Adjusted Hours</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 5: LABOUR TASK SUMMARY -->
+        <div class="detail-section" id="labourTasksSection">
+            <div class="detail-header">
+                <span>📋 LABOUR TASK SUMMARY</span>
+                <span class="badge" id="taskCountBadge">0 tasks</span>
+            </div>
+            <div class="detail-body">
+                <div class="task-table-wrap">
+                    <table class="task-table" id="taskSummaryTable">
+                        <thead>
+                            <tr>
+                                <th>Task</th>
+                                <th>Labour Definition</th>
+                                <th>CC</th>
+                                <th style="text-align:right;">Hours</th>
+                                <th style="text-align:right;">Effective Hrs</th>
+                                <th style="text-align:right;">Adjusted Hrs</th>
+                                <th style="text-align:right;">Rate/Hr</th>
+                                <th style="text-align:right;">Total Cost</th>
+                                <th style="text-align:center;">Count</th>
+                            </tr>
+                        </thead>
+                        <tbody id="taskSummaryBody">
+                            <tr><td colspan="9" style="text-align:center; color:#6c757d; padding:20px;">No labour tasks found</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SIDE BY SIDE -->
+        <div class="side-by-side" id="costSideBySide">
+            <div class="material-section">
+                <div class="material-header">📦 MATERIAL COST</div>
+                <div class="material-body">
+                    <table class="info-table">
+                        <tr><td class="label-col"><strong>Stock Coded Parts</strong></td><td class="value-col" id="scPartsDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Non-Stock Coded Parts</strong></td><td class="value-col" id="nscPartsDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Rebuilt Parts</strong></td><td class="value-col" id="rbCostDisplay">$0.00</td></tr>
+                        <tr class="total-row"><td class="label-col"><strong>Parts Total (No Tax)</strong></td><td class="value-col" id="partsTotalDisplay">$0.00</td></tr>
+                        <tr class="tax-row"><td class="label-col"><strong>+ Material Tax</strong></td><td class="value-col" id="materialTaxDisplay">$0.00</td></tr>
+                        <tr class="total-row"><td class="label-col"><strong>= Total Material Cost (With Tax)</strong></td><td class="value-col" id="materialWithTaxDisplay">$0.00</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <div class="labour-section">
+                <div class="labour-header">🔧 LABOUR COST</div>
+                <div class="labour-body">
+                    <table class="info-table">
+                        <tr><td class="label-col"><strong>Fringe</strong></td><td class="value-col" id="labourFringeDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Benefits</strong></td><td class="value-col" id="labourBenefitsDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Blended Fringe & Benefits</strong></td><td class="value-col" id="blendedFringeCostDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Overhead</strong></td><td class="value-col" id="labourOverheadDisplay">$0.00</td></tr>
+                        <tr class="total-row"><td class="label-col"><strong>= Total Labour Cost</strong></td><td class="value-col" id="totalLabourCostDisplay">$0.00</td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TOTALS ROW -->
+        <div class="totals-row" id="totalsRow">
+            <div class="total-box">
+                <div class="total-box-label">TOTAL MATERIAL COST (With Tax)</div>
+                <div class="total-box-value" id="totalMaterialBoxDisplay">$0.00</div>
+            </div>
+            <div class="total-box">
+                <div class="total-box-label">TOTAL LABOUR COST</div>
+                <div class="total-box-value" id="totalLabourBoxDisplay">$0.00</div>
+            </div>
+        </div>
+
+        <!-- GRAND TOTAL -->
+        <div class="grand-total-section" id="grandTotalSection">
+            <table class="grand-total-table">
+                <tr>
+                    <td class="grand-total-label"><strong>💰 GRAND TOTAL (Material + Labour)</strong></td>
+                    <td class="grand-total-value" id="totalWithTaxDisplay">$0.00</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- AUDIT ROW -->
+        <div class="vehicle-audit-row" id="auditRow">
+            <div class="vehicle-audit-item">
+                <span class="label">Modified By</span>
+                <span class="value" id="modifiedLastBy">-</span>
+            </div>
+            <div class="vehicle-audit-item">
+                <span class="label">Modified Date</span>
+                <span class="value" id="modifiedLastDate">-</span>
+            </div>
+        </div>
+
+        <div class="report-footer" id="reportFooter">
+            Estimate Generated On: @DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+        </div>
+    </div>
+
+    <!-- No data -->
+    <div id="noDataMessage" class="no-data-message" style="display: none;">
+        <div class="warning-icon">⚠️</div>
+        <p style="font-size:16px; margin:10px 0;"><strong>No cost data available</strong></p>
+        <p>No cost data found for Estimate ID: @ViewBag.PartNum</p>
+        <button id="retryButton" class="retry-btn">⟳ Retry Loading</button>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/_VehicleReport.js" asp-append-version="true"></script>
+    <script type="text/javascript">
+        // Configuration
+        var partNum = '@ViewBag.PartNum';
+        var gridType = '@ViewBag.GridType';
+        var totalCostDataUrl = '@Url.Action("GetTotalCostInEstimates", "TotalCost")' +
+                               '?id=' + encodeURIComponent(partNum) +
+                               '&gridType=' + encodeURIComponent(gridType);
+
+        // Initialize VehicleReport
+        VehicleReport.init({
+            partNum: partNum,
+            baseUrl: '@Url.Action("ViewReport", "TotalCost")',
+            debug: false
+        });
+
+        // Document ready
+        $(document).ready(function() {
+            console.log("TotalCostTab initialized");
+            fetchTotalCostData();
+
+            $("#retryButton").on('click', function() {
+                $("#noDataMessage").hide();
+                $("#loadingIndicator").show();
+                $("#costSummaryContent").hide();
+                fetchTotalCostData();
+            });
+
+            // Context menu
+            $("#reportMenu").kendoContextMenu({
+                target: "#reportActions",
+                showOn: "mouseenter",
+                alignToAnchor: true,
+                select: function(e) {
+                    var id = $(e.item).attr("id");
+                    var containerId = 'reportContainer';
+                    
+                    switch(id) {
+                        // View Actions
+                        case "viewFullReport":
+                            VehicleReport.viewReport('full', partNum);
+                            break;
+                        case "viewVehicleEstimate":
+                            VehicleReport.viewReport('vehicle', partNum);
+                            break;
+                        case "viewLabourDetails":
+                            VehicleReport.viewReport('labour', partNum);
+                            break;
+                        case "viewMaterialsEstimate":
+                            VehicleReport.viewReport('materials', partNum);
+                            break;
+                        
+                        // Copy Actions
+                        case "copyFullReport":
+                            VehicleReport.copyToClipboard(containerId, 'full');
+                            break;
+                        case "copyVehicleEstimate":
+                            VehicleReport.copyToClipboard(containerId, 'vehicle');
+                            break;
+                        case "copyLabourDetails":
+                            VehicleReport.copyToClipboard(containerId, 'labour');
+                            break;
+                        case "copyMaterialsEstimate":
+                            VehicleReport.copyToClipboard(containerId, 'materials');
+                            break;
+                        
+                        // PDF Actions
+                        case "saveFullReportPdf":
+                            VehicleReport.saveAsPdf(containerId, 'full');
+                            break;
+                        case "saveVehicleEstimatePdf":
+                            VehicleReport.saveAsPdf(containerId, 'vehicle');
+                            break;
+                        case "saveLabourDetailsPdf":
+                            VehicleReport.saveAsPdf(containerId, 'labour');
+                            break;
+                        case "saveMaterialsEstimatePdf":
+                            VehicleReport.saveAsPdf(containerId, 'materials');
+                            break;
+                    }
+                }
+            });
+        });
+
+        // Data fetching
+        function fetchTotalCostData() {
+            console.log("Fetching data from:", totalCostDataUrl);
+
+            $.ajax({
+                url: totalCostDataUrl,
+                type: 'GET',
+                dataType: 'json',
+                timeout: 30000,
+                success: function(response) {
+                    console.log("Response received:", response);
+                    if (response && response.Data && response.Data.length > 0) {
+                        var costData = response.Data[0];
+                        console.log("Cost data:", costData);
+                        populateAllSections(costData);
+                        $("#loadingIndicator").hide();
+                        $("#costSummaryContent").show();
+                        $("#noDataMessage").hide();
+                    } else {
+                        console.log("No data in response");
+                        showNoDataMessage();
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error("Error fetching cost data:", status, error);
+                    showNoDataMessage();
+                }
+            });
+        }
+
+        // Helper functions
+        function getVal(value) {
+            if (value === null || value === undefined) return 0;
+            var num = parseFloat(value);
+            return isNaN(num) ? 0 : num;
+        }
+
+        function formatMoney(val) {
+            return '$' + val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function setText(id, value) {
+            $(id).text(formatMoney(value));
+        }
+
+        function setNumber(id, value) {
+            var num = getVal(value);
+            $(id).text(num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }));
+        }
+
+        function formatIntegerOrDash(value) {
+            if (value === null || value === undefined || value === '') return '-';
+            var num = parseInt(value, 10);
+            return isNaN(num) ? '-' : num.toLocaleString();
+        }
+
+        function formatDateTime(value) {
+            if (value === null || value === undefined || value === '') return '-';
+            var date = new Date(value);
+            if (isNaN(date.getTime())) return String(value);
+            return date.toLocaleString(undefined, {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit'
+            });
+        }
+
+        function setNumberDecimal(id, value) {
+            var num = getVal(value);
+            $(id).text(num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+        }
+
+        // Main population function
+        function populateAllSections(costData) {
+            // Vehicle Details
+            $('#vehicleSeries').text(costData.VehicleSeries || '-');
+            $('#vehicleDescription').text(costData.VehicleDescription || '-');
+            $('#vehicleMake').text(costData.Make || '-');
+            $('#vehicleModel').text(costData.Model || '-');
+            $('#vehicleYear').text(formatIntegerOrDash(costData.Year));
+            $('#numberOfVehicles').text(formatIntegerOrDash(costData.NumOfVehicles));
+            $('#vehicleEngine').text(costData.Engine || '-');
+            $('#vehicleTransmission').text(costData.Transmission || '-');
+            $('#vehicleDifferential').text(costData.Differential || '-');
+            $('#modifiedLastBy').text(costData.ModifiedLastBy || '-');
+            $('#modifiedLastDate').text(formatDateTime(costData.ModifiedLastDate));
+
+            // Material Summary
+            var totalParts = (costData.TotalStockPartsCount || 0) + (costData.TotalNonStockPartsCount || 0) + (costData.TotalRebuiltPartsCount || 0);
+            $('#materialCountBadge').text(totalParts + ' parts');
+            setNumber('#stockPartsCount', costData.TotalStockPartsCount);
+            setNumber('#nonStockPartsCount', costData.TotalNonStockPartsCount);
+            setNumber('#rebuiltPartsCount', costData.TotalRebuiltPartsCount);
+            setText('#stockCost', costData.SCPartsMaterialCost);
+            setText('#totalNonStockCost', costData.NSCSCPartsMaterialCost);
+            setText('#totalRebuiltCost', costData.RBPartsMaterialCost);
+
+            // Material Lines
+            populateMaterialLines(costData.MaterialLines || []);
+
+            // Labour Hours
+            setNumberDecimal('#totalHours', costData.TotalLabourHours);
+            setNumberDecimal('#totalEffectiveHours', costData.TotalEffectiveHours);
+            setNumberDecimal('#totalAdjustedHours', costData.TotalAdjustedHours);
+
+            // Labour Tasks
+            populateTaskSummary(costData.LabourTasks || []);
+
+            // Cost Side by Side
+            var scParts = getVal(costData.SCPartsMaterialCost);
+            var nscParts = getVal(costData.NSCSCPartsMaterialCost);
+            var rbParts = getVal(costData.RBPartsMaterialCost);
+            var partsTotalNoTax = getVal(costData.MaterialTotalCostNoTax);
+            var materialTax = getVal(costData.MaterialTotalTaxAmount);
+            var materialWithTax = getVal(costData.MaterialTotalWithTax);
+
+            var labourFringe = getVal(costData.LabourFringe);
+            var labourBenefits = getVal(costData.LabourBenefits);
+            var blendedFringeCost = getVal(costData.BlendedFringeBenefitCost);
+            var labourOverhead = getVal(costData.LabourOverhead);
+            var totalLabour = getVal(costData.FinalLabourCost);
+            var totalWithTax = materialWithTax + totalLabour;
+
+            setText("#scPartsDisplay", scParts);
+            setText("#nscPartsDisplay", nscParts);
+            setText("#rbCostDisplay", rbParts);
+            setText("#partsTotalDisplay", partsTotalNoTax);
+            setText("#materialTaxDisplay", materialTax);
+            setText("#materialWithTaxDisplay", materialWithTax);
+
+            setText("#labourFringeDisplay", labourFringe);
+            setText("#labourBenefitsDisplay", labourBenefits);
+            setText("#blendedFringeCostDisplay", blendedFringeCost);
+            setText("#labourOverheadDisplay", labourOverhead);
+            setText("#totalLabourCostDisplay", totalLabour);
+
+            setText("#totalMaterialBoxDisplay", materialWithTax);
+            setText("#totalLabourBoxDisplay", totalLabour);
+            setText("#totalWithTaxDisplay", totalWithTax);
+        }
+
+        // Populate Material Lines
+        function populateMaterialLines(lines) {
+            var tbody = $('#materialLinesBody');
+            var badge = $('#materialLinesBadge');
+            var totalItems = lines.length;
+            badge.text(totalItems + ' items');
+
+            if (totalItems === 0) {
+                tbody.html('<tr><td colspan="8" style="text-align:center; color:#6c757d; padding:20px;">No material items found</td></tr>');
+                return;
+            }
+
+            var html = '';
+            var typeTotals = { Stock: 0, Rebuilt: 0, 'Non-Stock': 0 };
+            var grandTotal = 0;
+
+            lines.forEach(function(item) {
+                var type = item.Type || 'Stock';
+                var typeClass = type.toLowerCase().replace('-', '');
+                var badgeClass = typeClass === 'nonstock' ? 'nonstock' : typeClass;
+                var totalCost = getVal(item.TotalCost);
+
+                if (typeTotals[type] !== undefined) {
+                    typeTotals[type] += totalCost;
+                }
+                grandTotal += totalCost;
+
+                html += '<tr class="type-' + typeClass + '">' +
+                    '<td><span class="type-badge ' + badgeClass + '">' + type + '</span></td>' +
+                    '<td>' + (item.StockCode || '-') + '</td>' +
+                    '<td>' + (item.CC || '-') + '</td>' +
+                    '<td>' + (item.Description || 'N/A') + '</td>' +
+                    '<td style="text-align:right;">' + getVal(item.Quantity).toFixed(2) + '</td>' +
+                    '<td style="text-align:right;">' + formatMoney(getVal(item.UnitCost)) + '</td>' +
+                    '<td style="text-align:right;">' + getVal(item.PercentUsage).toFixed(1) + '%</td>' +
+                    '<td style="text-align:right; font-weight:600;">' + formatMoney(totalCost) + '</td>' +
+                    '</tr>';
+            });
+
+            // Add type subtotals
+            var typeOrder = ['Stock', 'Rebuilt', 'Non-Stock'];
+            typeOrder.forEach(function(type) {
+                if (typeTotals[type] > 0) {
+                    html += '<tr class="subtotal-row">' +
+                        '<td colspan="7" style="text-align:right; font-weight:600;">Subtotal - ' + type + '</td>' +
+                        '<td style="text-align:right; font-weight:600;">' + formatMoney(typeTotals[type]) + '</td>' +
+                        '</tr>';
+                }
+            });
+
+            // Add grand total
+            html += '<tr class="total-row">' +
+                '<td colspan="7" style="text-align:right; font-weight:800; font-size:1.05em;">GRAND TOTAL</td>' +
+                '<td style="text-align:right; font-weight:800; font-size:1.05em;">' + formatMoney(grandTotal) + '</td>' +
+                '</tr>';
+
+            tbody.html(html);
+        }
+
+        // Populate Task Summary
+        function populateTaskSummary(tasks) {
+            var tbody = $('#taskSummaryBody');
+            var badge = $('#taskCountBadge');
+            badge.text(tasks.length + ' tasks');
+
+            if (tasks.length === 0) {
+                tbody.html('<tr><td colspan="9" style="text-align:center; color:#6c757d; padding:20px;">No labour tasks found</td></tr>');
+                return;
+            }
+
+            var html = '';
+            var totalHours = 0, totalEffective = 0, totalAdjusted = 0, totalCost = 0;
+
+            tasks.forEach(function(task) {
+                var hours = getVal(task.Hours);
+                var effective = getVal(task.EffectiveHours);
+                var adjusted = getVal(task.AdjustedHours);
+                var cost = getVal(task.TotalCost);
+                var count = getVal(task.Count);
+
+                totalHours += hours;
+                totalEffective += effective;
+                totalAdjusted += adjusted;
+                totalCost += cost;
+
+                html += '<tr>' +
+                    '<td>' + (task.Task || 'Unnamed') + '</td>' +
+                    '<td>' + (task.LabourDefinition || 'N/A') + '</td>' +
+                    '<td>' + (task.CC || '-') + '</td>' +
+                    '<td style="text-align:right;">' + hours.toFixed(2) + '</td>' +
+                    '<td style="text-align:right;">' + effective.toFixed(2) + '</td>' +
+                    '<td style="text-align:right;">' + adjusted.toFixed(2) + '</td>' +
+                    '<td style="text-align:right;">' + formatMoney(getVal(task.RatePerHour)) + '</td>' +
+                    '<td style="text-align:right; font-weight:600;">' + formatMoney(cost) + '</td>' +
+                    '<td style="text-align:center;">' + count + '</td>' +
+                    '</tr>';
+            });
+
+            // Total row
+            html += '<tr class="total-row">' +
+                '<td colspan="3"><strong>TOTAL</strong></td>' +
+                '<td style="text-align:right;"><strong>' + totalHours.toFixed(2) + '</strong></td>' +
+                '<td style="text-align:right;"><strong>' + totalEffective.toFixed(2) + '</strong></td>' +
+                '<td style="text-align:right;"><strong>' + totalAdjusted.toFixed(2) + '</strong></td>' +
+                '<td style="text-align:right;"></td>' +
+                '<td style="text-align:right;"><strong>' + formatMoney(totalCost) + '</strong></td>' +
+                '<td style="text-align:center;"><strong>' + tasks.length + '</strong></td>' +
+                '</tr>';
+
+            tbody.html(html);
+        }
+
+        function showNoDataMessage() {
+            $("#loadingIndicator").hide();
+            $("#costSummaryContent").hide();
+            $("#noDataMessage").show();
+        }
+    </script>
+}
