@@ -1,0 +1,1256 @@
+@{
+    ViewData["Title"] = "Vehicle Cost Summary";
+}
+
+<style>
+    /* ===== PAGE-SPECIFIC STYLES ===== */
+    .report-toolbar {
+        position: absolute;
+        top: 8px;
+        right: 12px;
+        z-index: 1000;
+    }
+
+    .report-toolbar .k-button {
+        background: #2c3e50;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 8px 16px;
+        cursor: pointer;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .report-toolbar .k-button:hover {
+        background: #1a5276;
+    }
+
+    .loading-spinner {
+        text-align: center;
+        padding: 60px;
+        color: #5d6d7e;
+        font-size: 16px;
+    }
+
+    .no-data-message {
+        text-align: center;
+        padding: 50px;
+        background: #fef9e6;
+        border-radius: 8px;
+    }
+
+    .retry-btn {
+        background-color: #2c3e50;
+        color: white;
+        border: none;
+        padding: 8px 20px;
+        border-radius: 4px;
+        margin-top: 15px;
+        cursor: pointer;
+    }
+
+    .retry-btn:hover {
+        background-color: #1a5276;
+    }
+
+    .warning-icon {
+        font-size: 48px;
+        margin-bottom: 10px;
+    }
+
+    .no-print {
+        display: block;
+    }
+
+    /* ===== REPORT MENU STYLES ===== */
+    #reportMenu {
+        display: none;
+    }
+
+    /* Kendo ContextMenu override */
+    .k-context-menu {
+        min-width: 340px !important;
+        padding: 4px 0 !important;
+        border-radius: 8px !important;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.15) !important;
+        border: 1px solid #dee2e6 !important;
+        z-index: 10000 !important;
+    }
+
+    .k-context-menu .k-item {
+        padding: 8px 16px !important;
+        cursor: pointer !important;
+        border-bottom: 1px solid #f0f0f0 !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 12px !important;
+        min-height: 40px !important;
+        font-size: 14px !important;
+        color: #333 !important;
+    }
+
+    .k-context-menu .k-item:last-child {
+        border-bottom: none !important;
+    }
+
+    .k-context-menu .k-item:hover {
+        background: #e8f0fe !important;
+        color: #1a5276 !important;
+    }
+
+    .k-context-menu .k-item .k-icon {
+        font-size: 18px !important;
+        width: 24px !important;
+        height: 24px !important;
+        color: #1a5276 !important;
+    }
+
+    .k-context-menu .k-item .menu-label {
+        flex: 1;
+    }
+
+    .k-context-menu .k-item .menu-shortcut {
+        font-size: 11px;
+        color: #999;
+        font-weight: 400;
+    }
+
+    .k-context-menu .k-separator {
+        height: 1px !important;
+        background: #dee2e6 !important;
+        margin: 4px 12px !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+
+    /* Menu group headers in Kendo */
+    .k-context-menu .k-item.k-header-item {
+        font-size: 11px !important;
+        color: #6c757d !important;
+        text-transform: uppercase !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.5px !important;
+        padding: 6px 16px !important;
+        border-bottom: none !important;
+        pointer-events: none !important;
+        background: transparent !important;
+    }
+
+    .k-context-menu .k-item.k-header-item:hover {
+        background: transparent !important;
+    }
+
+    /* Fallback dropdown */
+    .report-menu-dropdown {
+        display: none;
+        position: fixed;
+        background: white;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        min-width: 340px;
+        z-index: 10000;
+        padding: 8px 0;
+        max-height: 80vh;
+        overflow-y: auto;
+    }
+
+    .report-menu-dropdown.show {
+        display: block;
+    }
+
+    .report-menu-dropdown .menu-item {
+        padding: 10px 18px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #2c3e50;
+        font-size: 14px;
+        transition: background 0.15s;
+        border-bottom: 1px solid #f0f0f0;
+    }
+
+    .report-menu-dropdown .menu-item:last-child {
+        border-bottom: none;
+    }
+
+    .report-menu-dropdown .menu-item:hover {
+        background: #e8f0fe;
+    }
+
+    .report-menu-dropdown .menu-item .k-icon {
+        font-size: 18px;
+        width: 24px;
+        text-align: center;
+        color: #1a5276;
+    }
+
+    .report-menu-dropdown .menu-separator {
+        height: 1px;
+        background: #dee2e6;
+        margin: 4px 12px;
+    }
+
+    .report-menu-dropdown .menu-header {
+        padding: 6px 18px;
+        font-size: 11px;
+        color: #6c757d;
+        text-transform: uppercase;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+
+    .report-menu-dropdown .menu-item .shortcut {
+        margin-left: auto;
+        font-size: 11px;
+        color: #999;
+        font-weight: 400;
+    }
+
+    @@media (max-width: 480px) {
+        .k-context-menu {
+            min-width: 280px !important;
+        }
+        .report-menu-dropdown {
+            min-width: 280px;
+            max-width: 90vw;
+            right: 10px !important;
+            left: auto !important;
+        }
+    }
+</style>
+
+<!-- Toolbar Button -->
+<div class="report-toolbar no-print">
+    <button id="reportActions" class="k-button" title="Report actions">
+        <span class="k-icon k-i-more-vertical"></span> Reports ▼
+    </button>
+</div>
+
+<!-- Report Menu for Kendo ContextMenu -->
+<ul id="reportMenu" style="display:none;">
+    <!-- Vehicle Estimate Report -->
+    <li data-action="viewVehicleEstimate" class="k-header-item">📄 VIEW REPORTS</li>
+    <li data-action="viewVehicleEstimate">
+        <span class="k-icon k-i-preview"></span>
+        <span class="menu-label">Vehicle Estimate Report</span>
+    </li>
+    <li data-action="viewLabourDetails">
+        <span class="k-icon k-i-preview"></span>
+        <span class="menu-label">Labour Details Report</span>
+    </li>
+    <li data-action="viewMaterialsEstimate">
+        <span class="k-icon k-i-preview"></span>
+        <span class="menu-label">Materials Estimate Report</span>
+    </li>
+    <li data-action="viewFullReport">
+        <span class="k-icon k-i-preview"></span>
+        <span class="menu-label">Full Vehicle Estimate Report</span>
+    </li>
+    
+    <li class="k-separator"></li>
+    
+    <!-- Copy to Clipboard -->
+    <li data-action="copyVehicleEstimate" class="k-header-item">📋 COPY TO CLIPBOARD</li>
+    <li data-action="copyVehicleEstimate">
+        <span class="k-icon k-i-copy"></span>
+        <span class="menu-label">Vehicle Estimate Report</span>
+    </li>
+    <li data-action="copyLabourDetails">
+        <span class="k-icon k-i-copy"></span>
+        <span class="menu-label">Labour Details Report</span>
+    </li>
+    <li data-action="copyMaterialsEstimate">
+        <span class="k-icon k-i-copy"></span>
+        <span class="menu-label">Materials Estimate Report</span>
+    </li>
+    <li data-action="copyFullReport">
+        <span class="k-icon k-i-copy"></span>
+        <span class="menu-label">Full Vehicle Estimate Report</span>
+    </li>
+    
+    <li class="k-separator"></li>
+    
+    <!-- Save as PDF -->
+    <li data-action="saveVehicleEstimatePdf" class="k-header-item">💾 SAVE AS PDF</li>
+    <li data-action="saveVehicleEstimatePdf">
+        <span class="k-icon k-i-file-pdf"></span>
+        <span class="menu-label">Vehicle Estimate Report</span>
+    </li>
+    <li data-action="saveLabourDetailsPdf">
+        <span class="k-icon k-i-file-pdf"></span>
+        <span class="menu-label">Labour Details Report</span>
+    </li>
+    <li data-action="saveMaterialsEstimatePdf">
+        <span class="k-icon k-i-file-pdf"></span>
+        <span class="menu-label">Materials Estimate Report</span>
+    </li>
+    <li data-action="saveFullReportPdf">
+        <span class="k-icon k-i-file-pdf"></span>
+        <span class="menu-label">Full Vehicle Estimate Report</span>
+    </li>
+</ul>
+
+<!-- Fallback Dropdown (if Kendo fails) -->
+<div class="report-menu-dropdown" id="reportMenuFallback">
+    <div class="menu-header">📄 View Reports</div>
+    <div class="menu-item" data-action="viewVehicleEstimate">
+        <span class="k-icon k-i-preview"></span> Vehicle Estimate Report
+    </div>
+    <div class="menu-item" data-action="viewLabourDetails">
+        <span class="k-icon k-i-preview"></span> Labour Details Report
+    </div>
+    <div class="menu-item" data-action="viewMaterialsEstimate">
+        <span class="k-icon k-i-preview"></span> Materials Estimate Report
+    </div>
+    <div class="menu-item" data-action="viewFullReport">
+        <span class="k-icon k-i-preview"></span> Full Vehicle Estimate Report
+    </div>
+    
+    <div class="menu-separator"></div>
+    <div class="menu-header">📋 Copy to Clipboard</div>
+    <div class="menu-item" data-action="copyVehicleEstimate">
+        <span class="k-icon k-i-copy"></span> Vehicle Estimate Report
+    </div>
+    <div class="menu-item" data-action="copyLabourDetails">
+        <span class="k-icon k-i-copy"></span> Labour Details Report
+    </div>
+    <div class="menu-item" data-action="copyMaterialsEstimate">
+        <span class="k-icon k-i-copy"></span> Materials Estimate Report
+    </div>
+    <div class="menu-item" data-action="copyFullReport">
+        <span class="k-icon k-i-copy"></span> Full Vehicle Estimate Report
+    </div>
+    
+    <div class="menu-separator"></div>
+    <div class="menu-header">💾 Save as PDF</div>
+    <div class="menu-item" data-action="saveVehicleEstimatePdf">
+        <span class="k-icon k-i-file-pdf"></span> Vehicle Estimate Report
+    </div>
+    <div class="menu-item" data-action="saveLabourDetailsPdf">
+        <span class="k-icon k-i-file-pdf"></span> Labour Details Report
+    </div>
+    <div class="menu-item" data-action="saveMaterialsEstimatePdf">
+        <span class="k-icon k-i-file-pdf"></span> Materials Estimate Report
+    </div>
+    <div class="menu-item" data-action="saveFullReportPdf">
+        <span class="k-icon k-i-file-pdf"></span> Full Vehicle Estimate Report
+    </div>
+</div>
+
+<div class="report-container" id="reportContainer">
+    <!-- HEADER -->
+    <div class="report-header" id="reportHeader">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="text-align: left;">
+                <div class="estimate-number">Vehicle Estimate #: <span id="estimateNumber">@ViewBag.PartNum</span></div>
+            </div>
+            <div style="text-align: center; flex: 1;">
+                <h1 id="reportTitle">VEHICLE COST SUMMARY REPORT</h1>
+                <div class="subtitle" id="generatedDate">Generated: @DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")</div>
+            </div>
+            <div style="text-align: right; min-width: 120px;">
+                <div class="status-badge">Status: <span class="active">● Active</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loadingIndicator" class="loading-spinner">
+        <span>⏳ Loading cost data...</span>
+    </div>
+
+    <!-- Content -->
+    <div id="costSummaryContent" style="display: none;">
+        <!-- SECTION 1: VEHICLE DETAILS -->
+        <div class="detail-section" id="vehicleDetailsSection">
+            <div class="detail-header">
+                <span>🚗 VEHICLE DETAILS</span>
+            </div>
+            <div class="detail-body">
+                <div class="vehicle-info">
+                    <div class="vehicle-info-item vehicle-description">
+                        <span class="label">Detailed Description</span>
+                        <span class="value" id="vehicleDescription">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Vehicle Series</span>
+                        <span class="value" id="vehicleSeries">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Make</span>
+                        <span class="value" id="vehicleMake">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Model</span>
+                        <span class="value" id="vehicleModel">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Year</span>
+                        <span class="value" id="vehicleYear">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label"># of Vehicles</span>
+                        <span class="value" id="numberOfVehicles">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Engine</span>
+                        <span class="value" id="vehicleEngine">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Transmission</span>
+                        <span class="value" id="vehicleTransmission">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Differential</span>
+                        <span class="value" id="vehicleDifferential">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 2: MATERIAL COST SUMMARY -->
+        <div class="detail-section" id="materialSummarySection">
+            <div class="detail-header">
+                <span>📦 MATERIAL COST SUMMARY</span>
+                <span class="badge" id="materialCountBadge">0 parts</span>
+            </div>
+            <div class="detail-body">
+                <div class="summary-grid summary-grid-6">
+                    <div class="summary-card">
+                        <span class="value" id="stockPartsCount">0</span>
+                        <span class="label">Stock Parts</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="nonStockPartsCount">0</span>
+                        <span class="label">Non-Stock Parts</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="rebuiltPartsCount">0</span>
+                        <span class="label">Rebuilt Parts</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="stockCost">$0.00</span>
+                        <span class="label">Total Stock Cost</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="totalNonStockCost">$0.00</span>
+                        <span class="label">Total Non-Stock Cost</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="totalRebuiltCost">$0.00</span>
+                        <span class="label">Total Rebuilt Cost</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 3: MATERIAL LINES -->
+        <div class="detail-section" id="materialLinesSection">
+            <div class="detail-header">
+                <span>📋 MATERIAL</span>
+                <span class="badge" id="materialLinesBadge">0 items</span>
+            </div>
+            <div class="detail-body">
+                <div class="material-table-wrap">
+                    <table class="material-table" id="materialLinesTable">
+                        <thead>
+                            <tr>
+                                <th style="width:90px;">Type</th>
+                                <th style="width:120px;">Stock Code</th>
+                                <th style="width:120px;">CC</th>
+                                <th>Desc/Supp Name</th>
+                                <th style="width:70px;text-align:right;">Qty</th>
+                                <th style="width:100px;text-align:right;">Unit Cost</th>
+                                <th style="width:80px;text-align:right;">Usage %</th>
+                                <th style="width:110px;text-align:right;">Total Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody id="materialLinesBody">
+                            <tr><td colspan="8" style="text-align:center; color:#6c757d; padding:20px;">No material items found</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 4: LABOUR HOURS SUMMARY -->
+        <div class="detail-section" id="labourHoursSection">
+            <div class="detail-header">
+                <span>⏱️ LABOUR HOURS SUMMARY</span>
+            </div>
+            <div class="detail-body">
+                <div class="summary-grid summary-grid-3">
+                    <div class="summary-card">
+                        <span class="value" id="totalHours">0.00</span>
+                        <span class="label">Total Hours</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="totalEffectiveHours">0.00</span>
+                        <span class="label">Effective Hours</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="totalAdjustedHours">0.00</span>
+                        <span class="label">Adjusted Hours</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 5: LABOUR TASK SUMMARY -->
+        <div class="detail-section" id="labourTasksSection">
+            <div class="detail-header">
+                <span>📋 LABOUR TASK SUMMARY</span>
+                <span class="badge" id="taskCountBadge">0 tasks</span>
+            </div>
+            <div class="detail-body">
+                <div class="task-table-wrap">
+                    <table class="task-table" id="taskSummaryTable">
+                        <thead>
+                            <tr>
+                                <th>Task</th>
+                                <th>Labour Definition</th>
+                                <th>CC</th>
+                                <th style="text-align:right;">Hours</th>
+                                <th style="text-align:right;">Effective Hrs</th>
+                                <th style="text-align:right;">Adjusted Hrs</th>
+                                <th style="text-align:right;">Rate/Hr</th>
+                                <th style="text-align:right;">Total Cost</th>
+                                <th style="text-align:center;">Count</th>
+                            </tr>
+                        </thead>
+                        <tbody id="taskSummaryBody">
+                            <tr><td colspan="9" style="text-align:center; color:#6c757d; padding:20px;">No labour tasks found</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SIDE BY SIDE -->
+        <div class="side-by-side" id="costSideBySide">
+            <div class="material-section">
+                <div class="material-header">📦 MATERIAL COST</div>
+                <div class="material-body">
+                    <table class="info-table">
+                        <tr><td class="label-col"><strong>Stock Coded Parts</strong></td><td class="value-col" id="scPartsDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Non-Stock Coded Parts</strong></td><td class="value-col" id="nscPartsDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Rebuilt Parts</strong></td><td class="value-col" id="rbCostDisplay">$0.00</td></tr>
+                        <tr class="total-row"><td class="label-col"><strong>Parts Total (No Tax)</strong></td><td class="value-col" id="partsTotalDisplay">$0.00</td></tr>
+                        <tr class="tax-row"><td class="label-col"><strong>+ Material Tax</strong></td><td class="value-col" id="materialTaxDisplay">$0.00</td></tr>
+                        <tr class="total-row"><td class="label-col"><strong>= Total Material Cost (With Tax)</strong></td><td class="value-col" id="materialWithTaxDisplay">$0.00</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <div class="labour-section">
+                <div class="labour-header">🔧 LABOUR COST</div>
+                <div class="labour-body">
+                    <table class="info-table">
+                        <tr><td class="label-col"><strong>Fringe</strong></td><td class="value-col" id="labourFringeDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Benefits</strong></td><td class="value-col" id="labourBenefitsDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Blended Fringe & Benefits</strong></td><td class="value-col" id="blendedFringeCostDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Overhead</strong></td><td class="value-col" id="labourOverheadDisplay">$0.00</td></tr>
+                        <tr class="total-row"><td class="label-col"><strong>= Total Labour Cost</strong></td><td class="value-col" id="totalLabourCostDisplay">$0.00</td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TOTALS ROW -->
+        <div class="totals-row" id="totalsRow">
+            <div class="total-box">
+                <div class="total-box-label">TOTAL MATERIAL COST (With Tax)</div>
+                <div class="total-box-value" id="totalMaterialBoxDisplay">$0.00</div>
+            </div>
+            <div class="total-box">
+                <div class="total-box-label">TOTAL LABOUR COST</div>
+                <div class="total-box-value" id="totalLabourBoxDisplay">$0.00</div>
+            </div>
+        </div>
+
+        <!-- GRAND TOTAL -->
+        <div class="grand-total-section" id="grandTotalSection">
+            <table class="grand-total-table">
+                <tr>
+                    <td class="grand-total-label"><strong>💰 GRAND TOTAL (Material + Labour)</strong></td>
+                    <td class="grand-total-value" id="totalWithTaxDisplay">$0.00</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- AUDIT ROW -->
+        <div class="vehicle-audit-row" id="auditRow">
+            <div class="vehicle-audit-item">
+                <span class="label">Modified By</span>
+                <span class="value" id="modifiedLastBy">-</span>
+            </div>
+            <div class="vehicle-audit-item">
+                <span class="label">Modified Date</span>
+                <span class="value" id="modifiedLastDate">-</span>
+            </div>
+        </div>
+
+        <div class="report-footer" id="reportFooter">
+            Estimate Generated On: @DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+        </div>
+    </div>
+
+    <!-- No data -->
+    <div id="noDataMessage" class="no-data-message" style="display: none;">
+        <div class="warning-icon">⚠️</div>
+        <p style="font-size:16px; margin:10px 0;"><strong>No cost data available</strong></p>
+        <p>No cost data found for Estimate ID: @ViewBag.PartNum</p>
+        <button id="retryButton" class="retry-btn">⟳ Retry Loading</button>
+    </div>
+</div>
+
+<script type="text/javascript">
+    // Configuration
+    var partNum = '@ViewBag.PartNum';
+    var gridType = '@ViewBag.GridType';
+    var totalCostDataUrl = '@Url.Action("GetTotalCostInEstimates", "TotalCost")' +
+                           '?id=' + encodeURIComponent(partNum) +
+                           '&gridType=' + encodeURIComponent(gridType);
+    var viewReportUrl = '@Url.Action("ViewReport", "TotalCost")';
+
+    // Document ready
+    $(document).ready(function() {
+        console.log("TotalCostTab initialized");
+        fetchTotalCostData();
+
+        $("#retryButton").on('click', function() {
+            $("#noDataMessage").hide();
+            $("#loadingIndicator").show();
+            $("#costSummaryContent").hide();
+            fetchTotalCostData();
+        });
+
+        // Initialize menu
+        initializeMenu();
+    });
+
+    // ===== MENU INITIALIZATION =====
+    function initializeMenu() {
+        var menuElement = document.getElementById('reportMenu');
+        var actionsButton = document.getElementById('reportActions');
+
+        if (!actionsButton) {
+            console.error('Report actions button not found');
+            return;
+        }
+
+        // Try Kendo ContextMenu first
+        if (typeof kendo !== 'undefined' && kendo.ui && kendo.ui.ContextMenu) {
+            try {
+                // Initialize Kendo ContextMenu
+                var menu = $(menuElement).kendoContextMenu({
+                    target: "#reportActions",
+                    showOn: "click",
+                    alignToAnchor: true,
+                    position: {
+                        my: "left top",
+                        at: "left bottom",
+                        offset: "0 4"
+                    },
+                    select: function(e) {
+                        var action = $(e.item).data('action');
+                        handleMenuAction(action);
+                    }
+                }).data('kendoContextMenu');
+
+                console.log('Kendo ContextMenu initialized successfully');
+                
+                // Hide fallback
+                var fallback = document.getElementById('reportMenuFallback');
+                if (fallback) {
+                    fallback.style.display = 'none';
+                }
+                
+                return;
+            } catch (err) {
+                console.warn('Kendo ContextMenu initialization failed:', err);
+            }
+        }
+
+        // Fallback: Simple dropdown menu
+        console.log('Using fallback menu');
+        var fallback = document.getElementById('reportMenuFallback');
+        if (fallback) {
+            actionsButton.addEventListener('click', function(e) {
+                e.stopPropagation();
+                fallback.classList.toggle('show');
+                
+                // Position the dropdown
+                var rect = actionsButton.getBoundingClientRect();
+                fallback.style.top = (rect.bottom + 4) + 'px';
+                fallback.style.right = '20px';
+                fallback.style.position = 'fixed';
+            });
+
+            // Close on outside click
+            document.addEventListener('click', function(e) {
+                if (!fallback.contains(e.target) && e.target !== actionsButton) {
+                    fallback.classList.remove('show');
+                }
+            });
+
+            // Handle menu item clicks
+            fallback.querySelectorAll('.menu-item').forEach(function(item) {
+                item.addEventListener('click', function() {
+                    var action = this.dataset.action;
+                    fallback.classList.remove('show');
+                    handleMenuAction(action);
+                });
+            });
+        }
+    }
+
+    // ===== MENU ACTION HANDLER =====
+    function handleMenuAction(action) {
+        console.log('Menu action:', action);
+        
+        switch(action) {
+            // View Actions
+            case 'viewVehicleEstimate':
+            case 'viewLabourDetails':
+            case 'viewMaterialsEstimate':
+            case 'viewFullReport':
+                openReportView(action.replace('view', '').toLowerCase());
+                break;
+            
+            // Copy Actions
+            case 'copyVehicleEstimate':
+            case 'copyLabourDetails':
+            case 'copyMaterialsEstimate':
+            case 'copyFullReport':
+                copyReportToClipboard(action.replace('copy', '').toLowerCase());
+                break;
+            
+            // PDF Actions
+            case 'saveVehicleEstimatePdf':
+            case 'saveLabourDetailsPdf':
+            case 'saveMaterialsEstimatePdf':
+            case 'saveFullReportPdf':
+                saveReportAsPdf(action.replace('save', '').replace('Pdf', '').toLowerCase());
+                break;
+            
+            default:
+                console.warn('Unknown action:', action);
+        }
+    }
+
+    // ===== OPEN REPORT VIEW =====
+    function openReportView(reportType) {
+        var url = viewReportUrl + '?reportType=' + encodeURIComponent(reportType) + 
+                  '&id=' + encodeURIComponent(partNum) + 
+                  '&gridType=' + encodeURIComponent(gridType);
+        console.log('Opening URL:', url);
+        window.open(url, '_blank');
+    }
+
+    // ===== SAVE AS PDF - FIXED VERSION =====
+    function saveReportAsPdf(reportType) {
+        console.log('saveReportAsPdf called for:', reportType);
+        
+        // Get the report container
+        var container = document.getElementById('reportContainer');
+        if (!container) {
+            alert('Unable to find the estimate report.');
+            return;
+        }
+
+        // Check if content is loaded
+        var content = document.getElementById('costSummaryContent');
+        if (!content || content.style.display === 'none') {
+            alert('Please wait for the report to finish loading.');
+            return;
+        }
+
+        // Check Kendo availability
+        if (typeof kendo === 'undefined' || !kendo.drawing) {
+            alert('Kendo UI is not available. Please ensure Kendo UI is loaded.');
+            return;
+        }
+
+        // Show loading indicator
+        var button = document.querySelector('[data-action="save' + reportType.charAt(0).toUpperCase() + reportType.slice(1) + 'Pdf"]');
+        if (button) {
+            button.innerHTML = '<span class="k-icon k-i-loading"></span> Generating...';
+        }
+
+        // Create a wrapper with all content
+        var wrapper = document.createElement('div');
+        wrapper.id = 'pdfWrapper_' + Date.now();
+        wrapper.style.cssText = [
+            'padding: 20px',
+            'background: white',
+            'font-family: "Segoe UI", Arial, sans-serif',
+            'position: absolute',
+            'left: -100000px',
+            'top: 0',
+            'width: 1100px',
+            'z-index: 9999',
+            'overflow: visible'
+        ].join('; ');
+
+        // Clone the container
+        var clone = container.cloneNode(true);
+        
+        // Update title based on report type
+        var titles = {
+            'vehicle': 'VEHICLE COST SUMMARY REPORT',
+            'labour': 'LABOUR DETAILS REPORT',
+            'materials': 'MATERIALS ESTIMATE REPORT',
+            'full': 'FULL VEHICLE ESTIMATE REPORT'
+        };
+        var titleEl = clone.querySelector('h1');
+        if (titleEl) {
+            titleEl.textContent = titles[reportType] || titles.vehicle;
+        }
+
+        // Remove UI elements from clone
+        var elementsToRemove = clone.querySelectorAll('.no-print, .report-toolbar, .k-button, button, .report-menu-dropdown, #reportMenu');
+        elementsToRemove.forEach(function(el) {
+            el.remove();
+        });
+
+        wrapper.appendChild(clone);
+        document.body.appendChild(wrapper);
+
+        // Ensure all sections are visible
+        var sections = wrapper.querySelectorAll('.detail-section, .side-by-side, .totals-row, .grand-total-section');
+        sections.forEach(function(el) {
+            el.style.display = '';
+            el.style.visibility = 'visible';
+            el.style.overflow = 'visible';
+            el.style.height = 'auto';
+            el.style.maxHeight = 'none';
+        });
+
+        // Force layout
+        void wrapper.offsetWidth;
+        void wrapper.offsetHeight;
+
+        // Wait a moment for layout
+        setTimeout(function() {
+            // Draw and export
+            kendo.drawing.drawDOM(wrapper, {
+                paperSize: 'Letter',
+                landscape: true,
+                margin: { top: '0.35in', bottom: '0.35in', left: '0.35in', right: '0.35in' },
+                scale: 0.78,
+                multiPage: true,
+                avoidLinks: true,
+                keepTogether: '.detail-section, .side-by-side, .grand-total-section'
+            }).then(function(group) {
+                if (!group) {
+                    throw new Error('Kendo returned null drawing group.');
+                }
+                return kendo.drawing.exportPDF(group, {
+                    paperSize: 'Letter',
+                    landscape: true,
+                    margin: { top: '0.35in', bottom: '0.35in', left: '0.35in', right: '0.35in' }
+                });
+            }).done(function(dataUri) {
+                // Clean up
+                if (wrapper.parentNode) {
+                    document.body.removeChild(wrapper);
+                }
+                
+                if (dataUri && dataUri.length > 100) {
+                    var fileName = getReportFileName(reportType) + '.pdf';
+                    kendo.saveAs({ dataURI: dataUri, fileName: fileName });
+                    console.log('PDF saved successfully:', fileName);
+                } else {
+                    throw new Error('PDF data is empty or invalid.');
+                }
+            }).fail(function(err) {
+                // Clean up on error
+                if (wrapper.parentNode) {
+                    document.body.removeChild(wrapper);
+                }
+                console.error('PDF export error:', err);
+                alert('Error generating PDF: ' + (err && err.message ? err.message : 'Unknown error. Please try again.'));
+            });
+        }, 500);
+    }
+
+    // ===== COPY TO CLIPBOARD =====
+    function copyReportToClipboard(reportType) {
+        console.log('copyReportToClipboard called for:', reportType);
+        
+        var container = document.getElementById('reportContainer');
+        if (!container) {
+            alert('Unable to find the estimate report.');
+            return;
+        }
+
+        var content = document.getElementById('costSummaryContent');
+        if (!content || content.style.display === 'none') {
+            alert('Please wait for the report to finish loading.');
+            return;
+        }
+
+        if (typeof kendo === 'undefined' || !kendo.drawing) {
+            alert('Kendo UI is not available. Please ensure Kendo UI is loaded.');
+            return;
+        }
+
+        if (!navigator.clipboard) {
+            alert('Clipboard API is not available. Please use a modern browser.');
+            return;
+        }
+
+        // Create wrapper
+        var wrapper = document.createElement('div');
+        wrapper.id = 'copyWrapper_' + Date.now();
+        wrapper.style.cssText = [
+            'padding: 20px',
+            'background: white',
+            'font-family: "Segoe UI", Arial, sans-serif',
+            'position: absolute',
+            'left: -100000px',
+            'top: 0',
+            'width: 1100px',
+            'z-index: 9999'
+        ].join('; ');
+
+        var clone = container.cloneNode(true);
+        
+        var titles = {
+            'vehicle': 'VEHICLE COST SUMMARY REPORT',
+            'labour': 'LABOUR DETAILS REPORT',
+            'materials': 'MATERIALS ESTIMATE REPORT',
+            'full': 'FULL VEHICLE ESTIMATE REPORT'
+        };
+        var titleEl = clone.querySelector('h1');
+        if (titleEl) {
+            titleEl.textContent = titles[reportType] || titles.vehicle;
+        }
+
+        var elementsToRemove = clone.querySelectorAll('.no-print, .report-toolbar, .k-button, button, .report-menu-dropdown, #reportMenu');
+        elementsToRemove.forEach(function(el) {
+            el.remove();
+        });
+
+        wrapper.appendChild(clone);
+        document.body.appendChild(wrapper);
+
+        var sections = wrapper.querySelectorAll('.detail-section, .side-by-side, .totals-row, .grand-total-section');
+        sections.forEach(function(el) {
+            el.style.display = '';
+            el.style.visibility = 'visible';
+        });
+
+        void wrapper.offsetWidth;
+        void wrapper.offsetHeight;
+
+        kendo.drawing.drawDOM(wrapper, {
+            paperSize: 'auto',
+            margin: '1cm',
+            scale: 1
+        }).then(function(group) {
+            return kendo.drawing.exportImage(group);
+        }).done(function(data) {
+            if (wrapper.parentNode) {
+                document.body.removeChild(wrapper);
+            }
+            
+            fetch(data)
+                .then(function(res) { return res.blob(); })
+                .then(function(blob) {
+                    navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                    var typeNames = {
+                        'vehicle': 'Vehicle Estimate Report',
+                        'labour': 'Labour Details Report',
+                        'materials': 'Materials Estimate Report',
+                        'full': 'Full Vehicle Estimate Report'
+                    };
+                    alert((typeNames[reportType] || 'Report') + ' copied to clipboard.');
+                })
+                .catch(function(err) {
+                    console.error('Clipboard error:', err);
+                    alert('Error copying to clipboard: ' + err.message);
+                });
+        }).fail(function(err) {
+            if (wrapper.parentNode) {
+                document.body.removeChild(wrapper);
+            }
+            console.error('Export image error:', err);
+            alert('Error generating image: ' + (err && err.message ? err.message : 'Unknown error.'));
+        });
+    }
+
+    // ===== HELPER: Get Report File Name =====
+    function getReportFileName(reportType) {
+        var typeMap = {
+            'vehicle': 'VehicleEstimate',
+            'labour': 'LabourDetails',
+            'materials': 'MaterialsEstimate',
+            'full': 'FullVehicleEstimate'
+        };
+        var typeName = typeMap[reportType] || 'VehicleEstimate';
+        var estimateNum = (document.getElementById('estimateNumber')?.textContent || 'Estimate').trim().replace(/[^a-z0-9_.-]/gi, '_');
+        return typeName + '_' + estimateNum;
+    }
+
+    // ===== DATA FETCHING =====
+    function fetchTotalCostData() {
+        console.log("Fetching data from:", totalCostDataUrl);
+
+        $.ajax({
+            url: totalCostDataUrl,
+            type: 'GET',
+            dataType: 'json',
+            timeout: 30000,
+            success: function(response) {
+                console.log("Response received:", response);
+                if (response && response.Data && response.Data.length > 0) {
+                    var costData = response.Data[0];
+                    console.log("Cost data:", costData);
+                    populateAllSections(costData);
+                    $("#loadingIndicator").hide();
+                    $("#costSummaryContent").show();
+                    $("#noDataMessage").hide();
+                } else {
+                    console.log("No data in response");
+                    showNoDataMessage();
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error("Error fetching cost data:", status, error);
+                showNoDataMessage();
+            }
+        });
+    }
+
+    // ===== HELPER FUNCTIONS =====
+    function getVal(value) {
+        if (value === null || value === undefined) return 0;
+        var num = parseFloat(value);
+        return isNaN(num) ? 0 : num;
+    }
+
+    function formatMoney(val) {
+        return '$' + val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function setText(id, value) {
+        $(id).text(formatMoney(value));
+    }
+
+    function setNumber(id, value) {
+        var num = getVal(value);
+        $(id).text(num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }));
+    }
+
+    function formatIntegerOrDash(value) {
+        if (value === null || value === undefined || value === '') return '-';
+        var num = parseInt(value, 10);
+        return isNaN(num) ? '-' : num.toLocaleString();
+    }
+
+    function formatDateTime(value) {
+        if (value === null || value === undefined || value === '') return '-';
+        var date = new Date(value);
+        if (isNaN(date.getTime())) return String(value);
+        return date.toLocaleString(undefined, {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit'
+        });
+    }
+
+    function setNumberDecimal(id, value) {
+        var num = getVal(value);
+        $(id).text(num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    }
+
+    // ===== POPULATE ALL SECTIONS =====
+    function populateAllSections(costData) {
+        // Vehicle Details
+        $('#vehicleSeries').text(costData.VehicleSeries || costData.Description || '-');
+        $('#vehicleDescription').text(costData.VehicleDescription || costData.Description || '-');
+        $('#vehicleMake').text(costData.Make || '-');
+        $('#vehicleModel').text(costData.Model || '-');
+        $('#vehicleYear').text(formatIntegerOrDash(costData.Year));
+        $('#numberOfVehicles').text(formatIntegerOrDash(costData.NumOfVehicles));
+        $('#vehicleEngine').text(costData.Engine || '-');
+        $('#vehicleTransmission').text(costData.Transmission || '-');
+        $('#vehicleDifferential').text(costData.Differential || '-');
+        $('#modifiedLastBy').text(costData.ModifiedLastBy || '-');
+        $('#modifiedLastDate').text(formatDateTime(costData.ModifiedLastDate));
+
+        // Material Summary
+        var totalParts = (costData.TotalStockPartsCount || 0) + (costData.TotalNonStockPartsCount || 0) + (costData.TotalRebuiltPartsCount || 0);
+        $('#materialCountBadge').text(totalParts + ' parts');
+        setNumber('#stockPartsCount', costData.TotalStockPartsCount);
+        setNumber('#nonStockPartsCount', costData.TotalNonStockPartsCount);
+        setNumber('#rebuiltPartsCount', costData.TotalRebuiltPartsCount);
+        setText('#stockCost', costData.SCPartsMaterialCost);
+        setText('#totalNonStockCost', costData.NSCSCPartsMaterialCost);
+        setText('#totalRebuiltCost', costData.RBPartsMaterialCost);
+
+        // Material Lines
+        populateMaterialLines(costData.MaterialLines || []);
+
+        // Labour Hours
+        setNumberDecimal('#totalHours', costData.TotalLabourHours);
+        setNumberDecimal('#totalEffectiveHours', costData.TotalEffectiveHours);
+        setNumberDecimal('#totalAdjustedHours', costData.TotalAdjustedHours);
+
+        // Labour Tasks
+        populateTaskSummary(costData.LabourTasks || []);
+
+        // Cost Side by Side
+        var scParts = getVal(costData.SCPartsMaterialCost);
+        var nscParts = getVal(costData.NSCSCPartsMaterialCost);
+        var rbParts = getVal(costData.RBPartsMaterialCost);
+        var partsTotalNoTax = getVal(costData.MaterialTotalCostNoTax);
+        var materialTax = getVal(costData.MaterialTotalTaxAmount);
+        var materialWithTax = getVal(costData.MaterialTotalWithTax);
+
+        var labourFringe = getVal(costData.LabourFringe);
+        var labourBenefits = getVal(costData.LabourBenefits);
+        var blendedFringeCost = getVal(costData.BlendedFringeBenefitCost);
+        var labourOverhead = getVal(costData.LabourOverhead);
+        var totalLabour = getVal(costData.FinalLabourCost);
+        var totalWithTax = materialWithTax + totalLabour;
+
+        setText("#scPartsDisplay", scParts);
+        setText("#nscPartsDisplay", nscParts);
+        setText("#rbCostDisplay", rbParts);
+        setText("#partsTotalDisplay", partsTotalNoTax);
+        setText("#materialTaxDisplay", materialTax);
+        setText("#materialWithTaxDisplay", materialWithTax);
+
+        setText("#labourFringeDisplay", labourFringe);
+        setText("#labourBenefitsDisplay", labourBenefits);
+        setText("#blendedFringeCostDisplay", blendedFringeCost);
+        setText("#labourOverheadDisplay", labourOverhead);
+        setText("#totalLabourCostDisplay", totalLabour);
+
+        setText("#totalMaterialBoxDisplay", materialWithTax);
+        setText("#totalLabourBoxDisplay", totalLabour);
+        setText("#totalWithTaxDisplay", totalWithTax);
+    }
+
+    // ===== POPULATE MATERIAL LINES =====
+    function populateMaterialLines(lines) {
+        var tbody = $('#materialLinesBody');
+        var badge = $('#materialLinesBadge');
+        var totalItems = lines.length;
+        badge.text(totalItems + ' items');
+
+        if (totalItems === 0) {
+            tbody.html('<tr><td colspan="8" style="text-align:center; color:#6c757d; padding:20px;">No material items found</td></tr>');
+            return;
+        }
+
+        var html = '';
+        var typeTotals = { Stock: 0, Rebuilt: 0, 'Non-Stock': 0 };
+        var grandTotal = 0;
+
+        lines.forEach(function(item) {
+            var type = item.Type || 'Stock';
+            var typeClass = type.toLowerCase().replace('-', '');
+            var badgeClass = typeClass === 'nonstock' ? 'nonstock' : typeClass;
+            var totalCost = getVal(item.TotalCost);
+
+            if (typeTotals[type] !== undefined) {
+                typeTotals[type] += totalCost;
+            }
+            grandTotal += totalCost;
+
+            html += '<tr class="type-' + typeClass + '">' +
+                '<td><span class="type-badge ' + badgeClass + '">' + type + '</span></td>' +
+                '<td>' + (item.StockCode || '-') + '</td>' +
+                '<td>' + (item.CC || '-') + '</td>' +
+                '<td>' + (item.Description || 'N/A') + '</td>' +
+                '<td style="text-align:right;">' + getVal(item.Quantity).toFixed(2) + '</td>' +
+                '<td style="text-align:right;">' + formatMoney(getVal(item.UnitCost)) + '</td>' +
+                '<td style="text-align:right;">' + getVal(item.PercentUsage).toFixed(1) + '%</td>' +
+                '<td style="text-align:right; font-weight:600;">' + formatMoney(totalCost) + '</td>' +
+                '</tr>';
+        });
+
+        var typeOrder = ['Stock', 'Rebuilt', 'Non-Stock'];
+        typeOrder.forEach(function(type) {
+            if (typeTotals[type] > 0) {
+                html += '<tr class="subtotal-row">' +
+                    '<td colspan="7" style="text-align:right; font-weight:600;">Subtotal - ' + type + '</td>' +
+                    '<td style="text-align:right; font-weight:600;">' + formatMoney(typeTotals[type]) + '</td>' +
+                    '</tr>';
+            }
+        });
+
+        html += '<tr class="total-row">' +
+            '<td colspan="7" style="text-align:right; font-weight:800; font-size:1.05em;">GRAND TOTAL</td>' +
+            '<td style="text-align:right; font-weight:800; font-size:1.05em;">' + formatMoney(grandTotal) + '</td>' +
+            '</tr>';
+
+        tbody.html(html);
+    }
+
+    // ===== POPULATE TASK SUMMARY =====
+    function populateTaskSummary(tasks) {
+        var tbody = $('#taskSummaryBody');
+        var badge = $('#taskCountBadge');
+        badge.text(tasks.length + ' tasks');
+
+        if (tasks.length === 0) {
+            tbody.html('<tr><td colspan="9" style="text-align:center; color:#6c757d; padding:20px;">No labour tasks found</td></tr>');
+            return;
+        }
+
+        var html = '';
+        var totalHours = 0, totalEffective = 0, totalAdjusted = 0, totalCost = 0;
+
+        tasks.forEach(function(task) {
+            var hours = getVal(task.Hours);
+            var effective = getVal(task.EffectiveHours);
+            var adjusted = getVal(task.AdjustedHours);
+            var cost = getVal(task.TotalCost);
+            var count = getVal(task.Count);
+
+            totalHours += hours;
+            totalEffective += effective;
+            totalAdjusted += adjusted;
+            totalCost += cost;
+
+            html += '<tr>' +
+                '<td>' + (task.Task || 'Unnamed') + '</td>' +
+                '<td>' + (task.LabourDefinition || 'N/A') + '</td>' +
+                '<td>' + (task.CC || '-') + '</td>' +
+                '<td style="text-align:right;">' + hours.toFixed(2) + '</td>' +
+                '<td style="text-align:right;">' + effective.toFixed(2) + '</td>' +
+                '<td style="text-align:right;">' + adjusted.toFixed(2) + '</td>' +
+                '<td style="text-align:right;">' + formatMoney(getVal(task.RatePerHour)) + '</td>' +
+                '<td style="text-align:right; font-weight:600;">' + formatMoney(cost) + '</td>' +
+                '<td style="text-align:center;">' + count + '</td>' +
+                '</tr>';
+        });
+
+        html += '<tr class="total-row">' +
+            '<td colspan="3"><strong>TOTAL</strong></td>' +
+            '<td style="text-align:right;"><strong>' + totalHours.toFixed(2) + '</strong></td>' +
+            '<td style="text-align:right;"><strong>' + totalEffective.toFixed(2) + '</strong></td>' +
+            '<td style="text-align:right;"><strong>' + totalAdjusted.toFixed(2) + '</strong></td>' +
+            '<td style="text-align:right;"></td>' +
+            '<td style="text-align:right;"><strong>' + formatMoney(totalCost) + '</strong></td>' +
+            '<td style="text-align:center;"><strong>' + tasks.length + '</strong></td>' +
+            '</tr>';
+
+        tbody.html(html);
+    }
+
+    function showNoDataMessage() {
+        $("#loadingIndicator").hide();
+        $("#costSummaryContent").hide();
+        $("#noDataMessage").show();
+    }
+</script>
