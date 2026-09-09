@@ -1,0 +1,395 @@
+026-09-09 16:00:32,581 [INFO] START REFRESH | Oracle=ARCH_VEHICLE_LIST | SQL=SBCES.ArchVehicleList | MODE=DELETE
+2026-09-09 16:00:32,756 [INFO] ORACLE COUNT | ARCH_VEHICLE_LIST = 142
+2026-09-09 16:00:32,768 [INFO] Deleted existing SQL rows: 645
+2026-09-09 16:00:32,769 [INFO] SQL COUNT AFTER DELETE | SBCES.ArchVehicleList = 0
+2026-09-09 16:00:32,772 [INFO] END REFRESH | elapsed=0:00:00.199415
+2026-09-09 16:00:32,772 [INFO] ==========================================================================================
+2026-09-09 16:00:33,279 [INFO] ==========================================================================================
+2026-09-09 16:00:33,279 [INFO] START REFRESH | Oracle=ARCH_MB_MASTERLIST | SQL=SBCES.ArchMbMasterlist | MODE=INSERT
+2026-09-09 16:00:33,453 [INFO] ORACLE COUNT | ARCH_MB_MASTERLIST = 9
+2026-09-09 16:00:33,498 [INFO] FETCHED FROM ORACLE | 9 rows
+2026-09-09 16:00:33,540 [WARNING] Bulk insert failed; retrying row-by-row. Error: ('42S22', "[42S22] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Invalid column name 'ArchivedBy'. (207) (SQLExecute); [42S22] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Statement(s) could not be prepared. (8180)")
+2026-09-09 16:00:33,544 [ERROR] ROW FAILED | row=1 | error=('42S22', "[42S22] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Invalid column name 'ArchivedBy'. (207) (SQLExecDirectW); [42S22] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Statement(s) could not be prepared. (8180)") | data=(1.0, 'MB0020', 'INJECTOR', 'SERIES 50 INJECTOR 6347', ' ', '135', 'R5236347', '011802', '032281', '011803', '350', ' 43', 'Y', '2', '$357.52', '$', '$', '$13.94', ' ', '$0', '92253', 'ACORNACC', 7.39, 6.55, 13.94, 23.33, 37.27, datetime.datetime(2005, 4, 28, 14, 43, 35), 1.87, 39.14)
+MS SQL schema
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchMbMasterlist]    Script Date: 9/9/2026 4:08:30 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchMbMasterlist](
+	[ArchMbMasterlistId] [int] NOT NULL,
+	[MbNumber] [varchar](25) NOT NULL,
+	[Keyword] [varchar](50) NULL,
+	[Description] [varchar](50) NULL,
+	[BusType] [varchar](50) NULL,
+	[NumBusComp] [varchar](10) NULL,
+	[VendorPartNum] [varchar](25) NULL,
+	[BuyCode] [varchar](25) NOT NULL,
+	[RebuildCode] [varchar](25) NULL,
+	[CoreCode] [varchar](25) NULL,
+	[AnnualUsage] [varchar](25) NULL,
+	[BenchNumber] [varchar](25) NULL,
+	[SampleProvided] [varchar](25) NULL,
+	[Recommendation] [varchar](1) NULL,
+	[RemanCost] [varchar](25) NULL,
+	[ExternalCost] [varchar](25) NULL,
+	[BuyNewCost] [varchar](25) NULL,
+	[InternalCost] [varchar](25) NULL,
+	[SopNumber] [varchar](25) NULL,
+	[CoreCost] [varchar](25) NULL,
+	[JobNumber] [varchar](25) NULL,
+	[LabourCost] [numeric](20, 2) NOT NULL,
+	[LabourOverheadAmount] [numeric](20, 2) NOT NULL,
+	[LabourTotal] [numeric](20, 2) NOT NULL,
+	[MaterialsTotal] [numeric](20, 2) NOT NULL,
+	[TotalMbEstimateCost] [numeric](20, 2) NOT NULL,
+	[DateEntered] [datetime] NULL,
+	[TotalTax] [numeric](20, 2) NULL,
+	[TotalCostTax] [numeric](20, 2) NULL,
+ CONSTRAINT [PK_ArchMbMasterlist] PRIMARY KEY CLUSTERED 
+(
+	[ArchMbMasterlistId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+python ;
+# ============================================================
+# ces_refresh_ArchMbMasterlist.py
+# Oracle CES -> SQL Server CES / SBCES
+# Production refresh script generated from supplied DDL
+# ============================================================
+
+import sys
+import logging
+from datetime import datetime
+import pyodbc
+import oracledb
+
+ORACLE_DSN = "//ocipr-wersc-scan.ttcociclientsub.ttcocivcn.oraclevcn.com:1521/ces_prd_svc.int.ttc.ca"
+ORACLE_USER = "CES"
+ORACLE_PASSWORD = "cesprd1210"
+
+SQL_CONN_STR = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=SQL2022UAT;"
+    "DATABASE=CES;"
+    "UID=cesuser;"
+    "PWD=CESUser#UAT;"
+    "TrustServerCertificate=Yes;"
+)
+
+SQL_SCHEMA = "SBCES"
+ORACLE_TABLE = "ARCH_MB_MASTERLIST"
+SQL_TABLE = "ArchMbMasterlist"
+
+LOG_FILE = f"{SQL_TABLE}_refresh.log"
+
+logger = logging.getLogger(SQL_TABLE)
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    handler = logging.FileHandler(LOG_FILE, mode="a", encoding="utf-8")
+    console = logging.StreamHandler(sys.stdout)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    handler.setFormatter(fmt)
+    console.setFormatter(fmt)
+    logger.addHandler(handler)
+    logger.addHandler(console)
+
+def get_oracle_conn():
+    return oracledb.connect(
+        user=ORACLE_USER,
+        password=ORACLE_PASSWORD,
+        dsn=ORACLE_DSN
+    )
+
+def get_sql_conn():
+    conn = pyodbc.connect(SQL_CONN_STR, timeout=30)
+    cur = conn.cursor()
+    cur.execute("SET ANSI_WARNINGS OFF;")
+    cur.close()
+    return conn
+
+def get_oracle_count(conn):
+    cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT COUNT(*) FROM {ORACLE_TABLE}")
+        return int(cur.fetchone()[0])
+    finally:
+        cur.close()
+
+def get_sql_count(conn):
+    cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT COUNT(*) FROM {SQL_SCHEMA}.{SQL_TABLE}")
+        return int(cur.fetchone()[0])
+    finally:
+        cur.close()
+
+def delete_sql_table(conn):
+    sql = f"DELETE FROM {SQL_SCHEMA}.{SQL_TABLE}"
+    cur = conn.cursor()
+    try:
+        cur.execute(sql)
+        deleted = cur.rowcount
+        conn.commit()
+        logger.info("Deleted existing SQL rows: %s", deleted)
+    except Exception:
+        conn.rollback()
+        logger.exception("DELETE failed for %s", SQL_TABLE)
+        raise
+    finally:
+        cur.close()
+
+def fetch_oracle_rows(conn):
+    sql = f"""
+        SELECT
+            ARCH_MB_MASTERLIST_ID,
+            MB_NUMBER,
+            KEYWORD,
+            DESCRIPTION,
+            BUS_TYPE,
+            NUM_BUS_COMP,
+            VENDOR_PART_NUM,
+            BUY_CODE,
+            REBUILD_CODE,
+            CORE_CODE,
+            ANNUAL_USAGE,
+            BENCH_NUMBER,
+            SAMPLE_PROVIDED,
+            RECOMMENDATION,
+            REMAN_COST,
+            EXTERNAL_COST,
+            BUY_NEW_COST,
+            INTERNAL_COST,
+            SOP_NUMBER,
+            CORE_COST,
+            JOB_NUMBER,
+            ARCHIVED_BY,
+            LABOUR_COST,
+            LABOUR_OVERHEAD_AMOUNT,
+            LABOUR_TOTAL,
+            MATERIALS_TOTAL,
+            TOTAL_MB_ESTIMATE_COST,
+            DATE_ARCHIVED,
+            TOTAL_TAX,
+            TOTAL_COST_TAX
+        FROM {ORACLE_TABLE}
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute(sql)
+        return cur.fetchall()
+    finally:
+        cur.close()
+
+def insert_rows(conn, rows):
+    sql = f"""
+        INSERT INTO {SQL_SCHEMA}.{SQL_TABLE} (
+            ArchMbMasterlistId,
+            MbNumber,
+            Keyword,
+            Description,
+            BusType,
+            NumBusComp,
+            VendorPartNum,
+            BuyCode,
+            RebuildCode,
+            CoreCode,
+            AnnualUsage,
+            BenchNumber,
+            SampleProvided,
+            Recommendation,
+            RemanCost,
+            ExternalCost,
+            BuyNewCost,
+            InternalCost,
+            SopNumber,
+            CoreCost,
+            JobNumber,
+            ArchivedBy,
+            LabourCost,
+            LabourOverheadAmount,
+            LabourTotal,
+            MaterialsTotal,
+            TotalMbEstimateCost,
+            DateEntered,
+            TotalTax,
+            TotalCostTax
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    success = 0
+    failed = 0
+    cur = conn.cursor()
+
+    try:
+        # Fast path.
+        cur.fast_executemany = True
+        try:
+            cur.executemany(sql, rows)
+            success = len(rows)
+            conn.commit()
+            logger.info("Bulk insert succeeded: %s rows", success)
+            return success, failed
+        except Exception as bulk_error:
+            conn.rollback()
+            logger.warning("Bulk insert failed; retrying row-by-row. Error: %s", bulk_error)
+
+        # Row-by-row fallback gives exact rejected-row diagnostics.
+        cur.fast_executemany = False
+        for idx, row in enumerate(rows, start=1):
+            try:
+                cur.execute(sql, row)
+                success += 1
+            except Exception as exc:
+                failed += 1
+                logger.error(
+                    "ROW FAILED | row=%s | error=%s | data=%r",
+                    idx, exc, row
+                )
+        conn.commit()
+        return success, failed
+    except Exception:
+        conn.rollback()
+        logger.exception("Insert transaction failed")
+        raise
+    finally:
+        cur.close()
+
+def main():
+    mode = __import__("os").environ.get("CES_REFRESH_MODE", "FULL").upper()
+    started = datetime.now()
+    oracle_conn = None
+    sql_conn = None
+
+    logger.info("=" * 90)
+    logger.info("START REFRESH | Oracle=%s | SQL=%s.%s | MODE=%s",
+                ORACLE_TABLE, SQL_SCHEMA, SQL_TABLE, mode)
+
+    try:
+        oracle_conn = get_oracle_conn()
+        sql_conn = get_sql_conn()
+
+        oracle_count = get_oracle_count(oracle_conn)
+        logger.info("ORACLE COUNT | %s = %s", ORACLE_TABLE, oracle_count)
+
+        if mode == "DELETE":
+            delete_sql_table(sql_conn)
+            sql_count = get_sql_count(sql_conn)
+            logger.info("SQL COUNT AFTER DELETE | %s.%s = %s",
+                        SQL_SCHEMA, SQL_TABLE, sql_count)
+            return 0
+
+        if mode == "INSERT":
+            rows = fetch_oracle_rows(oracle_conn)
+            logger.info("FETCHED FROM ORACLE | %s rows", len(rows))
+            if len(rows) != oracle_count:
+                raise RuntimeError(
+                    f"Oracle row count changed during fetch: COUNT={oracle_count}, FETCHED={len(rows)}"
+                )
+            success, failed = insert_rows(sql_conn, rows)
+            sql_count = get_sql_count(sql_conn)
+            logger.info("SQL COUNT | %s.%s = %s", SQL_SCHEMA, SQL_TABLE, sql_count)
+            logger.info("RESULT | Oracle=%s | Inserted=%s | Failed=%s | SQL=%s",
+                        oracle_count, success, failed, sql_count)
+            if failed == 0 and sql_count == oracle_count:
+                logger.info("STATUS | SUCCESS | COUNTS MATCH")
+                return 0
+            logger.error("STATUS | FAILED/REVIEW")
+            return 2
+
+        if mode != "FULL":
+            raise ValueError("CES_REFRESH_MODE must be FULL, DELETE, or INSERT")
+
+        delete_sql_table(sql_conn)
+        rows = fetch_oracle_rows(oracle_conn)
+        logger.info("FETCHED FROM ORACLE | %s rows", len(rows))
+        success, failed = insert_rows(sql_conn, rows)
+        sql_count = get_sql_count(sql_conn)
+        logger.info("RESULT | Oracle=%s | Inserted=%s | Failed=%s | SQL=%s",
+                    oracle_count, success, failed, sql_count)
+        return 0 if failed == 0 and sql_count == oracle_count else 2
+
+    except Exception as exc:
+        logger.exception("FATAL ERROR | %s", exc)
+        return 1
+    finally:
+        if oracle_conn is not None:
+            try: oracle_conn.close()
+            except Exception: pass
+        if sql_conn is not None:
+            try: sql_conn.close()
+            except Exception: pass
+        logger.info("END REFRESH | elapsed=%s", datetime.now() - started)
+        logger.info("=" * 90)
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+    started = datetime.now()
+    oracle_conn = None
+    sql_conn = None
+
+    logger.info("=" * 90)
+    logger.info("START REFRESH | Oracle=%s | SQL=%s.%s", ORACLE_TABLE, SQL_SCHEMA, SQL_TABLE)
+
+    try:
+        oracle_conn = get_oracle_conn()
+        sql_conn = get_sql_conn()
+
+        oracle_count = get_oracle_count(oracle_conn)
+        logger.info("ORACLE COUNT | %s = %s", ORACLE_TABLE, oracle_count)
+
+        # IMPORTANT: the BAT file controls FK-safe execution order.
+        # This script only refreshes its own target table.
+        delete_sql_table(sql_conn)
+
+        rows = fetch_oracle_rows(oracle_conn)
+        logger.info("FETCHED FROM ORACLE | %s rows", len(rows))
+
+        if len(rows) != oracle_count:
+            logger.error(
+                "ORACLE FETCH COUNT MISMATCH | COUNT(*)=%s | FETCHED=%s",
+                oracle_count, len(rows)
+            )
+            raise RuntimeError("Oracle row count changed during fetch; refresh aborted.")
+
+        success, failed = insert_rows(sql_conn, rows)
+
+        sql_count = get_sql_count(sql_conn)
+        logger.info("SQL COUNT | %s.%s = %s", SQL_SCHEMA, SQL_TABLE, sql_count)
+        logger.info(
+            "RESULT | Oracle=%s | Inserted=%s | Failed=%s | SQL=%s",
+            oracle_count, success, failed, sql_count
+        )
+
+        if failed == 0 and sql_count == oracle_count:
+            logger.info("STATUS | SUCCESS | COUNTS MATCH")
+           
+    except Exception as exc:
+        logger.exception("FATAL ERROR | %s", exc)
+        
+    finally:
+        if oracle_conn is not None:
+            try:
+                oracle_conn.close()
+            except Exception:
+                pass
+        if sql_conn is not None:
+            try:
+                sql_conn.close()
+            except Exception:
+                pass
+
+        logger.info("END REFRESH | elapsed=%s", datetime.now() - started)
+        logger.info("=" * 90)
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+
