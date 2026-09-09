@@ -1,0 +1,1608 @@
+Yuo are MS SQL and Oracle expert. I want to copy data from oracle database to SQL database. I will provide you oracle schema and sql table schema (below).
+Oracle table and column names match. Oracle table and column name use Snake_Case. MS SQL table and column name use CamelCase and MS SQL uses schema name as SBCES.
+Make sure to insert uising column names. If any tables have additional columns, inform user.
+Genarate python scripts for each table (name as ces_refresh_<tablename>.py) based on the below python script. Remember, one script for one table. 
+Adjust python exection based on the fk constraints. Greate .bat file for all tables
+python ces_refresh_<tablename>.py.
+.bat file should spit the logs - count in Oracle and count in SQL
+Give me all the downloadable python (full prod ready) and bat file.
+sample python script :
+# ============================
+# ces_round8.py (VehicleList)
+# ============================
+
+import sys
+import logging
+import pyodbc
+import oracledb
+
+# ----------------------------
+# ORACLE CONNECTION
+# ----------------------------
+ORACLE_DSN ="//ocipr-wersc-scan.ttcociclientsub.ttcocivcn.oraclevcn.com:1521/ces_prd_svc.int.ttc.ca"
+ORACLE_USER = "CES"
+ORACLE_PASSWORD = "cesprd1210"
+
+# ----------------------------
+# SQL SERVER CONNECTION
+# ----------------------------
+SQL_CONN_STR = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=SQL2022UAT;"
+    "DATABASE=CES;"
+    "UID=cesuser;"
+    "PWD=CESUser#UAT;"
+    "TrustServerCertificate=Yes;"
+)
+
+SQL_SCHEMA = "SBCES"
+
+# ----------------------------
+# LOGGING
+# ----------------------------
+logger = logging.getLogger("migration_round8")
+logger.setLevel(logging.INFO)
+handler = logging.FileHandler("migration_round8.log", mode="a", encoding="utf-8")
+console = logging.StreamHandler(sys.stdout)
+fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+handler.setFormatter(fmt)
+console.setFormatter(fmt)
+logger.addHandler(handler)
+logger.addHandler(console)
+
+# ----------------------------
+# CONNECTION HELPERS
+# ----------------------------
+def get_oracle_conn():
+    return oracledb.connect(
+        user=ORACLE_USER,
+        password=ORACLE_PASSWORD,
+        dsn=ORACLE_DSN
+    )
+
+def get_sql_conn():
+    conn = pyodbc.connect(SQL_CONN_STR, timeout=10)
+    cur = conn.cursor()
+    cur.execute("SET ANSI_WARNINGS OFF;")
+    cur.close()
+    return conn
+
+# ----------------------------
+# DELETE SQL TABLE
+# ----------------------------
+def delete_sql_table(sql_conn, table):
+    cur = sql_conn.cursor()
+    try:
+        cur.execute(f"DELETE FROM {SQL_SCHEMA}.{table}")
+        sql_conn.commit()
+        logger.info(f"Deleted {table}")
+    except Exception as e:
+        logger.error(f"Delete failed for {table}: {e}")
+    cur.close()
+
+# ----------------------------
+# FETCH ORACLE ROWS
+# ----------------------------
+def fetch_oracle_rows(oracle_conn):
+    sql = """
+        SELECT
+            VEHICLE_LIST_ID,
+            VEH_SERIES_CODE,
+            NUM_OF_VEHICLES,
+            PROJ_DESC,
+            DATE_ENTERED,
+            ENTERED_BY,
+            MODIFIED_LAST_BY,
+            MODIFIED_LAST_DATE,
+            MAKE,
+            MODEL,
+            YEAR,
+            ENGINE,
+            TRANSMISSION,
+            DIFFERENTIAL,
+            SOPNUMBER
+        FROM VEHICLE_LIST
+    """
+    cur = oracle_conn.cursor()
+    cur.execute(sql)
+    rows = cur.fetchall()
+    cur.close()
+    return rows
+
+# ----------------------------
+# INSERT INTO SQL SERVER
+# ----------------------------
+def insert_vehiclelist(sql_conn, rows):
+    sql = f"""
+        INSERT INTO {SQL_SCHEMA}.VehicleList (
+            VehicleListId,
+            VehSeriesCode,
+            NumOfVehicles,
+            ProjDesc,
+            DateEntered,
+            EnteredBy,
+            ModifiedLastBy,
+            ModifiedLastDate,
+            Make,
+            Model,
+            Year,
+            Engine,
+            Transmission,
+            Differential,
+            Sopnumber
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
+    cur = sql_conn.cursor()
+    success = 0
+    fail = 0
+
+    for idx, r in enumerate(rows):
+        try:
+            cur.execute(sql, r)
+            success += 1
+        except Exception as e:
+            fail += 1
+            logger.error(f"VehicleList row {idx} failed: {e} | Row={r}")
+
+    sql_conn.commit()
+    cur.close()
+    logger.info(f"VehicleList: {success} succeeded, {fail} failed")
+
+# ----------------------------
+# MAIN
+# ----------------------------
+def main():
+    logger.info("=== ROUND 8 VEHICLE_LIST MIGRATION START ===")
+
+    oracle_conn = get_oracle_conn()
+    sql_conn = get_sql_conn()
+
+    # Delete existing SQL rows
+    delete_sql_table(sql_conn, "VehicleList")
+
+    # Fetch Oracle rows
+    rows = fetch_oracle_rows(oracle_conn)
+
+    # Insert into SQL
+    insert_vehiclelist(sql_conn, rows)
+
+    oracle_conn.close()
+    sql_conn.close()
+
+    logger.info("=== ROUND 8 VEHICLE_LIST MIGRATION COMPLETE ===")
+
+if __name__ == "__main__":
+    main()
+    =================================================================================================================================
+    Oracle :
+    --------------------------------------------------------
+--  DDL for Table ARCH_RB_LABOUR_CC_TOTAL
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_RB_LABOUR_CC_TOTAL" 
+   (	"COST_CENTRE" VARCHAR2(5 BYTE), 
+	"ARCH_RB_MASTERLIST_ID" NUMBER, 
+	"TOTAL_HOURS" VARCHAR2(25 BYTE)
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_RB_LABOUR_CC_TOTAL
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_LABOUR_CC_TOTAL" MODIFY ("ARCH_RB_MASTERLIST_ID" NOT NULL ENABLE);
+--------------------------------------------------------
+--  Ref Constraints for Table ARCH_RB_LABOUR_CC_TOTAL
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_LABOUR_CC_TOTAL" ADD CONSTRAINT "FK_ARCH_RB_LABOUR_CC_TOTAL" FOREIGN KEY ("ARCH_RB_MASTERLIST_ID")
+	  REFERENCES "CES"."ARCH_RB_MASTERLIST" ("ARCH_RB_MASTERLIST_ID") ENABLE;
+MS SQL :
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchMblabourCcTotal]    Script Date: 9/9/2026 2:31:22 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchMblabourCcTotal](
+	[CostCentre] [varchar](5) NULL,
+	[ArchMbMasterlistId] [int] NOT NULL,
+	[TotalHours] [numeric](18, 2) NULL
+) ON [PRIMARY]
+GO
+============================================================================
+oracle 
+--------------------------------------------------------
+--  DDL for Table ARCH_MB_EMPLOYEE_LABOUR
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_MB_EMPLOYEE_LABOUR" 
+   (	"LABOUR_DEFN" VARCHAR2(50 BYTE), 
+	"DATE_ENTERED" DATE, 
+	"LINK_NUMBER" VARCHAR2(25 BYTE), 
+	"TYPEID" VARCHAR2(5 BYTE), 
+	"COSTCENTRE" VARCHAR2(5 BYTE), 
+	"TASK" VARCHAR2(50 BYTE), 
+	"LABOUR_TYPE" VARCHAR2(5 BYTE), 
+	"USAGE" VARCHAR2(25 BYTE), 
+	"HRS_REQD" VARCHAR2(25 BYTE), 
+	"ADJ_HRS" VARCHAR2(25 BYTE), 
+	"TIME_ADDITION" NUMBER(18,2), 
+	"ARCH_MB_MASTERLIST" NUMBER
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_MB_EMPLOYEE_LABOUR
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_MB_EMPLOYEE_LABOUR" MODIFY ("ARCH_MB_MASTERLIST" NOT NULL ENABLE);
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchMbEmployeeLabour]    Script Date: 9/9/2026 2:33:10 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchMbEmployeeLabour](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[LabourDefn] [varchar](50) NULL,
+	[DateEntered] [datetime] NULL,
+	[LinkNumber] [varchar](25) NULL,
+	[TypeId] [varchar](5) NULL,
+	[CostCentre] [varchar](5) NULL,
+	[Task] [varchar](50) NULL,
+	[LabourType] [varchar](5) NULL,
+	[Usage] [varchar](25) NULL,
+	[HrsReqd] [varchar](25) NULL,
+	[AdjHrs] [varchar](25) NULL,
+	[TimeAddition] [numeric](18, 2) NULL,
+	[ArchMbMasterlist] [int] NOT NULL,
+ CONSTRAINT [PK_ArchMbEmployeeLabour] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+===========================
+oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_MB_LIST_BUSES
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_MB_LIST_BUSES" 
+   (	"BUS_DESCRIPTION" VARCHAR2(500 BYTE), 
+	"ARCH_MB_MASTERLIST_ID" NUMBER
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchMbListBuses]    Script Date: 9/9/2026 2:34:59 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchMbListBuses](
+	[BusDescription] [varchar](500) NULL,
+	[ArchMbMasterlistId] [int] NULL
+) ON [PRIMARY]
+GO
+===================================================================
+oracle 
+--------------------------------------------------------
+--  DDL for Table ARCH_MB_MASTERLIST
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_MB_MASTERLIST" 
+   (	"MB_NUMBER" VARCHAR2(25 BYTE), 
+	"KEYWORD" VARCHAR2(50 BYTE), 
+	"DESCRIPTION" VARCHAR2(50 BYTE), 
+	"BUS_TYPE" VARCHAR2(50 BYTE), 
+	"NUM_BUS_COMP" VARCHAR2(10 BYTE), 
+	"VENDOR_PART_NUM" VARCHAR2(25 BYTE), 
+	"BUY_CODE" VARCHAR2(25 BYTE), 
+	"REBUILD_CODE" VARCHAR2(25 BYTE), 
+	"CORE_CODE" VARCHAR2(25 BYTE), 
+	"ANNUAL_USAGE" VARCHAR2(25 BYTE), 
+	"BENCH_NUMBER" VARCHAR2(25 BYTE), 
+	"SAMPLE_PROVIDED" VARCHAR2(25 BYTE), 
+	"RECOMMENDATION" VARCHAR2(1 BYTE) DEFAULT NULL, 
+	"REMAN_COST" VARCHAR2(25 BYTE) DEFAULT NULL, 
+	"EXTERNAL_COST" VARCHAR2(25 BYTE) DEFAULT NULL, 
+	"BUY_NEW_COST" VARCHAR2(25 BYTE) DEFAULT NULL, 
+	"INTERNAL_COST" VARCHAR2(25 BYTE) DEFAULT NULL, 
+	"SOP_NUMBER" VARCHAR2(25 BYTE), 
+	"CORE_COST" VARCHAR2(25 BYTE) DEFAULT NULL, 
+	"JOB_NUMBER" VARCHAR2(25 BYTE), 
+	"ARCH_MB_MASTERLIST_ID" NUMBER(18,2), 
+	"ARCHIVED_BY" VARCHAR2(50 BYTE), 
+	"LABOUR_COST" NUMBER(20,2) DEFAULT 0, 
+	"LABOUR_OVERHEAD_AMOUNT" NUMBER(20,2) DEFAULT 0, 
+	"LABOUR_TOTAL" NUMBER(20,2) DEFAULT 0, 
+	"MATERIALS_TOTAL" NUMBER(20,2) DEFAULT 0, 
+	"TOTAL_MB_ESTIMATE_COST" NUMBER(20,2), 
+	"DATE_ARCHIVED" DATE, 
+	"TOTAL_TAX" NUMBER(20,2), 
+	"TOTAL_COST_TAX" NUMBER(20,2)
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  DDL for Index PK_ARCH_MB_MASTERLIST
+--------------------------------------------------------
+
+  CREATE UNIQUE INDEX "CES"."PK_ARCH_MB_MASTERLIST" ON "CES"."ARCH_MB_MASTERLIST" ("ARCH_MB_MASTERLIST_ID") 
+  PCTFREE 10 INITRANS 2 MAXTRANS 255 COMPUTE STATISTICS 
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_MB_MASTERLIST
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_MB_MASTERLIST" ADD CONSTRAINT "PK_ARCH_MB_MASTERLIST" PRIMARY KEY ("ARCH_MB_MASTERLIST_ID")
+  USING INDEX PCTFREE 10 INITRANS 2 MAXTRANS 255 COMPUTE STATISTICS 
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES"  ENABLE;
+  ALTER TABLE "CES"."ARCH_MB_MASTERLIST" MODIFY ("TOTAL_MB_ESTIMATE_COST" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_MB_MASTERLIST" MODIFY ("MATERIALS_TOTAL" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_MB_MASTERLIST" MODIFY ("LABOUR_TOTAL" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_MB_MASTERLIST" MODIFY ("LABOUR_OVERHEAD_AMOUNT" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_MB_MASTERLIST" MODIFY ("LABOUR_COST" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_MB_MASTERLIST" MODIFY ("ARCH_MB_MASTERLIST_ID" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_MB_MASTERLIST" MODIFY ("BUY_CODE" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_MB_MASTERLIST" MODIFY ("MB_NUMBER" NOT NULL ENABLE);
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchMbMasterlist]    Script Date: 9/9/2026 2:36:27 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchMbMasterlist](
+	[ArchMbMasterlistId] [int] NOT NULL,
+	[MbNumber] [varchar](25) NOT NULL,
+	[Keyword] [varchar](50) NULL,
+	[Description] [varchar](50) NULL,
+	[BusType] [varchar](50) NULL,
+	[NumBusComp] [varchar](10) NULL,
+	[VendorPartNum] [varchar](25) NULL,
+	[BuyCode] [varchar](25) NOT NULL,
+	[RebuildCode] [varchar](25) NULL,
+	[CoreCode] [varchar](25) NULL,
+	[AnnualUsage] [varchar](25) NULL,
+	[BenchNumber] [varchar](25) NULL,
+	[SampleProvided] [varchar](25) NULL,
+	[Recommendation] [varchar](1) NULL,
+	[RemanCost] [varchar](25) NULL,
+	[ExternalCost] [varchar](25) NULL,
+	[BuyNewCost] [varchar](25) NULL,
+	[InternalCost] [varchar](25) NULL,
+	[SopNumber] [varchar](25) NULL,
+	[CoreCost] [varchar](25) NULL,
+	[JobNumber] [varchar](25) NULL,
+	[LabourCost] [numeric](20, 2) NOT NULL,
+	[LabourOverheadAmount] [numeric](20, 2) NOT NULL,
+	[LabourTotal] [numeric](20, 2) NOT NULL,
+	[MaterialsTotal] [numeric](20, 2) NOT NULL,
+	[TotalMbEstimateCost] [numeric](20, 2) NOT NULL,
+	[DateEntered] [datetime] NULL,
+	[TotalTax] [numeric](20, 2) NULL,
+	[TotalCostTax] [numeric](20, 2) NULL,
+ CONSTRAINT [PK_ArchMbMasterlist] PRIMARY KEY CLUSTERED 
+(
+	[ArchMbMasterlistId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+==============================================
+oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_MB_MATERIALS_CC_TOTAL
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_MB_MATERIALS_CC_TOTAL" 
+   (	"COST_CENTRE" VARCHAR2(5 BYTE), 
+	"TOTAL_COST" NUMBER(18,2) DEFAULT 0, 
+	"ARCH_MB_MASTERLIST_ID" NUMBER
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_MB_MATERIALS_CC_TOTAL
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_MB_MATERIALS_CC_TOTAL" MODIFY ("ARCH_MB_MASTERLIST_ID" NOT NULL ENABLE);
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchMbmaterielsCcTotal]    Script Date: 9/9/2026 2:38:13 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchMbmaterielsCcTotal](
+	[CostCentre] [varchar](5) NULL,
+	[TotalCost] [numeric](18, 2) NULL,
+	[ArchMbMasterlistId] [int] NOT NULL
+) ON [PRIMARY]
+GO
+====================================================
+Oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_MB_NSC_PARTS_USED
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_MB_NSC_PARTS_USED" 
+   (	"ORIG_SUPP_NUM" VARCHAR2(50 BYTE), 
+	"ORIG_SUPPLIER_NAME" VARCHAR2(50 BYTE), 
+	"COST_CENTRE" VARCHAR2(4 BYTE), 
+	"QTY_REQD" VARCHAR2(10 BYTE), 
+	"PERCENT_USAGE" VARCHAR2(10 BYTE), 
+	"DATE_ENTERED" DATE, 
+	"ENTERED_BY" VARCHAR2(25 BYTE), 
+	"LINK_CODE" VARCHAR2(30 BYTE), 
+	"COST" NUMBER(18,2) DEFAULT 0, 
+	"LINK_TYPE" VARCHAR2(3 BYTE), 
+	"CORECOST" NUMBER(18,2) DEFAULT 0, 
+	"ARCH_MB_MASTERLIST_ID" NUMBER, 
+	"TOTAL_COST" NUMBER(18,2) DEFAULT 0
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_MB_NSC_PARTS_USED
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_MB_NSC_PARTS_USED" MODIFY ("ARCH_MB_MASTERLIST_ID" NOT NULL ENABLE);
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchMbNscPartsUsed]    Script Date: 9/9/2026 2:39:23 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchMbNscPartsUsed](
+	[OrigSuppNum] [varchar](50) NULL,
+	[OrigSupplierName] [varchar](50) NULL,
+	[CostCentre] [varchar](4) NULL,
+	[QtyReqd] [varchar](10) NULL,
+	[PercentUsage] [varchar](10) NULL,
+	[DateEntered] [datetime] NULL,
+	[EnteredBy] [varchar](25) NULL,
+	[LinkCode] [varchar](30) NULL,
+	[Cost] [numeric](18, 2) NULL,
+	[LinkType] [varchar](3) NULL,
+	[Corecost] [numeric](18, 2) NULL,
+	[ArchMbMasterlistId] [int] NOT NULL,
+	[TotalCost] [numeric](18, 2) NULL
+) ON [PRIMARY]
+GO
+=========================================
+oracle 
+--------------------------------------------------------
+--  DDL for Table ARCH_MB_SC_PARTS_USED
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_MB_SC_PARTS_USED" 
+   (	"MMS_STOCK_CODE" VARCHAR2(30 BYTE), 
+	"DATE_ENTERED" DATE, 
+	"REB_PART_COST" NUMBER(18,2) DEFAULT 0, 
+	"USER_ENTERED" VARCHAR2(50 BYTE), 
+	"MMS_COST" NUMBER(18,2) DEFAULT 0, 
+	"OEM_COST" NUMBER(18,2) DEFAULT 0, 
+	"MMS_REBUILT_CODE" VARCHAR2(30 BYTE), 
+	"COST_CENTRE" VARCHAR2(4 BYTE), 
+	"QTY_REQD" VARCHAR2(10 BYTE), 
+	"PERCENT_USAGE" VARCHAR2(10 BYTE), 
+	"LINK_CODE" VARCHAR2(30 BYTE), 
+	"REBUILT_PART" VARCHAR2(1 BYTE), 
+	"LINK_TYPE" VARCHAR2(3 BYTE), 
+	"CORECOST" NUMBER(18,2) DEFAULT 0, 
+	"ARCH_MB_MASTERLIST_ID" NUMBER, 
+	"TOTAL_COST" NUMBER(18,2) DEFAULT 0, 
+	"SC_KEYWORD" VARCHAR2(50 BYTE), 
+	"SC_DESCRIPTION" VARCHAR2(500 BYTE)
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_MB_SC_PARTS_USED
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_MB_SC_PARTS_USED" MODIFY ("ARCH_MB_MASTERLIST_ID" NOT NULL ENABLE);
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchMbScPartsUsed]    Script Date: 9/9/2026 2:40:54 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchMbScPartsUsed](
+	[MmsStockCode] [varchar](30) NULL,
+	[DateEntered] [datetime] NULL,
+	[RebPartCost] [numeric](18, 2) NULL,
+	[UserEntered] [varchar](50) NULL,
+	[MmsCost] [numeric](18, 2) NULL,
+	[OemCost] [numeric](18, 2) NULL,
+	[MmsRebuiltCode] [varchar](30) NULL,
+	[CostCentre] [varchar](4) NULL,
+	[QtyReqd] [varchar](10) NULL,
+	[PercentUsage] [varchar](10) NULL,
+	[LinkCode] [varchar](30) NULL,
+	[RebuiltPart] [varchar](1) NULL,
+	[LinkType] [varchar](3) NULL,
+	[Corecost] [numeric](18, 2) NULL,
+	[ArchMbMasterlistId] [int] NOT NULL,
+	[TotalCost] [numeric](18, 2) NULL,
+	[ScKeyword] [varchar](50) NULL,
+	[ScDescription] [varchar](500) NULL
+) ON [PRIMARY]
+GO
+==========================================================
+oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_RB_EMPLOYEE_LABOUR
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_RB_EMPLOYEE_LABOUR" 
+   (	"LABOUR_DEFN" VARCHAR2(50 BYTE), 
+	"DATE_ENTERED" DATE, 
+	"LINK_NUMBER" VARCHAR2(25 BYTE), 
+	"TYPEID" VARCHAR2(5 BYTE), 
+	"COSTCENTRE" VARCHAR2(5 BYTE), 
+	"TASK" VARCHAR2(50 BYTE), 
+	"LABOUR_TYPE" VARCHAR2(5 BYTE), 
+	"USAGE" VARCHAR2(25 BYTE), 
+	"HRS_REQD" VARCHAR2(25 BYTE), 
+	"ADJ_HRS" VARCHAR2(25 BYTE), 
+	"TIME_ADDITION" NUMBER(18,2), 
+	"ARCH_RB_MASTERLIST_ID" NUMBER
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_RB_EMPLOYEE_LABOUR
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_EMPLOYEE_LABOUR" MODIFY ("ARCH_RB_MASTERLIST_ID" NOT NULL ENABLE);
+--------------------------------------------------------
+--  Ref Constraints for Table ARCH_RB_EMPLOYEE_LABOUR
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_EMPLOYEE_LABOUR" ADD CONSTRAINT "FK_ARCH_EMPLOYEE_LABOUR" FOREIGN KEY ("ARCH_RB_MASTERLIST_ID")
+	  REFERENCES "CES"."ARCH_RB_MASTERLIST" ("ARCH_RB_MASTERLIST_ID") ENABLE;
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchRbEmployeeLabour]    Script Date: 9/9/2026 2:43:33 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchRbEmployeeLabour](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[LabourDefn] [varchar](50) NULL,
+	[DateEntered] [datetime] NULL,
+	[LinkNumber] [varchar](25) NULL,
+	[TypeId] [varchar](5) NULL,
+	[Costcentre] [varchar](5) NULL,
+	[Task] [varchar](50) NULL,
+	[LabourType] [varchar](5) NULL,
+	[Usage] [varchar](25) NULL,
+	[HrsReqd] [varchar](25) NULL,
+	[AdjHrs] [varchar](25) NULL,
+	[TimeAddition] [numeric](18, 2) NULL,
+	[ArchRbMasterlistId] [int] NOT NULL,
+ CONSTRAINT [PK_ArchRbEmployeeLabour] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[ArchRbEmployeeLabour]  WITH NOCHECK ADD  CONSTRAINT [FK_ArchEmployeeLabour] FOREIGN KEY([ArchRbMasterlistId])
+REFERENCES [SBCES].[ArchRbMasterlist] ([ArchRbMasterlistId])
+GO
+
+ALTER TABLE [SBCES].[ArchRbEmployeeLabour] NOCHECK CONSTRAINT [FK_ArchEmployeeLabour]
+GO
+
+========================
+oracle 
+--------------------------------------------------------
+--  DDL for Table ARCH_RB_LABOUR_CC_TOTAL
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_RB_LABOUR_CC_TOTAL" 
+   (	"COST_CENTRE" VARCHAR2(5 BYTE), 
+	"ARCH_RB_MASTERLIST_ID" NUMBER, 
+	"TOTAL_HOURS" VARCHAR2(25 BYTE)
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_RB_LABOUR_CC_TOTAL
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_LABOUR_CC_TOTAL" MODIFY ("ARCH_RB_MASTERLIST_ID" NOT NULL ENABLE);
+--------------------------------------------------------
+--  Ref Constraints for Table ARCH_RB_LABOUR_CC_TOTAL
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_LABOUR_CC_TOTAL" ADD CONSTRAINT "FK_ARCH_RB_LABOUR_CC_TOTAL" FOREIGN KEY ("ARCH_RB_MASTERLIST_ID")
+	  REFERENCES "CES"."ARCH_RB_MASTERLIST" ("ARCH_RB_MASTERLIST_ID") ENABLE;
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchRbLabourCcTotal]    Script Date: 9/9/2026 2:44:31 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchRbLabourCcTotal](
+	[CostCentre] [varchar](5) NULL,
+	[ArchRbMasterlistId] [int] NOT NULL,
+	[TotalHours] [varchar](25) NULL
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[ArchRbLabourCcTotal]  WITH NOCHECK ADD  CONSTRAINT [FK_ArchRbLabourCcTotal] FOREIGN KEY([ArchRbMasterlistId])
+REFERENCES [SBCES].[ArchRbMasterlist] ([ArchRbMasterlistId])
+GO
+
+ALTER TABLE [SBCES].[ArchRbLabourCcTotal] NOCHECK CONSTRAINT [FK_ArchRbLabourCcTotal]
+GO
+================================================================================
+Oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_RB_LIST_BUSES
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_RB_LIST_BUSES" 
+   (	"BUS_DESCRIPTION" VARCHAR2(500 BYTE), 
+	"ARCH_RB_MASTERLIST_ID" NUMBER
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_RB_LIST_BUSES
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_LIST_BUSES" MODIFY ("ARCH_RB_MASTERLIST_ID" NOT NULL ENABLE);
+--------------------------------------------------------
+--  Ref Constraints for Table ARCH_RB_LIST_BUSES
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_LIST_BUSES" ADD CONSTRAINT "FK_ARCH_RB_LIST_BUSES" FOREIGN KEY ("ARCH_RB_MASTERLIST_ID")
+	  REFERENCES "CES"."ARCH_RB_MASTERLIST" ("ARCH_RB_MASTERLIST_ID") ENABLE;
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchRbListBuses]    Script Date: 9/9/2026 2:46:27 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchRbListBuses](
+	[BusDescription] [varchar](500) NULL,
+	[ArchRbMasterlistId] [int] NOT NULL
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[ArchRbListBuses]  WITH NOCHECK ADD  CONSTRAINT [FK_ArchRbListBuses] FOREIGN KEY([ArchRbMasterlistId])
+REFERENCES [SBCES].[ArchRbMasterlist] ([ArchRbMasterlistId])
+GO
+
+ALTER TABLE [SBCES].[ArchRbListBuses] NOCHECK CONSTRAINT [FK_ArchRbListBuses]
+GO
+============================
+oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_RB_MASTERLIST
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_RB_MASTERLIST" 
+   (	"MMS_STOCK_CODE" VARCHAR2(30 BYTE), 
+	"ITEM_REF_NUMBER" VARCHAR2(16 BYTE), 
+	"DETAILED_DESC" VARCHAR2(250 BYTE), 
+	"KEYWORD" VARCHAR2(250 BYTE), 
+	"CORE_PART_NUM" VARCHAR2(30 BYTE), 
+	"REBUILT_STOCK_NUM" VARCHAR2(30 BYTE), 
+	"CORE_CHARGE" VARCHAR2(25 BYTE), 
+	"JOB_NUMBER" VARCHAR2(25 BYTE), 
+	"DATE_ARCHIVED" DATE, 
+	"ARCHIVED_BY" VARCHAR2(50 BYTE), 
+	"ESTIMATED_COST" NUMBER(20,2) DEFAULT 0, 
+	"SOP_NUMBER" VARCHAR2(25 BYTE), 
+	"ARCH_RB_MASTERLIST_ID" NUMBER, 
+	"LABOUR_COST" NUMBER(20,2) DEFAULT 0, 
+	"LABOUR_OVERHEAD_AMOUNT" NUMBER(20,2) DEFAULT 0, 
+	"LABOUR_TOTAL" NUMBER(20,2) DEFAULT 0, 
+	"MATERIALS_TOTAL" NUMBER(20,2) DEFAULT 0, 
+	"TOTAL_REBUILT_PART_COST" NUMBER(20,2) DEFAULT 0, 
+	"TAX_TOTAL" NUMBER(20,2), 
+	"TOTAL_COST_TAX" NUMBER(20,2)
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  DDL for Index UK_ARCH_RB_MASTERLIST
+--------------------------------------------------------
+
+  CREATE UNIQUE INDEX "CES"."UK_ARCH_RB_MASTERLIST" ON "CES"."ARCH_RB_MASTERLIST" ("REBUILT_STOCK_NUM", "DATE_ARCHIVED") 
+  PCTFREE 10 INITRANS 2 MAXTRANS 255 COMPUTE STATISTICS 
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  DDL for Index PK_ARCH_RB_MASTERLIST
+--------------------------------------------------------
+
+  CREATE UNIQUE INDEX "CES"."PK_ARCH_RB_MASTERLIST" ON "CES"."ARCH_RB_MASTERLIST" ("ARCH_RB_MASTERLIST_ID") 
+  PCTFREE 10 INITRANS 2 MAXTRANS 255 COMPUTE STATISTICS 
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_RB_MASTERLIST
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_MASTERLIST" ADD CONSTRAINT "UK_ARCH_RB_MASTERLIST" UNIQUE ("REBUILT_STOCK_NUM", "DATE_ARCHIVED")
+  USING INDEX PCTFREE 10 INITRANS 2 MAXTRANS 255 COMPUTE STATISTICS 
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES"  ENABLE;
+  ALTER TABLE "CES"."ARCH_RB_MASTERLIST" ADD CONSTRAINT "PK_ARCH_RB_MASTERLIST" PRIMARY KEY ("ARCH_RB_MASTERLIST_ID")
+  USING INDEX PCTFREE 10 INITRANS 2 MAXTRANS 255 COMPUTE STATISTICS 
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES"  ENABLE;
+  ALTER TABLE "CES"."ARCH_RB_MASTERLIST" MODIFY ("TOTAL_REBUILT_PART_COST" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_RB_MASTERLIST" MODIFY ("MATERIALS_TOTAL" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_RB_MASTERLIST" MODIFY ("LABOUR_TOTAL" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_RB_MASTERLIST" MODIFY ("LABOUR_OVERHEAD_AMOUNT" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_RB_MASTERLIST" MODIFY ("LABOUR_COST" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_RB_MASTERLIST" MODIFY ("ARCH_RB_MASTERLIST_ID" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_RB_MASTERLIST" MODIFY ("ESTIMATED_COST" NOT NULL ENABLE);
+--------------------------------------------------------
+--  Ref Constraints for Table ARCH_RB_MASTERLIST
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_MASTERLIST" ADD CONSTRAINT "FK_ARCH_RB_MASTERLIST" FOREIGN KEY ("REBUILT_STOCK_NUM")
+	  REFERENCES "CES"."RB_MASTERLIST" ("REBUILT_STOCK_NUM") ENABLE;
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchRbMasterlist]    Script Date: 9/9/2026 2:48:05 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchRbMasterlist](
+	[ArchRbMasterlistId] [int] NOT NULL,
+	[MmsStockCode] [varchar](30) NULL,
+	[ItemRefNumber] [varchar](16) NULL,
+	[DetailedDesc] [varchar](250) NULL,
+	[Keyword] [varchar](250) NULL,
+	[CorePartNum] [varchar](30) NULL,
+	[RebuiltStockNum] [varchar](30) NULL,
+	[CoreCharge] [varchar](25) NULL,
+	[JobNumber] [varchar](25) NULL,
+	[DateEntered] [datetime] NULL,
+	[EnteredBy] [varchar](50) NULL,
+	[EstimatedCost] [numeric](20, 2) NOT NULL,
+	[SopNumber] [varchar](25) NULL,
+	[LabourCost] [numeric](20, 2) NOT NULL,
+	[LabourOverheadAmount] [numeric](20, 2) NOT NULL,
+	[LabourTotal] [numeric](20, 2) NOT NULL,
+	[MaterialsTotal] [numeric](20, 2) NOT NULL,
+	[TotalRebuiltPartCost] [numeric](20, 2) NOT NULL,
+	[TaxTotal] [numeric](20, 2) NULL,
+	[TotalCostTax] [numeric](20, 2) NULL,
+ CONSTRAINT [PK_ArchRbMasterlist] PRIMARY KEY CLUSTERED 
+(
+	[ArchRbMasterlistId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+ CONSTRAINT [UK_ArchRbMasterlist] UNIQUE NONCLUSTERED 
+(
+	[RebuiltStockNum] ASC,
+	[DateEntered] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[ArchRbMasterlist]  WITH NOCHECK ADD  CONSTRAINT [FK_ArchRbMasterlist] FOREIGN KEY([RebuiltStockNum])
+REFERENCES [SBCES].[RbMasterlist] ([RebuiltStockNum])
+GO
+
+ALTER TABLE [SBCES].[ArchRbMasterlist] NOCHECK CONSTRAINT [FK_ArchRbMasterlist]
+GO
+==================================================================
+Oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_RB_MATERIALS_CC_TOTAL
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_RB_MATERIALS_CC_TOTAL" 
+   (	"COST_CENTRE" VARCHAR2(5 BYTE), 
+	"TOTAL_COST" NUMBER(18,2) DEFAULT 0, 
+	"ARCH_RB_MASTERLIST_ID" NUMBER
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_RB_MATERIALS_CC_TOTAL
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_MATERIALS_CC_TOTAL" MODIFY ("ARCH_RB_MASTERLIST_ID" NOT NULL ENABLE);
+--------------------------------------------------------
+--  Ref Constraints for Table ARCH_RB_MATERIALS_CC_TOTAL
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_MATERIALS_CC_TOTAL" ADD CONSTRAINT "FK_ARCH_RB_MATERIALS_CC_TOTALS" FOREIGN KEY ("ARCH_RB_MASTERLIST_ID")
+	  REFERENCES "CES"."ARCH_RB_MASTERLIST" ("ARCH_RB_MASTERLIST_ID") ENABLE;
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchRbMaterialsCcTotal]    Script Date: 9/9/2026 2:49:10 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchRbMaterialsCcTotal](
+	[CostCentre] [varchar](5) NULL,
+	[TotalCost] [numeric](18, 2) NULL,
+	[ArchRbMasterlistId] [int] NOT NULL
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[ArchRbMaterialsCcTotal]  WITH NOCHECK ADD  CONSTRAINT [FK_ArchRbMaterialsCcTotals] FOREIGN KEY([ArchRbMasterlistId])
+REFERENCES [SBCES].[ArchRbMasterlist] ([ArchRbMasterlistId])
+GO
+
+ALTER TABLE [SBCES].[ArchRbMaterialsCcTotal] NOCHECK CONSTRAINT [FK_ArchRbMaterialsCcTotals]
+GO
+=====================================================================
+oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_RB_NSC_PARTS_USED
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_RB_NSC_PARTS_USED" 
+   (	"ORIG_SUPP_NUM" VARCHAR2(50 BYTE), 
+	"ORIG_SUPPLIER_NAME" VARCHAR2(50 BYTE), 
+	"COST_CENTRE" VARCHAR2(4 BYTE), 
+	"QTY_REQD" VARCHAR2(10 BYTE), 
+	"PERCENT_USAGE" VARCHAR2(10 BYTE), 
+	"DATE_ENTERED" DATE, 
+	"ENTERED_BY" VARCHAR2(25 BYTE), 
+	"LINK_CODE" VARCHAR2(30 BYTE), 
+	"COST" NUMBER(18,2) DEFAULT 0, 
+	"LINK_TYPE" VARCHAR2(3 BYTE), 
+	"CORECOST" NUMBER(18,2) DEFAULT 0, 
+	"ARCH_RB_MASTERLIST_ID" NUMBER, 
+	"TOTAL_COST" NUMBER(18,2) DEFAULT 0
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_RB_NSC_PARTS_USED
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_NSC_PARTS_USED" MODIFY ("ARCH_RB_MASTERLIST_ID" NOT NULL ENABLE);
+--------------------------------------------------------
+--  Ref Constraints for Table ARCH_RB_NSC_PARTS_USED
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_NSC_PARTS_USED" ADD CONSTRAINT "FK_ARCH_NSC_PARTS_USED" FOREIGN KEY ("ARCH_RB_MASTERLIST_ID")
+	  REFERENCES "CES"."ARCH_RB_MASTERLIST" ("ARCH_RB_MASTERLIST_ID") ENABLE;
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchRbNscPartsUsed]    Script Date: 9/9/2026 2:50:13 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchRbNscPartsUsed](
+	[OrigSuppNum] [varchar](50) NULL,
+	[OrigSupplierName] [varchar](50) NULL,
+	[CostCentre] [varchar](4) NULL,
+	[QtyReqd] [varchar](10) NULL,
+	[PercentUsage] [varchar](10) NULL,
+	[DateEntered] [datetime] NULL,
+	[EnteredBy] [varchar](25) NULL,
+	[LinkCode] [varchar](30) NULL,
+	[Cost] [numeric](18, 2) NULL,
+	[LinkType] [varchar](3) NULL,
+	[Corecost] [numeric](18, 2) NULL,
+	[ArchRbMasterlistId] [int] NOT NULL,
+	[TotalCost] [numeric](18, 2) NULL
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[ArchRbNscPartsUsed]  WITH NOCHECK ADD  CONSTRAINT [FK_ArchNscPartsUsed] FOREIGN KEY([ArchRbMasterlistId])
+REFERENCES [SBCES].[ArchRbMasterlist] ([ArchRbMasterlistId])
+GO
+
+ALTER TABLE [SBCES].[ArchRbNscPartsUsed] NOCHECK CONSTRAINT [FK_ArchNscPartsUsed]
+GO
+=======================================
+orcle
+--------------------------------------------------------
+--  DDL for Table ARCH_RB_SC_PARTS_USED
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_RB_SC_PARTS_USED" 
+   (	"MMS_STOCK_CODE" VARCHAR2(30 BYTE), 
+	"DATE_ENTERED" DATE, 
+	"REB_PART_COST" NUMBER(18,2) DEFAULT 0, 
+	"USER_ENTERED" VARCHAR2(50 BYTE), 
+	"MMS_COST" NUMBER(18,2) DEFAULT 0, 
+	"OEM_COST" NUMBER(18,2) DEFAULT 0, 
+	"MMS_REBUILT_CODE" VARCHAR2(30 BYTE), 
+	"COST_CENTRE" VARCHAR2(4 BYTE), 
+	"QTY_REQD" VARCHAR2(10 BYTE), 
+	"PERCENT_USAGE" VARCHAR2(10 BYTE), 
+	"LINK_CODE" VARCHAR2(30 BYTE), 
+	"REBUILT_PART" VARCHAR2(1 BYTE), 
+	"LINK_TYPE" VARCHAR2(3 BYTE), 
+	"CORECOST" NUMBER(18,2) DEFAULT 0, 
+	"ARCH_RB_MASTERLIST_ID" NUMBER, 
+	"TOTAL_COST" NUMBER(18,2) DEFAULT 0, 
+	"SC_KEYWORD" VARCHAR2(50 BYTE), 
+	"SC_DESCRIPTION" VARCHAR2(500 BYTE)
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_RB_SC_PARTS_USED
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_SC_PARTS_USED" MODIFY ("ARCH_RB_MASTERLIST_ID" NOT NULL ENABLE);
+--------------------------------------------------------
+--  Ref Constraints for Table ARCH_RB_SC_PARTS_USED
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_RB_SC_PARTS_USED" ADD CONSTRAINT "FK_ARCH_SC_PARTS_USED" FOREIGN KEY ("ARCH_RB_MASTERLIST_ID")
+	  REFERENCES "CES"."ARCH_RB_MASTERLIST" ("ARCH_RB_MASTERLIST_ID") ENABLE;
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchRbScPartsUsed]    Script Date: 9/9/2026 2:51:19 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchRbScPartsUsed](
+	[MmsStockCode] [varchar](30) NULL,
+	[DateEntered] [datetime] NULL,
+	[RebPartCost] [numeric](18, 2) NULL,
+	[UserEntered] [varchar](50) NULL,
+	[MmsCost] [numeric](18, 2) NULL,
+	[OemCost] [numeric](18, 2) NULL,
+	[MmsRebuiltCode] [varchar](30) NULL,
+	[CostCentre] [varchar](4) NULL,
+	[QtyReqd] [varchar](10) NULL,
+	[PercentUsage] [varchar](10) NULL,
+	[LinkCode] [varchar](30) NULL,
+	[RebuiltPart] [varchar](1) NULL,
+	[LinkType] [varchar](3) NULL,
+	[Corecost] [numeric](18, 2) NULL,
+	[ArchRbMasterlistId] [int] NOT NULL,
+	[TotalCost] [numeric](18, 2) NULL,
+	[ScKeyword] [varchar](50) NULL,
+	[ScDescription] [varchar](500) NULL
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[ArchRbScPartsUsed]  WITH NOCHECK ADD  CONSTRAINT [FK_ArchScPartsUsed] FOREIGN KEY([ArchRbMasterlistId])
+REFERENCES [SBCES].[ArchRbMasterlist] ([ArchRbMasterlistId])
+GO
+
+ALTER TABLE [SBCES].[ArchRbScPartsUsed] NOCHECK CONSTRAINT [FK_ArchScPartsUsed]
+GO
+======================================================
+oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_VEH_EMPLOYEE_LABOUR
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_VEH_EMPLOYEE_LABOUR" 
+   (	"LABOUR_DEFN" VARCHAR2(50 BYTE), 
+	"DATE_ENTERED" DATE, 
+	"LINK_NUMBER" VARCHAR2(25 BYTE), 
+	"TYPEID" VARCHAR2(5 BYTE), 
+	"COSTCENTRE" VARCHAR2(5 BYTE), 
+	"TASK" VARCHAR2(50 BYTE), 
+	"LABOUR_TYPE" VARCHAR2(5 BYTE), 
+	"USAGE" VARCHAR2(25 BYTE), 
+	"HRS_REQD" VARCHAR2(25 BYTE), 
+	"ADJ_HRS" VARCHAR2(25 BYTE), 
+	"TIME_ADDITION" NUMBER(18,2), 
+	"ARCH_VEHICLE_LIST_ID" NUMBER
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_VEH_EMPLOYEE_LABOUR
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_VEH_EMPLOYEE_LABOUR" MODIFY ("ARCH_VEHICLE_LIST_ID" NOT NULL ENABLE);
+--------------------------------------------------------
+--  Ref Constraints for Table ARCH_VEH_EMPLOYEE_LABOUR
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_VEH_EMPLOYEE_LABOUR" ADD CONSTRAINT "FK_ARCH_VEH_EMPLOYEE_LABOUR" FOREIGN KEY ("ARCH_VEHICLE_LIST_ID")
+	  REFERENCES "CES"."ARCH_VEHICLE_LIST" ("ARCH_VEHICLE_LIST_ID") ENABLE;
+ms sql
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchVehEmployeeLabour]    Script Date: 9/9/2026 2:52:22 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchVehEmployeeLabour](
+	[LabourDefn] [varchar](50) NULL,
+	[DateEntered] [datetime] NULL,
+	[LinkNumber] [varchar](25) NULL,
+	[TypeId] [varchar](5) NULL,
+	[Costcentre] [varchar](5) NULL,
+	[Task] [varchar](50) NULL,
+	[LabourType] [varchar](5) NULL,
+	[Usage] [varchar](25) NULL,
+	[HrsReqd] [varchar](25) NULL,
+	[AdjHrs] [varchar](25) NULL,
+	[TimeAddition] [numeric](18, 2) NULL,
+	[ArchVehicleListId] [int] NOT NULL,
+	[ID] [int] IDENTITY(1,1) NOT NULL
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[ArchVehEmployeeLabour]  WITH CHECK ADD  CONSTRAINT [FK_ArchVehEmployeeLabour] FOREIGN KEY([ArchVehicleListId])
+REFERENCES [SBCES].[ArchVehicleList] ([ArchVehicleListId])
+GO
+
+ALTER TABLE [SBCES].[ArchVehEmployeeLabour] CHECK CONSTRAINT [FK_ArchVehEmployeeLabour]
+GO
+===========================================================
+oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_VEHICLE_LIST
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_VEHICLE_LIST" 
+   (	"VEH_SERIES_CODE" VARCHAR2(75 BYTE), 
+	"NUM_OF_VEHICLES" VARCHAR2(10 BYTE), 
+	"PROJ_DESC" VARCHAR2(200 BYTE), 
+	"DATE_ARCHIVED" DATE, 
+	"ARCHIVED_BY" VARCHAR2(25 BYTE), 
+	"MAKE" VARCHAR2(25 BYTE), 
+	"MODEL" VARCHAR2(25 BYTE), 
+	"YEAR" VARCHAR2(4 BYTE), 
+	"ENGINE" VARCHAR2(25 BYTE), 
+	"TRANSMISSION" VARCHAR2(25 BYTE), 
+	"DIFFERENTIAL" VARCHAR2(25 BYTE), 
+	"ARCH_VEHICLE_LIST_ID" NUMBER, 
+	"LABOUR_COST" NUMBER(20,2) DEFAULT 0, 
+	"LABOUR_OVERHEAD_AMOUNT" NUMBER(20,2) DEFAULT 0, 
+	"LABOUR_TOTAL" NUMBER(20,2) DEFAULT 0, 
+	"MATERIALS_TOTAL" NUMBER(20,2) DEFAULT 0, 
+	"TOTAL_BUS_ESTIMATE_COST" NUMBER(20,2) DEFAULT 0, 
+	"TOTAL_TAX" NUMBER(20,2), 
+	"TOTAL_COST_TAX" NUMBER(20,2), 
+	"OEM_KITS_TOTAL" NUMBER(20,2) DEFAULT 0, 
+	"SOPNUMBER" VARCHAR2(25 BYTE), 
+	"OLD_ID" NUMBER
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  DDL for Index PK_ARCH_VEHICLE_LIST
+--------------------------------------------------------
+
+  CREATE UNIQUE INDEX "CES"."PK_ARCH_VEHICLE_LIST" ON "CES"."ARCH_VEHICLE_LIST" ("ARCH_VEHICLE_LIST_ID") 
+  PCTFREE 10 INITRANS 2 MAXTRANS 255 COMPUTE STATISTICS 
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_VEHICLE_LIST
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_VEHICLE_LIST" ADD CONSTRAINT "PK_ARCH_VEHICLE_LIST" PRIMARY KEY ("ARCH_VEHICLE_LIST_ID")
+  USING INDEX PCTFREE 10 INITRANS 2 MAXTRANS 255 COMPUTE STATISTICS 
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES"  ENABLE;
+  ALTER TABLE "CES"."ARCH_VEHICLE_LIST" MODIFY ("OEM_KITS_TOTAL" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_VEHICLE_LIST" MODIFY ("TOTAL_BUS_ESTIMATE_COST" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_VEHICLE_LIST" MODIFY ("MATERIALS_TOTAL" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_VEHICLE_LIST" MODIFY ("LABOUR_TOTAL" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_VEHICLE_LIST" MODIFY ("LABOUR_OVERHEAD_AMOUNT" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_VEHICLE_LIST" MODIFY ("LABOUR_COST" NOT NULL ENABLE);
+  ALTER TABLE "CES"."ARCH_VEHICLE_LIST" MODIFY ("ARCH_VEHICLE_LIST_ID" NOT NULL ENABLE);
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchVehicleList]    Script Date: 9/9/2026 2:53:56 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchVehicleList](
+	[ArchVehicleListId] [int] NOT NULL,
+	[VehSeriesCode] [varchar](75) NULL,
+	[NumOfVehicles] [varchar](10) NULL,
+	[ProjDesc] [varchar](200) NULL,
+	[DateEntered] [datetime] NULL,
+	[EnteredBy] [varchar](25) NULL,
+	[Make] [varchar](25) NULL,
+	[Model] [varchar](25) NULL,
+	[Year] [varchar](4) NULL,
+	[Engine] [varchar](25) NULL,
+	[Transmission] [varchar](25) NULL,
+	[Differential] [varchar](25) NULL,
+	[LabourCost] [numeric](20, 2) NOT NULL,
+	[LabourOverheadAmount] [numeric](20, 2) NOT NULL,
+	[LabourTotal] [numeric](20, 2) NOT NULL,
+	[MaterialsTotal] [numeric](20, 2) NOT NULL,
+	[TotalBusEstimateCost] [numeric](20, 2) NOT NULL,
+	[TotalTax] [numeric](20, 2) NULL,
+	[TotalCostTax] [numeric](20, 2) NULL,
+	[OemKitsTotal] [numeric](20, 2) NOT NULL,
+	[Sopnumber] [varchar](25) NULL,
+	[OldId] [int] NULL,
+ CONSTRAINT [PK_ArchVehicleList] PRIMARY KEY CLUSTERED 
+(
+	[ArchVehicleListId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+===================
+oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_VEH_KITS
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_VEH_KITS" 
+   (	"PART_NUMBER" VARCHAR2(30 BYTE), 
+	"ESTIMATED_COST" NUMBER(18,2), 
+	"ARCH_VEHICLE_LIST_ID" NUMBER
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Ref Constraints for Table ARCH_VEH_KITS
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_VEH_KITS" ADD CONSTRAINT "FK_ARCH_VEH_KITS" FOREIGN KEY ("ARCH_VEHICLE_LIST_ID")
+	  REFERENCES "CES"."ARCH_VEHICLE_LIST" ("ARCH_VEHICLE_LIST_ID") ENABLE;
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchVehKits]    Script Date: 9/9/2026 2:54:52 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchVehKits](
+	[PartNumber] [varchar](30) NULL,
+	[EstimatedCost] [numeric](18, 2) NULL,
+	[ArchVehicleListId] [int] NULL
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[ArchVehKits]  WITH CHECK ADD  CONSTRAINT [FK_ArchVehKits] FOREIGN KEY([ArchVehicleListId])
+REFERENCES [SBCES].[ArchVehicleList] ([ArchVehicleListId])
+GO
+
+ALTER TABLE [SBCES].[ArchVehKits] CHECK CONSTRAINT [FK_ArchVehKits]
+GO
+======================================================
+oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_VEH_LABOUR_CC_TOTAL
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_VEH_LABOUR_CC_TOTAL" 
+   (	"ARCH_VEHICLE_LIST_ID" NUMBER, 
+	"COST_CENTRE" VARCHAR2(5 BYTE), 
+	"TOTAL_HOURS" NUMBER(18,2)
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_VEH_LABOUR_CC_TOTAL
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_VEH_LABOUR_CC_TOTAL" MODIFY ("ARCH_VEHICLE_LIST_ID" NOT NULL ENABLE);
+ms sql
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchVehLabourCcTotal]    Script Date: 9/9/2026 2:55:54 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchVehLabourCcTotal](
+	[ArchVehicleListId] [int] NOT NULL,
+	[CostCentre] [varchar](5) NULL,
+	[TotalHours] [numeric](18, 2) NULL
+) ON [PRIMARY]
+GO
+====================================
+oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_VEH_MATERIALS_CC_TOTAL
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_VEH_MATERIALS_CC_TOTAL" 
+   (	"COST_CENTRE" VARCHAR2(5 BYTE), 
+	"TOTAL_COST" NUMBER(18,2), 
+	"ARCH_VEHICLE_LIST_ID" NUMBER
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+ms sql
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchVehMaterialsCcTotal]    Script Date: 9/9/2026 2:57:37 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchVehMaterialsCcTotal](
+	[CostCentre] [varchar](5) NULL,
+	[TotalCost] [numeric](18, 2) NULL,
+	[ArchVehicleListId] [int] NULL
+) ON [PRIMARY]
+GO
+=================================
+oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_VEH_NSC_PARTS_USED
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_VEH_NSC_PARTS_USED" 
+   (	"ORIG_SUPP_NUM" VARCHAR2(50 BYTE), 
+	"ORIG_SUPPLIER_NAME" VARCHAR2(50 BYTE), 
+	"COST_CENTRE" VARCHAR2(4 BYTE), 
+	"QTY_REQD" VARCHAR2(10 BYTE), 
+	"PERCENT_USAGE" VARCHAR2(10 BYTE), 
+	"DATE_ENTERED" DATE, 
+	"ENTERED_BY" VARCHAR2(25 BYTE), 
+	"LINK_CODE" VARCHAR2(30 BYTE), 
+	"COST" NUMBER(18,2), 
+	"LINK_TYPE" VARCHAR2(3 BYTE), 
+	"CORECOST" NUMBER(18,2), 
+	"ARCH_VEHICLE_LIST_ID" NUMBER, 
+	"TOTAL_COST" NUMBER(18,2)
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_VEH_NSC_PARTS_USED
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_VEH_NSC_PARTS_USED" MODIFY ("ARCH_VEHICLE_LIST_ID" NOT NULL ENABLE);
+--------------------------------------------------------
+--  Ref Constraints for Table ARCH_VEH_NSC_PARTS_USED
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_VEH_NSC_PARTS_USED" ADD CONSTRAINT "FK_ARCH_VEH_NSC_PARTS_USED" FOREIGN KEY ("ARCH_VEHICLE_LIST_ID")
+	  REFERENCES "CES"."ARCH_VEHICLE_LIST" ("ARCH_VEHICLE_LIST_ID") ENABLE;
+ms sql
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchVehNscPartsUsed]    Script Date: 9/9/2026 2:58:56 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchVehNscPartsUsed](
+	[OrigSuppNum] [varchar](50) NULL,
+	[OrigSupplierName] [varchar](50) NULL,
+	[CostCentre] [varchar](4) NULL,
+	[QtyReqd] [varchar](10) NULL,
+	[PercentUsage] [varchar](10) NULL,
+	[DateEntered] [datetime] NULL,
+	[EnteredBy] [varchar](25) NULL,
+	[LinkCode] [varchar](30) NULL,
+	[Cost] [numeric](18, 2) NULL,
+	[LinkType] [varchar](3) NULL,
+	[Corecost] [numeric](18, 2) NULL,
+	[ArchVehicleListId] [int] NOT NULL,
+	[TotalCost] [numeric](18, 2) NULL
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[ArchVehNscPartsUsed]  WITH CHECK ADD  CONSTRAINT [FK_ArchVehNscPartsUsed] FOREIGN KEY([ArchVehicleListId])
+REFERENCES [SBCES].[ArchVehicleList] ([ArchVehicleListId])
+GO
+
+ALTER TABLE [SBCES].[ArchVehNscPartsUsed] CHECK CONSTRAINT [FK_ArchVehNscPartsUsed]
+GO
+===========================
+oracle
+--------------------------------------------------------
+--  DDL for Table ARCH_VEH_SC_PARTS_USED
+--------------------------------------------------------
+
+  CREATE TABLE "CES"."ARCH_VEH_SC_PARTS_USED" 
+   (	"MMS_STOCK_CODE" VARCHAR2(30 BYTE), 
+	"DATE_ENTERED" DATE, 
+	"REB_PART_COST" NUMBER(18,2), 
+	"USER_ENTERED" VARCHAR2(50 BYTE), 
+	"MMS_COST" NUMBER(18,2), 
+	"OEM_COST" NUMBER(18,2), 
+	"MMS_REBUILT_CODE" VARCHAR2(30 BYTE), 
+	"COST_CENTRE" VARCHAR2(4 BYTE), 
+	"QTY_REQD" VARCHAR2(10 BYTE), 
+	"PERCENT_USAGE" VARCHAR2(10 BYTE), 
+	"LINK_CODE" VARCHAR2(30 BYTE), 
+	"REBUILT_PART" VARCHAR2(1 BYTE), 
+	"LINK_TYPE" VARCHAR2(3 BYTE), 
+	"CORECOST" NUMBER(18,2), 
+	"ARCH_VEHICLE_LIST_ID" NUMBER, 
+	"TOTAL_COST" NUMBER(18,2), 
+	"SC_KEYWORD" VARCHAR2(50 BYTE), 
+	"SC_DESCRIPTION" VARCHAR2(500 BYTE)
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 1048576 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "CES" ;
+--------------------------------------------------------
+--  Constraints for Table ARCH_VEH_SC_PARTS_USED
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_VEH_SC_PARTS_USED" MODIFY ("ARCH_VEHICLE_LIST_ID" NOT NULL ENABLE);
+--------------------------------------------------------
+--  Ref Constraints for Table ARCH_VEH_SC_PARTS_USED
+--------------------------------------------------------
+
+  ALTER TABLE "CES"."ARCH_VEH_SC_PARTS_USED" ADD CONSTRAINT "FK_ARCH_VEH_SC_PARTS_USED" FOREIGN KEY ("ARCH_VEHICLE_LIST_ID")
+	  REFERENCES "CES"."ARCH_VEHICLE_LIST" ("ARCH_VEHICLE_LIST_ID") ENABLE;
+MS SQL
+USE [CES]
+GO
+
+/****** Object:  Table [SBCES].[ArchVehScPartsUsed]    Script Date: 9/9/2026 2:59:56 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [SBCES].[ArchVehScPartsUsed](
+	[MmsStockCode] [varchar](30) NULL,
+	[DateEntered] [datetime] NULL,
+	[RebPartCost] [numeric](18, 2) NULL,
+	[UserEntered] [varchar](50) NULL,
+	[MmsCost] [numeric](18, 2) NULL,
+	[OemCost] [numeric](18, 2) NULL,
+	[MmsRebuiltCode] [varchar](30) NULL,
+	[CostCentre] [varchar](4) NULL,
+	[QtyReqd] [varchar](10) NULL,
+	[PercentUsage] [varchar](10) NULL,
+	[LinkCode] [varchar](30) NULL,
+	[RebuiltPart] [varchar](1) NULL,
+	[LinkType] [varchar](3) NULL,
+	[Corecost] [numeric](18, 2) NULL,
+	[ArchVehicleListId] [int] NOT NULL,
+	[TotalCost] [numeric](18, 2) NULL,
+	[ScKeyword] [varchar](50) NULL,
+	[ScDescription] [varchar](500) NULL
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [SBCES].[ArchVehScPartsUsed]  WITH CHECK ADD  CONSTRAINT [FK_ArchVehScPartsUsed] FOREIGN KEY([ArchVehicleListId])
+REFERENCES [SBCES].[ArchVehicleList] ([ArchVehicleListId])
+GO
+
+ALTER TABLE [SBCES].[ArchVehScPartsUsed] CHECK CONSTRAINT [FK_ArchVehScPartsUsed]
+GO
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
