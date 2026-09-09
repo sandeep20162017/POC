@@ -1,0 +1,463 @@
+Fix erros in all the python scripts
+
+2026-09-09 16:44:38,545 [ERROR] FATAL ERROR | ('IM002', '[IM002] [Microsoft][ODBC Driver Manager] Data source name not found and no default driver specified (0) (SQLDriverConnect)')
+Traceback (most recent call last):
+  File "C:\ces\ces_refresh_ArchMbMasterlist.py", line 188, in main
+    sql_conn = get_sql_conn()
+  File "C:\ces\ces_refresh_ArchMbMasterlist.py", line 50, in get_sql_conn
+    return pyodbc.connect(conn_str, timeout=60)
+pyodbc.InterfaceError: ('IM002', '[IM002] [Microsoft][ODBC Driver Manager] Data source name not found and no default driver specified (0) (SQLDriverConnect)')
+2026-09-09 16:44:38,548 [INFO] END REFRESH | elapsed=0:00:00.086010
+..
+2026-09-09 16:44:44,661 [INFO] START REFRESH | Oracle={ORACLE_TABLE} | SQL=SBCES.{SQL_TABLE} | MODE=INSERT
+2026-09-09 16:44:44,731 [ERROR] FATAL ERROR | ('IM002', '[IM002] [Microsoft][ODBC Driver Manager] Data source name not found and no default driver specified (0) (SQLDriverConnect)')
+Traceback (most recent call last):
+  File "C:\ces\ces_refresh_ArchRbLabourCcTotal.py", line 136, in main
+  Working python version
+  import sys
+import platform
+import logging
+import pyodbc
+import oracledb
+from datetime import datetime
+
+# =========================================================
+# CONFIG
+# =========================================================
+#ces_Prd	ces@//ocipr-wersc-scan.ttcociclientsub.ttcocivcn.oraclevcn.com:1521/ces_prd_svc.int.ttc.ca
+#CES_TST ORACLE_DSN = "//ocinp-f453r-scan.ttcocidrclients.ttcocidrvcn.oraclevcn.com:1521/ces_upg_svc.int.ttc.ca"
+ORACLE_DSN ="//ocipr-wersc-scan.ttcociclientsub.ttcocivcn.oraclevcn.com:1521/ces_prd_svc.int.ttc.ca"
+ORACLE_USER = "CES"
+ORACLE_PASSWORD = "cesprd1210"
+
+
+SQL_CONN_STR = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=SQL2022UAT;"
+    "DATABASE=CES;"
+    "UID=cesuser;"
+    "PWD=CESUser#UAT;"
+    "TrustServerCertificate=Yes;"
+)
+
+SQL_SCHEMA = "SBCES"
+
+ROUND1_TABLES = [
+    "ArchRbMasterlist",
+    "ArchRbLabourCcTotal",
+    "ArchRbListBuses",
+    "ArchRbMaterialsCcTotal",
+    "ArchRbNscPartsUsed",
+    "ArchRbScPartsUsed",
+    "ArchRbEmployeeLabour",
+]
+
+TABLE_NAME_MAP = {
+    "ArchRbMasterlist": "ARCH_RB_MASTERLIST",
+    "ArchRbLabourCcTotal": "ARCH_RB_LABOUR_CC_TOTAL",
+    "ArchRbListBuses": "ARCH_RB_LIST_BUSES",
+    "ArchRbMaterialsCcTotal": "ARCH_RB_MATERIALS_CC_TOTAL",
+    "ArchRbNscPartsUsed": "ARCH_RB_NSC_PARTS_USED",
+    "ArchRbScPartsUsed": "ARCH_RB_SC_PARTS_USED",
+    "ArchRbEmployeeLabour": "ARCH_RB_EMPLOYEE_LABOUR",
+}
+
+DELETE_ORDER = [
+    "ArchRbEmployeeLabour",
+    "ArchRbScPartsUsed",
+    "ArchRbNscPartsUsed",
+    "ArchRbMaterialsCcTotal",
+    "ArchRbLabourCcTotal",
+    "ArchRbListBuses",
+    "ArchRbMasterlist",
+]
+
+INSERT_ORDER = list(reversed(DELETE_ORDER))
+
+
+# =========================================================
+# LOGGING
+# =========================================================
+
+def setup_logging():
+    logger = logging.getLogger("migration")
+    logger.setLevel(logging.INFO)
+
+    handler = logging.FileHandler("migration_round1.log", mode="a", encoding="utf-8")
+    console = logging.StreamHandler(sys.stdout)
+
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    handler.setFormatter(fmt)
+    console.setFormatter(fmt)
+
+    logger.addHandler(handler)
+    logger.addHandler(console)
+    return logger
+
+logger = setup_logging()
+
+
+# =========================================================
+# CONNECTIONS
+# =========================================================
+
+def get_oracle_conn():
+    return oracledb.connect(
+        user=ORACLE_USER,
+        password=ORACLE_PASSWORD,
+        dsn=ORACLE_DSN
+    )
+
+def get_sql_conn():
+    conn = pyodbc.connect(SQL_CONN_STR, timeout=10)
+    cur = conn.cursor()
+
+    cur.execute("SET ANSI_WARNINGS OFF;")
+
+    for table in ROUND1_TABLES:
+        cur.execute(f"ALTER TABLE {SQL_SCHEMA}.{table} NOCHECK CONSTRAINT ALL;")
+        logger.info(f"Disabled FK constraints for {SQL_SCHEMA}.{table}")
+
+    cur.close()
+    return conn
+
+
+# =========================================================
+# SQL COLUMN LENGTHS
+# =========================================================
+
+def get_sql_column_lengths(sql_conn, table):
+    cur = sql_conn.cursor()
+    cur.execute(f"""
+        SELECT CHARACTER_MAXIMUM_LENGTH
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = '{SQL_SCHEMA}'
+          AND TABLE_NAME = '{table}'
+        ORDER BY ORDINAL_POSITION
+    """)
+    col_lengths = [maxlen if maxlen is not None else None for (maxlen,) in cur.fetchall()]
+    cur.close()
+    return col_lengths
+
+
+# =========================================================
+# CORE HELPERS
+# =========================================================
+
+def delete_sql_table(sql_conn, table):
+    full = f"{SQL_SCHEMA}.{table}"
+    logger.info(f"Deleting SQL rows: {full}")
+    cur = sql_conn.cursor()
+    try:
+        cur.execute(f"DELETE FROM {full}")
+        sql_conn.commit()
+        logger.info(f"Deleted rows from {full}")
+    except Exception as e:
+        sql_conn.rollback()
+        logger.error(f"Delete failed for {full}: {e}")
+        raise
+    finally:
+        cur.close()
+
+
+def truncate_row_to_sql_lengths(row, col_lengths):
+    new_row = []
+    for idx, value in enumerate(row):
+        maxlen = col_lengths[idx]
+
+        if maxlen is None or value is None:
+            new_row.append(value)
+            continue
+
+        if isinstance(value, str) and len(value) > maxlen:
+            logger.warning(
+                f"Truncating value '{value}' to length {maxlen}"
+            )
+            new_row.append(value[:maxlen])
+        else:
+            new_row.append(value)
+
+    return tuple(new_row)
+
+
+def insert_sql_rows(sql_conn, table, rows, explicit_columns=None):
+    full = f"{SQL_SCHEMA}.{table}"
+
+    if not rows:
+        logger.info(f"No rows to insert into {full}")
+        return
+
+    col_lengths = get_sql_column_lengths(sql_conn, table)
+
+    if explicit_columns:
+        col_list = ", ".join(explicit_columns)
+        placeholders = ", ".join(["?"] * len(explicit_columns))
+        sql = f"INSERT INTO {full} ({col_list}) VALUES ({placeholders})"
+    else:
+        placeholders = ", ".join(["?"] * len(rows[0]))
+        sql = f"INSERT INTO {full} VALUES ({placeholders})"
+
+    logger.info(f"Inserting {len(rows)} rows into {full}")
+
+    cur = sql_conn.cursor()
+    cur.fast_executemany = False
+
+    success = 0
+    fail = 0
+
+    for idx, row in enumerate(rows):
+        try:
+            safe_row = truncate_row_to_sql_lengths(row, col_lengths)
+            cur.execute(sql, safe_row)
+            success += 1
+        except Exception as e:
+            fail += 1
+            logger.error(
+                f"Row {idx} failed for {full}: {e} | RowData={row}"
+            )
+
+    try:
+        sql_conn.commit()
+    except Exception as e:
+        logger.error(f"Commit failed for {full}: {e}")
+        sql_conn.rollback()
+
+    logger.info(
+        f"Completed insert for {full}: {success} succeeded, {fail} failed."
+    )
+
+    cur.close()
+
+
+# =========================================================
+# MASTERLIST SPECIAL HANDLING
+# =========================================================
+
+def fetch_oracle_masterlist(oracle_conn):
+    """
+    Oracle ARCH_RB_MASTERLIST columns:
+
+    MMS_STOCK_CODE            VARCHAR2
+    ITEM_REF_NUMBER           VARCHAR2
+    DETAILED_DESC             VARCHAR2
+    KEYWORD                   VARCHAR2
+    CORE_PART_NUM             VARCHAR2
+    REBUILT_STOCK_NUM         VARCHAR2
+    CORE_CHARGE               VARCHAR2
+    JOB_NUMBER                VARCHAR2
+    DATE_ARCHIVED             DATE
+    ARCHIVED_BY               VARCHAR2
+    ESTIMATED_COST            NUMBER
+    SOP_NUMBER                VARCHAR2
+    ARCH_RB_MASTERLIST_ID     NUMBER
+    LABOUR_COST               NUMBER
+    LABOUR_OVERHEAD_AMOUNT    NUMBER
+    LABOUR_TOTAL              NUMBER
+    MATERIALS_TOTAL           NUMBER
+    TOTAL_REBUILT_PART_COST   NUMBER
+    TAX_TOTAL                 NUMBER
+    """
+    logger.info("Fetching Oracle ARCH_RB_MASTERLIST with explicit column order")
+    cur = oracle_conn.cursor()
+    sql = """
+        SELECT
+            MMS_STOCK_CODE,
+            ITEM_REF_NUMBER,
+            DETAILED_DESC,
+            KEYWORD,
+            CORE_PART_NUM,
+            REBUILT_STOCK_NUM,
+            CORE_CHARGE,
+            JOB_NUMBER,
+            DATE_ARCHIVED,
+            ARCHIVED_BY,
+            ESTIMATED_COST,
+            SOP_NUMBER,
+            ARCH_RB_MASTERLIST_ID,
+            LABOUR_COST,
+            LABOUR_OVERHEAD_AMOUNT,
+            LABOUR_TOTAL,
+            MATERIALS_TOTAL,
+            TOTAL_REBUILT_PART_COST,
+            TAX_TOTAL
+        FROM ARCH_RB_MASTERLIST
+    """
+    cur.execute(sql)
+    rows = cur.fetchall()
+    cur.close()
+    logger.info(f"Fetched {len(rows)} rows from ARCH_RB_MASTERLIST")
+    return rows
+
+
+def build_sql_masterlist_rows(oracle_rows):
+    """
+    Map Oracle row → SQL ArchRbMasterlist row:
+
+    SQL columns:
+        ArchRbMasterlistId
+        MmsStockCode
+        ItemRefNumber
+        DetailedDesc
+        Keyword
+        CorePartNum
+        RebuiltStockNum
+        CoreCharge
+        JobNumber
+        DateEntered
+        EnteredBy
+        EstimatedCost
+        SopNumber
+        LabourCost
+        LabourOverheadAmount
+        LabourTotal
+        MaterialsTotal
+        TotalRebuiltPartCost
+        TaxTotal
+        TotalCostTax
+    """
+    sql_rows = []
+
+    for r in oracle_rows:
+        (
+            mms_stock_code,
+            item_ref_number,
+            detailed_desc,
+            keyword,
+            core_part_num,
+            rebuilt_stock_num,
+            core_charge,
+            job_number,
+            date_archived,
+            archived_by,
+            estimated_cost,
+            sop_number,
+            arch_rb_masterlist_id,
+            labour_cost,
+            labour_overhead_amount,
+            labour_total,
+            materials_total,
+            total_rebuilt_part_cost,
+            tax_total,
+        ) = r
+
+        total_cost_tax = None
+        if total_rebuilt_part_cost is not None and tax_total is not None:
+            total_cost_tax = total_rebuilt_part_cost + tax_total
+
+        sql_row = (
+            arch_rb_masterlist_id,      # ArchRbMasterlistId
+            mms_stock_code,             # MmsStockCode
+            item_ref_number,            # ItemRefNumber
+            detailed_desc,              # DetailedDesc
+            keyword,                    # Keyword
+            core_part_num,              # CorePartNum
+            rebuilt_stock_num,          # RebuiltStockNum
+            core_charge,                # CoreCharge
+            job_number,                 # JobNumber
+            date_archived,              # DateEntered
+            archived_by,                # EnteredBy
+            estimated_cost,             # EstimatedCost
+            sop_number,                 # SopNumber
+            labour_cost,                # LabourCost
+            labour_overhead_amount,     # LabourOverheadAmount
+            labour_total,               # LabourTotal
+            materials_total,            # MaterialsTotal
+            total_rebuilt_part_cost,    # TotalRebuiltPartCost
+            tax_total,                  # TaxTotal
+            total_cost_tax,             # TotalCostTax
+        )
+
+        sql_rows.append(sql_row)
+
+    return sql_rows
+
+
+def migrate_masterlist(oracle_conn, sql_conn):
+    logger.info("=== Migrating ArchRbMasterlist with explicit mapping ===")
+    oracle_rows = fetch_oracle_masterlist(oracle_conn)
+    sql_rows = build_sql_masterlist_rows(oracle_rows)
+
+    explicit_columns = [
+        "ArchRbMasterlistId",
+        "MmsStockCode",
+        "ItemRefNumber",
+        "DetailedDesc",
+        "Keyword",
+        "CorePartNum",
+        "RebuiltStockNum",
+        "CoreCharge",
+        "JobNumber",
+        "DateEntered",
+        "EnteredBy",
+        "EstimatedCost",
+        "SopNumber",
+        "LabourCost",
+        "LabourOverheadAmount",
+        "LabourTotal",
+        "MaterialsTotal",
+        "TotalRebuiltPartCost",
+        "TaxTotal",
+        "TotalCostTax",
+    ]
+
+    insert_sql_rows(sql_conn, "ArchRbMasterlist", sql_rows, explicit_columns=explicit_columns)
+    logger.info("=== Completed ArchRbMasterlist ===")
+
+
+# =========================================================
+# GENERIC TABLE MIGRATION (OTHER ROUND1 TABLES)
+# =========================================================
+
+def fetch_oracle_rows_generic(oracle_conn, oracle_table):
+    logger.info(f"Fetching Oracle rows: {oracle_table}")
+    cur = oracle_conn.cursor()
+    cur.execute(f"SELECT * FROM {oracle_table}")
+    rows = cur.fetchall()
+    cur.close()
+    logger.info(f"Fetched {len(rows)} rows from {oracle_table}")
+    return rows
+
+
+def migrate_table_generic(oracle_conn, sql_conn, sql_table):
+    oracle_table = TABLE_NAME_MAP[sql_table]
+    logger.info(f"=== Migrating {sql_table} (Oracle={oracle_table}) ===")
+    rows = fetch_oracle_rows_generic(oracle_conn, oracle_table)
+    insert_sql_rows(sql_conn, sql_table, rows)
+    logger.info(f"=== Completed {sql_table} ===")
+
+
+# =========================================================
+# MAIN
+# =========================================================
+
+def main():
+    logger.info("=== ROUND 1 MIGRATION START ===")
+    logger.info(f"Python: {sys.version}")
+    logger.info(f"Arch: {platform.architecture()}")
+
+    oracle_conn = get_oracle_conn()
+    sql_conn = get_sql_conn()
+
+    logger.info("=== DELETE PHASE ===")
+    for table in DELETE_ORDER:
+        delete_sql_table(sql_conn, table)
+
+    logger.info("=== INSERT PHASE (FK disabled) ===")
+
+    # 1. Masterlist with explicit mapping
+    migrate_masterlist(oracle_conn, sql_conn)
+
+    # 2. Other tables with generic SELECT * → INSERT VALUES
+    for table in INSERT_ORDER:
+        if table == "ArchRbMasterlist":
+            continue
+        migrate_table_generic(oracle_conn, sql_conn, table)
+
+    oracle_conn.close()
+    sql_conn.close()
+
+    logger.info("=== ROUND 1 MIGRATION COMPLETE ===")
+
+
+if __name__ == "__main__":
+    main()
