@@ -1,0 +1,184 @@
+// PDF Actions
+case 'saveFullReportPdf':
+    saveReportAsPdf('full');
+    break;
+case 'saveVehicleEstimatePdf':
+    saveReportAsPdf('vehicle');
+    break;
+case 'saveLabourDetailsPdf':
+    saveReportAsPdf('labour');
+    break;
+case 'saveMaterialsEstimatePdf':
+    saveReportAsPdf('materials');
+    break;
+
+....
+// ===== SAVE AS PDF =====
+function saveReportAsPdf(reportType) {
+    var container = document.getElementById('reportContainer');
+    if (!container) {
+        alert('Unable to find the estimate report.');
+        return;
+    }
+
+    // Check if VehicleReport is available
+    if (typeof VehicleReport !== 'undefined' && VehicleReport.saveAsPdf) {
+        VehicleReport.saveAsPdf('reportContainer', reportType);
+        return;
+    }
+
+    // Fallback: Use Kendo directly
+    if (typeof kendo === 'undefined' || !kendo.drawing) {
+        alert('Kendo UI is not available. Please ensure Kendo UI is loaded.');
+        return;
+    }
+
+    // Use the existing Kendo PDF export logic
+    var wrapper = createExportWrapper(container, reportType);
+    if (!wrapper) return;
+
+    kendo.drawing.drawDOM(wrapper, {
+        paperSize: 'Letter',
+        landscape: true,
+        margin: { top: '0.35in', bottom: '0.35in', left: '0.35in', right: '0.35in' },
+        scale: 0.78,
+        multiPage: true
+    }).then(function(group) {
+        return kendo.drawing.exportPDF(group, {
+            paperSize: 'Letter',
+            landscape: true,
+            margin: { top: '0.35in', bottom: '0.35in', left: '0.35in', right: '0.35in' }
+        });
+    }).done(function(dataUri) {
+        document.body.removeChild(wrapper);
+        var fileName = getReportFileName(reportType) + '.pdf';
+        kendo.saveAs({ dataURI: dataUri, fileName: fileName });
+    }).fail(function(err) {
+        if (wrapper.parentNode) document.body.removeChild(wrapper);
+        console.error('PDF export error:', err);
+        alert('Error generating PDF: ' + (err && err.message ? err.message : 'Unknown error.'));
+    });
+}
+
+// ===== COPY TO CLIPBOARD =====
+function copyReportToClipboard(reportType) {
+    var container = document.getElementById('reportContainer');
+    if (!container) {
+        alert('Unable to find the estimate report.');
+        return;
+    }
+
+    // Check if VehicleReport is available
+    if (typeof VehicleReport !== 'undefined' && VehicleReport.copyToClipboard) {
+        VehicleReport.copyToClipboard('reportContainer', reportType);
+        return;
+    }
+
+    // Fallback: Use Kendo directly
+    if (typeof kendo === 'undefined' || !kendo.drawing) {
+        alert('Kendo UI is not available. Please ensure Kendo UI is loaded.');
+        return;
+    }
+
+    if (!navigator.clipboard) {
+        alert('Clipboard API is not available.');
+        return;
+    }
+
+    var wrapper = createExportWrapper(container, reportType);
+    if (!wrapper) return;
+
+    kendo.drawing.drawDOM(wrapper, {
+        paperSize: 'auto',
+        margin: '1cm',
+        scale: 1
+    }).then(function(group) {
+        return kendo.drawing.exportImage(group);
+    }).done(function(data) {
+        document.body.removeChild(wrapper);
+        fetch(data)
+            .then(function(res) { return res.blob(); })
+            .then(function(blob) {
+                navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                var typeNames = {
+                    'full': 'Full Vehicle Estimate Report',
+                    'vehicle': 'Vehicle Estimate Report',
+                    'labour': 'Labour Details Report',
+                    'materials': 'Materials Estimate Report'
+                };
+                alert((typeNames[reportType] || 'Report') + ' copied to clipboard.');
+            })
+            .catch(function(err) {
+                console.error('Clipboard error:', err);
+                alert('Error copying to clipboard: ' + err.message);
+            });
+    }).fail(function(err) {
+        if (wrapper.parentNode) document.body.removeChild(wrapper);
+        console.error('Export image error:', err);
+        alert('Error generating image: ' + (err && err.message ? err.message : 'Unknown error.'));
+    });
+}
+
+// ===== HELPER: Create Export Wrapper =====
+function createExportWrapper(container, reportType) {
+    var wrapper = document.createElement('div');
+    wrapper.id = 'exportWrapper_' + Date.now();
+    wrapper.style.cssText = [
+        'padding: 20px',
+        'background: white',
+        'font-family: "Segoe UI", Arial, sans-serif',
+        'position: absolute',
+        'left: -100000px',
+        'top: 0',
+        'width: 1100px',
+        'z-index: 9999'
+    ].join('; ');
+
+    var clone = container.cloneNode(true);
+
+    // Update title based on report type
+    var titles = {
+        'full': 'FULL VEHICLE ESTIMATE REPORT',
+        'vehicle': 'VEHICLE COST ESTIMATE REPORT',
+        'labour': 'LABOUR DETAILS REPORT',
+        'materials': 'MATERIALS ESTIMATE REPORT'
+    };
+    var titleEl = clone.querySelector('h1');
+    if (titleEl) {
+        titleEl.textContent = titles[reportType] || titles.vehicle;
+    }
+
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
+    // Remove UI elements
+    var noPrintElements = wrapper.querySelectorAll('.no-print, button, .k-button, .k-context-menu, .report-toolbar, .report-menu-dropdown');
+    noPrintElements.forEach(function(el) {
+        el.style.display = 'none';
+    });
+
+    // Ensure sections are visible
+    var sections = wrapper.querySelectorAll('.detail-section, .side-by-side, .totals-row, .grand-total-section');
+    sections.forEach(function(el) {
+        el.style.display = '';
+        el.style.visibility = 'visible';
+    });
+
+    void wrapper.offsetWidth;
+    void wrapper.offsetHeight;
+
+    return wrapper;
+}
+
+// ===== HELPER: Get Report File Name =====
+function getReportFileName(reportType) {
+    var typeMap = {
+        'full': 'FullVehicleEstimate',
+        'vehicle': 'VehicleEstimate',
+        'labour': 'LabourDetails',
+        'materials': 'MaterialsEstimate'
+    };
+    var typeName = typeMap[reportType] || 'VehicleEstimate';
+    var estimateNum = (document.getElementById('estimateNumber')?.textContent || 'Estimate').trim().replace(/[^a-z0-9_.-]/gi, '_');
+    return typeName + '_' + estimateNum;
+}
