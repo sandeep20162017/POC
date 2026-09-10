@@ -1,0 +1,702 @@
+ces_refresh_config.json
+json
+{
+  "oracle": {
+    "dsn": "YOUR_ORACLE_DSN_HERE",
+    "user": "YOUR_ORACLE_USER",
+    "password": "YOUR_ORACLE_PASSWORD"
+  },
+  "sqlserver": {
+    "driver": "auto",
+    "server": "YOUR_SQL_SERVER",
+    "database": "CES",
+    "user": "YOUR_SQL_USER",
+    "password": "YOUR_SQL_PASSWORD",
+    "trust_server_certificate": true
+  },
+  "settings": {
+    "log_directory": "logs",
+    "default_mode": "FULL",
+    "tables": [
+      "CostCentres",
+      "Differential",
+      "EmployeeSalaries",
+      "Engines",
+      "Transmissions",
+      "TypeOfVehicle",
+      "ListOfBuses",
+      "LabourTaskDescriptions",
+      "MbList",
+      "RbMasterlist",
+      "StockCodedParts",
+      "NonStockCodedParts",
+      "NscPartsUsed",
+      "ScPartsUsed",
+      "ScOemkitsTextData",
+      "KitsMasterlist",
+      "KitsUsed",
+      "SubKits",
+      "VehicleList",
+      "VendorPartDesc",
+      "EmployeeLabour",
+      "EmplClass",
+      "MbListOfBuses",
+      "RbListOfBuses"
+    ]
+  }
+}
+The tables array in the JSON is the insertion order (parents → children). Delete order is the reverse, computed automatically.
+
+📁 ces_refresh_common.py
+python
+"""
+Shared helpers for CES Oracle -> SQL Server refresh.
+Oracle is READ ONLY. All DML is issued against SQL Server only.
+Identity columns are preserved via SET IDENTITY_INSERT ON.
+"""
+import json
+import logging
+import os
+import re
+from datetime import datetime
+from pathlib import Path
+
+import pyodbc
+import oracledb
+
+BASE_DIR = Path(__file__).resolve().parent
+CONFIG_FILE = BASE_DIR / "ces_refresh_config.json"
+
+with CONFIG_FILE.open("r", encoding="utf-8") as f:
+    CONFIG = json.load(f)
+
+ORACLE_DSN = CONFIG["oracle"]["dsn"]
+ORACLE_USER = CONFIG["oracle"]["user"]
+ORACLE_PASSWORD = CONFIG["oracle"]["password"]
+SQL_CFG = CONFIG["sqlserver"]
+SQL_SCHEMA = "SBCES"
+
+
+def make_logger(name, log_dir=None):
+    log_dir = Path(log_dir or BASE_DIR / CONFIG["settings"].get("log_directory", "logs"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"{name}_refresh.log"
+
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+    fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    sh = logging.StreamHandler()
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    fh.setFormatter(fmt)
+    sh.setFormatter(fmt)
+    logger.addHandler(fh)
+    logger.addHandler(sh)
+    return logger
+
+
+def get_oracle_conn():
+    return oracledb.connect(user=ORACLE_USER, password=ORACLE_PASSWORD, dsn=ORACLE_DSN)
+
+
+def get_sql_conn(logger):
+    configured_driver = str(SQL_CFG.get("driver", "auto")).strip()
+    if configured_driver.lower() == "auto":
+        installed = pyodbc.drivers()
+        candidates = [d for d in installed if "SQL Server" in d and "Native Client" not in d]
+        if not candidates:
+            raise RuntimeError(
+                "No Microsoft SQL Server ODBC driver is installed. "
+                f"Installed ODBC drivers: {installed}"
+            )
+        def rank(n):
+            m = re.search(r"(\d+)", n)
+            return int(m.group(1)) if m else 0
+        driver = sorted(candidates, key=rank, reverse=True)[0]
+        logger.info("SQL ODBC DRIVER | auto-selected=%s", driver)
+    else:
+        driver = configured_driver
+        if driver not in pyodbc.drivers():
+            raise RuntimeError(
+                f"Configured SQL Server ODBC driver '{driver}' is not installed. "
+                f"Installed ODBC drivers: {pyodbc.drivers()}"
+            )
+
+    conn_str = (
+        "DRIVER={" + driver + "};"
+        "SERVER=" + str(SQL_CFG["server"]) + ";"
+        "DATABASE=" + str(SQL_CFG["database"]) + ";"
+        "UID=" + str(SQL_CFG["user"]) + ";"
+        "PWD=" + str(SQL_CFG["password"]) + ";"
+        "TrustServerCertificate=" + (
+            "Yes" if SQL_CFG.get("trust_server_certificate", True) else "No"
+        ) + ";"
+    )
+    logger.info(
+        "SQL CONNECTION | server=%s | database=%s | driver=%s",
+        SQL_CFG["server"], SQL_CFG["database"], driver,
+    )
+    return pyodbc.connect(conn_str, timeout=60)
+
+
+def refresh_table(
+    *,
+    logger,
+    oracle_table,
+    sql_table,
+    oracle_columns,
+    sql_columns,
+    identity_column=None,
+    mode=None,
+):
+    """
+    Refresh a single table.
+
+    identity_column: name of the SQL Server IDENTITY column to preserve.
+                     If provided, SET IDENTITY_INSERT ON/OFF wraps the INSERT
+                     and the column is automatically appended to the column lists.
+    mode: FULL / INSERT / DELETE. Defaults to CES_REFRESH_MODE env or config.
+    """
+    mode = (mode or os.environ.get(
+        "CES_REFRESH_MODE",
+        CONFIG["settings"].get("default_mode", "FULL"),
+    )).upper()
+
+    # If preserving identity, append identity column to both lists.
+    ora_cols = list(oracle_columns)
+    sql_cols = list(sql_columns)
+    if identity_column:
+        if identity_column not in sql_cols:
+            sql_cols.append(identity_column)
+            # identity column must map from an Oracle column of the same ordinal.
+            # If identity_column not already in ora_cols, the caller must have
+            # provided it as the first element of oracle_columns.
+            if identity_column not in ora_cols:
+                raise ValueError(
+                    f"identity_column='{identity_column}' must also exist in "
+                    f"oracle_columns for {oracle_table}"
+                )
+
+    started = datetime.now()
+    logger.info("=" * 100)
+    logger.info("START REFRESH | Oracle=%s | SQL=SBCES.%s | MODE=%s",
+                oracle_table, sql_table, mode)
+
+    o_conn = None
+    s_conn = None
+
+    def o_count(conn):
+        cur = conn.cursor()
+        try:
+            cur.execute(f"SELECT COUNT(*) FROM {oracle_table}")
+            return int(cur.fetchone()[0])
+        finally:
+            cur.close()
+
+    def o_fetch(conn):
+        sql = "SELECT " + ", ".join(ora_cols) + f" FROM {oracle_table}"
+        cur = conn.cursor()
+        try:
+            cur.execute(sql)
+            return cur.fetchall()
+        finally:
+            cur.close()
+
+    def s_count(conn):
+        cur = conn.cursor()
+        try:
+            cur.execute(f"SELECT COUNT(*) FROM [{SQL_SCHEMA}].[{sql_table}]")
+            return int(cur.fetchone()[0])
+        finally:
+            cur.close()
+
+    def s_delete(conn):
+        cur = conn.cursor()
+        try:
+            cur.execute(f"DELETE FROM [{SQL_SCHEMA}].[{sql_table}]")
+            logger.info("SQL DELETE | SBCES.%s | rows=%s", sql_table, cur.rowcount)
+        finally:
+            cur.close()
+
+    def s_insert(conn, rows):
+        col_list = ", ".join(sql_cols)
+        ph = ", ".join("?" for _ in sql_cols)
+        sql = f"INSERT INTO [{SQL_SCHEMA}].[{sql_table}] ({col_list}) VALUES ({ph})"
+        cur = conn.cursor()
+        inserted = 0
+        failed = 0
+        id_on = False
+        try:
+            if identity_column:
+                cur.execute(f"SET IDENTITY_INSERT [{SQL_SCHEMA}].[{sql_table}] ON")
+                id_on = True
+            cur.fast_executemany = True
+            try:
+                cur.executemany(sql, rows)
+                inserted = len(rows)
+                logger.info("BULK INSERT | rows=%s", inserted)
+            except Exception as bulk_exc:
+                conn.rollback()
+                if id_on:
+                    try:
+                        cur.execute(f"SET IDENTITY_INSERT [{SQL_SCHEMA}].[{sql_table}] ON")
+                    except Exception:
+                        pass
+                logger.warning("BULK INSERT FAILED | retrying row-by-row | error=%s", bulk_exc)
+                cur.fast_executemany = False
+                for idx, row in enumerate(rows, 1):
+                    try:
+                        cur.execute(sql, row)
+                        inserted += 1
+                    except Exception as exc:
+                        failed += 1
+                        logger.error("ROW FAILED | row=%s | error=%s | data=%r",
+                                     idx, exc, row)
+            return inserted, failed
+        finally:
+            if id_on:
+                try:
+                    cur.execute(f"SET IDENTITY_INSERT [{SQL_SCHEMA}].[{sql_table}] OFF")
+                except Exception:
+                    pass
+            cur.close()
+
+    try:
+        o_conn = get_oracle_conn()
+        s_conn = get_sql_conn(logger)
+        ocount = o_count(o_conn)
+        logger.info("ORACLE COUNT | %s = %s", oracle_table, ocount)
+
+        if mode == "DELETE":
+            s_delete(s_conn)
+            s_conn.commit()
+            logger.info("SQL COUNT AFTER DELETE | %s", s_count(s_conn))
+
+        elif mode in ("INSERT", "FULL"):
+            rows = o_fetch(o_conn)
+            logger.info("FETCHED FROM ORACLE | %s rows", len(rows))
+            if len(rows) != ocount:
+                logger.error("ORACLE FETCH COUNT MISMATCH | COUNT=%s | FETCHED=%s",
+                             ocount, len(rows))
+                s_conn.rollback()
+            else:
+                if mode == "FULL":
+                    s_delete(s_conn)
+                inserted, failed = s_insert(s_conn, rows)
+                if failed == 0 and inserted == len(rows):
+                    s_conn.commit()
+                    logger.info(
+                        "RESULT | Oracle=%s | Inserted=%s | Failed=%s | SQL=%s",
+                        ocount, inserted, failed, s_count(s_conn),
+                    )
+                    logger.info("STATUS | SUCCESS | COUNTS MATCH")
+                else:
+                    s_conn.rollback()
+                    logger.error(
+                        "STATUS | FAILED | TRANSACTION ROLLED BACK | Inserted=%s | Failed=%s",
+                        inserted, failed,
+                    )
+        else:
+            logger.error("INVALID CES_REFRESH_MODE=%s | expected FULL, INSERT, or DELETE", mode)
+
+    except Exception as exc:
+        if s_conn is not None:
+            try:
+                s_conn.rollback()
+            except Exception:
+                pass
+        logger.exception("FATAL ERROR | %s", exc)
+    finally:
+        for c in (o_conn, s_conn):
+            if c is not None:
+                try:
+                    c.close()
+                except Exception:
+                    pass
+        logger.info("END REFRESH | elapsed=%s", datetime.now() - started)
+        logger.info("=" * 100)
+📁 ces_refresh_all.py (single script for all tables)
+python
+"""
+CES Oracle -> SQL Server refresh driver.
+
+- Iterates every table in one run.
+- INSERT order (parents first) comes from ces_refresh_config.json -> settings.tables.
+- DELETE order (children first) is the reverse of that list.
+- FULL mode = reverse-order DELETE for all tables, then forward-order INSERT.
+  This satisfies FK constraints across the whole schema.
+- Identity columns are preserved via SET IDENTITY_INSERT ON.
+
+Run:
+    python ces_refresh_all.py
+
+Modes (env CES_REFRESH_MODE, overrides config default):
+    FULL   - delete everything, then insert everything (default)
+    INSERT - insert only (no delete)
+    DELETE - delete only
+"""
+import os
+import sys
+from datetime import datetime
+
+from ces_refresh_common import (
+    CONFIG, make_logger, refresh_table,
+)
+
+
+# ---------------------------------------------------------------------------
+# Table definitions.  Order of this dict is the INSERT order (parents first).
+# Each entry:
+#   oracle_table      : Oracle table name
+#   sql_table         : SQL Server table name (schema is SBCES)
+#   oracle_columns    : Oracle column names in SELECT order
+#   sql_columns       : SQL Server column names in INSERT order (same length)
+#   identity_column   : (optional) SQL Server IDENTITY column to preserve
+# ---------------------------------------------------------------------------
+TABLES = {
+    "CostCentres": dict(
+        oracle_table="COST_CENTRES",
+        sql_table="CostCentres",
+        oracle_columns=["NAME", "DATE_ENTERED", "COST_CENTRE"],
+        sql_columns=["Name", "DateEntered", "CostCentre"],
+    ),
+    "Differential": dict(
+        oracle_table="DIFFERENTIAL",
+        sql_table="Differential",
+        oracle_columns=["NAME"],
+        sql_columns=["Name"],
+    ),
+    "EmployeeSalaries": dict(
+        oracle_table="EMPLOYEE_SALARIES",
+        sql_table="EmployeeSalaries",
+        oracle_columns=["WAGE_GROUP", "RATE_PER_HOUR", "DATE_ENTERED"],
+        sql_columns=["WageGroup", "RatePerHour", "DateEntered"],
+    ),
+    "Engines": dict(
+        oracle_table="ENGINES",
+        sql_table="Engines",
+        oracle_columns=["NAME"],
+        sql_columns=["Name"],
+    ),
+    "Transmissions": dict(
+        oracle_table="TRANSMISSIONS",
+        sql_table="Transmissions",
+        oracle_columns=["NAME"],
+        sql_columns=["Name"],
+    ),
+    "TypeOfVehicle": dict(
+        oracle_table="TYPE_OF_VEHICLE",
+        sql_table="TypeOfVehicle",
+        oracle_columns=["MAKE", "MODEL", "YEAR"],
+        sql_columns=["Make", "Model", "Year"],
+    ),
+    "ListOfBuses": dict(
+        oracle_table="LIST_OF_BUSES",
+        sql_table="ListOfBuses",
+        oracle_columns=["LIST_ID", "DESCRIPTION"],
+        sql_columns=["ListId", "Description"],
+    ),
+    "LabourTaskDescriptions": dict(
+        oracle_table="LABOUR_TASK_DESCRIPTIONS",
+        sql_table="LabourTaskDescriptions",
+        oracle_columns=["TASK_ID", "TASK_DESCRIPTION"],
+        sql_columns=["TaskId", "TaskDescription"],
+    ),
+    "MbList": dict(
+        oracle_table="MB_LIST",
+        sql_table="MbList",
+        oracle_columns=[
+            "MB_NUMBER", "KEYWORD", "DESCRIPTION", "BUS_TYPE", "NUM_BUS_COMP",
+            "VENDOR_PART_NUM", "BUY_CODE", "REBUILD_CODE", "CORE_CODE",
+            "ANNUAL_USAGE", "BENCH_NUMBER", "SAMPLE_PROVIDED", "RECOMMENDATION",
+            "REMAN_COST", "EXTERNAL_COST", "BUY_NEW_COST", "INTERNAL_COST",
+            "SOP_NUMBER", "CORE_COST", "JOB_NUMBER", "DATE_OPENED",
+            "READMANUALNEWPRICE",
+        ],
+        sql_columns=[
+            "MbNumber", "Keyword", "Description", "BusType", "NumBusComp",
+            "VendorPartNum", "BuyCode", "RebuildCode", "CoreCode",
+            "AnnualUsage", "BenchNumber", "SampleProvided", "Recommendation",
+            "RemanCost", "ExternalCost", "BuyNewCost", "InternalCost",
+            "SopNumber", "CoreCost", "JobNumber", "DateOpened",
+            "ReadManualNewPrice",
+        ],
+    ),
+    "RbMasterlist": dict(
+        oracle_table="RB_MASTERLIST",
+        sql_table="RbMasterlist",
+        # NOTE: identity RbMasterlistId is auto-generated by Oracle? No - it does
+        # not exist in Oracle. Leave identity_column=None so it's auto-assigned.
+        oracle_columns=[
+            "MMS_STOCK_CODE", "ITEM_REF_NUMBER", "DETAILED_DESC", "KEYWORD",
+            "CORE_PART_NUM", "REBUILT_STOCK_NUM", "CORE_CHARGE", "JOB_NUMBER",
+            "DATE_MODIFIED", "LAST_MODIFIED_BY", "ESTIMATED_COST", "SOP_NUMBER",
+            "BUY_NEW_COST", "REMAN_COST", "EXTERNAL_COST", "ACTIVE",
+        ],
+        sql_columns=[
+            "MmsStockCode", "ItemRefNumber", "DetailedDesc", "Keyword",
+            "CorePartNum", "RebuiltStockNum", "CoreCharge", "JobNumber",
+            "DateEntered", "LastModifiedBy", "EstimatedCost", "SopNumber",
+            "BuyNewCost", "RemanCost", "ExternalCost", "Active",
+        ],
+    ),
+    "StockCodedParts": dict(
+        oracle_table="STOCK_CODED_PARTS",
+        sql_table="StockCodedParts",
+        oracle_columns=[
+            "MMS_STOCK_CODE", "CORE_PART_NUMBER", "PART_TYPE", "JOB_NUMBER",
+            "DETAILED_DESC", "DATE_ENTERED", "ITEM_REF_NUMBER", "OVERHEADTYPE",
+            "CORE_CHARGE", "PART_COST", "LAST_MODIFIED_DATE", "LAST_MODIFIED_BY",
+            "ADDED_BY", "MMS_NEW_COST", "OEM_PART_COST", "MMS_SYNC_DATE",
+            "ORIG_SUPPLIER_NUM", "ORIG_SUPPLIER_NAME",
+        ],
+        sql_columns=[
+            "MmsStockCode", "CorePartNumber", "PartType", "JobNumber",
+            "DetailedDesc", "DateEntered", "ItemRefNumber", "OverheadType",
+            "CoreCharge", "PartCost", "LastModifiedDate", "LastModifiedBy",
+            "AddedBy", "MmsNewCost", "OemPartCost", "MmsSyncDate",
+            "OrigSupplierNum", "OrigSupplierName",
+        ],
+    ),
+    "NonStockCodedParts": dict(
+        oracle_table="NON_STOCK_CODED_PARTS",
+        sql_table="NonStockCodedParts",
+        oracle_columns=[
+            "ORIG_SUPPLIER_NUM", "ORIG_SUPPLIER_NAME", "DATE_ENTERED",
+            "OEM_PART_COST", "DETAILED_DESC", "PART_ADDED_BY",
+            "LAST_MODIFIED_BY", "LAST_MODIFIED_DATE", "KEYWORD", "ID",
+        ],
+        sql_columns=[
+            "OrigSupplierNum", "OrigSupplierName", "DateEntered",
+            "OemPartCost", "DetailedDesc", "PartAddedBy",
+            "LastModifiedBy", "LastModifiedDate", "Keyword", "Id",
+        ],
+    ),
+    "NscPartsUsed": dict(
+        oracle_table="NSC_PARTS_USED",
+        sql_table="NscPartsUsed",
+        # Oracle has ID (no identity). SQL Server has Oid IDENTITY + Id (int).
+        # We preserve Oracle ID into SQL Server Id; Oid is auto-assigned.
+        oracle_columns=[
+            "ORIG_SUPP_NUM", "ORIG_SUPPLIER_NAME", "COST_CENTRE", "QTY_REQD",
+            "PERCENT_USAGE", "DATE_ENTERED", "ENTERED_BY", "LAST_MODIFIED_BY",
+            "LAST_MODIFIED_DATE", "LINK_CODE", "COST", "LINK_TYPE",
+            "CORECOST", "ID",
+        ],
+        sql_columns=[
+            "OrigSuppNum", "OrigSupplierName", "CostCentre", "QtyReqd",
+            "PercentUsage", "DateEntered", "EnteredBy", "LastModifiedBy",
+            "LastModifiedDate", "LinkCode", "Cost", "LinkType",
+            "CoreCost", "Id",
+        ],
+    ),
+    "ScPartsUsed": dict(
+        oracle_table="SC_PARTS_USED",
+        sql_table="ScPartsUsed",
+        # SQL Server Id is IDENTITY and has no Oracle counterpart.
+        # Leave identity_column=None so it is auto-assigned.
+        oracle_columns=[
+            "MMS_STOCK_CODE", "DATE_ENTERED", "REB_PART_COST", "USER_ENTERED",
+            "MMS_COST", "OEM_COST", "LAST_MODIFIED_BY", "LAST_MODIFIED_DATE",
+            "MMS_REBUILT_CODE", "COST_CENTRE", "QTY_REQD", "PERCENT_USAGE",
+            "LINK_CODE", "REBUILT_PART", "LINK_TYPE", "CORECOST",
+            "ORIG_SUP_NUM", "ORIG_SUPPLIER_NAME",
+        ],
+        sql_columns=[
+            "MmsStockCode", "DateEntered", "RebPartCost", "EnteredBy",
+            "MmsCost", "OemCost", "LastModifiedBy", "LastModifiedDate",
+            "MmsRebuiltCode", "CostCentre", "QtyReqd", "PercentUsage",
+            "LinkCode", "RebuiltPart", "LinkType", "CoreCost",
+            "OrigSupNum", "OrigSupplierName",
+        ],
+    ),
+    "ScOemkitsTextData": dict(
+        oracle_table="SC_OEMKITS_TEXT_DATA",
+        sql_table="ScOemkitsTextData",
+        oracle_columns=["MMS_NEW_CODE", "TEXT_DATA"],
+        sql_columns=["MmsNewCode", "TextData"],
+    ),
+    "KitsMasterlist": dict(
+        oracle_table="KITS_MASTERLIST",
+        sql_table="KitsMasterlist",
+        oracle_columns=[
+            "ESTIMATED_COST", "KEYWORD", "DETAILED_DESC", "MODIFIED_LAST_BY",
+            "MODIFIED_LAST_DATE", "DATE_ENTERED", "PART_NUMBER",
+        ],
+        sql_columns=[
+            "EstimatedCost", "Keyword", "DetailedDesc", "LastModifiedBy",
+            "LastModifiedDate", "DateEntered", "PartNumber",
+        ],
+    ),
+    "KitsUsed": dict(
+        oracle_table="KITS_USED",
+        sql_table="KitsUsed",
+        oracle_columns=[
+            "PART_NUMBER", "DATE_ENTERED", "USER_ENTERED", "LAST_MODIFIED_BY",
+            "LAST_MODIFIED_DATE", "COST_CENTRE", "LINK_CODE",
+        ],
+        sql_columns=[
+            "PartNumber", "DateEntered", "EnteredBy", "LastModifiedBy",
+            "LastModifiedDate", "CostCentre", "LinkCode",
+        ],
+    ),
+    "SubKits": dict(
+        oracle_table="SUB_KITS",
+        sql_table="SubKits",
+        oracle_columns=[
+            "KIT_PART_NUMBER", "PART_TYPE", "SUPPLIER_NUMBER", "SUPPLIER_NAME",
+            "STOCK_CODE", "QTY", "SUB_KIT_LETTER", "DESCRIPTION", "SEQUENCE",
+        ],
+        sql_columns=[
+            "KitPartNumber", "PartType", "SupplierNumber", "SupplierName",
+            "StockCode", "Qty", "SubKitLetter", "Description", "Sequence",
+        ],
+    ),
+    "VehicleList": dict(
+        oracle_table="VEHICLE_LIST",
+        sql_table="VehicleList",
+        oracle_columns=[
+            "VEHICLE_LIST_ID", "VEH_SERIES_CODE", "NUM_OF_VEHICLES", "PROJ_DESC",
+            "DATE_ENTERED", "ENTERED_BY", "MODIFIED_LAST_BY", "MODIFIED_LAST_DATE",
+            "MAKE", "MODEL", "YEAR", "ENGINE", "TRANSMISSION", "DIFFERENTIAL",
+            "SOPNUMBER",
+        ],
+        sql_columns=[
+            "VehicleListId", "VehSeriesCode", "NumOfVehicles", "ProjDesc",
+            "DateEntered", "EnteredBy", "ModifiedLastBy", "ModifiedLastDate",
+            "Make", "Model", "Year", "Engine", "Transmission", "Differential",
+            "Sopnumber",
+        ],
+    ),
+    "VendorPartDesc": dict(
+        oracle_table="VENDOR_PART_DESC",
+        sql_table="VendorPartDesc",
+        oracle_columns=[
+            "PART_NUMBER", "PRINT_SEQ", "VENDOR_PART_NUMBER",
+            "BUSINESS_NAME", "PART_XDESC_ED_LINE",
+        ],
+        sql_columns=[
+            "PartNumber", "PrintSeq", "VendorPartNumber",
+            "BusinessName", "PartXdescEdLine",
+        ],
+    ),
+    "EmployeeLabour": dict(
+        oracle_table="EMPLOYEE_LABOUR",
+        sql_table="EmployeeLabour",
+        # Oracle has no ID. SQL Server Id is IDENTITY -> auto-assigned.
+        # Leave identity_column=None.
+        oracle_columns=[
+            "LABOUR_DEFN", "DATE_ENTERED", "LINK_NUMBER", "TYPEID",
+            "COSTCENTRE", "TASK", "LABOUR_TYPE", "USAGE", "HRS_REQD",
+            "ADJ_HRS", "DATE_REVISED", "TIME_ADDITION", "REBUILT_PART_NUM",
+            "LAST_MODIFIED_BY",
+        ],
+        sql_columns=[
+            "LabourDefn", "DateEntered", "LinkNumber", "TypeId",
+            "CostCentre", "Task", "LabourType", "Usage", "HrsReqd",
+            "AdjHrs", "DateRevised", "TimeAddition", "RebuiltPartNum",
+            "LastModifiedBy",
+        ],
+    ),
+    # --- children with FKs (must be inserted after their parents) ---
+    "EmplClass": dict(
+        oracle_table="EMPL_CLASS",
+        sql_table="EmplClass",
+        oracle_columns=[
+            "LABOUR_TYPE", "LABOUR_DEFN", "WAGE_GROUP", "HRS_PER_WEEK",
+            "DATE_ENTERED", "OVERHEADTYPE",
+        ],
+        sql_columns=[
+            "LabourType", "LabourDefn", "WageGroup", "HrsPerWeek",
+            "DateEntered", "OverheadType",
+        ],
+    ),
+    "MbListOfBuses": dict(
+        oracle_table="MB_LIST_OF_BUSES",
+        sql_table="MbListOfBuses",
+        oracle_columns=["MB_NUMBER", "LIST_ID"],
+        sql_columns=["MbNumber", "ListId"],
+    ),
+    "RbListOfBuses": dict(
+        oracle_table="RB_LIST_OF_BUSES",
+        sql_table="RbListOfBuses",
+        oracle_columns=["REBUILT_STOCK_NUM", "LIST_ID"],
+        sql_columns=["RebuiltStockNum", "ListId"],
+    ),
+}
+
+
+# Columns we actually want to preserve identity for.
+# Keyed by sql_table name. Value is the SQL Server identity column.
+IDENTITY_COLUMNS = {
+    # Add here only when the Oracle table has a column that maps 1:1 to the
+    # SQL Server IDENTITY column, e.g. "NscPartsUsed": "Oid".
+    # Do NOT add tables whose identity column is auto-generated (no Oracle
+    # counterpart) - the DB will assign it during insert.
+}
+
+
+def main():
+    mode = os.environ.get(
+        "CES_REFRESH_MODE",
+        CONFIG["settings"].get("default_mode", "FULL"),
+    ).upper()
+
+    # Config-declared order wins if present; otherwise dict order.
+    config_order = CONFIG["settings"].get("tables") or list(TABLES.keys())
+    ordered = [t for t in config_order if t in TABLES]
+
+    # sanity: make sure no table definitions are orphaned
+    missing = [t for t in TABLES if t not in ordered]
+    if missing:
+        print(f"WARNING: tables in TABLES but not in config order: {missing}")
+
+    logger = make_logger("CES_REFRESH_ALL")
+    started = datetime.now()
+    logger.info("#" * 100)
+    logger.info("CES REFRESH ALL | MODE=%s | TABLES=%d", mode, len(ordered))
+    logger.info("#" * 100)
+
+    # ---------- DELETE phase: reverse order (children first) ----------
+    if mode in ("FULL", "DELETE"):
+        logger.info("-" * 100)
+        logger.info("DELETE PHASE (children -> parents)")
+        logger.info("-" * 100)
+        for name in reversed(ordered):
+            cfg = TABLES[name]
+            logger.info("DELETE START | %s", name)
+            refresh_table(
+                logger=logger,
+                oracle_table=cfg["oracle_table"],
+                sql_table=cfg["sql_table"],
+                oracle_columns=cfg["oracle_columns"],
+                sql_columns=cfg["sql_columns"],
+                identity_column=None,
+                mode="DELETE",
+            )
+
+    # ---------- INSERT phase: forward order (parents first) ----------
+    if mode in ("FULL", "INSERT"):
+        logger.info("-" * 100)
+        logger.info("INSERT PHASE (parents -> children)")
+        logger.info("-" * 100)
+        for name in ordered:
+            cfg = TABLES[name]
+            logger.info("INSERT START | %s", name)
+            refresh_table(
+                logger=logger,
+                oracle_table=cfg["oracle_table"],
+                sql_table=cfg["sql_table"],
+                oracle_columns=cfg["oracle_columns"],
+                sql_columns=cfg["sql_columns"],
+                identity_column=IDENTITY_COLUMNS.get(cfg["sql_table"]),
+                mode="INSERT",
+            )
+
+    logger.info("#" * 100)
+    logger.info("CES REFRESH ALL COMPLETE | elapsed=%s", datetime.now() - started)
+    logger.info("#" * 100)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
