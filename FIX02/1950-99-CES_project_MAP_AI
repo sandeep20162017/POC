@@ -1,3 +1,290 @@
+import os
+import re
+import json
+from pathlib import Path
+
+# ---------------------------------------------------------
+# CONFIG
+# ---------------------------------------------------------
+ROOT = r"C:\Projects\MyAspApp"        # your ASP.NET Core 8.0 MVC project root
+OUTPUT = "project_map.json"           # where to save the map
+
+EXCLUDE_DIRS = {
+    "bin", "obj", "debug", "release",
+    ".vs", "node_modules", "packages",
+    "__pycache__", "wwwroot/lib"
+}
+# ---------------------------------------------------------
+
+
+def should_skip(path: str) -> bool:
+    parts = Path(path).parts
+    return any(p.lower() in EXCLUDE_DIRS for p in parts)
+
+
+def read_file(path: str) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            return f.read()
+    except Exception:
+        return ""
+
+
+# ---------------------------------------------------------
+# SOLUTION / PROJECT PARSING
+# ---------------------------------------------------------
+
+def parse_solution(root: str) -> dict:
+    sln_files = list(Path(root).glob("*.sln"))
+    projects = []
+
+    for sln in sln_files:
+        text = read_file(str(sln))
+        matches = re.findall(r'Project\(".*"\)\s=\s".*?",\s"(.*?)"', text)
+        projects.extend(matches)
+
+    return {
+        "solution_files": [str(s) for s in sln_files],
+        "projects": projects
+    }
+
+
+def parse_csproj(root: str) -> dict:
+    csproj_files = list(Path(root).rglob("*.csproj"))
+    proj_info = {}
+
+    for csproj in csproj_files:
+        text = read_file(str(csproj))
+        proj_info[str(csproj)] = {
+            "sdk": re.findall(r'<Project Sdk="([^"]+)"', text),
+            "package_refs": re.findall(
+                r'<PackageReference Include="([^"]+)" Version="([^"]+)"', text
+            ),
+            "compile_includes": re.findall(
+                r'<Compile Include="([^"]+)"', text
+            ),
+            "content_includes": re.findall(
+                r'<Content Include="([^"]+)"', text
+            )
+        }
+
+    return proj_info
+
+
+# ---------------------------------------------------------
+# CLASSIFIERS
+# ---------------------------------------------------------
+
+def classify_file(path: str, text: str) -> str:
+    if path.endswith(".cshtml"):
+        return classify_view(path, text)
+    if path.endswith(".cs"):
+        return classify_cs(path, text)
+    if path.endswith(".js"):
+        return "js"
+    if path.endswith(".css"):
+        return "css"
+    if "appsettings" in path.lower():
+        return "config"
+    return "unknown"
+
+
+def classify_view(path: str, text: str) -> str:
+    filename = os.path.basename(path)
+    normalized = path.replace("\\", "/")
+
+    # Layout file
+    if filename.lower() == "_layout.cshtml":
+        return "layout_view"
+
+    # Shared views / editor views
+    if "Views/Shared" in normalized:
+        if re.search(r"(telerik-window|telerik-dialog|kendo-window)", text, re.IGNORECASE):
+            return "popup_view"
+        if re.search(r"(telerik-grid|kendo-grid)", text, re.IGNORECASE):
+            return "telerik_view"
+        return "shared_view"
+
+    # Partial views
+    if filename.startswith("_"):
+        if re.search(r"(telerik-window|telerik-dialog|kendo-window)", text, re.IGNORECASE):
+            return "popup_view"
+        return "partial_view"
+
+    # Telerik views
+    if re.search(r"(telerik-grid|kendo-grid)", text, re.IGNORECASE):
+        return "telerik_view"
+
+    # Popup views
+    if re.search(r"(telerik-window|telerik-dialog|kendo-window)", text, re.IGNORECASE):
+        return "popup_view"
+
+    return "view"
+
+
+def classify_cs(path: str, text: str) -> str:
+    if "Controller" in text or "IActionResult" in text or "Task<IActionResult>" in text:
+        if re.search(r"(SELECT|INSERT|UPDATE|DELETE)\s", text, re.IGNORECASE):
+            return "controller_sql_inline"
+        return "controller"
+
+    if "class" in text and "get;" in text and "set;" in text:
+        return "model"
+
+    if "static class" in text:
+        return "utility"
+
+    return "cs"
+
+
+# ---------------------------------------------------------
+# METADATA EXTRACTION
+# ---------------------------------------------------------
+
+def extract_layout_metadata(path: str, text: str) -> dict:
+    js_files = re.findall(r'<script.*src="([^"]+\.js)"', text)
+    css_files = re.findall(r'<link.*href="([^"]+\.css)"', text)
+    partials = re.findall(r'partial name="([^"]+)"', text)
+    ajax_urls = re.findall(r'["\'](/[\w/\-]+)["\']', text)
+
+    has_telerik = bool(re.search(r"(telerik|kendo)", text, re.IGNORECASE))
+    has_tabs = bool(re.search(r"(tabstrip|telerik-tabstrip)", text, re.IGNORECASE))
+    has_popup = bool(re.search(r"(telerik-window|telerik-dialog|kendo-window)", text, re.IGNORECASE))
+
+    return {
+        "ui_role": "layout",
+        "js": js_files,
+        "css": css_files,
+        "partial_views": partials,
+        "ajax_urls": list(set(ajax_urls)),
+        "ui_flags": {
+            "has_telerik": has_telerik,
+            "has_tabs": has_tabs,
+            "has_popup": has_popup
+        }
+    }
+
+
+def extract_view_metadata(path: str, text: str) -> dict:
+    models = re.findall(r"@model\s+([\w\.]+)", text)
+    js_files = re.findall(r'<script.*src="([^"]+\.js)"', text)
+    css_files = re.findall(r'<link.*href="([^"]+\.css)"', text)
+    partials = re.findall(r'partial name="([^"]+)"', text)
+    actions = re.findall(r'asp-action="([^"]+)"', text)
+    controllers = re.findall(r'asp-controller="([^"]+)"', text)
+    ajax_urls = re.findall(r'["\'](/[\w/\-]+)["\']', text)
+
+    has_telerik_grid = bool(re.search(r"(telerik-grid|kendo-grid)", text, re.IGNORECASE))
+    has_popup = bool(re.search(r"(telerik-window|telerik-dialog|kendo-window)", text, re.IGNORECASE))
+    has_tabs = bool(re.search(r"(tabstrip|telerik-tabstrip)", text, re.IGNORECASE))
+
+    return {
+        "models": models,
+        "js": js_files,
+        "css": css_files,
+        "partial_views": partials,
+        "controller_actions": actions,
+        "controllers": controllers,
+        "ajax_urls": list(set(ajax_urls)),
+        "ui_flags": {
+            "has_telerik_grid": has_telerik_grid,
+            "has_popup": has_popup,
+            "has_tabs": has_tabs
+        }
+    }
+
+
+def extract_cs_metadata(path: str, text: str) -> dict:
+    actions = re.findall(
+        r"(public\s+(?:async\s+)?(?:IActionResult|ActionResult|Task<IActionResult>)\s+([\w]+)\s*\()",
+        text
+    )
+    action_names = [a[1] for a in actions]
+
+    model_refs = re.findall(r"\b([\w]+)\s+\w+\s*=\s*new\s+[\w]+\s*\(", text)
+    has_inline_sql = bool(re.search(r"(SELECT|INSERT|UPDATE|DELETE)\s", text, re.IGNORECASE))
+    tables = re.findall(r"FROM\s+([
+
+\[\]
+
+\w\.]+)", text, re.IGNORECASE)
+
+    crud_flags = {
+        "has_create": any(n.lower() in ("create", "add", "insert") for n in action_names),
+        "has_read": any(n.lower() in ("index", "list", "get", "details") for n in action_names),
+        "has_update": any(n.lower() in ("edit", "update") for n in action_names),
+        "has_delete": any(n.lower() in ("delete", "remove") for n in action_names),
+    }
+
+    return {
+        "controller_actions": action_names,
+        "model_refs": list(set(model_refs)),
+        "sql": {
+            "has_inline_sql": has_inline_sql,
+            "tables": list(set(tables))
+        },
+        "crud_flags": crud_flags
+    }
+
+def extract_inline_js_functions(text):
+    funcs = re.findall(r"function\s+([\w]+)\s*\(", text)
+    funcs += re.findall(r"const\s+([\w]+)\s*=\s*\(", text)
+    funcs += re.findall(r"([\w]+)\s*:\s*function\s*\(", text)
+    return list(set(funcs))
+
+def extract_js_metadata(path: str, text: str) -> dict:
+    urls = re.findall(r'["\'](/[\w/\-]+)["\']', text)
+    funcs = re.findall(r"function\s+([\w]+)\s*\(", text)
+    popup_triggers = re.findall(r"(openPopup|showPopup|openWindow|showWindow)", text)
+
+    return {
+        "ajax_urls": list(set(urls)),
+        "functions": list(set(funcs)),
+        "popup_triggers": list(set(popup_triggers))
+    }
+
+
+def extract_css_metadata(path: str, text: str) -> dict:
+    classes = re.findall(r"\.([\w\-]+)\s*\{", text)
+    return {
+        "classes": list(set(classes))
+    }
+
+
+def extract_metadata(path: str, file_type: str, text: str) -> dict:
+    # Layout view (special metadata)
+    if file_type == "layout_view":
+        meta = extract_layout_metadata(path, text)
+        meta["inline_js_functions"] = extract_inline_js_functions(text)
+        return meta
+
+    # Razor views (normal, shared, partial, popup, Telerik)
+    if file_type in {"view", "shared_view", "partial_view", "popup_view", "telerik_view"}:
+        meta = extract_view_metadata(path, text)
+        meta["inline_js_functions"] = extract_inline_js_functions(text)
+        return meta
+
+    # Controllers (.cs)
+    if file_type in {"controller", "controller_sql_inline", "cs"}:
+        return extract_cs_metadata(path, text)
+
+    # JS files
+    if file_type == "js":
+        return extract_js_metadata(path, text)
+
+    # CSS files
+    if file_type == "css":
+        return extract_css_metadata(path, text)
+
+    # Unknown file types
+    return {}
+
+
+
+# ---------------------------------------------------------
+# MAIN SCANNER
+# ---------------------------------------------------------
+
 def generate_project_map(root: str) -> dict:
     project_map = {
         "project": {
@@ -55,3 +342,18 @@ def generate_project_map(root: str) -> dict:
                 project_map["project"]["rules"]["allowed_modify"].append(rel_path)
 
     return project_map
+
+
+
+# ---------------------------------------------------------
+# RUN
+# ---------------------------------------------------------
+
+if __name__ == "__main__":
+    print(f"Scanning project at: {ROOT}")
+    pm = generate_project_map(ROOT)
+
+    with open(OUTPUT, "w", encoding="utf-8") as f:
+        json.dump(pm, f, indent=4)
+
+    print(f"Project map saved to {OUTPUT}")
