@@ -1,0 +1,57 @@
+def generate_project_map(root: str) -> dict:
+    project_map = {
+        "project": {
+            "root": root,
+            "aspnet_core_version": "8.0",
+            "architecture_notes": {
+                "mvc": True,
+                "uses_dapper_style_inline_sql_in_controllers": True,
+                "has_crud_functionality": True,
+                "uses_telerik_controls": True,
+                "has_popup_views": True
+            },
+            "solution": parse_solution(root),
+            "csproj": parse_csproj(root),
+            "files": {},
+            "rules": {
+                "never_modify": [],
+                "allowed_modify": [],
+                "test_framework": "dotnet test"
+            }
+        }
+    }
+
+    for dirpath, _, filenames in os.walk(root):
+        if should_skip(dirpath):
+            continue
+
+        for filename in filenames:
+            full_path = os.path.join(dirpath, filename)
+            if should_skip(full_path):
+                continue
+
+            rel_path = os.path.relpath(full_path, root)
+
+            if not (rel_path.endswith(".cs") or rel_path.endswith(".cshtml")
+                    or rel_path.endswith(".js") or rel_path.endswith(".css")
+                    or rel_path.endswith(".json") or rel_path.endswith(".config")):
+                continue
+
+            text = read_file(full_path)
+            file_type = classify_file(rel_path, text)
+            meta = extract_metadata(rel_path, file_type, text)
+
+            modifiable = filename not in ["Program.cs", "Startup.cs"]
+
+            project_map["project"]["files"][rel_path] = {
+                "type": file_type,
+                "metadata": meta,
+                "modifiable": modifiable
+            }
+
+            if not modifiable:
+                project_map["project"]["rules"]["never_modify"].append(rel_path)
+            else:
+                project_map["project"]["rules"]["allowed_modify"].append(rel_path)
+
+    return project_map
