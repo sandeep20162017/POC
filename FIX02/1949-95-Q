@@ -1,0 +1,18 @@
+Fix below and give me full block
+private void AnalyzeRazor(string file,string root)
+{
+    var text=File.ReadAllText(file); var rel=Path.GetRelativePath(root,file); var viewType=Path.GetFileName(file).StartsWith("_",StringComparison.Ordinal)?"partial_view":"view";
+    if(Path.GetFileName(file).Equals("_ViewStart.cshtml",StringComparison.OrdinalIgnoreCase)) viewType="layout";
+    var vid=GraphBuilder.Id("view",rel); _g.AddNode(new GraphNode{Id=vid,Type=viewType,Name=Path.GetFileName(file),Location=Loc(file,root,text,0),Properties=new(){["relative_path"]=rel,["model_directive"]=ModelRx.Match(text).Groups["model"].Value.Trim()}});
+    foreach(Match m in PartialRx.Matches(text)) { var target=m.Groups["name"].Value.Trim(); var pid=GraphBuilder.Id("view",target); _g.AddNode(new GraphNode{Id=pid,Type="view_reference",Name=target,Properties=new(){["unresolved"]=true}}); _g.AddEdge(new GraphEdge{Id=GraphBuilder.EdgeId(vid,pid,"renders",rel+m.Index),From=vid,To=pid,Type="renders",Confidence="exact",Evidence=Loc(file,root,text,m.Index)}); }
+    foreach(Match s in ScriptRx.Matches(text)) AnalyzeScript(file,root,text,vid,s);
+    foreach(Match t in TelerikActionRx.Matches(text)) { var route=GraphBuilder.Id("route",$"/{t.Groups["controller"].Value}/{t.Groups["action"].Value}"); _g.AddNode(new GraphNode{Id=route,Type="route",Name=$"/{t.Groups["controller"].Value}/{t.Groups["action"].Value}",Properties=new(){["source"]= "telerik"}}); _g.AddEdge(new GraphEdge{Id=GraphBuilder.EdgeId(vid,route,"telerik_endpoint",rel+t.Index),From=vid,To=route,Type="telerik_endpoint",Evidence=Loc(file,root,text,t.Index),Properties=new(){["controller"]=t.Groups["controller"].Value,["action"]=t.Groups["action"].Value}}); }
+}
+private void AnalyzeScript(
+string file,
+string root,
+string full,
+string view,
+Match script)
+{
+....
