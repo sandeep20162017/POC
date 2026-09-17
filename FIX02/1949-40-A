@@ -1,0 +1,603 @@
+private void AnalyzeDocument(
+    Document doc,
+    SyntaxNode root,
+    SemanticModel model,
+    string project,
+    CancellationToken ct)
+{
+    var file = doc.FilePath ?? doc.Name;
+
+    // ============================================================
+    // CLASSES
+    // ============================================================
+    foreach (var cls in root
+        .DescendantNodes()
+        .OfType<ClassDeclarationSyntax>())
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var declaredSymbol = model.GetDeclaredSymbol(cls, ct);
+
+        if (declaredSymbol is not INamedTypeSymbol symbol)
+            continue;
+
+        var classId = GraphBuilder.Id(
+            "class",
+            symbol.ToDisplayString(
+                SymbolDisplayFormat.FullyQualifiedFormat));
+
+        _g.AddNode(
+            new GraphNode
+            {
+                Id = classId,
+                Type = "class",
+                Name = symbol.Name,
+                Namespace = symbol.ContainingNamespace?.ToDisplayString(),
+                Project = project,
+                Location = Loc(doc, cls),
+
+                Properties = new()
+                {
+                    ["fully_qualified_name"] =
+                        symbol.ToDisplayString(),
+
+                    ["accessibility"] =
+                        symbol.DeclaredAccessibility.ToString(),
+
+                    ["type_kind"] =
+                        symbol.TypeKind.ToString()
+                }
+            });
+
+        // --------------------------------------------------------
+        // Interfaces
+        // --------------------------------------------------------
+        foreach (var iface in symbol.Interfaces)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var interfaceId = GraphBuilder.Id(
+                "interface",
+                iface.ToDisplayString(
+                    SymbolDisplayFormat.FullyQualifiedFormat));
+
+            _g.AddNode(
+                new GraphNode
+                {
+                    Id = interfaceId,
+                    Type = "interface",
+                    Name = iface.Name,
+                    Namespace =
+                        iface.ContainingNamespace?.ToDisplayString(),
+                    Project = project
+                });
+
+            _g.AddEdge(
+                new GraphEdge
+                {
+                    Id = GraphBuilder.EdgeId(
+                        classId,
+                        interfaceId,
+                        "implements",
+                        file),
+
+                    From = classId,
+                    To = interfaceId,
+                    Type = "implements",
+
+                    Evidence = Loc(
+                        doc,
+                        cls)
+                });
+        }
+
+        // --------------------------------------------------------
+        // Base class
+        // --------------------------------------------------------
+        if (symbol.BaseType is INamedTypeSymbol baseType &&
+            baseType.SpecialType != SpecialType.System_Object)
+        {
+            var baseId = GraphBuilder.Id(
+                "class",
+                baseType.ToDisplayString(
+                    SymbolDisplayFormat.FullyQualifiedFormat));
+
+            _g.AddNode(
+                new GraphNode
+                {
+                    Id = baseId,
+                    Type = "class",
+                    Name = baseType.Name,
+                    Namespace =
+                        baseType.ContainingNamespace?.ToDisplayString(),
+                    Project = project
+                });
+
+            _g.AddEdge(
+                new GraphEdge
+                {
+                    Id = GraphBuilder.EdgeId(
+                        classId,
+                        baseId,
+                        "inherits",
+                        file),
+
+                    From = classId,
+                    To = baseId,
+                    Type = "inherits",
+
+                    Evidence = Loc(
+                        doc,
+                        cls)
+                });
+        }
+    }
+
+
+    // ============================================================
+    // METHODS
+    // ============================================================
+    foreach (var method in root
+        .DescendantNodes()
+        .OfType<MethodDeclarationSyntax>())
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var declaredSymbol =
+            model.GetDeclaredSymbol(method, ct);
+
+        // Explicitly require an IMethodSymbol.
+        // This fixes the ISymbol -> IMethodSymbol compile error.
+        if (declaredSymbol is not IMethodSymbol symbol)
+            continue;
+
+        var methodId = MethodId(symbol);
+
+        var containingType = symbol.ContainingType;
+
+        string? containingId = null;
+
+        if (containingType is not null)
+        {
+            containingId = GraphBuilder.Id(
+                containingType.TypeKind == TypeKind.Interface
+                    ? "interface"
+                    : "class",
+                containingType.ToDisplayString(
+                    SymbolDisplayFormat.FullyQualifiedFormat));
+
+            _g.AddNode(
+                new GraphNode
+                {
+                    Id = containingId,
+
+                    Type =
+                        containingType.TypeKind ==
+                        TypeKind.Interface
+                            ? "interface"
+                            : "class",
+
+                    Name = containingType.Name,
+
+                    Namespace =
+                        containingType.ContainingNamespace
+                            ?.ToDisplayString(),
+
+                    Project = project
+                });
+        }
+
+        var isControllerAction =
+            IsControllerAction(symbol);
+
+        _g.AddNode(
+            new GraphNode
+            {
+                Id = methodId,
+
+                Type =
+                    isControllerAction
+                        ? "controller_action"
+                        : "method",
+
+                Name = symbol.Name,
+
+                Namespace =
+                    symbol.ContainingNamespace
+                        ?.ToDisplayString(),
+
+                Project = project,
+
+                Location = Loc(
+                    doc,
+                    method),
+
+                Properties = new()
+                {
+                    ["signature"] =
+                        symbol.ToDisplayString(),
+
+                    ["return_type"] =
+                        symbol.ReturnType.ToDisplayString(),
+
+                    ["is_async"] =
+                        symbol.IsAsync,
+
+                    ["containing_type"] =
+                        containingType?.ToDisplayString(),
+
+                    ["accessibility"] =
+                        symbol.DeclaredAccessibility.ToString()
+                }
+            });
+
+
+        // --------------------------------------------------------
+        // Method -> containing class
+        // --------------------------------------------------------
+        if (containingId is not null)
+        {
+            _g.AddEdge(
+                new GraphEdge
+                {
+                    Id = GraphBuilder.EdgeId(
+                        methodId,
+                        containingId,
+                        "member_of",
+                        file + method.SpanStart),
+
+                    From = methodId,
+                    To = containingId,
+                    Type = "member_of",
+
+                    Evidence = Loc(
+                        doc,
+                        method)
+                });
+        }
+
+
+        // --------------------------------------------------------
+        // Controller action analysis
+        // --------------------------------------------------------
+        if (isControllerAction)
+        {
+            AnalyzeControllerAction(
+                doc,
+                method,
+                model,
+                symbol,
+                methodId);
+        }
+
+
+        // ========================================================
+        // METHOD INVOCATIONS
+        // ========================================================
+        foreach (var invocation in method
+            .DescendantNodes()
+            .OfType<InvocationExpressionSyntax>())
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var symbolInfo =
+                model.GetSymbolInfo(
+                    invocation,
+                    ct);
+
+            // GetSymbolInfo().Symbol is ISymbol.
+            // Explicitly pattern-match it to IMethodSymbol.
+            if (symbolInfo.Symbol is not IMethodSymbol target)
+                continue;
+
+            var targetId = MethodId(target);
+
+            var targetIsControllerAction =
+                IsControllerAction(target);
+
+            _g.AddNode(
+                new GraphNode
+                {
+                    Id = targetId,
+
+                    Type =
+                        targetIsControllerAction
+                            ? "controller_action"
+                            : "method",
+
+                    Name = target.Name,
+
+                    Namespace =
+                        target.ContainingNamespace
+                            ?.ToDisplayString(),
+
+                    Project = project,
+
+                    Properties = new()
+                    {
+                        ["signature"] =
+                            target.ToDisplayString(),
+
+                        ["return_type"] =
+                            target.ReturnType.ToDisplayString(),
+
+                        ["containing_type"] =
+                            target.ContainingType
+                                ?.ToDisplayString()
+                    }
+                });
+
+
+            // ----------------------------------------------------
+            // Caller -> callee
+            // ----------------------------------------------------
+            _g.AddEdge(
+                new GraphEdge
+                {
+                    Id = GraphBuilder.EdgeId(
+                        methodId,
+                        targetId,
+                        "calls",
+                        file + invocation.SpanStart),
+
+                    From = methodId,
+                    To = targetId,
+                    Type = "calls",
+
+                    Evidence = Loc(
+                        doc,
+                        invocation),
+
+                    Properties = new()
+                    {
+                        ["target_symbol"] =
+                            target.ToDisplayString()
+                    }
+                });
+
+
+            // ----------------------------------------------------
+            // Dapper
+            // ----------------------------------------------------
+            if (IsDapperMethod(target))
+            {
+                AnalyzeDapperInvocation(
+                    doc,
+                    invocation,
+                    model,
+                    methodId);
+            }
+        }
+
+
+        // ========================================================
+        // RETURN View() / PartialView()
+        // ========================================================
+        foreach (var returnStatement in method
+            .DescendantNodes()
+            .OfType<ReturnStatementSyntax>())
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var expression =
+                returnStatement.Expression?.ToString();
+
+            if (string.IsNullOrWhiteSpace(expression))
+                continue;
+
+            var isViewReturn =
+                expression.Contains(
+                    "View(",
+                    StringComparison.Ordinal) ||
+                expression.Contains(
+                    "PartialView(",
+                    StringComparison.Ordinal);
+
+            if (!isViewReturn)
+                continue;
+
+            var viewReferenceId =
+                GraphBuilder.Id(
+                    "view_reference",
+                    $"{file}:{returnStatement.SpanStart}");
+
+            _g.AddNode(
+                new GraphNode
+                {
+                    Id = viewReferenceId,
+                    Type = "view_reference",
+                    Name = expression,
+                    Project = project,
+
+                    Location = Loc(
+                        doc,
+                        returnStatement),
+
+                    Properties = new()
+                    {
+                        ["expression"] = expression,
+                        ["source"] = "controller_return"
+                    }
+                });
+
+            _g.AddEdge(
+                new GraphEdge
+                {
+                    Id = GraphBuilder.EdgeId(
+                        methodId,
+                        viewReferenceId,
+                        "returns_view",
+                        file + returnStatement.SpanStart),
+
+                    From = methodId,
+                    To = viewReferenceId,
+                    Type = "returns_view",
+
+                    Evidence = Loc(
+                        doc,
+                        returnStatement),
+
+                    Properties = new()
+                    {
+                        ["expression"] = expression
+                    }
+                });
+        }
+    }
+
+
+    // ============================================================
+    // PROPERTIES
+    // ============================================================
+    foreach (var property in root
+        .DescendantNodes()
+        .OfType<PropertyDeclarationSyntax>())
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var declaredSymbol =
+            model.GetDeclaredSymbol(
+                property,
+                ct);
+
+        if (declaredSymbol is not IPropertySymbol symbol)
+            continue;
+
+        var propertyId =
+            GraphBuilder.Id(
+                "property",
+                symbol.ToDisplayString());
+
+        _g.AddNode(
+            new GraphNode
+            {
+                Id = propertyId,
+                Type = "property",
+                Name = symbol.Name,
+
+                Namespace =
+                    symbol.ContainingNamespace
+                        ?.ToDisplayString(),
+
+                Project = project,
+
+                Location = Loc(
+                    doc,
+                    property),
+
+                Properties = new()
+                {
+                    ["type"] =
+                        symbol.Type.ToDisplayString(),
+
+                    ["accessibility"] =
+                        symbol.DeclaredAccessibility.ToString(),
+
+                    ["containing_type"] =
+                        symbol.ContainingType
+                            ?.ToDisplayString()
+                }
+            });
+    }
+}
+
+
+public async Task AnalyzeAsync(
+    string solutionPath,
+    CancellationToken ct)
+{
+    // MSBuildWorkspace requires MSBuild to be registered before
+    // the workspace is created.
+    //
+    // Program.cs should already call:
+    //
+    // MSBuildLocator.RegisterDefaults();
+    //
+    // before this analyzer is instantiated.
+
+    using var workspace =
+        MSBuildWorkspace.Create();
+
+    workspace.WorkspaceFailed += (_, e) =>
+    {
+        Console.Error.WriteLine(
+            $"[Roslyn] {e.Diagnostic.Kind}: " +
+            e.Diagnostic.Message);
+    };
+
+    Console.WriteLine(
+        $"[Roslyn] Loading solution: {solutionPath}");
+
+    // IMPORTANT:
+    // Use the named cancellationToken argument.
+    // This avoids the overload mismatch:
+    //
+    // Argument 2 cannot convert from CancellationToken
+    // to IProgress<ProjectLoadProgress>
+    //
+    var solution =
+        await workspace.OpenSolutionAsync(
+            solutionPath,
+            cancellationToken: ct);
+
+    Console.WriteLine(
+        $"[Roslyn] Solution loaded. " +
+        $"Projects: {solution.Projects.Count()}");
+
+    foreach (var project in solution.Projects)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        Console.WriteLine(
+            $"[Roslyn] Project: {project.Name}");
+
+        foreach (var doc in project.Documents
+            .Where(d =>
+                d.SourceCodeKind ==
+                SourceCodeKind.Regular))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                var root =
+                    await doc.GetSyntaxRootAsync(
+                        ct);
+
+                if (root is null)
+                    continue;
+
+                var model =
+                    await doc.GetSemanticModelAsync(
+                        ct);
+
+                if (model is null)
+                    continue;
+
+                AnalyzeDocument(
+                    doc,
+                    root,
+                    model,
+                    project.Name,
+                    ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"[Roslyn] Document failed: " +
+                    $"{doc.FilePath ?? doc.Name}");
+
+                Console.Error.WriteLine(
+                    $"[Roslyn] {ex.GetType().Name}: " +
+                    $"{ex.Message}");
+            }
+        }
+    }
+
+    Console.WriteLine(
+        "[Roslyn] Analysis complete.");
+}
