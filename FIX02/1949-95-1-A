@@ -1,0 +1,368 @@
+private void AnalyzeRazor(string file, string root)
+{
+    var text = File.ReadAllText(file);
+
+    var relativePath = Path.GetRelativePath(root, file);
+    var fileName = Path.GetFileName(file);
+
+    var viewType =
+        fileName.StartsWith("_", StringComparison.Ordinal)
+            ? "partial_view"
+            : "view";
+
+    if (fileName.Equals(
+            "_ViewStart.cshtml",
+            StringComparison.OrdinalIgnoreCase))
+    {
+        viewType = "layout";
+    }
+
+    var viewId = GraphBuilder.Id(
+        "view",
+        relativePath);
+
+    var modelMatch = ModelRx.Match(text);
+
+    var modelDirective = modelMatch.Success
+        ? modelMatch.Groups["model"].Value.Trim()
+        : string.Empty;
+
+    _g.AddNode(
+        new GraphNode
+        {
+            Id = viewId,
+            Type = viewType,
+            Name = fileName,
+
+            Location = Loc(
+                file,
+                root,
+                file,
+                0),
+
+            Properties = new()
+            {
+                ["relative_path"] = relativePath,
+                ["model_directive"] = modelDirective
+            }
+        });
+
+    // ------------------------------------------------------------
+    // Razor partial/shared view references
+    // ------------------------------------------------------------
+    foreach (Match match in PartialRx.Matches(text))
+    {
+        if (!match.Success)
+            continue;
+
+        var target = match.Groups["name"].Value.Trim();
+
+        if (string.IsNullOrWhiteSpace(target))
+            continue;
+
+        var partialId = GraphBuilder.Id(
+            "view",
+            target);
+
+        _g.AddNode(
+            new GraphNode
+            {
+                Id = partialId,
+                Type = "view_reference",
+                Name = target,
+
+                Properties = new()
+                {
+                    ["unresolved"] = true,
+                    ["referenced_from"] = relativePath
+                }
+            });
+
+        var evidenceOffset = match.Index;
+
+        _g.AddEdge(
+            new GraphEdge
+            {
+                Id = GraphBuilder.EdgeId(
+                    viewId,
+                    partialId,
+                    "renders",
+                    relativePath + evidenceOffset),
+
+                From = viewId,
+                To = partialId,
+                Type = "renders",
+                Confidence = "exact",
+
+                Evidence = Loc(
+                    file,
+                    root,
+                    file,
+                    evidenceOffset)
+            });
+    }
+
+    // ------------------------------------------------------------
+    // Embedded JavaScript
+    // ------------------------------------------------------------
+    foreach (Match script in ScriptRx.Matches(text))
+    {
+        if (!script.Success)
+            continue;
+
+        AnalyzeScript(
+            file,
+            root,
+            file,
+            viewId,
+            script);
+    }
+
+    // ------------------------------------------------------------
+    // Telerik MVC helper actions
+    //
+    // Example:
+    // .Action("GetData", "Vehicle")
+    // ------------------------------------------------------------
+    foreach (Match telerik in TelerikActionRx.Matches(text))
+    {
+        if (!telerik.Success)
+            continue;
+
+        var controller =
+            telerik.Groups["controller"].Value.Trim();
+
+        var action =
+            telerik.Groups["action"].Value.Trim();
+
+        if (string.IsNullOrWhiteSpace(controller) ||
+            string.IsNullOrWhiteSpace(action))
+        {
+            continue;
+        }
+
+        var routeName =
+            $"/{controller}/{action}";
+
+        var routeId = GraphBuilder.Id(
+            "route",
+            routeName);
+
+        _g.AddNode(
+            new GraphNode
+            {
+                Id = routeId,
+                Type = "route",
+                Name = routeName,
+
+                Properties = new()
+                {
+                    ["source"] = "telerik",
+                    ["controller"] = controller,
+                    ["action"] = action
+                }
+            });
+
+        var evidenceOffset = telerik.Index;
+
+        _g.AddEdge(
+            new GraphEdge
+            {
+                Id = GraphBuilder.EdgeId(
+                    viewId,
+                    routeId,
+                    "telerik_endpoint",
+                    relativePath + evidenceOffset),
+
+                From = viewId,
+                To = routeId,
+                Type = "telerik_endpoint",
+                Confidence = "exact",
+
+                Evidence = Loc(
+                    file,
+                    root,
+                    file,
+                    evidenceOffset),
+
+                Properties = new()
+                {
+                    ["controller"] = controller,
+                    ["action"] = action,
+                    ["route"] = routeName
+                }
+            });
+    }
+}
+
+
+private void AnalyzeScript(
+    string file,
+    string root,
+    string full,
+    string view,
+    Match script)
+{
+    // ------------------------------------------------------------
+    // Extract <script>...</script> body
+    // ------------------------------------------------------------
+    var bodyGroup = script.Groups["body"];
+
+    if (!bodyGroup.Success)
+        return;
+
+    var body = bodyGroup.Value;
+
+    if (string.IsNullOrWhiteSpace(body))
+        return;
+
+    // Absolute character offset of the JavaScript body
+    // within the complete source file.
+    var baseOffset = bodyGroup.Index;
+
+    // ------------------------------------------------------------
+    // JavaScript functions
+    // ------------------------------------------------------------
+    foreach (Match functionMatch in JsFnRx.Matches(body))
+    {
+        if (!functionMatch.Success)
+            continue;
+
+        var functionName =
+            !string.IsNullOrWhiteSpace(
+                functionMatch.Groups["name"].Value)
+                    ? functionMatch.Groups["name"].Value
+                    : functionMatch.Groups["name2"].Value;
+
+        functionName = functionName.Trim();
+
+        if (string.IsNullOrWhiteSpace(functionName))
+            continue;
+
+        var functionOffset =
+            baseOffset + functionMatch.Index;
+
+        var javascriptId = GraphBuilder.Id(
+            "javascript",
+            $"{file}:{functionName}:{functionOffset}");
+
+        _g.AddNode(
+            new GraphNode
+            {
+                Id = javascriptId,
+                Type = "javascript_function",
+                Name = functionName,
+
+                Location = Loc(
+                    file,
+                    root,
+                    full,
+                    functionOffset),
+
+                Properties = new()
+                {
+                    ["embedded_in_view"] = view,
+                    ["relative_path"] = Path.GetRelativePath(
+                        root,
+                        file)
+                }
+            });
+
+        // View contains JavaScript function
+        _g.AddEdge(
+            new GraphEdge
+            {
+                Id = GraphBuilder.EdgeId(
+                    view,
+                    javascriptId,
+                    "contains_javascript",
+                    file + functionOffset),
+
+                From = view,
+                To = javascriptId,
+                Type = "contains_javascript",
+                Confidence = "exact",
+
+                Evidence = Loc(
+                    file,
+                    root,
+                    full,
+                    functionOffset)
+            });
+
+        // --------------------------------------------------------
+        // AJAX calls associated with this JavaScript function
+        // --------------------------------------------------------
+        //
+        // We inspect the JavaScript from the function declaration
+        // onward so that the discovered AJAX endpoint can be
+        // associated with the function.
+        //
+        // This is intentionally conservative. A future AST/data-flow
+        // analyzer can determine exact function boundaries.
+        // --------------------------------------------------------
+        var functionBody =
+            body.Substring(functionMatch.Index);
+
+        foreach (Match ajaxMatch in AjaxRx.Matches(functionBody))
+        {
+            if (!ajaxMatch.Success)
+                continue;
+
+            var url = ajaxMatch.Groups["value"].Value.Trim();
+
+            if (string.IsNullOrWhiteSpace(url))
+                continue;
+
+            var routeId = GraphBuilder.Id(
+                "route",
+                url);
+
+            _g.AddNode(
+                new GraphNode
+                {
+                    Id = routeId,
+                    Type = "route",
+                    Name = url,
+
+                    Properties = new()
+                    {
+                        ["source"] = "javascript_ajax",
+                        ["url"] = url
+                    }
+                });
+
+            var ajaxOffset =
+                baseOffset +
+                functionMatch.Index +
+                ajaxMatch.Index;
+
+            _g.AddEdge(
+                new GraphEdge
+                {
+                    Id = GraphBuilder.EdgeId(
+                        javascriptId,
+                        routeId,
+                        "ajax_calls",
+                        file + ajaxOffset),
+
+                    From = javascriptId,
+                    To = routeId,
+                    Type = "ajax_calls",
+                    Confidence = "exact",
+
+                    Evidence = Loc(
+                        file,
+                        root,
+                        full,
+                        ajaxOffset),
+
+                    Properties = new()
+                    {
+                        ["url"] = url,
+                        ["source"] = "javascript_ajax"
+                    }
+                });
+        }
+    }
+}
