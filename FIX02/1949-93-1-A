@@ -1,0 +1,218 @@
+private static readonly Regex SqlObjectRx = new(
+    @"\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|MERGE\s+INTO)\s+(?<obj>(?:\[[^\]]+\]|[A-Za-z0-9_]+)(?:\s*\.\s*(?:\[[^\]]+\]|[A-Za-z0-9_]+)){0,2})",
+    RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+private static readonly Regex TableRx = new(
+    @"CREATE\s+(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?<obj>(?:\[[^\]]+\]|[A-Za-z0-9_]+)(?:\s*\.\s*(?:\[[^\]]+\]|[A-Za-z0-9_]+)){0,2})",
+    RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+private static readonly Regex SqlStmtRx = new(
+    @"(?is)\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\b[\s\S]*?(?=;|$)",
+    RegexOptions.Compiled);
+
+
+private void AnalyzeSqlFile(
+    string file,
+    string root)
+{
+    var text = File.ReadAllText(file);
+
+    var display = Path.GetRelativePath(
+        root,
+        file);
+
+    AnalyzeSqlText(
+        file,
+        text,
+        root,
+        display,
+        false);
+}
+
+
+private void AnalyzeSqlText(
+    string file,
+    string text,
+    string root,
+    string display,
+    bool schema)
+{
+    if (string.IsNullOrWhiteSpace(text))
+        return;
+
+    // ------------------------------------------------------------
+    // CREATE TABLE / CREATE VIEW
+    // ------------------------------------------------------------
+    foreach (Match match in TableRx.Matches(text))
+    {
+        if (!match.Success)
+            continue;
+
+        var objectGroup = match.Groups["obj"];
+
+        if (!objectGroup.Success)
+            continue;
+
+        var objectName = Clean(
+            objectGroup.Value);
+
+        if (string.IsNullOrWhiteSpace(objectName))
+            continue;
+
+        var isView = match.Value.Contains(
+            "VIEW",
+            StringComparison.OrdinalIgnoreCase);
+
+        var nodeType =
+            isView
+                ? "database_view"
+                : "database_table";
+
+        var nodeId = GraphBuilder.Id(
+            nodeType,
+            objectName);
+
+        _g.AddNode(
+            new GraphNode
+            {
+                Id = nodeId,
+                Type = nodeType,
+                Name = objectName,
+
+                Location = Loc(
+                    file,
+                    root,
+                    text,
+                    match.Index),
+
+                Properties = new()
+                {
+                    ["schema_source"] = schema,
+                    ["object_name"] = objectName,
+                    ["object_type"] = isView
+                        ? "VIEW"
+                        : "TABLE"
+                }
+            });
+    }
+
+
+    // ------------------------------------------------------------
+    // SELECT / INSERT / UPDATE / DELETE / MERGE statements
+    // ------------------------------------------------------------
+    foreach (Match statementMatch in SqlStmtRx.Matches(text))
+    {
+        if (!statementMatch.Success)
+            continue;
+
+        var statement = statementMatch.Value.Trim();
+
+        if (string.IsNullOrWhiteSpace(statement))
+            continue;
+
+        var statementOffset =
+            statementMatch.Index;
+
+        var statementId = GraphBuilder.Id(
+            "sql",
+            $"{file}:{statementOffset}");
+
+        _g.AddNode(
+            new GraphNode
+            {
+                Id = statementId,
+                Type = "sql_statement",
+
+                Name =
+                    $"{display}#{statementOffset}",
+
+                Location = Loc(
+                    file,
+                    root,
+                    text,
+                    statementOffset),
+
+                Properties = new()
+                {
+                    ["statement"] = statement,
+                    ["source_file"] = display,
+                    ["schema_source"] = schema
+                }
+            });
+
+
+        // --------------------------------------------------------
+        // Tables/views referenced by this SQL statement
+        // --------------------------------------------------------
+        foreach (Match objectMatch in
+                 SqlObjectRx.Matches(statement))
+        {
+            if (!objectMatch.Success)
+                continue;
+
+            var objectGroup =
+                objectMatch.Groups["obj"];
+
+            if (!objectGroup.Success)
+                continue;
+
+            var objectName = Clean(
+                objectGroup.Value);
+
+            if (string.IsNullOrWhiteSpace(objectName))
+                continue;
+
+            var tableId = GraphBuilder.Id(
+                "database_table",
+                objectName);
+
+            _g.AddNode(
+                new GraphNode
+                {
+                    Id = tableId,
+                    Type = "database_table",
+                    Name = objectName,
+
+                    Properties = new()
+                    {
+                        ["unresolved"] = true,
+                        ["referenced_by_sql"] = true
+                    }
+                });
+
+
+            var evidenceOffset =
+                statementOffset +
+                objectMatch.Index;
+
+            _g.AddEdge(
+                new GraphEdge
+                {
+                    Id = GraphBuilder.EdgeId(
+                        statementId,
+                        tableId,
+                        "sql_references",
+                        file + evidenceOffset),
+
+                    From = statementId,
+                    To = tableId,
+
+                    Type = "sql_references",
+
+                    Confidence = "exact",
+
+                    Evidence = Loc(
+                        file,
+                        root,
+                        text,
+                        evidenceOffset),
+
+                    Properties = new()
+                    {
+                        ["object"] = objectName,
+                        ["source"] = "sql_parser"
+                    }
+                });
+        }
+    }
+}
