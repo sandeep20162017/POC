@@ -1,0 +1,138 @@
+private void AnalyzeScript(
+    string file,
+    string root,
+    string full,
+    string view,
+    Match script)
+{
+    // The <script> Regex captures the JavaScript body in the "body" group.
+    // Because script is a Match, Groups["body"] is valid here.
+    var bodyGroup = script.Groups["body"];
+
+    if (!bodyGroup.Success)
+        return;
+
+    var body = bodyGroup.Value;
+    var baseOffset = bodyGroup.Index;
+
+    if (string.IsNullOrWhiteSpace(body))
+        return;
+
+    foreach (Match f in JsFnRx.Matches(body))
+    {
+        if (!f.Success)
+            continue;
+
+        var name =
+            !string.IsNullOrWhiteSpace(f.Groups["name"].Value)
+                ? f.Groups["name"].Value
+                : f.Groups["name2"].Value;
+
+        if (string.IsNullOrWhiteSpace(name))
+            continue;
+
+        var functionOffset = baseOffset + f.Index;
+
+        var id = GraphBuilder.Id(
+            "javascript",
+            $"{file}:{name}:{functionOffset}");
+
+        _g.AddNode(
+            new GraphNode
+            {
+                Id = id,
+                Type = "javascript_function",
+                Name = name,
+                Location = Loc(
+                    file,
+                    root,
+                    full,
+                    functionOffset),
+                Properties = new()
+                {
+                    ["embedded_in_view"] = view
+                }
+            });
+
+        _g.AddEdge(
+            new GraphEdge
+            {
+                Id = GraphBuilder.EdgeId(
+                    view,
+                    id,
+                    "contains_javascript",
+                    file + functionOffset),
+
+                From = view,
+                To = id,
+                Type = "contains_javascript",
+
+                Evidence = Loc(
+                    file,
+                    root,
+                    full,
+                    functionOffset)
+            });
+
+        // Analyze AJAX calls contained in this JavaScript function.
+        var functionBody = body.Substring(f.Index);
+
+        foreach (Match a in AjaxRx.Matches(functionBody))
+        {
+            if (!a.Success)
+                continue;
+
+            var url = a.Groups["value"].Value;
+
+            if (string.IsNullOrWhiteSpace(url))
+                continue;
+
+            var routeId = GraphBuilder.Id(
+                "route",
+                url);
+
+            _g.AddNode(
+                new GraphNode
+                {
+                    Id = routeId,
+                    Type = "route",
+                    Name = url,
+
+                    Properties = new()
+                    {
+                        ["source"] = "javascript_ajax"
+                    }
+                });
+
+            var ajaxOffset =
+                baseOffset +
+                f.Index +
+                a.Index;
+
+            _g.AddEdge(
+                new GraphEdge
+                {
+                    Id = GraphBuilder.EdgeId(
+                        id,
+                        routeId,
+                        "ajax_calls",
+                        file + ajaxOffset),
+
+                    From = id,
+                    To = routeId,
+                    Type = "ajax_calls",
+
+                    Evidence = Loc(
+                        file,
+                        root,
+                        full,
+                        ajaxOffset),
+
+                    Properties = new()
+                    {
+                        ["url"] = url
+                    }
+                });
+        }
+    }
+}
