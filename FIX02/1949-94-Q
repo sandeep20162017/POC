@@ -1,0 +1,11 @@
+error 
+The name 'TableRx' does not exist in the current context
+The name 'SqlStmtRx' does not exist in the current context
+The name 'SqlObjectRx' does not exist in the current context
+
+private void AnalyzeSqlFile(string file,string root) => AnalyzeSqlText(file,File.ReadAllText(file),root,Path.GetRelativePath(root,file),false);
+private void AnalyzeSqlText(string file,string text,string root,string display,bool schema)
+{
+    foreach(Match m in TableRx.Matches(text)) { var obj=Clean(m.Groups["obj"].Value); var id=GraphBuilder.Id("database_table",obj); _g.AddNode(new GraphNode{Id=id,Type=m.Value.Contains("VIEW",StringComparison.OrdinalIgnoreCase)?"database_view":"database_table",Name=obj,Location=Loc(file,root,text,m.Index),Properties=new(){["schema_source"]=schema}}); }
+    foreach(Match m in SqlStmtRx.Matches(text)) { var sid=GraphBuilder.Id("sql",$"{file}:{m.Index}"); _g.AddNode(new GraphNode{Id=sid,Type="sql_statement",Name=display+"#"+m.Index,Location=Loc(file,root,text,m.Index),Properties=new(){["statement"]=m.Value.Trim()}}); foreach(Match o in SqlObjectRx.Matches(m.Value)) { var obj=Clean(o.Groups["obj"].Value); var tid=GraphBuilder.Id("database_table",obj); _g.AddNode(new GraphNode{Id=tid,Type="database_table",Name=obj,Properties=new(){["unresolved"] = true}}); _g.AddEdge(new GraphEdge{Id=GraphBuilder.EdgeId(sid,tid,"sql_references",file+m.Index+o.Index),From=sid,To=tid,Type="sql_references",Evidence=Loc(file,root,text,m.Index+o.Index),Properties=new(){["object"]=obj}}); } }
+}
