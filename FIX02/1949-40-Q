@@ -1,0 +1,71 @@
+2 errros in RoslynAnalyzer.cs
+Argument 4: cannot convert from 'Microsoft.CodeAnalysis.ISymbol' to 'Microsoft.CodeAnalysis.IMethodSymbol' in
+
+private void AnalyzeDocument(Document doc, SyntaxNode root, SemanticModel model, string project, CancellationToken ct)
+{
+    var file = doc.FilePath ?? doc.Name;
+    foreach (var cls in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
+    {
+        ct.ThrowIfCancellationRequested();
+        var symbol = model.GetDeclaredSymbol(cls, ct);
+        if (symbol is null) continue;
+        var id = GraphBuilder.Id("class", symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+        _g.AddNode(new GraphNode { Id=id, Type="class", Name=symbol.Name, Namespace=symbol.ContainingNamespace?.ToDisplayString(), Project=project, Location=Loc(doc, cls), Properties = new() { ["fully_qualified_name"]=symbol.ToDisplayString(), ["accessibility"]=symbol.DeclaredAccessibility.ToString() } });
+        foreach (var iface in symbol.Interfaces)
+        {
+            var iid=GraphBuilder.Id("interface",iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+            _g.AddNode(new GraphNode { Id=iid, Type="interface", Name=iface.Name, Namespace=iface.ContainingNamespace?.ToDisplayString(), Project=project });
+            _g.AddEdge(new GraphEdge { Id=GraphBuilder.EdgeId(id,iid,"implements",file), From=id, To=iid, Type="implements", Evidence=Loc(doc,cls) });
+        }
+        if (symbol.BaseType is { } bt && bt.SpecialType!=SpecialType.System_Object)
+        {
+            var bid=GraphBuilder.Id("class",bt.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+            _g.AddNode(new GraphNode { Id=bid, Type="class", Name=bt.Name, Namespace=bt.ContainingNamespace?.ToDisplayString(), Project=project });
+            _g.AddEdge(new GraphEdge { Id=GraphBuilder.EdgeId(id,bid,"inherits",file), From=id, To=bid, Type="inherits", Evidence=Loc(doc,cls) });
+        }
+    }
+    foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
+    {
+        ct.ThrowIfCancellationRequested();
+        var symbol=model.GetDeclaredSymbol(method,ct); if(symbol is null) continue;
+        var mid=MethodId(symbol);
+        var containing=symbol.ContainingType;
+        var cid=containing is null ? null : GraphBuilder.Id("class",containing.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+        if(cid is not null) _g.AddNode(new GraphNode { Id=cid, Type=containing!.TypeKind==TypeKind.Interface?"interface":"class", Name=containing.Name, Namespace=containing.ContainingNamespace?.ToDisplayString(), Project=project });
+        _g.AddNode(new GraphNode { Id=mid, Type=IsControllerAction(symbol)?"controller_action":"method", Name=symbol.Name, Namespace=symbol.ContainingNamespace?.ToDisplayString(), Project=project, Location=Loc(doc,method), Properties = new() { ["signature"]=symbol.ToDisplayString(), ["return_type"]=symbol.ReturnType.ToDisplayString(), ["is_async"]=symbol.IsAsync, ["containing_type"]=containing?.ToDisplayString() } });
+        if(cid is not null) _g.AddEdge(new GraphEdge { Id=GraphBuilder.EdgeId(mid,cid,"member_of",file+method.SpanStart), From=mid, To=cid, Type="member_of", Evidence=Loc(doc,method) });
+        if(IsControllerAction(symbol)) AnalyzeControllerAction(doc,method,model,symbol,mid);
+        foreach(var inv in method.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            var target=model.GetSymbolInfo(inv,ct).Symbol as IMethodSymbol;
+            if(target is null) continue;
+            var tid=MethodId(target);
+            _g.AddNode(new GraphNode { Id=tid, Type=IsControllerAction(target)?"controller_action":"method", Name=target.Name, Namespace=target.ContainingNamespace?.ToDisplayString(), Project=project, Properties = new() { ["signature"]=target.ToDisplayString(), ["return_type"]=target.ReturnType.ToDisplayString(), ["containing_type"]=target.ContainingType?.ToDisplayString() } });
+            _g.AddEdge(new GraphEdge { Id=GraphBuilder.EdgeId(mid,tid,"calls",file+inv.SpanStart), From=mid, To=tid, Type="calls", Evidence=Loc(doc,inv), Properties=new() { ["target_symbol"]=target.ToDisplayString() } });
+            if(IsDapperMethod(target)) AnalyzeDapperInvocation(doc, inv, model, mid);
+        }
+        foreach(var ret in method.DescendantNodes().OfType<ReturnStatementSyntax>())
+        {
+            var expr=ret.Expression?.ToString(); if(expr is null) continue;
+            if(expr.Contains("View(",StringComparison.Ordinal) || expr.Contains("PartialView(",StringComparison.Ordinal))
+                _g.AddNode(new GraphNode { Id=GraphBuilder.Id("view_reference",$"{file}:{ret.SpanStart}"), Type="view_reference", Name=expr, Project=project, Location=Loc(doc,ret), Properties=new(){["expression"]=expr} });
+        }
+    }
+    foreach(var prop in root.DescendantNodes().OfType<PropertyDeclarationSyntax>())
+    {
+        var symbol=model.GetDeclaredSymbol(prop,ct); if(symbol is null) continue;
+        _g.AddNode(new GraphNode { Id=GraphBuilder.Id("property",symbol.ToDisplayString()), Type="property", Name=symbol.Name, Namespace=symbol.ContainingNamespace?.ToDisplayString(), Project=project, Location=Loc(doc,prop), Properties=new(){["type"]=symbol.Type.ToDisplayString()} });
+    }
+}
+second error :
+Argument 2: cannot convert from 'System.Threading.CancellationToken' to 'System.IProgress<Microsoft.CodeAnalysis.MSBuild.ProjectLoadProgress>?' in
+ public async Task AnalyzeAsync(string solutionPath, CancellationToken ct)
+ {
+     using var workspace = MSBuildWorkspace.Create();
+     workspace.WorkspaceFailed += (_, e) => Console.Error.WriteLine($"[Roslyn] {e.Diagnostic.Kind}: {e.Diagnostic.Message}");
+     var solution = await workspace.OpenSolutionAsync(solutionPath, ct);
+     foreach (var project in solution.Projects)
+     {
+         Console.WriteLine($"[Roslyn] Project: {project.Name}");
+         foreach (var doc in project.Documents.Where(d=>d.SourceCodeKind==SourceCodeKind.Regular))
+...
