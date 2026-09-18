@@ -1,0 +1,181 @@
+Question
+APPDATA:Feature: In shared\_VehPopup I need to implement new feature - User should be able to upload one or more (up to 5) files, using Telerik/Kendoo .net core fileupload  control. These files should be saved on sharepoint. I will provide api key for sharepoint. When form is loaded shrepoint links should be displayed.  Save links in database. 
+
+Answer :
+To implement the requested feature in `shared_VehPopup` with the ability for users to upload files via the Telerik/Kendo UI file upload control, which will subsequently be saved to SharePoint and stored in the database, we will follow a detailed approach.
+
+### 1. REQUIREMENT / DESIGN DECISION
+
+The implementation will allow users to upload up to five files, store the SharePoint links in the database, and display them on the form when loaded.
+
+### 2. EXISTING SAVE-BUTTON / USER-EVENT FLOW
+
+The existing popup dialog likely has a save button which will need to be extended to accommodate the file upload functionality.
+
+### 3. END-TO-END IMPLEMENTATION TRACE
+
+1. **User uploads files** using the Telerik/Kendo file upload control.
+2. **JavaScript retrieves the uploaded files** when the save button is clicked.
+3. **AJAX call to the controller** to upload files to SharePoint and save links to the database.
+4. **Dapper query to insert/update the database** with the file links.
+
+### 4. FILE-BY-FILE CHANGES
+
+- **Views**: Modify `Views/Shared/_VehPopUp.cshtml` to include the file upload control.
+- **Controllers**: Create or modify a method in the relevant controller to handle file uploads.
+- **Database**: Create a table or modify an existing one to hold the file links.
+
+### 5. EXACT CHANGED FUNCTIONS / CODE
+
+#### 5.1. Modify Razor View (_VehPopUp.cshtml)
+
+Add the file upload control within the form:
+
+```html
+<div class="form-group">
+    @Html.Label("Upload Files", new { @class = "form-label" })
+    @(Html.Kendo().Upload("files")
+        .Name("files") // Populate the name appropriately
+        .Multiple(true) // Allow multiple file uploads
+        .MaxFileCount(5) // Limit to 5 files
+        .Async(a => a
+            .Insert("/api/upload") // Placeholder
+            .Remove("/api/remove") // Placeholder
+        )
+        .HtmlAttributes(new { @class = "form-control" }))
+</div>
+```
+
+#### 5.2. File Upload Controller Action
+
+Create a new action in the controller for handling the file upload:
+
+```csharp
+[HttpPost]
+public async Task<IActionResult UploadFiles(List<IFormFile> files)
+{
+    var sharePointLinks = new List<string>();
+    
+    foreach (var file in files)
+    {
+        if (file.Length > 0)
+        {
+            // Upload to SharePoint (pseudo-code for SharePoint API interaction)
+            var sharePointLink = await UploadToSharePoint(file); // Implement this method
+            sharePointLinks.Add(sharePointLink);
+        }
+    }
+
+    // Save links to the database (assumes a method SaveLinks exists)
+    SaveLinksToDatabase(sharePointLinks); // Implement this method
+    return Ok(sharePointLinks); // Return the links to the frontend if necessary
+}
+```
+
+#### 5.3. SharePoint Upload Method (pseudo-code)
+
+You would need to implement this method to upload files to SharePoint:
+
+```csharp
+private async Task<string> UploadToSharePoint(IFormFile file)
+{
+    // Use HttpClient or an appropriate SharePoint client here
+    var apiKey = _configuration["SharePoint:ApiKey"]; // Fetch from config
+    var url = "https://yourSharePointUrl/upload"; // Update with real endpoint
+
+    using var client = new HttpClient();
+    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+    
+    using var content = new MultipartFormDataContent();
+    using var stream = file.OpenReadStream();
+    content.Add(new StreamContent(stream), "file", file.FileName);
+
+    var response = await client.PostAsync(url, content);
+    if (response.IsSuccessStatusCode)
+    {
+        // Parse response to get SharePoint file link
+        return await response.Content.ReadAsStringAsync(); // Adjust accordingly
+    }
+    
+    throw new Exception("Failed to upload file to SharePoint.");
+}
+```
+
+#### 5.4. Database Save Function (pseudo-code)
+
+Implement a function to save file links to the database:
+
+```csharp
+private void SaveLinksToDatabase(List<string> links)
+{
+    using var connection = new SqlConnection(connectionString);
+    var sql = "INSERT INTO VehicleAttachments (VehicleId, FileLink) VALUES (@VehicleId, @FileLink)";
+
+    foreach (var link in links)
+    {
+        connection.Execute(sql, new { VehicleId = vehicleId, FileLink = link });
+    }
+}
+```
+
+### 6. TELERIK / JAVASCRIPT / AJAX / WEB API
+
+1. Ensure that the file upload control is correctly set to trigger the upload action.
+2. Optionally, use AJAX to refresh the displayed links after saving the files.
+
+### 7. SHAREPOINT API CONFIGURATION / API KEY PLACEMENT
+
+Place the API key in `appsettings.json` like so:
+
+```json
+{
+  "SharePoint": {
+    "ApiKey": "your-api-key-here"
+  }
+}
+```
+
+Use configuration services in your controller to read this value.
+
+### 8. DATABASE CHANGES
+
+#### 8.1. Create / Modify Table for Links
+
+```sql
+CREATE TABLE VehicleAttachments (
+    Id INT PRIMARY KEY IDENTITY,
+    VehicleId INT NOT NULL, 
+    FileLink NVARCHAR(MAX) NOT NULL,
+    FOREIGN KEY (VehicleId) REFERENCES Vehicles(VehicleId)
+);
+```
+
+### 9. EXACT SQL / DDL / DAPPER
+
+The SQL to insert the links into your created table is shown in the `SaveLinksToDatabase` method above.
+
+### 10. LOAD / RETRIEVAL / DISPLAY
+
+On form load, retrieve the linked file URLs associated with the `VehicleId` to display in the view.
+
+### 11. TRANSACTION / FAILURE / ORPHAN HANDLING
+
+Implement error handling during both file upload and database save operations to ensure partial failures can be gracefully managed (rollback if necessary).
+
+### 12. VALIDATION
+
+Before saving, ensure the user has selected up to 5 files. Validate file types and sizes as needed.
+
+### 13. REGRESSION RISKS
+
+Ensure existing functionality remains intact by testing the file upload and existing operations thoroughly.
+
+### 14. TEST PLAN
+
+- Test single and multiple file uploads.
+- Test with and without files selected.
+- Test validation of file type and size.
+- Check that links are visible upon form load.
+- Test error handling for SharePoint uploads and database transactions.
+
+By following this detailed plan, the requested feature for file uploads in `shared_VehPopup` can be successfully implemented, adhering to the architecture while providing a good user experience.
