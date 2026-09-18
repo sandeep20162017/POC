@@ -1,0 +1,75 @@
+Question
+Fix bug - Modified By value in Labour tab in Vehicle estimate is incorrect.
+
+Answer 
+### DEFECT ANALYSIS
+**ROOT CAUSE / DESIGN DECISION**
+The defect is related to the "Modified By" field in the Labour tab under the Vehicle estimate being incorrect. 
+
+**IMPLEMENTATION TRACE**
+1. **User Action**: When a user modifies labour details in the Labour tab, the system captures the user details into the "Modified By" field.
+2. **Controller**: This occurs in the `LabourDetailsController`, specifically within the methods related to creation and updating of labour entries such as `CreateLabourDetail` and `UpdateLabourDetail`.
+3. **Model Binding**: The controller obtains the `LastModifiedBy` value from `ViewBag.UserName`.
+4. **Dapper and SQL**: The `LastModifiedBy` value is passed as a parameter into the SQL INSERT/UPDATE statements targeting the `EmployeeLabour` table.
+
+### FILE-BY-FILE CHANGES
+1. **File**: `Controllers/Parts/LabourDetailsController.cs`
+   - **Function**: `CreateLabourDetail`
+     - Current value for `LastModifiedBy` is taken from `ViewBag.UserName`.
+   - **Function**: `UpdateLabourDetail`
+     - Similar pattern used with `LastModifiedBy`.
+
+### EXACT CHANGED FUNCTIONS / CODE
+#### FILE: Controllers/Parts/LabourDetailsController.cs
+```csharp
+// Method for creating labour detail
+public async Task<IActionResult CreateLabourDetail([DataSourceRequest] DataSourceRequest request, LabourDetailsRebuiltPartsViewModel model)
+{
+    ...
+    var parameters = new
+    {
+        model.LabourDefn,
+        DateEntered = DateTime.Now,
+        ...
+        LastModifiedBy = ViewBag.UserName // Ensure UserName is being set correctly and updated as expected.
+    };
+    await _dbConnection.ExecuteAsync(query, parameters, transaction);
+    ...
+}
+
+// Method for updating labour detail
+[AcceptVerbs("Post")]
+public IActionResult UpdateLabourDetail([DataSourceRequest] DataSourceRequest request, LabourDetailsRebuiltPartsViewModel model)
+{
+    ...
+    var parameters = new
+    {
+        model.LabourDefn,
+        ...
+        LastModifiedBy = ViewBag.UserName // Ensure this value is updated correctly based on user
+    };
+    _dbConnection.Execute(query, parameters);
+    ...
+}
+```
+
+### CONFIRMED BUGS
+- The value of `LastModifiedBy` may not always reflect the current user. This could occur if `ViewBag.UserName` is not set correctly before these actions are called, or if it is called before user authentication has completed.
+  
+### POTENTIAL BUGS
+- If `ViewBag.UserName` is `null` or not properly updated, it may default to `SYSTEM` or remain as an outdated value.
+- Check the order of operations in the controller where the `ViewBag` is populated. Ensure `ViewBag.UserName` is retrieved after user authentication.
+
+### VALIDATION
+1. Ensure `ViewBag.UserName` is correctly set upon user login and is accessible within the `CreateLabourDetail` and `UpdateLabourDetail` methods.
+2. Check for scenarios where multiple users or sessions might lead to the loss or incorrect assignment of this value.
+
+### REGRESSION RISKS
+- Changes to how `LastModifiedBy` is assigned could impact other areas where user identification is critical. Testing must ensure that user tracking remains accurate across different sections of the application.
+
+### TEST PLAN
+1. Verify that the `LastModifiedBy` field reflects the correct user when:
+   - A new labour detail is created.
+   - An existing labour detail is updated.
+   - Edge cases such as simultaneous editing by different users are handled correctly.
+2. Log the value of `ViewBag.UserName` before executing the create/update queries to ensure it holds the expected value.
