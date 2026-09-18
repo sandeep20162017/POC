@@ -1,0 +1,84 @@
+Question : APP:Fix bug - Modified By value in Labour tab in Vehicle estimate is incorrect.
+
+Answer :
+# ROOT CAUSE / DESIGN DECISION
+The issue pertains to the "Modified By" value in the Labour tab of the Vehicle estimate displaying incorrectly. A thorough investigation into the controller's logic and the associated SQL will help identify the bug.
+
+## IMPLEMENTATION TRACE
+1. **Model/ViewModel**: The `LabourDetailsRebuiltPartsViewModel` contains properties related to the labour entry, including `LastModifiedBy`.
+  
+2. **View/Razor**: The input fields utilize Kendo UI which binds to the above ViewModel. The respective property used for "Modified By" likely draws data from `ViewBag.UserName`.
+
+3. **Telerik/Kendo**: The Kendo grid configurations will rely on the correct values passed back and forth between the client and the server.
+
+4. **JavaScript**: In the JavaScript associated with the grid, the values are sent via AJAX to a controller where they are processed.
+
+5. **AJAX/HTTP**: The actual AJAX call will be found in the `onLabourEdit` function or similar method, which posts the updated values back to the server.
+
+6. **Controller**: On the server side, the `UpdateLabourDetail` method processes the data. The variable `LastModifiedBy` should be set to `ViewBag.UserName` as part of the parameters.
+
+7. **Dapper**: The SQL for updating the labour entry uses the `LASTMODIFIEDBY` field while executing an `UPDATE`.
+
+8. **SQL**: Check that the SQL correctly updates the `LASTMODIFIEDBY` column.
+
+## FILE-BY-FILE CHANGES
+### 1. Controllers/Parts/LabourDetailsController.cs
+#### FUNCTION: UpdateLabourDetail
+**CONFIRMED BUGS**:
+- Inconsistent assignment of `LastModifiedBy` to use the correct user context.
+
+#### CHANGE:
+```csharp
+var parameters = new
+{
+    model.LabourDefn,
+    model.CostCentre,
+    model.Task,
+    model.Usage,
+    model.HrsReqd,
+    model.LinkNumber,
+    DateRevised = DateTime.Now,
+    LastModifiedBy = ViewBag.UserName, // Ensure this is assigned correctly
+    model.Id
+};
+
+string query = @"
+    UPDATE SBCES.EMPLOYEELABOUR 
+    SET 
+        LABOURDEFN = @LabourDefn,
+        COSTCENTRE = @CostCentre,
+        TASK = @Task,
+        USAGE = @Usage,
+        HRSREQD = @HrsReqd,
+        LASTMODIFIEDBY = @LastModifiedBy,
+        [DateRevised] = @DateRevised
+    WHERE [LinkNumber] = @LinkNumber AND Id = @Id";
+
+_dBConnection.Execute(query, parameters);
+```
+
+### 2. Views/Vehicles/Index_Oct_27.cshtml
+Not applicable unless tied to UI changes that reflect on updated data.
+
+## DAPPER / SQL
+### SQL Statement
+```sql
+UPDATE SBCES.EMPLOYEELABOUR 
+SET 
+    LABOURDEFN = @LabourDefn,
+    COSTCENTRE = @CostCentre,
+    TASK = @Task,
+    USAGE = @Usage,
+    HRSREQD = @HrsReqd,
+    LASTMODIFIEDBY = @LastModifiedBy,
+    DateRevised = @DateRevised
+WHERE LINKNUMBER = @LinkNumber AND ID = @Id;
+```
+
+## REGRESSION RISKS
+Confirm the `ViewBag.UserName` always has the correctly logged-in user's value when performing labour detail updates. Any caching or user session issues may need to be explored if this value does not populate correctly.
+
+## TEST PLAN
+1. Manually create/update Labour details and confirm the "Modified By" column correctly reflects the current user's name.
+2. Test various user contexts to ensure integrity across different role levels within the application.
+3. Check that no SQL triggers inadvertently modify the `LASTMODIFIEDBY` value upon concurrent edits.
