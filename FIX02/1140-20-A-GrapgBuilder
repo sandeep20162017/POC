@@ -1,0 +1,99 @@
+using CodeGraphGenerator.Models;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace CodeGraphGenerator.Infrastructure;
+
+public sealed class GraphBuilder
+{
+    private readonly Dictionary<string,GraphNode> _nodes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string,GraphEdge> _edges = new(StringComparer.Ordinal);
+    public IEnumerable<GraphNode> Nodes => _nodes.Values;
+    public IEnumerable<GraphEdge> Edges => _edges.Values;
+
+    // FIX (was first-write-wins): the old version only ever inserted a node
+    // the FIRST time its Id was seen and silently dropped every later write
+    // to that same Id - including a real, located node arriving AFTER a
+    // location-less "stub" was registered for it (e.g. RoslynAnalyzer adds a
+    // bare stub node for a `calls` target the moment method A calls method
+    // B, before B's own declaration is necessarily visited; when B's real
+    // declaration IS visited later and tries to register a node with a real
+    // Location, the old AddNode saw the Id already existed and threw the
+    // better version away). Confirmed against a real generated master.json:
+    // 333/357 method nodes and 9/219 controller_action nodes had Location
+    // missing entirely because of exactly this ordering. Same pattern hit
+    // database_table nodes (an "unresolved" reference stub from a query
+    // beating the table's own CREATE TABLE node to its Id).
+    //
+    // New rule: once a node has a Location, nothing can overwrite it (a
+    // second sighting of a fully-analyzed symbol should never regress a
+    // good location back to a stub). A location-less stub, on the other
+    // hand, IS upgraded in place the moment a better version of the same Id
+    // arrives - whether that's a real Location, or simply richer
+    // Properties/Namespace/Project than the stub had. This makes node
+    // registration order-independent, which it needs to be given Roslyn
+    // visits call targets and declarations in whatever order it encounters
+    // them, not in a guaranteed "declaration before use" order.
+    public GraphNode AddNode(GraphNode node)
+    {
+        if (!_nodes.TryGetValue(node.Id, out var existing))
+        {
+            _nodes[node.Id] = node;
+            return node;
+        }
+
+        if (existing.Location is not null)
+        {
+            // Already have a located version - never let a later, possibly
+            // location-less stub for the same Id clobber it.
+            return existing;
+        }
+
+        // Existing entry was a stub (no Location yet). Take the new node if
+        // it's an upgrade - i.e. it actually brings a Location, or at least
+        // more Properties than the stub had. Otherwise keep the existing
+        // stub rather than replacing it with an equally-empty duplicate.
+        if (node.Location is not null || node.Properties.Count > existing.Properties.Count)
+        {
+            _nodes[node.Id] = node;
+            return node;
+        }
+
+        return existing;
+    }
+
+    public void AddEdge(GraphEdge edge)
+    {
+        if (!_nodes.ContainsKey(edge.From) || !_nodes.ContainsKey(edge.To)) return;
+        _edges.TryAdd(edge.Id, edge);
+    }
+
+    public static string Id(string kind, string value) => $"{kind}:{value}";
+    public static string EdgeId(string from, string to, string type, string evidence) =>
+        "edge:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{from}|{to}|{type}|{evidence}"))).ToLowerInvariant()[..24];
+
+    public GraphPackage BuildPackage(GraphMetadata metadata)
+    {
+        var p = new GraphPackage { Metadata = metadata, Nodes = _nodes.Values.OrderBy(x=>x.Id).ToList(), Edges = _edges.Values.OrderBy(x=>x.Id).ToList() };
+        foreach (var n in p.Nodes)
+        {
+            if (!string.IsNullOrWhiteSpace(n.Name)) AddIndex(p.Indexes.Symbols, n.Name, n.Id);
+            if (n.Location is not null) AddIndex(p.Indexes.Files, n.Location.Path, n.Id);
+            if (n.Type is "view" or "partial_view" or "layout") AddIndex(p.Indexes.Views, n.Name, n.Id);
+            if (n.Type is "javascript_function" or "javascript_event") AddIndex(p.Indexes.JavaScript, n.Name, n.Id);
+            if (n.Type is "route" or "controller_action") AddIndex(p.Indexes.Routes, n.Name, n.Id);
+            if (n.Type is "sql_statement" or "dapper_query") AddIndex(p.Indexes.Sql, n.Name, n.Id);
+            if (n.Type is "database_table" or "database_view" or "database_function" or "database_procedure") AddIndex(p.Indexes.Database, n.Name, n.Id);
+        }
+        metadata.Statistics.NodeCount = p.Nodes.Count;
+        metadata.Statistics.EdgeCount = p.Edges.Count;
+        metadata.Statistics.NodesByType = p.Nodes.GroupBy(x=>x.Type,StringComparer.OrdinalIgnoreCase).ToDictionary(g=>g.Key,g=>g.Count(),StringComparer.OrdinalIgnoreCase);
+        metadata.Statistics.EdgesByType = p.Edges.GroupBy(x=>x.Type,StringComparer.OrdinalIgnoreCase).ToDictionary(g=>g.Key,g=>g.Count(),StringComparer.OrdinalIgnoreCase);
+        return p;
+    }
+    private static void AddIndex(Dictionary<string,List<string>> index, string key, string id)
+    {
+        if (!index.TryGetValue(key,out var list)) index[key]=list=[];
+        if (!list.Contains(id,StringComparer.Ordinal)) list.Add(id);
+    }
+}
