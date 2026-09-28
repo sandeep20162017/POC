@@ -1,0 +1,355 @@
+using CodeGraphGenerator.Infrastructure;
+using CodeGraphGenerator.Models;
+using System.Text.RegularExpressions;
+
+namespace CodeGraphGenerator.Analyzers;
+
+public sealed class NonCSharpAnalyzer
+{
+    private readonly GraphBuilder _g;
+
+    // FIX: every regex below is now a verbatim string (@"...") with plain,
+    // single-backslash regex escaping throughout. The previous version mixed
+    // verbatim and non-verbatim string literals for the same regex idioms
+    // (\s, \b, \., \(, \)) - in a NON-verbatim C# string, a lone "\s" is not
+    // a legal escape sequence at all (only \', \", \\, \0, \a, \b, \f, \n,
+    // \r, \t, \v, \u, \x, \U are), so at least one declaration (the old
+    // ScriptRx) would not compile as written, and others silently changed
+    // meaning (e.g. "\b" in a non-verbatim string is a literal backspace
+    // character, not a regex word-boundary). Using @"..." uniformly, with
+    // the same single-backslash regex syntax you'd write in any regex
+    // tester, removes this whole class of bug.
+    private static readonly Regex ScriptRx = new(
+        @"<script\b[^>]*>(?<body>[\s\S]*?)</script\s*>",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // FIX: the previous JsFnRx only matched `function name(...)` and
+    // `name = (...) => ...` (arrow form). It could never match this
+    // codebase's dominant handler idiom, `window.name = function (e) {...}`
+    // (confirmed directly in Views\Vehicles\Index.cshtml: onCopyEstimate,
+    // onArchiveClick, onComboBoxModelDataBound all use this exact form) -
+    // nor the plain non-arrow `name = function(...) {...}` form, nor the
+    // object-literal-method `name: function(...) {...}` form used in Kendo
+    // grid column/toolbar config. This is very likely the actual reason
+    // window.onCopyEstimate never got its own javascript_function node in
+    // the first place (only a phantom onCopyEstimateClick reference node
+    // existed). The four alternatives below mirror the four JS_FUNC_DEF_RES
+    // patterns already proven correct on this codebase by the Python
+    // retrieval tool's own Bridges class (app_claude_v1.py).
+    private static readonly Regex JsFnRx = new(
+        @"function\s+(?<name>[A-Za-z_$][\w$]*)\s*\(" +
+        @"|window\.(?<name2>[A-Za-z_$][\w$]*)\s*=\s*function\s*\(" +
+        @"|(?:var|let|const)\s+(?<name3>[A-Za-z_$][\w$]*)\s*=\s*(?:function\s*\(|\([^)]*\)\s*=>)" +
+        @"|(?<name4>[A-Za-z_$][\w$]*)\s*:\s*function\s*\(",
+        RegexOptions.Compiled);
+
+    private static readonly Regex AjaxRx = new(
+        @"(?:url\s*:\s*|\.ajax\s*\(\s*\{[\s\S]*?url\s*:\s*)(?<url>['""])(?<value>.*?)\1",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex PartialRx = new(
+        @"(?:<partial\s+name\s*=\s*|PartialAsync\s*\(\s*|RenderPartialAsync\s*\(\s*)(?:@)?[""'](?<name>[^""']+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ModelRx = new(
+        @"@model\s+(?<model>[^\r\n]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex TelerikActionRx = new(
+        @"\.Action\s*\(\s*[""'](?<action>[^""']+)[""']\s*,\s*[""'](?<controller>[^""']+)[""']",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex SqlObjectRx = new(
+        @"\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|MERGE\s+INTO)\s+(?<obj>(?:\[[^\]]+\]|[A-Za-z0-9_]+)(?:\s*\.\s*(?:\[[^\]]+\]|[A-Za-z0-9_]+)){0,2})",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex TableRx = new(
+        @"CREATE\s+(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?<obj>(?:\[[^\]]+\]|[A-Za-z0-9_]+)(?:\s*\.\s*(?:\[[^\]]+\]|[A-Za-z0-9_]+)){0,2})",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex SqlStmtRx = new(
+        @"(?is)\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\b[\s\S]*?(?=;|$)",
+        RegexOptions.Compiled);
+
+    public NonCSharpAnalyzer(GraphBuilder g) => _g = g;
+
+    public void AnalyzeDirectory(string root)
+    {
+        foreach (var file in Directory.EnumerateFiles(root, "*.cshtml", SearchOption.AllDirectories)) AnalyzeRazor(file, root);
+        foreach (var file in Directory.EnumerateFiles(root, "*.sql", SearchOption.AllDirectories)) AnalyzeSqlFile(file, root);
+    }
+
+    public void AnalyzeSchema(string schema, string root)
+    {
+        if (!File.Exists(schema)) return;
+        AnalyzeSqlText(schema, File.ReadAllText(schema), root, "schema.sql", true);
+    }
+
+    private void AnalyzeRazor(string file, string root)
+    {
+        var text = File.ReadAllText(file);
+        var rel = Path.GetRelativePath(root, file);
+        var viewType = Path.GetFileName(file).StartsWith("_", StringComparison.Ordinal) ? "partial_view" : "view";
+        if (Path.GetFileName(file).Equals("_ViewStart.cshtml", StringComparison.OrdinalIgnoreCase)) viewType = "layout";
+
+        var vid = GraphBuilder.Id("view", rel);
+        _g.AddNode(new GraphNode
+        {
+            Id = vid,
+            Type = viewType,
+            Name = Path.GetFileName(file),
+            Location = Loc(file, root, text, 0),
+            Properties = new() { ["relative_path"] = rel, ["model_directive"] = ModelRx.Match(text).Groups["model"].Value.Trim() }
+        });
+
+        foreach (Match m in PartialRx.Matches(text))
+        {
+            var target = m.Groups["name"].Value.Trim();
+            var pid = GraphBuilder.Id("view", target);
+            _g.AddNode(new GraphNode { Id = pid, Type = "view_reference", Name = target, Properties = new() { ["unresolved"] = true } });
+            _g.AddEdge(new GraphEdge
+            {
+                Id = GraphBuilder.EdgeId(vid, pid, "renders", rel + m.Index),
+                From = vid,
+                To = pid,
+                Type = "renders",
+                Confidence = "exact",
+                Evidence = Loc(file, root, text, m.Index, m.Index + m.Length)
+            });
+        }
+
+        foreach (Match s in ScriptRx.Matches(text)) AnalyzeScript(file, root, text, vid, s);
+
+        foreach (Match t in TelerikActionRx.Matches(text))
+        {
+            var routeName = $"/{t.Groups["controller"].Value}/{t.Groups["action"].Value}";
+            var route = GraphBuilder.Id("route", routeName);
+            _g.AddNode(new GraphNode { Id = route, Type = "route", Name = routeName, Properties = new() { ["source"] = "telerik" } });
+            _g.AddEdge(new GraphEdge
+            {
+                Id = GraphBuilder.EdgeId(vid, route, "telerik_endpoint", rel + t.Index),
+                From = vid,
+                To = route,
+                Type = "telerik_endpoint",
+                Evidence = Loc(file, root, text, t.Index, t.Index + t.Length),
+                Properties = new() { ["controller"] = t.Groups["controller"].Value, ["action"] = t.Groups["action"].Value }
+            });
+        }
+    }
+
+    private void AnalyzeScript(string file, string root, string full, string view, Match script)
+    {
+        var body = script.Groups["body"].Value;
+        var baseOffset = script.Groups["body"].Index;
+
+        foreach (Match f in JsFnRx.Matches(body))
+        {
+            var name = FirstNonEmpty(f.Groups["name"], f.Groups["name2"], f.Groups["name3"], f.Groups["name4"]);
+            if (string.IsNullOrEmpty(name)) continue;
+
+            var absDefStart = baseOffset + f.Index;
+
+            // FIX: the old code only ever recorded the match's START offset
+            // (Start == End for every JS node, 413/413 in a real generated
+            // master.json - i.e. every javascript_function node was a
+            // zero-width point, not a real span). Find the function body's
+            // opening brace and its matching close so the node covers the
+            // function's real extent, the same way RoslynAnalyzer already
+            // does for free via Roslyn's own SyntaxNode.Span/GetLineSpan.
+            var openBraceInBody = body.IndexOf('{', f.Index + f.Length);
+            int absEnd;
+            string funcBodyForAjaxScan;
+            int ajaxScanBaseOffset;
+            if (openBraceInBody >= 0)
+            {
+                var closeBraceInBody = FindMatchingBrace(body, openBraceInBody);
+                if (closeBraceInBody >= 0)
+                {
+                    absEnd = baseOffset + closeBraceInBody + 1;
+                    funcBodyForAjaxScan = body.Substring(openBraceInBody, closeBraceInBody - openBraceInBody + 1);
+                    ajaxScanBaseOffset = baseOffset + openBraceInBody;
+                }
+                else
+                {
+                    // Unbalanced braces (shouldn't normally happen) - fall
+                    // back to a zero-width point rather than guessing a
+                    // wrong end, and don't scan for ajax calls we can't
+                    // reliably bound to this function.
+                    absEnd = absDefStart;
+                    funcBodyForAjaxScan = "";
+                    ajaxScanBaseOffset = absDefStart;
+                }
+            }
+            else
+            {
+                absEnd = absDefStart;
+                funcBodyForAjaxScan = "";
+                ajaxScanBaseOffset = absDefStart;
+            }
+
+            var id = GraphBuilder.Id("javascript", $"{file}:{name}:{absDefStart}");
+            _g.AddNode(new GraphNode
+            {
+                Id = id,
+                Type = "javascript_function",
+                Name = name,
+                Location = Loc(file, root, full, absDefStart, absEnd),
+                Properties = new() { ["embedded_in_view"] = view }
+            });
+            _g.AddEdge(new GraphEdge
+            {
+                Id = GraphBuilder.EdgeId(view, id, "contains_javascript", file + f.Index),
+                From = view,
+                To = id,
+                Type = "contains_javascript",
+                Evidence = Loc(file, root, full, absDefStart, absEnd)
+            });
+
+            // FIX: the old code scanned for AjaxRx matches across
+            // `body.Substring(f.Index)` - i.e. from this function's start to
+            // the END OF THE WHOLE <script> BLOCK, not just this function's
+            // own body. That meant an $.ajax(...) call belonging to a later,
+            // unrelated function in the same script block could be wrongly
+            // attributed to THIS function as an ajax_calls edge. Now that we
+            // have a real matching closing brace, bound the scan to exactly
+            // this function's own body.
+            foreach (Match a in AjaxRx.Matches(funcBodyForAjaxScan))
+            {
+                var url = a.Groups["value"].Value;
+                var rid = GraphBuilder.Id("route", url);
+                _g.AddNode(new GraphNode { Id = rid, Type = "route", Name = url, Properties = new() { ["source"] = "javascript_ajax" } });
+                var off = ajaxScanBaseOffset + a.Index;
+                _g.AddEdge(new GraphEdge
+                {
+                    Id = GraphBuilder.EdgeId(id, rid, "ajax_calls", file + off),
+                    From = id,
+                    To = rid,
+                    Type = "ajax_calls",
+                    Evidence = Loc(file, root, full, off, off + a.Length),
+                    Properties = new() { ["url"] = url }
+                });
+            }
+        }
+    }
+
+    private void AnalyzeSqlFile(string file, string root) => AnalyzeSqlText(file, File.ReadAllText(file), root, Path.GetRelativePath(root, file), false);
+
+    private void AnalyzeSqlText(string file, string text, string root, string display, bool schema)
+    {
+        foreach (Match m in TableRx.Matches(text))
+        {
+            var obj = Clean(m.Groups["obj"].Value);
+            var id = GraphBuilder.Id("database_table", obj);
+            _g.AddNode(new GraphNode
+            {
+                Id = id,
+                Type = m.Value.Contains("VIEW", StringComparison.OrdinalIgnoreCase) ? "database_view" : "database_table",
+                Name = obj,
+                // FIX: real span (was a zero-width point at m.Index only).
+                Location = Loc(file, root, text, m.Index, m.Index + m.Length),
+                Properties = new() { ["schema_source"] = schema }
+            });
+        }
+
+        foreach (Match m in SqlStmtRx.Matches(text))
+        {
+            var sid = GraphBuilder.Id("sql", $"{file}:{m.Index}");
+            _g.AddNode(new GraphNode
+            {
+                Id = sid,
+                Type = "sql_statement",
+                Name = display + "#" + m.Index,
+                // FIX: real span covering the whole matched statement text
+                // (was a zero-width point - 142/142 sql_statement nodes in a
+                // real generated master.json had StartOffset == EndOffset).
+                Location = Loc(file, root, text, m.Index, m.Index + m.Length),
+                Properties = new() { ["statement"] = m.Value.Trim() }
+            });
+
+            foreach (Match o in SqlObjectRx.Matches(m.Value))
+            {
+                var obj = Clean(o.Groups["obj"].Value);
+                var tid = GraphBuilder.Id("database_table", obj);
+                _g.AddNode(new GraphNode { Id = tid, Type = "database_table", Name = obj, Properties = new() { ["unresolved"] = true } });
+                _g.AddEdge(new GraphEdge
+                {
+                    Id = GraphBuilder.EdgeId(sid, tid, "sql_references", file + m.Index + o.Index),
+                    From = sid,
+                    To = tid,
+                    Type = "sql_references",
+                    Evidence = Loc(file, root, text, m.Index + o.Index, m.Index + o.Index + o.Length),
+                    Properties = new() { ["object"] = obj }
+                });
+            }
+        }
+    }
+
+    private static string Clean(string s) => Regex.Replace(s.Trim().Replace("[", "").Replace("]", "").Replace(" ", ""), @"\s*\.\s*", ".");
+
+    private static string FirstNonEmpty(params Group[] groups)
+    {
+        foreach (var g in groups)
+            if (g.Success && !string.IsNullOrWhiteSpace(g.Value)) return g.Value;
+        return "";
+    }
+
+    // FIX: naive but reliable brace-depth matching from an opening '{' to
+    // its real closing '}', mirroring the same helper the Python retrieval
+    // tool already relies on (_find_matching_brace in app_claude_v1.py).
+    // Like that helper, this doesn't try to skip braces inside strings/
+    // comments/template literals - good enough for finding a JS function's
+    // real extent in practice, and a strict improvement over never
+    // computing an end at all.
+    private static int FindMatchingBrace(string text, int openBraceIndex)
+    {
+        var depth = 0;
+        for (var i = openBraceIndex; i < text.Length; i++)
+        {
+            if (text[i] == '{') depth++;
+            else if (text[i] == '}')
+            {
+                depth--;
+                if (depth == 0) return i;
+            }
+        }
+        return -1;
+    }
+
+    // FIX: now takes an optional real end offset instead of always
+    // producing a zero-width point (StartOffset == EndOffset for every
+    // single non-C# node in the old version). Passing no endOffset still
+    // gives the old zero-width-point behavior for call sites that
+    // genuinely only have a single point of interest (e.g. a @model
+    // directive), so this is a strict superset of the previous signature.
+    private static SourceLocation Loc(string file, string root, string text, int startOffset, int? endOffset = null)
+    {
+        var start = Math.Clamp(startOffset, 0, text.Length);
+        var end = Math.Clamp(endOffset ?? startOffset, start, text.Length);
+        var (startLine, startCol) = LineCol(text, start);
+        var (endLine, endCol) = LineCol(text, end);
+        return new SourceLocation
+        {
+            Path = Path.GetRelativePath(root, file),
+            FullPath = Path.GetFullPath(file),
+            StartLine = startLine,
+            StartColumn = startCol,
+            EndLine = endLine,
+            EndColumn = endCol,
+            StartOffset = start,
+            EndOffset = end
+        };
+    }
+
+    private static (int line, int col) LineCol(string text, int offset)
+    {
+        var line = 1;
+        var col = 1;
+        var span = text.AsSpan(0, offset);
+        foreach (var ch in span)
+        {
+            if (ch == '\n') { line++; col = 1; }
+            else col++;
+        }
+        return (line, col);
+    }
+}
