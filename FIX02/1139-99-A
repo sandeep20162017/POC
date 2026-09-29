@@ -1,3 +1,4 @@
+
 CREATE OR ALTER PROCEDURE [SBCES].[RptCostVariance]
     @Debug BIT = 1
 AS
@@ -17,18 +18,25 @@ BEGIN
  
     ------------------------------------------------------------------------
     -- STAGE 1: recursive BOM expansion. Adjustment is the compounded usage
-    -- fraction from the root down to this node (see header). DECIMAL(28,10)
-    -- to keep precision across several levels of multiplication.
+    -- fraction from the root down to this node (see header). FLOAT rather
+    -- than DECIMAL(p,s) here specifically because SQL Server's recursive
+    -- CTE type-check requires the anchor and recursive members to produce
+    -- the exact same precision/scale, not just a compatible one, and that
+    -- kept tripping (Msg 240) even with matching explicit CASTs; FLOAT has
+    -- no precision/scale to mismatch on. Adjustment is only ever a small
+    -- 0..1-ish multiplier (a chain of Qty*Percent/100 fractions), so
+    -- FLOAT's precision is more than enough here - this is not a currency
+    -- amount, just a scaling factor applied to currency amounts later.
     ------------------------------------------------------------------------
-    DECLARE @Bom TABLE (RootRbNumber VARCHAR(30), LinkCode VARCHAR(30), Adjustment DECIMAL(28,10), Depth INT);
+    DECLARE @Bom TABLE (RootRbNumber VARCHAR(30), LinkCode VARCHAR(30), Adjustment FLOAT, Depth INT);
  
     ;WITH RbBom AS
     (
         SELECT
-            rb.RebuiltStockNum       AS RootRbNumber,
-            rb.RebuiltStockNum       AS LinkCode,
-            CAST(1 AS DECIMAL(28,10)) AS Adjustment,
-            0                         AS Depth
+            rb.RebuiltStockNum AS RootRbNumber,
+            rb.RebuiltStockNum AS LinkCode,
+            CAST(1 AS FLOAT)   AS Adjustment,
+            0                  AS Depth
         FROM SBCES.RbMasterlist rb
  
         UNION ALL
@@ -40,7 +48,7 @@ BEGIN
                 bom.Adjustment
                     * (ISNULL(TRY_CAST(spu.QtyReqd AS DECIMAL(18,6)), 0)
                        * ISNULL(TRY_CAST(spu.PercentUsage AS DECIMAL(18,6)), 0) / 100.0)
-                AS DECIMAL(28,10)
+                AS FLOAT
             ) AS Adjustment,
             bom.Depth + 1 AS Depth
         FROM RbBom bom
