@@ -1,0 +1,110 @@
+CREATE OR ALTER PROCEDURE [SBCES].[RptCostVarianceV2]
+AS
+BEGIN
+    SET NOCOUNT ON;
+ 
+    ;WITH RbBom AS
+    (
+        /* Anchor: every active rebuilt part is its own BOM root. */
+        SELECT
+            rb.RebuiltStockNum                     AS RootRbNumber,
+            rb.RebuiltStockNum                      AS LinkCode,
+            0                                        AS Depth
+        FROM SBCES.RbMasterlist rb
+        WHERE rb.Active = 1
+ 
+        UNION ALL
+ 
+        /* Recursive member: for every ScPartsUsed row flagged as itself a
+           rebuilt part (RebuiltPart = 'Y'), descend into that nested part's
+           own materials list (its RebuiltStockNum becomes the next
+           LinkCode to expand), while keeping the ORIGINAL top-level
+           RootRbNumber unchanged so costs still roll all the way up. */
+        SELECT
+            bom.RootRbNumber,
+            nested.RebuiltStockNum                  AS LinkCode,
+            bom.Depth + 1                            AS Depth
+        FROM RbBom bom
+        JOIN SBCES.ScPartsUsed spu
+            ON spu.LinkCode = bom.LinkCode
+           AND spu.RebuiltPart = 'Y'
+        JOIN SBCES.RbMasterlist nested
+            ON nested.RebuiltStockNum = spu.MmsRebuiltCode   -- see assumption (B)
+        WHERE bom.Depth < 50   -- guard against a cyclic BOM; adjust if legitimately deeper
+    ),
+ 
+    MaterialCost AS
+    (
+        /* Stock-coded parts used at every level of every RB's BOM, EXCLUDING
+           the nested-RB rows themselves (those are expanded by RbBom, not
+           priced directly here - the recursion already reaches their own
+           ScPartsUsed rows one level down). */
+        SELECT
+            bom.RootRbNumber,
+            SUM(SBCES.FinalCost(spu.PercentUsage, spu.QtyReqd, spu.MmsCost, spu.CoreCost)) AS Cost
+        FROM RbBom bom
+        JOIN SBCES.ScPartsUsed spu
+            ON spu.LinkCode = bom.LinkCode
+           AND (spu.RebuiltPart IS NULL OR spu.RebuiltPart <> 'Y')
+        GROUP BY bom.RootRbNumber
+    ),
+ 
+    NonStockMaterialCost AS
+    (
+        /* Non-stock-coded parts used at every level of every RB's BOM.
+           NscPartsUsed has no RebuiltPart flag, so nothing here recurses
+           further - every row is a leaf cost. */
+        SELECT
+            bom.RootRbNumber,
+            SUM(ISNULL(nsc.Cost, 0)) AS Cost
+        FROM RbBom bom
+        JOIN SBCES.NscPartsUsed nsc
+            ON nsc.LinkCode = bom.LinkCode
+        GROUP BY bom.RootRbNumber
+    ),
+ 
+    LabourCost AS
+    (
+        /* Labour at every level of every RB's BOM, same nested-RB rollup as
+           materials. RatePerHour comes from the labour row's own WageGroup
+           via EmplClass, matching CrEmployeeLabourCctotals' join pattern. */
+        SELECT
+            bom.RootRbNumber,
+            SUM(
+                (CAST(SBCES.HhmmToDecimal(
+                    CASE WHEN el.AdjHrs IS NOT NULL AND el.AdjHrs <> ''
+                         THEN el.AdjHrs
+                         ELSE el.HrsReqd
+                    END) AS DECIMAL(10,2)) * sal.RatePerHour)
+                + ISNULL(el.TimeAddition, 0)
+            ) AS Cost
+        FROM RbBom bom
+        JOIN SBCES.EmployeeLabour el
+            ON el.LinkNumber = bom.LinkCode
+           AND el.TypeId = 'RB'
+        JOIN SBCES.EmplClass ec
+            ON ec.LabourDefn = UPPER(el.LabourDefn)
+        JOIN SBCES.EmployeeSalaries sal
+            ON sal.WageGroup = ec.WageGroup
+        GROUP BY bom.RootRbNumber
+    )
+ 
+    SELECT
+        rb.RebuiltStockNum                                                           AS RbNumber,
+        ROUND(
+              ISNULL(mc.Cost, 0)
+            + ISNULL(nsmc.Cost, 0)
+            + ISNULL(lc.Cost, 0)
+        , 2)                                                                          AS TotalCost,
+        rb.DetailedDesc                                                               AS DetailedDesc,
+        rb.ExternalCost                                                               AS ExternalCost,
+        rb.Active                                                                     AS Active,
+        rb.Keyword                                                                    AS Keyword
+    FROM SBCES.RbMasterlist rb
+    LEFT JOIN MaterialCost         mc   ON mc.RootRbNumber   = rb.RebuiltStockNum
+    LEFT JOIN NonStockMaterialCost nsmc ON nsmc.RootRbNumber = rb.RebuiltStockNum
+    LEFT JOIN LabourCost           lc   ON lc.RootRbNumber   = rb.RebuiltStockNum
+    WHERE rb.Active = 1
+    ORDER BY rb.RebuiltStockNum;
+END;
+GO
