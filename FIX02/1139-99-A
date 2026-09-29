@@ -1,32 +1,15 @@
+
 CREATE OR ALTER PROCEDURE [SBCES].[RptCostVariance]
     @Debug BIT = 1
 AS
 BEGIN
     SET NOCOUNT ON;
  
-    ------------------------------------------------------------------------
-    -- STAGE 0: sanity-check RbMasterlist / Active itself, before anything
-    -- else runs. If this prints 0 total rows, or 0 active rows, that IS
-    -- the root cause - nothing past this point can produce output.
-    ------------------------------------------------------------------------
     IF @Debug = 1
     BEGIN
-        DECLARE @RbTotal INT, @RbActive INT, @ActiveBreakdown NVARCHAR(MAX);
- 
+        DECLARE @RbTotal INT;
         SELECT @RbTotal = COUNT(*) FROM SBCES.RbMasterlist;
-        SELECT @RbActive = COUNT(*) FROM SBCES.RbMasterlist WHERE Active = 1;
- 
-        SELECT @ActiveBreakdown = STRING_AGG(
-            CONCAT('Active=', ISNULL(CAST(Active AS VARCHAR(20)), 'NULL'), ' -> ', Cnt, ' rows'), ' | ')
-        FROM (
-            SELECT Active, COUNT(*) AS Cnt
-            FROM SBCES.RbMasterlist
-            GROUP BY Active
-        ) x;
- 
-        PRINT '[DEBUG] SBCES.RbMasterlist total rows      = ' + CAST(@RbTotal AS VARCHAR(20));
-        PRINT '[DEBUG] SBCES.RbMasterlist Active = 1 rows = ' + CAST(@RbActive AS VARCHAR(20));
-        PRINT '[DEBUG] Active column value breakdown       = ' + ISNULL(@ActiveBreakdown, '(no rows at all)');
+        PRINT '[DEBUG] SBCES.RbMasterlist total rows (no Active filter applied) = ' + CAST(@RbTotal AS VARCHAR(20));
  
         DECLARE @RbNullKey INT;
         SELECT @RbNullKey = COUNT(*) FROM SBCES.RbMasterlist WHERE RebuiltStockNum IS NULL OR RebuiltStockNum = '';
@@ -34,38 +17,39 @@ BEGIN
     END;
  
     ------------------------------------------------------------------------
-    -- STAGE 1: materialize the recursive BOM expansion into a table
-    -- variable (not a physical temp table) so we can both debug-print its
-    -- row count AND reuse it three times below without re-running the
-    -- recursion three times.
+    -- STAGE 1: recursive BOM expansion. Adjustment is the compounded usage
+    -- fraction from the root down to this node (see header). DECIMAL(28,10)
+    -- to keep precision across several levels of multiplication.
     ------------------------------------------------------------------------
-    DECLARE @Bom TABLE (RootRbNumber VARCHAR(30), LinkCode VARCHAR(30), Depth INT);
+    DECLARE @Bom TABLE (RootRbNumber VARCHAR(30), LinkCode VARCHAR(30), Adjustment DECIMAL(28,10), Depth INT);
  
     ;WITH RbBom AS
     (
         SELECT
-            rb.RebuiltStockNum AS RootRbNumber,
-            rb.RebuiltStockNum AS LinkCode,
-            0                  AS Depth
+            rb.RebuiltStockNum       AS RootRbNumber,
+            rb.RebuiltStockNum       AS LinkCode,
+            CAST(1 AS DECIMAL(28,10)) AS Adjustment,
+            0                         AS Depth
         FROM SBCES.RbMasterlist rb
-        WHERE rb.Active = 1
  
         UNION ALL
  
         SELECT
             bom.RootRbNumber,
-            nested.RebuiltStockNum AS LinkCode,
-            bom.Depth + 1            AS Depth
+            spu.MmsRebuiltCode AS LinkCode,
+            bom.Adjustment
+                * (ISNULL(TRY_CAST(spu.QtyReqd AS DECIMAL(18,6)), 0)
+                   * ISNULL(TRY_CAST(spu.PercentUsage AS DECIMAL(18,6)), 0) / 100.0) AS Adjustment,
+            bom.Depth + 1 AS Depth
         FROM RbBom bom
         JOIN SBCES.ScPartsUsed spu
             ON spu.LinkCode = bom.LinkCode
            AND spu.RebuiltPart = 'Y'
-        JOIN SBCES.RbMasterlist nested
-            ON nested.RebuiltStockNum = spu.MmsRebuiltCode   -- see assumption (B)
-        WHERE bom.Depth < 50
+           AND spu.LinkType = 'RB'
+        WHERE bom.Depth < 50   -- guard against a cyclic BOM
     )
-    INSERT INTO @Bom (RootRbNumber, LinkCode, Depth)
-    SELECT RootRbNumber, LinkCode, Depth
+    INSERT INTO @Bom (RootRbNumber, LinkCode, Adjustment, Depth)
+    SELECT RootRbNumber, LinkCode, Adjustment, Depth
     FROM RbBom
     OPTION (MAXRECURSION 100);
  
@@ -74,91 +58,90 @@ BEGIN
         DECLARE @BomRows INT, @BomRoots INT, @BomNested INT;
         SELECT @BomRows = COUNT(*), @BomRoots = COUNT(DISTINCT RootRbNumber) FROM @Bom;
         SELECT @BomNested = COUNT(*) FROM @Bom WHERE Depth > 0;
-        PRINT '[DEBUG] @Bom total rows (all depths)        = ' + CAST(@BomRows AS VARCHAR(20));
-        PRINT '[DEBUG] @Bom distinct root RB numbers        = ' + CAST(@BomRoots AS VARCHAR(20));
-        PRINT '[DEBUG] @Bom nested (Depth > 0) rows          = ' + CAST(@BomNested AS VARCHAR(20));
+        PRINT '[DEBUG] @Bom total rows (all depths)   = ' + CAST(@BomRows AS VARCHAR(20));
+        PRINT '[DEBUG] @Bom distinct root RB numbers    = ' + CAST(@BomRoots AS VARCHAR(20));
+        PRINT '[DEBUG] @Bom nested (Depth > 0) rows      = ' + CAST(@BomNested AS VARCHAR(20));
     END;
  
     ------------------------------------------------------------------------
-    -- STAGE 2: materials / non-stock materials / labour, each keyed off
-    -- @Bom, each materialized so we can print their row counts too.
+    -- STAGE 2: materials (stock + non-stock), per the real FinalCost-twice
+    -- formula, scaled by each node's Adjustment.
     ------------------------------------------------------------------------
-    DECLARE @MaterialCost TABLE (RootRbNumber VARCHAR(30), Cost DECIMAL(18,2));
+    DECLARE @MaterialCost TABLE (RootRbNumber VARCHAR(30), Cost DECIMAL(28,6));
     INSERT INTO @MaterialCost (RootRbNumber, Cost)
     SELECT
         bom.RootRbNumber,
-        SUM(ISNULL(TRY_CAST(SBCES.FinalCost(spu.PercentUsage, spu.QtyReqd, spu.MmsCost, spu.CoreCost) AS DECIMAL(18,2)), 0))
+        SUM(bom.Adjustment * parts.Cost)
     FROM @Bom bom
-    JOIN SBCES.ScPartsUsed spu
-        ON spu.LinkCode = bom.LinkCode
-       AND (spu.RebuiltPart IS NULL OR spu.RebuiltPart <> 'Y')
+    CROSS APPLY (
+        SELECT
+            ISNULL(TRY_CAST(SBCES.FinalCost(spu.PercentUsage, spu.QtyReqd, spu.MmsCost,  0) AS DECIMAL(18,6)), 0)
+          - ISNULL(TRY_CAST(SBCES.FinalCost(spu.PercentUsage, spu.QtyReqd, spu.CoreCost, 0) AS DECIMAL(18,6)), 0) AS Cost
+        FROM SBCES.ScPartsUsed spu
+        WHERE spu.LinkCode = bom.LinkCode
+          AND spu.RebuiltPart = 'N'
+          AND spu.LinkType = 'RB'
+ 
+        UNION ALL
+ 
+        SELECT
+            ISNULL(TRY_CAST(SBCES.FinalCost(nsp.PercentUsage, nsp.QtyReqd, nsc.OemPartCost, 0) AS DECIMAL(18,6)), 0)
+          - ISNULL(TRY_CAST(SBCES.FinalCost(nsp.PercentUsage, nsp.QtyReqd, nsp.CoreCost,    0) AS DECIMAL(18,6)), 0) AS Cost
+        FROM SBCES.NscPartsUsed nsp
+        LEFT JOIN SBCES.NonStockCodedParts nsc ON nsc.Id = nsp.Id
+        WHERE nsp.LinkCode = bom.LinkCode
+          AND nsp.LinkType = 'RB'
+    ) parts
     GROUP BY bom.RootRbNumber;
  
-    DECLARE @NonStockMaterialCost TABLE (RootRbNumber VARCHAR(30), Cost DECIMAL(18,2));
-    INSERT INTO @NonStockMaterialCost (RootRbNumber, Cost)
-    SELECT
-        bom.RootRbNumber,
-        SUM(ISNULL(nsc.Cost, 0))
-    FROM @Bom bom
-    JOIN SBCES.NscPartsUsed nsc
-        ON nsc.LinkCode = bom.LinkCode
-    GROUP BY bom.RootRbNumber;
- 
-    DECLARE @LabourCost TABLE (RootRbNumber VARCHAR(30), Cost DECIMAL(18,2));
+    ------------------------------------------------------------------------
+    -- STAGE 3: labour, per the real WriteLabour/GetLabourCost formula,
+    -- scaled by each node's Adjustment.
+    ------------------------------------------------------------------------
+    DECLARE @LabourCost TABLE (RootRbNumber VARCHAR(30), Cost DECIMAL(28,6));
     INSERT INTO @LabourCost (RootRbNumber, Cost)
     SELECT
         bom.RootRbNumber,
         SUM(
-            (ISNULL(TRY_CAST(SBCES.HhmmToDecimal(
-                CASE WHEN el.AdjHrs IS NOT NULL AND el.AdjHrs <> ''
-                     THEN el.AdjHrs
-                     ELSE el.HrsReqd
-                END) AS DECIMAL(10,2)), 0) * sal.RatePerHour)
-            + ISNULL(el.TimeAddition, 0)
+            (sal.RatePerHour / 60.0)
+            * ROUND(ISNULL(TRY_CAST(SBCES.HhmmToMinutes(el.TimeAddition) AS DECIMAL(18,2)), 0) * bom.Adjustment, 0)
+            * (ISNULL(TRY_CAST(REPLACE(el.[Usage], ',', '.') AS DECIMAL(18,4)), 0) / 100.0)
         )
     FROM @Bom bom
     JOIN SBCES.EmployeeLabour el
         ON el.LinkNumber = bom.LinkCode
        AND el.TypeId = 'RB'
     JOIN SBCES.EmplClass ec
-        ON ec.LabourDefn = UPPER(el.LabourDefn)
+        ON UPPER(el.LabourDefn) = UPPER(ec.LabourDefn)
     JOIN SBCES.EmployeeSalaries sal
         ON sal.WageGroup = ec.WageGroup
     GROUP BY bom.RootRbNumber;
  
     IF @Debug = 1
     BEGIN
-        DECLARE @McRows INT, @NsmcRows INT, @LcRows INT;
+        DECLARE @McRows INT, @LcRows INT;
         SELECT @McRows = COUNT(*) FROM @MaterialCost;
-        SELECT @NsmcRows = COUNT(*) FROM @NonStockMaterialCost;
         SELECT @LcRows = COUNT(*) FROM @LabourCost;
-        PRINT '[DEBUG] @MaterialCost rows (RBs with stock parts costed)       = ' + CAST(@McRows AS VARCHAR(20));
-        PRINT '[DEBUG] @NonStockMaterialCost rows (RBs with non-stock parts) = ' + CAST(@NsmcRows AS VARCHAR(20));
+        PRINT '[DEBUG] @MaterialCost rows (RBs with any priced material)     = ' + CAST(@McRows AS VARCHAR(20));
         PRINT '[DEBUG] @LabourCost rows (RBs with RB-type labour)             = ' + CAST(@LcRows AS VARCHAR(20));
- 
-        DECLARE @FinalRows INT;
-        SELECT @FinalRows = COUNT(*) FROM SBCES.RbMasterlist WHERE Active = 1;
-        PRINT '[DEBUG] Final SELECT will attempt to return this many rows (= RbMasterlist Active=1 count) = ' + CAST(@FinalRows AS VARCHAR(20));
         PRINT '[DEBUG] --- end of debug block, result set follows ---';
     END;
  
     ------------------------------------------------------------------------
-    -- FINAL: one row per active RB, LEFT JOINed to whichever cost buckets
-    -- have data for it (a RB with no materials or no labour still shows up
-    -- with 0 in that bucket, rather than being dropped).
+    -- FINAL: one row per RB (all of them - no Active filter), LEFT JOINed
+    -- to whichever cost buckets have data (an RB with no materials or no
+    -- labour still shows up with 0 in that bucket, not dropped).
     ------------------------------------------------------------------------
     SELECT
         rb.RebuiltStockNum AS RbNumber,
-        ROUND(ISNULL(mc.Cost, 0) + ISNULL(nsmc.Cost, 0) + ISNULL(lc.Cost, 0), 2) AS TotalCost,
+        ROUND(ISNULL(mc.Cost, 0) + ISNULL(lc.Cost, 0), 2) AS TotalCost,
         rb.DetailedDesc    AS DetailedDesc,
         rb.ExternalCost    AS ExternalCost,
         rb.Active          AS Active,
         rb.Keyword         AS Keyword
     FROM SBCES.RbMasterlist rb
-    LEFT JOIN @MaterialCost         mc   ON mc.RootRbNumber   = rb.RebuiltStockNum
-    LEFT JOIN @NonStockMaterialCost nsmc ON nsmc.RootRbNumber = rb.RebuiltStockNum
-    LEFT JOIN @LabourCost           lc   ON lc.RootRbNumber   = rb.RebuiltStockNum
-    WHERE rb.Active = 1
+    LEFT JOIN @MaterialCost mc ON mc.RootRbNumber = rb.RebuiltStockNum
+    LEFT JOIN @LabourCost   lc ON lc.RootRbNumber = rb.RebuiltStockNum
     ORDER BY rb.RebuiltStockNum;
 END;
 GO
