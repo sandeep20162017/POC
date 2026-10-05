@@ -1,0 +1,48 @@
+$ErrorActionPreference = "Stop"
+$root = $PSScriptRoot
+$wsdl = "https://boeservice.prod.int.ttc.ca/ReportService.svc?wsdl"
+
+# 0. Local NuGet config: nuget.org only (ignores the Telerik feed that needs a login)
+$cfg = Join-Path $root "NuGet.config"
+@'
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+  </packageSources>
+</configuration>
+'@ | Set-Content -Path $cfg -Encoding UTF8
+
+# Let the tool run on a machine that only has .NET 10 installed
+$env:DOTNET_ROLL_FORWARD = "Major"
+$env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+
+Write-Host "1/4 .NET SDK version:"; dotnet --version
+
+# 2. Install or update the tool using only nuget.org
+Write-Host "2/4 Installing dotnet-svcutil..."
+dotnet tool update --global dotnet-svcutil --configfile $cfg
+if ($LASTEXITCODE -ne 0) {
+    dotnet tool install --global dotnet-svcutil --configfile $cfg
+}
+$svcutil = Join-Path $env:USERPROFILE ".dotnet\tools\dotnet-svcutil.exe"
+if (-not (Test-Path $svcutil)) { throw "dotnet-svcutil.exe not found at $svcutil" }
+
+# 3. Generate the proxy
+Write-Host "3/4 Generating proxy from $wsdl ..."
+$proj = Get-ChildItem -Path $root -Recurse -Filter *.csproj | Select-Object -First 1
+if (-not $proj) { throw "No .csproj found under $root" }
+$out = Join-Path $proj.DirectoryName "Connected Services\BOEService"
+
+& $svcutil $wsdl `
+    --projectFile $proj.FullName `
+    --outputDir $out `
+    --namespace "*,BOEService" `
+    --collectionType System.Array `
+    --sync `
+    --targetFramework net8.0
+if ($LASTEXITCODE -ne 0) { throw "dotnet-svcutil failed (exit $LASTEXITCODE)" }
+
+Write-Host "4/4 Done. Send me this file:"
+Get-ChildItem -Path $out -Filter Reference.cs -Recurse | ForEach-Object { $_.FullName }
