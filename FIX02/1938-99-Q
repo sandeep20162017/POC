@@ -1,3 +1,73 @@
+Additional detils. Interestingly, if I change screen resolution, pages are visible. SQL query returns 66 count below.
+private async Task<IEnumerable<UserViewModel>> GetUsers()
+        {
+            try
+            {
+                const string query = @"SELECT u.UserId, u.UserName, u.userADId, u.RoleId, r.RoleName,
+                                     STRING_AGG(CAST(us.SiteId AS VARCHAR), ',') AS SiteId,
+                                     STRING_AGG(s.SiteName, ',') AS SiteName
+                                      FROM SBCES.[Users] u
+                                      INNER JOIN SBCES.[Roles] r ON u.RoleId = r.RoleId
+                                      LEFT JOIN SBCES.UserSites us ON u.UserId = us.UserId
+                                      LEFT JOIN SBCES.Sites s ON us.SiteId = s.SiteId
+                                      
+                                      GROUP BY u.userADId, u.UserId, u.UserName, u.RoleId, r.RoleName
+                                       order by  u.userADId 
+                                        ";
+
+                var users =  _dbConnection.Query<UserViewModel>(query).ToList();
+
+                // Parse SiteIdsString into SiteIds
+                foreach (var user in users)
+                {
+                    if (user.SiteIds.Count > 0)
+                    {
+                        user.SiteIds = string.IsNullOrEmpty(user.SiteId)
+                            ? new List<int>()
+                            : user.SiteId.Split(',').Select(int.Parse).ToList();
+
+                        user.SiteNames = string.IsNullOrEmpty(user.SiteName)
+                            ? new List<string>()
+                            : user.SiteName.Split(',').ToList();
+
+                        List<int> siteIdList = user.SiteId.Split(',').Select(int.Parse).ToList();
+                        List<string> siteNameList = user.SiteName.Split(',').ToList();
+
+
+                        var siteModelList = siteIdList.Zip(siteNameList, (id, name) => new SiteModel
+                        {
+                            SiteId = id,
+                            SiteName = name
+                        }).ToList();
+                        user.Sites = siteModelList;
+                    }
+                }
+                return users.Distinct().ToList();
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<IActionResult> ReadUsers([DataSourceRequest] DataSourceRequest request)
+        {
+            try
+            {
+
+                var users = await GetUsers();
+                return Json(users.ToDataSourceResult(request));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while fetching users.");
+            }
+        }
+
+
+==================================================================
 Telerik gid shows page=1. Other page numbers are missing. DB has 65 rows. No JS errors in chrome
 
 Generated HTML 
