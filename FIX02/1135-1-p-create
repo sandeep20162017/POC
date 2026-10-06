@@ -1,0 +1,241 @@
+/* =====================================================================
+   PICS - Oracle 12c -> SQL Server 2022
+   Script 1 of 2: database, schema, tables, primary keys, defaults
+   Run in SSMS (connected to master). Script 2 adds foreign keys AFTER data load.
+
+   Type mapping used:
+     NUMBER(2,0)  -> smallint      NUMBER(5,0)  -> int
+     NUMBER(10,0) -> bigint        NUMBER(5,1)  -> decimal(5,1)
+     VARCHAR2(n)  -> nvarchar(n)   CHAR(n)      -> nchar(n)
+     DATE         -> datetime2(0)  (Oracle DATE has time; range covers year 0001..2199)
+   Hidden Oracle SYS_STS* extended-statistics columns are NOT migrated.
+   ===================================================================== */
+
+USE master;
+GO
+IF DB_ID(N'PICS') IS NULL
+    -- Case-sensitive collation to mimic Oracle string comparison.
+    -- Change to Latin1_General_100_CI_AS if you want case-insensitive searches.
+    CREATE DATABASE PICS COLLATE Latin1_General_100_CS_AS;
+GO
+ALTER DATABASE PICS SET RECOVERY SIMPLE;
+GO
+USE PICS;
+GO
+IF SCHEMA_ID(N'PICS') IS NULL EXEC (N'CREATE SCHEMA PICS AUTHORIZATION dbo');
+GO
+
+/* ---------------------------- Lookup tables ---------------------------- */
+
+CREATE TABLE PICS.SEC_GROUPS (
+    GROUP_ID    smallint      NOT NULL,
+    GROUP_DESC  nvarchar(30)  NULL,
+    CONSTRAINT SEC_GROUP_PK PRIMARY KEY (GROUP_ID)
+);
+
+CREATE TABLE PICS.LOCATIONS (
+    LOCATION_ID nvarchar(2)   NOT NULL,
+    CC          nvarchar(5)   NULL,
+    CC_DESC     nvarchar(50)  NULL,
+    LOCATION    nvarchar(20)  NULL,
+    CONSTRAINT LOCATION_PK PRIMARY KEY (LOCATION_ID)
+);
+
+CREATE TABLE PICS.ORDER_TYPES (
+    ORDER_TYPE       smallint      NOT NULL,
+    CODE             nvarchar(50)  NULL,
+    ORDER_TYPE_DESC  nchar(25)     NULL,
+    CONSTRAINT ORDER_TYPES1_BRW_P1 PRIMARY KEY (ORDER_TYPE)
+);
+
+CREATE TABLE PICS.VEH_TYPES (
+    TYPE_ID    smallint     NOT NULL,
+    TYPE_DESC  nvarchar(5)  NULL,
+    CONSTRAINT VEH_TYPE_PK PRIMARY KEY (TYPE_ID)
+);
+
+CREATE TABLE PICS.WO_MODES (
+    MODE_ID    smallint      NOT NULL,
+    MODE_DESC  nvarchar(12)  NULL,
+    CONSTRAINT WO_MODE_PK PRIMARY KEY (MODE_ID)
+);
+
+CREATE TABLE PICS.JOB_TYPES (
+    JOB_TYPE         nvarchar(8)  NOT NULL,
+    JOB_TYPE_STATIC  nvarchar(2)  NULL,
+    CONSTRAINT TABLE1_BRW_P1 PRIMARY KEY (JOB_TYPE)
+);
+
+/* ---------------------------- Users ---------------------------- */
+
+CREATE TABLE PICS.USERS (
+    USER_ID       nvarchar(30)  NOT NULL,
+    PASSWORD      nvarchar(30)  NULL,
+    F_VALID       nchar(1)      NULL CONSTRAINT DF_USERS_F_VALID DEFAULT (N'Y'),
+    SEC_GROUP_ID  smallint      NULL,
+    CONSTRAINT USER_PK PRIMARY KEY (USER_ID)
+);
+
+CREATE TABLE PICS.USER_LOCATIONS (
+    USER_ID      nvarchar(30)  NOT NULL,
+    LOCATION_ID  nvarchar(2)   NOT NULL,
+    CONSTRAINT USER_LOCATION_PK PRIMARY KEY (USER_ID, LOCATION_ID)
+);
+
+/* ---------------------------- Jobs ---------------------------- */
+
+CREATE TABLE PICS.JOBS (
+    JOB_ID        bigint         NOT NULL,
+    CODE_ID       nvarchar(6)    NULL,
+    JOB_TITLE     nvarchar(40)   NULL,
+    JOB_TYPE      nvarchar(8)    NULL,
+    VEHICLE_TYPE  nvarchar(4)    NULL,
+    DELIVER_TO    nvarchar(80)   NULL,
+    DWG           nvarchar(12)   NULL,
+    JOB_MODE      nvarchar(12)   NULL,
+    REMARKS       nvarchar(50)   NULL,
+    DATE_RVSD     datetime2(0)   NULL,
+    CONSTRAINT JOB_PK PRIMARY KEY (JOB_ID)
+);
+
+CREATE TABLE PICS.JOB_MATERIALS (
+    JOB_ID    bigint        NOT NULL,
+    ITEM_ID   bigint        NOT NULL,
+    MATERIAL  nvarchar(50)  NULL,
+    UNITS     nvarchar(15)  NULL,
+    STOCK_ID  nvarchar(6)   NULL,
+    CONSTRAINT JOB_MATERIAL_PK PRIMARY KEY (JOB_ID, ITEM_ID)
+);
+
+CREATE TABLE PICS.JOB_OPS (
+    JOB_ID     bigint         NOT NULL,
+    OP_ID      smallint       NOT NULL,
+    CC         nvarchar(5)    NULL,
+    OP_DESC    nvarchar(500)  NULL,
+    EST_HOURS  decimal(5,1)   NULL,
+    CC_DETAIL  nvarchar(5)    NULL,
+    CONSTRAINT JOB_OP_PK PRIMARY KEY (JOB_ID, OP_ID)
+);
+
+/* ---------------------------- Work orders ---------------------------- */
+
+CREATE TABLE PICS.WORKORDERS (
+    WO_ID              bigint         NOT NULL,
+    JOB_ID             bigint         NULL,
+    CODE_ID            nvarchar(6)    NULL,
+    JOB_TITLE          nvarchar(40)   NULL,
+    JOB_TYPE           nvarchar(8)    NULL,
+    CURRENT_OPERATION  smallint       NULL,
+    DATE_ISSUE         datetime2(0)   NULL,
+    ORDER_TYPE         smallint       NULL,
+    ORDER_ID           nvarchar(8)    NULL,
+    STATUS             nchar(1)       NULL CONSTRAINT DF_WORKORDERS_STATUS DEFAULT (N'0'),
+    DATE_DONE          datetime2(0)   NULL,
+    WO_COMMENT         nvarchar(70)   NULL,
+    PRIORITY           nchar(1)       NULL,
+    VEHICLE_ID         nvarchar(4)    NULL,
+    VEHICLE_TYPE       nvarchar(4)    NULL,
+    QUANTITY_REQ       int            NULL,
+    QUANTITY           int            NULL,
+    SOPS               nvarchar(5)    NULL,
+    DELIVER_TO         nvarchar(80)   NULL,
+    DWG                nvarchar(12)   NULL,
+    WO_MODE            nvarchar(12)   NULL,
+    REMARKS            nvarchar(50)   NULL,
+    CONSTRAINT WORKORDER_PK PRIMARY KEY (WO_ID)
+);
+
+CREATE TABLE PICS.WO_OPS (
+    WO_ID         bigint         NOT NULL,
+    OP_ID         smallint       NOT NULL,
+    LOCATION_ID   nvarchar(2)    NULL,
+    OP_DESC       nvarchar(500)  NULL,
+    EST_HOURS     decimal(5,1)   NULL,
+    DATE_ARRIVED  datetime2(0)   NULL,
+    DATE_START    datetime2(0)   NULL,
+    DATE_FINISH   datetime2(0)   NULL,
+    DATE_PICKUP   datetime2(0)   NULL,
+    OP_COMMENT    nvarchar(160)  NULL,
+    USER_START    nvarchar(30)   NULL,
+    USER_FINISH   nvarchar(30)   NULL,
+    F_ARRIVE      nchar(1)       NULL,
+    USER_ARRIVE   nvarchar(30)   NULL,
+    QTY_IN        int            NULL,
+    QTY_OUT       int            NULL,
+    CONSTRAINT WO_OP_PK PRIMARY KEY (WO_ID, OP_ID)
+);
+
+CREATE TABLE PICS.WO_MATERIALS (
+    WO_ID              bigint        NOT NULL,
+    ITEM_ID            bigint        NOT NULL,
+    ORDER_LOCATION_ID  nvarchar(2)   NULL,
+    MATERIAL           nvarchar(50)  NULL,
+    QUANTITY           bigint        NULL,
+    UNITS              nvarchar(15)  NULL,
+    STOCK_ID           nvarchar(6)   NULL,
+    ACCOUNT_ID         bigint        NULL,
+    CONSTRAINT WO_MATERIAL_PK PRIMARY KEY (WO_ID, ITEM_ID)
+);
+
+/* ---------------------------- Backup / archive tables (no keys in Oracle) ---------------------------- */
+
+CREATE TABLE PICS.WORKORDERS_BACK (
+    WO_ID              bigint         NULL,
+    JOB_ID             bigint         NULL,
+    CODE_ID            nvarchar(6)    NULL,
+    JOB_TITLE          nvarchar(40)   NULL,
+    JOB_TYPE           nvarchar(8)    NULL,
+    CURRENT_OPERATION  smallint       NULL,
+    DATE_ISSUE         datetime2(0)   NULL,
+    ORDER_TYPE         smallint       NULL,
+    ORDER_ID           nvarchar(6)    NULL,   -- note: 6 here, 8 in WORKORDERS (as in Oracle)
+    STATUS             nchar(1)       NULL,
+    DATE_DONE          datetime2(0)   NULL,
+    WO_COMMENT         nvarchar(70)   NULL,
+    PRIORITY           nchar(1)       NULL,
+    VEHICLE_ID         nvarchar(4)    NULL,
+    VEHICLE_TYPE       nvarchar(4)    NULL,
+    QUANTITY_REQ       int            NULL,
+    QUANTITY           int            NULL,
+    SOPS               nvarchar(5)    NULL,
+    DELIVER_TO         nvarchar(80)   NULL,
+    DWG                nvarchar(12)   NULL,
+    WO_MODE            nvarchar(12)   NULL,
+    REMARKS            nvarchar(50)   NULL
+);
+
+CREATE TABLE PICS.JOB_TYPES_BACKUP (
+    JOB_TYPE         nvarchar(8)  NULL,
+    JOB_TYPE_STATIC  nvarchar(2)  NULL
+);
+
+CREATE TABLE PICS.LOCATIONS_BACKUP (
+    LOCATION_ID nvarchar(2)   NULL,
+    CC          nvarchar(5)   NULL,
+    CC_DESC     nvarchar(50)  NULL,
+    LOCATION    nvarchar(20)  NULL
+);
+
+CREATE TABLE PICS.VEH_TYPES_BACKUP (
+    TYPE_ID    smallint     NULL,
+    TYPE_DESC  nvarchar(5)  NULL
+);
+
+CREATE TABLE PICS.WO_MODES_BACKUP (
+    MODE_ID    smallint      NULL,
+    MODE_DESC  nvarchar(12)  NULL
+);
+
+-- ORDER_TYPES_BK_1, _5, _6: ORDER_TYPE nullable
+CREATE TABLE PICS.ORDER_TYPES_BK_1 (ORDER_TYPE smallint NULL, CODE nvarchar(50) NULL, ORDER_TYPE_DESC nchar(25) NULL);
+CREATE TABLE PICS.ORDER_TYPES_BK_5 (ORDER_TYPE smallint NULL, CODE nvarchar(50) NULL, ORDER_TYPE_DESC nchar(25) NULL);
+CREATE TABLE PICS.ORDER_TYPES_BK_6 (ORDER_TYPE smallint NULL, CODE nvarchar(50) NULL, ORDER_TYPE_DESC nchar(25) NULL);
+-- ORDER_TYPES_BK_2, _3, _4: ORDER_TYPE NOT NULL (no PK)
+CREATE TABLE PICS.ORDER_TYPES_BK_2 (ORDER_TYPE smallint NOT NULL, CODE nvarchar(50) NULL, ORDER_TYPE_DESC nchar(25) NULL);
+CREATE TABLE PICS.ORDER_TYPES_BK_3 (ORDER_TYPE smallint NOT NULL, CODE nvarchar(50) NULL, ORDER_TYPE_DESC nchar(25) NULL);
+CREATE TABLE PICS.ORDER_TYPES_BK_4 (ORDER_TYPE smallint NOT NULL, CODE nvarchar(50) NULL, ORDER_TYPE_DESC nchar(25) NULL);
+GO
+
+-- Sanity check: should return 25
+SELECT COUNT(*) AS table_count FROM sys.tables WHERE schema_id = SCHEMA_ID(N'PICS');
+GO
