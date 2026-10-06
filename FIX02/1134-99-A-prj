@@ -1,0 +1,72 @@
+1. Fix global.json (the SDK error)
+
+C:\ttc2020\CESDEV\global.json pins an SDK 8.x version that isn't on the machine. Install the .NET 10 SDK:
+
+powershell
+winget install Microsoft.DotNet.SDK.10
+dotnet --list-sdks
+
+Then edit global.json to match the installed version, or delete the file if you don't need pinning:
+
+json
+{
+  "sdk": {
+    "version": "10.0.100",
+    "rollForward": "latestFeature"
+  }
+}
+
+If you build in Visual Studio, you need Visual Studio 2026. VS 2022 doesn't support .NET 10.
+
+2. Fix Telerik 401 (the NuGet feed error)
+
+The 401 means NuGet has no valid credentials for nuget.telerik.com. The "connection forcibly closed" errors are probably follow-on failures, or a proxy or firewall dropping the connection. Run this once:
+
+powershell
+dotnet nuget remove source telerik.com
+dotnet nuget add source https://nuget.telerik.com/v3/index.json --name telerik.com `
+  --username "YOUR_TELERIK_EMAIL" --password "YOUR_PASSWORD_OR_API_KEY" --store-password-in-clear-text
+
+Notes:
+
+Telerik recommends an API key, not your password. Generate one in your Telerik account under Downloads → NuGet Keys. Use api-key as the username and the key as the password.
+If you're using the password route, the username must be the exact email you log in with.
+Don't paste credentials into chat or commit them. If a nuget.config is checked into source control, keep the credentials out of it.
+If it still resets connections, check the corporate proxy or VPN and make sure TLS 1.2+ is allowed to nuget.telerik.com.
+3. Update the project file
+
+Change the target framework:
+
+xml
+<TargetFramework>net10.0</TargetFramework>
+
+Update these packages:
+
+xml
+<PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.*" />
+<PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.*" />
+<PackageReference Include="Microsoft.EntityFrameworkCore.Abstractions" Version="10.0.*" />
+<PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.*" />
+<PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.*">...</PackageReference>
+<PackageReference Include="Microsoft.VisualStudio.Web.CodeGeneration.Design" Version="10.0.*" />
+
+Remove System.Net.Http 4.3.4 entirely. It's built into the framework, and the old package causes vulnerability and conflict warnings.
+
+Leave Dapper, MailKit, MimeKit, Newtonsoft.Json and Microsoft.Data.SqlClient for now. They work on .NET 10, so bump them to latest later.
+
+For the Telerik packages, check which version supports .NET 10 in your license. The versions you have (Reporting 18.3 and UI for ASP.NET Core 2024.3) predate .NET 10, so you'll need newer ones. Once the feed authenticates, find them with:
+
+powershell
+dotnet package search Telerik.Reporting --source telerik.com
+dotnet package search Telerik.UI.for.AspNet.Core --source telerik.com
+
+Telerik.Reporting, Telerik.Reporting.Services.AspNetCore, Telerik.UI.for.AspNet.Core and Telerik.DataSource should all move to the same release. Reporting and UI release numbers differ (for example 19.x versus 2025.x), so don't mix versions within one product.
+
+4. Things likely to break after the upgrade
+Report viewer assets: wwwroot\css\telerikReportViewer-18.3.24.1112.min.css is version-named. Replace it and the report viewer JS and CSS references in your layouts with the new version's files.
+Kendo scripts and styles: the UI for ASP.NET Core version must match the Kendo JS and CSS you reference in _Layout.
+EPPlus: 7.5.2 still builds. EPPlus 8 changes the license-setting API, so only move to it deliberately.
+EF Core 10: check the breaking-changes list, especially if you use raw SQL, JSON columns or complex types.
+Cleanup: run dotnet nuget locals all --clear, delete bin and obj, then dotnet restore and dotnet build.
+
+If you paste the build errors that remain after this (and your global.json), I can go through them with you. I can also write the full updated .csproj once you tell me which Telerik versions your license resolves to.
