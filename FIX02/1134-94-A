@@ -1,0 +1,40 @@
+1. Test the credentials directly, outside NuGet
+
+powershell
+curl.exe -u "YOUR_TELERIK_EMAIL:YOUR_PASSWORD_OR_KEY" https://nuget.telerik.com/v3/index.json
+A JSON response means the credentials work, and the problem is how NuGet stored them (see step 3).
+A 401 means Telerik is rejecting the login itself.
+
+2. If curl returns 401, use an API key
+
+This is the most common cause. If your Telerik account has two-factor authentication on, or the password has special characters, password login to the feed often fails.
+
+Sign in at telerik.com, then go to Account → Downloads → NuGet Keys.
+Generate a key.
+Re-add the source with api-key as the username:
+powershell
+dotnet nuget remove source telerik.com
+dotnet nuget add source https://nuget.telerik.com/v3/index.json --name telerik.com --username "api-key" --password "PASTE_KEY_HERE" --store-password-in-clear-text
+
+Put it all on one line to avoid backtick problems. If the key works for curl but the password didn't, you're done.
+
+Also confirm that your Telerik account has an active license or trial that includes the NuGet feed. An expired license gives a 401 too. Your account page shows this under Licenses.
+
+3. If curl works but NuGet still fails, check where the credentials were saved
+
+You ran PowerShell from C:\Windows\system32, which suggests an elevated prompt. If the elevated account differs from the one Visual Studio runs as, the source went into a different user's config. Check:
+
+powershell
+dotnet nuget list source --format detailed
+
+and compare against %AppData%\NuGet\NuGet.Config for the account that runs VS. Re-run the add source command from a normal, non-admin PowerShell opened as the same user as VS.
+
+Also check for a nuget.config in C:\ttc2020\CESDEV\ or the solution folder. A solution-level config with a telerik.com entry and different credentials will override the user-level one.
+
+4. Re-test
+
+powershell
+dotnet nuget locals all --clear
+dotnet package search Telerik.Reporting --source telerik.com
+
+Once that lists versions, restart VS and restore.
