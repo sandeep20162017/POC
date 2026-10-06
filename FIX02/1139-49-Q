@@ -1,0 +1,196 @@
+A. Overview
+
+A1. Object counts by type
+
+sql
+SELECT object_type, COUNT(*) cnt
+FROM user_objects
+GROUP BY object_type
+ORDER BY cnt DESC;
+
+A2. Database character set and version
+
+sql
+SELECT parameter, value FROM nls_database_parameters
+WHERE parameter IN ('NLS_CHARACTERSET','NLS_NCHAR_CHARACTERSET','NLS_LENGTH_SEMANTICS');
+SELECT banner FROM v$version;
+
+A3. Table types (flags temporary, partitioned, IOT, nested, and external tables)
+
+sql
+SELECT table_name, temporary, partitioned, iot_type, nested
+FROM user_tables
+WHERE temporary = 'Y' OR partitioned = 'YES' OR iot_type IS NOT NULL OR nested = 'YES'
+ORDER BY table_name;
+SELECT table_name FROM user_external_tables;
+B. Size
+
+B1. Exact row counts and size per table
+
+sql
+SELECT t.table_name,
+       TO_NUMBER(extractvalue(xmltype(dbms_xmlgen.getxml(
+         'select count(*) c from "'||t.table_name||'"')),'/ROWSET/ROW/C')) AS row_count,
+       ROUND(NVL(s.mb,0),2) AS size_mb
+FROM user_tables t
+LEFT JOIN (SELECT segment_name, SUM(bytes)/1024/1024 mb
+           FROM user_segments WHERE segment_type LIKE 'TABLE%'
+           GROUP BY segment_name) s ON s.segment_name = t.table_name
+ORDER BY row_count DESC;
+C. Columns and data types
+
+C1. Data types in use
+
+sql
+SELECT data_type, COUNT(*) cols, COUNT(DISTINCT table_name) tables
+FROM user_tab_columns
+GROUP BY data_type
+ORDER BY cols DESC;
+
+C2. Full column list (the main input for the table generator)
+
+sql
+SELECT table_name, column_id, column_name, data_type, data_length,
+       char_length, char_used, data_precision, data_scale, nullable,
+       virtual_column, identity_column, default_length
+FROM user_tab_cols
+ORDER BY table_name, column_id;
+
+Hidden and virtual columns also show up here. 12c identity columns appear with identity_column = 'YES'.
+
+C3. Columns that need special handling
+
+sql
+SELECT table_name, column_name, data_type, data_precision, data_scale
+FROM user_tab_cols
+WHERE data_type IN ('LONG','LONG RAW','BFILE','ROWID','UROWID','XMLTYPE','ANYDATA')
+   OR data_type LIKE 'INTERVAL%'
+   OR data_type LIKE '%WITH%TIME ZONE'
+   OR data_type_owner IS NOT NULL
+   OR (data_type = 'NUMBER' AND data_precision IS NULL)
+   OR virtual_column = 'YES'
+   OR hidden_column = 'YES'
+ORDER BY table_name, column_name;
+
+C4. Identity details and defaults
+
+sql
+SELECT table_name, column_name, generation_type, identity_options
+FROM user_tab_identity_cols;
+
+SELECT table_name, column_name, data_default
+FROM user_tab_cols
+WHERE data_default IS NOT NULL AND virtual_column = 'NO'
+ORDER BY table_name, column_name;
+D. Constraints and indexes
+
+D1. Constraints by type
+
+sql
+SELECT constraint_type, COUNT(*) cnt FROM user_constraints
+GROUP BY constraint_type;
+
+Types: P = primary key, U = unique, R = foreign key, C = check (this also includes the system NOT NULL checks).
+
+D2. Primary, unique, and foreign keys with columns
+
+sql
+SELECT c.table_name, c.constraint_name, c.constraint_type,
+       c.r_constraint_name, rc.table_name AS ref_table, c.delete_rule,
+       c.deferrable, c.status,
+       (SELECT LISTAGG(cc.column_name, ',') WITHIN GROUP (ORDER BY cc.position)
+        FROM user_cons_columns cc
+        WHERE cc.constraint_name = c.constraint_name) AS columns_list
+FROM user_constraints c
+LEFT JOIN user_constraints rc ON rc.constraint_name = c.r_constraint_name
+WHERE c.constraint_type IN ('P','U','R')
+ORDER BY c.table_name, c.constraint_type, c.constraint_name;
+
+D3. User-defined check constraints (skips NOT NULL)
+
+sql
+SELECT table_name, constraint_name, search_condition_vc AS condition
+FROM user_constraints
+WHERE constraint_type = 'C'
+  AND constraint_name NOT LIKE 'SYS\_C%' ESCAPE '\';
+
+If search_condition_vc isn't available in your version, use search_condition (it's a LONG, but SQL Developer displays it fine). Also run the unfiltered version if your NOT NULL constraints have custom names.
+
+D4. Indexes with columns
+
+sql
+SELECT i.table_name, i.index_name, i.index_type, i.uniqueness, i.partitioned,
+       (SELECT LISTAGG(ic.column_name || CASE ic.descend WHEN 'DESC' THEN ' DESC' END, ',')
+               WITHIN GROUP (ORDER BY ic.column_position)
+        FROM user_ind_columns ic
+        WHERE ic.index_name = i.index_name) AS columns_list
+FROM user_indexes i
+ORDER BY i.table_name, i.index_name;
+
+D5. Function-based index expressions
+
+sql
+SELECT table_name, index_name, column_expression
+FROM user_ind_expressions;
+E. Other objects that might affect the data
+
+E1. Triggers (often used to fill IDs or audit columns)
+
+sql
+SELECT table_name, trigger_name, triggering_event, trigger_type, status
+FROM user_triggers
+ORDER BY table_name;
+
+E2. Sequences
+
+sql
+SELECT sequence_name, min_value, max_value, increment_by, last_number, cycle_flag
+FROM user_sequences;
+
+E3. Views (to decide whether any are worth recreating)
+
+sql
+SELECT view_name FROM user_views;
+F. Data checks
+
+F1. Date and timestamp ranges (finds bad dates that SQL Server may reject)
+
+sql
+SELECT c.table_name, c.column_name, c.data_type,
+  extractvalue(xmltype(dbms_xmlgen.getxml(
+    'select to_char(min("'||c.column_name||'"),''YYYY-MM-DD'') mn from "'||c.table_name||'"')),'/ROWSET/ROW/MN') AS min_date,
+  extractvalue(xmltype(dbms_xmlgen.getxml(
+    'select to_char(max("'||c.column_name||'"),''YYYY-MM-DD'') mx from "'||c.table_name||'"')),'/ROWSET/ROW/MX') AS max_date
+FROM user_tab_columns c
+JOIN user_tables t ON t.table_name = c.table_name
+WHERE c.data_type = 'DATE' OR c.data_type LIKE 'TIMESTAMP%'
+ORDER BY c.table_name, c.column_name;
+
+F2. Real scale and precision of NUMBER columns without declared precision
+
+sql
+SELECT c.table_name, c.column_name,
+  extractvalue(xmltype(dbms_xmlgen.getxml(
+    'select max(case when instr(to_char("'||c.column_name||'",''TM9''),''.'')>0 then length(to_char("'||c.column_name||'",''TM9''))-instr(to_char("'||c.column_name||'",''TM9''),''.'') else 0 end) ms from "'||c.table_name||'"')),'/ROWSET/ROW/MS') AS max_decimal_places,
+  extractvalue(xmltype(dbms_xmlgen.getxml(
+    'select max(length(replace(replace(to_char(abs("'||c.column_name||'"),''TM9''),''.'',''''),''E'',''''))) md from "'||c.table_name||'"')),'/ROWSET/ROW/MD') AS max_digits
+FROM user_tab_columns c
+JOIN user_tables t ON t.table_name = c.table_name
+WHERE c.data_type = 'NUMBER' AND c.data_precision IS NULL
+ORDER BY c.table_name, c.column_name;
+
+This tells me whether each of those columns can safely become int, bigint, or decimal(p,s). If it returns nothing, there are no such columns.
+
+F3. Largest LOB values (only if C1 shows CLOB/BLOB columns)
+Send me the list of LOB columns from C3 or C2 and I'll generate the sizing query for them.
+
+F4. Object names that need quoting or renaming
+
+sql
+SELECT 'TABLE' kind, table_name name FROM user_tables
+WHERE NOT REGEXP_LIKE(table_name, '^[A-Z][A-Z0-9_]*$')
+UNION ALL
+SELECT 'COLUMN', table_name || '.' || column_name FROM user_tab_columns
+WHERE NOT REGEXP_LIKE(column_name, '^[A-Z][A-Z0-9_]*$');
+
+Any rows here have lowercase or special characters. Since SQL Server will quote everything in brackets, they should still work, but I'll plan for them.
