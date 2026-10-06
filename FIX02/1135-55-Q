@@ -1,0 +1,253 @@
+I used below Python script to copy data from oracle database to MS SQL database.
+Create similar script to copy data from PICS oracle to PICS MS SQL.
+MS PICS database name is CES and schema name PICS. All the tables are created and FK is added.
+copy should copy column name by column name not as ?.
+Produce clear logs after each insert
+Need insert script for all inserts. Specify order of execution becaue of FK consttaints.
+sample python you can check if you can use.
+
+
+# CES Oracle -> SQL Server Refresh
+# Generated from supplied Oracle/MS SQL DDL.
+# IMPORTANT: Oracle is READ ONLY in these scripts.
+# Oracle statements are SELECT COUNT(*) and SELECT ... only.
+
+import json
+import logging
+import os
+import re
+from datetime import datetime
+from pathlib import Path
+import pyodbc
+import oracledb
+
+BASE_DIR = Path(__file__).resolve().parent
+CONFIG_FILE = BASE_DIR / "ces_refresh_config.json"
+with CONFIG_FILE.open("r", encoding="utf-8") as f:
+    CONFIG = json.load(f)
+
+ORACLE_DSN = CONFIG["oracle"]["dsn"]
+ORACLE_USER = CONFIG["oracle"]["user"]
+ORACLE_PASSWORD = CONFIG["oracle"]["password"]
+SQL_CFG = CONFIG["sqlserver"]
+SQL_SCHEMA = "SBCES"
+ORACLE_TABLE = "ARCH_RB_NSC_PARTS_USED"
+SQL_TABLE = "ArchRbNscPartsUsed"
+LOG_DIR = BASE_DIR / CONFIG["settings"].get("log_directory", "logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_FILE = LOG_DIR / f"{SQL_TABLE}_refresh.log"
+
+logger = logging.getLogger(SQL_TABLE)
+logger.setLevel(logging.INFO)
+logger.handlers.clear()
+fh = logging.FileHandler(LOG_FILE, mode="a", encoding="utf-8")
+sh = logging.StreamHandler()
+fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+fh.setFormatter(fmt); sh.setFormatter(fmt)
+logger.addHandler(fh); logger.addHandler(sh)
+
+
+def get_oracle_conn():
+    return oracledb.connect(user=ORACLE_USER, password=ORACLE_PASSWORD, dsn=ORACLE_DSN)
+
+
+def get_sql_conn():
+    """
+    Connect to SQL Server using the configured driver, or automatically select
+    an installed Microsoft SQL Server ODBC driver when driver=auto.
+    """
+    configured_driver = str(SQL_CFG.get("driver", "auto")).strip()
+
+    if configured_driver.lower() == "auto":
+        installed = pyodbc.drivers()
+        candidates = [
+            d for d in installed
+            if "SQL Server" in d and "Native Client" not in d
+        ]
+        if not candidates:
+            raise RuntimeError(
+                "No Microsoft SQL Server ODBC driver is installed. "
+                f"Installed ODBC drivers: {installed}"
+            )
+
+        # Prefer the newest Microsoft SQL Server driver available.
+        def driver_rank(name):
+            m = re.search(r"(\d+)", name)
+            return int(m.group(1)) if m else 0
+
+        driver = sorted(candidates, key=driver_rank, reverse=True)[0]
+        logger.info("SQL ODBC DRIVER | auto-selected=%s", driver)
+    else:
+        driver = configured_driver
+        installed = pyodbc.drivers()
+        if driver not in installed:
+            raise RuntimeError(
+                f"Configured SQL Server ODBC driver '{driver}' is not installed. "
+                f"Installed ODBC drivers: {installed}"
+            )
+
+    conn_str = (
+        "DRIVER={" + driver + "};"
+        "SERVER=" + str(SQL_CFG["server"]) + ";"
+        "DATABASE=" + str(SQL_CFG["database"]) + ";"
+        "UID=" + str(SQL_CFG["user"]) + ";"
+        "PWD=" + str(SQL_CFG["password"]) + ";"
+        "TrustServerCertificate=" + (
+            "Yes" if SQL_CFG.get("trust_server_certificate", True) else "No"
+        ) + ";"
+    )
+
+    logger.info(
+        "SQL CONNECTION | server=%s | database=%s | driver=%s",
+        SQL_CFG["server"], SQL_CFG["database"], driver
+    )
+    return pyodbc.connect(conn_str, timeout=60)
+
+
+def oracle_count(conn):
+    cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT COUNT(*) FROM {ORACLE_TABLE}")
+        return int(cur.fetchone()[0])
+    finally:
+        cur.close()
+
+
+def fetch_oracle(conn):
+    sql = """
+        SELECT
+            ORIG_SUPP_NUM,
+            ORIG_SUPPLIER_NAME,
+            COST_CENTRE,
+            QTY_REQD,
+            PERCENT_USAGE,
+            DATE_ENTERED,
+            ENTERED_BY,
+            LINK_CODE,
+            COST,
+            LINK_TYPE,
+            CORECOST,
+            ARCH_RB_MASTERLIST_ID,
+            TOTAL_COST
+        FROM ARCH_RB_NSC_PARTS_USED
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute(sql)
+        return cur.fetchall()
+    finally:
+        cur.close()
+
+
+def sql_count(conn):
+    cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT COUNT(*) FROM [{SQL_SCHEMA}].[{SQL_TABLE}]")
+        return int(cur.fetchone()[0])
+    finally:
+        cur.close()
+
+
+def delete_sql(conn):
+    cur = conn.cursor()
+    try:
+        cur.execute(f"DELETE FROM [{SQL_SCHEMA}].[{SQL_TABLE}]")
+        logger.info("SQL DELETE | table=SBCES.%s | rows=%s", SQL_TABLE, cur.rowcount)
+    finally:
+        cur.close()
+
+
+def insert_rows(conn, rows):
+    sql = """
+        INSERT INTO [SBCES].[ArchRbNscPartsUsed] (
+            OrigSuppNum,
+            OrigSupplierName,
+            CostCentre,
+            QtyReqd,
+            PercentUsage,
+            DateEntered,
+            EnteredBy,
+            LinkCode,
+            Cost,
+            LinkType,
+            Corecost,
+            ArchRbMasterlistId,
+            TotalCost
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    cur = conn.cursor()
+    inserted = 0; failed = 0
+    try:
+        cur.fast_executemany = True
+        try:
+            cur.executemany(sql, rows)
+            inserted = len(rows)
+            logger.info("BULK INSERT | rows=%s", inserted)
+        except Exception as bulk_exc:
+            conn.rollback()
+            logger.warning("BULK INSERT FAILED | retrying row-by-row | error=%s", bulk_exc)
+            cur.fast_executemany = False
+            for idx, row in enumerate(rows, 1):
+                try:
+                    cur.execute(sql, row)
+                    inserted += 1
+                except Exception as exc:
+                    failed += 1
+                    logger.error("ROW FAILED | row=%s | error=%s | data=%r", idx, exc, row)
+        return inserted, failed
+    finally:
+        cur.close()
+
+
+def main():
+    mode = os.environ.get("CES_REFRESH_MODE", CONFIG["settings"].get("default_mode", "FULL")).upper()
+    started = datetime.now()
+    oracle_conn = None; sql_conn = None
+    logger.info("=" * 100)
+    logger.info("START REFRESH | Oracle=%s | SQL=SBCES.%s | MODE=%s", ORACLE_TABLE, SQL_TABLE, mode)
+    try:
+        oracle_conn = get_oracle_conn()
+        sql_conn = get_sql_conn()
+        ocount = oracle_count(oracle_conn)
+        logger.info("ORACLE COUNT | %s = %s", ORACLE_TABLE, ocount)
+
+        if mode == "DELETE":
+            delete_sql(sql_conn)
+            sql_conn.commit()
+            logger.info("SQL COUNT AFTER DELETE | %s", sql_count(sql_conn))
+        elif mode in ("INSERT", "FULL"):
+            rows = fetch_oracle(oracle_conn)
+            logger.info("FETCHED FROM ORACLE | %s rows", len(rows))
+            if len(rows) != ocount:
+                logger.error("ORACLE FETCH COUNT MISMATCH | COUNT=%s | FETCHED=%s", ocount, len(rows))
+                sql_conn.rollback()
+            else:
+                if mode == "FULL":
+                    delete_sql(sql_conn)
+                inserted, failed = insert_rows(sql_conn, rows)
+                if failed == 0 and inserted == len(rows):
+                    sql_conn.commit()
+                    logger.info("RESULT | Oracle=%s | Inserted=%s | Failed=%s | SQL=%s", ocount, inserted, failed, sql_count(sql_conn))
+                    logger.info("STATUS | SUCCESS | COUNTS MATCH")
+                else:
+                    sql_conn.rollback()
+                    logger.error("STATUS | FAILED | TRANSACTION ROLLED BACK | Inserted=%s | Failed=%s", inserted, failed)
+        else:
+            logger.error("INVALID CES_REFRESH_MODE=%s | expected FULL, INSERT, or DELETE", mode)
+    except Exception as exc:
+        if sql_conn is not None:
+            try: sql_conn.rollback()
+            except Exception: pass
+        logger.exception("FATAL ERROR | %s", exc)
+    finally:
+        if oracle_conn is not None:
+            try: oracle_conn.close()
+            except Exception: pass
+        if sql_conn is not None:
+            try: sql_conn.close()
+            except Exception: pass
+        logger.info("END REFRESH | elapsed=%s", datetime.now()-started)
+        logger.info("=" * 100)
+
+if __name__ == "__main__":
+    main()
