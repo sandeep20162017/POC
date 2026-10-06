@@ -1,0 +1,420 @@
+# PICS Oracle -> SQL Server (database CES, schema PICS) refresh
+#
+# IMPORTANT: Oracle is READ ONLY in this script.
+#   Oracle statements are only: SET TRANSACTION READ ONLY (optional, consistent snapshot),
+#   SELECT COUNT(*) and SELECT col1, col2, ... FROM table.
+#
+# Usage:
+#   python pics_refresh.py                 -> mode from config (default FULL)
+#   python pics_refresh.py --mode FULL     -> delete all target rows (children first), then insert (parents first)
+#   python pics_refresh.py --mode INSERT   -> insert only (aborts if any target table is not empty)
+#   python pics_refresh.py --mode DELETE   -> delete all target rows (children first)
+#   python pics_refresh.py --mode VERIFY   -> only compare Oracle vs SQL Server row counts (tables + views)
+#   python pics_refresh.py --tables WO_OPS,WO_MATERIALS   (optional subset, FK order still applied)
+#
+# FK-SAFE ORDER OF EXECUTION
+#   INSERT order (parents first):                DELETE order = exact reverse.
+#     Level 1 (no FKs):  SEC_GROUPS, LOCATIONS, ORDER_TYPES, VEH_TYPES, WO_MODES, JOB_TYPES, JOBS, WORKORDERS
+#     Level 2:           USERS            (-> SEC_GROUPS)
+#                        JOB_MATERIALS    (-> JOBS)
+#                        JOB_OPS          (-> JOBS)
+#                        WO_OPS           (-> WORKORDERS, LOCATIONS)
+#                        WO_MATERIALS     (-> LOCATIONS)
+#     Level 3:           USER_LOCATIONS   (-> USERS, LOCATIONS)
+#     Backup tables (no FKs, any time): *_BACKUP, ORDER_TYPES_BK_1..6, WORKORDERS_BACK
+#   The exact sequence actually used is the TABLES list below and is printed at the start of every run.
+#
+# The whole load runs in ONE SQL Server transaction: any failure rolls everything back.
+# Column names are explicit in every SELECT and INSERT (column by column, never SELECT * / positional).
+
+import argparse
+import json
+import logging
+import re
+import sys
+from datetime import datetime
+from pathlib import Path
+
+import oracledb
+import pyodbc
+
+BASE_DIR = Path(__file__).resolve().parent
+CONFIG_FILE = BASE_DIR / "pics_refresh_config.json"
+with CONFIG_FILE.open("r", encoding="utf-8") as f:
+    CONFIG = json.load(f)
+
+ORA_CFG = CONFIG["oracle"]
+SQL_CFG = CONFIG["sqlserver"]
+SETTINGS = CONFIG.get("settings", {})
+
+SQL_SCHEMA = SQL_CFG.get("schema", "PICS")
+ORA_OWNER = ORA_CFG.get("owner", "")          # leave empty if you connect as the PICS owner
+BATCH_SIZE = int(SETTINGS.get("batch_size", 10000))
+
+# Return NUMBER(p,s>0) as Decimal (exact) instead of float, so EST_HOURS etc. load exactly.
+oracledb.defaults.fetch_decimals = True
+
+# --------------------------------------------------------------------------------------
+# Column lists (identical names in Oracle and SQL Server)
+# --------------------------------------------------------------------------------------
+WORKORDERS_COLS = [
+    "WO_ID", "JOB_ID", "CODE_ID", "JOB_TITLE", "JOB_TYPE", "CURRENT_OPERATION",
+    "DATE_ISSUE", "ORDER_TYPE", "ORDER_ID", "STATUS", "DATE_DONE", "WO_COMMENT",
+    "PRIORITY", "VEHICLE_ID", "VEHICLE_TYPE", "QUANTITY_REQ", "QUANTITY", "SOPS",
+    "DELIVER_TO", "DWG", "WO_MODE", "REMARKS",
+]
+ORDER_TYPES_COLS = ["ORDER_TYPE", "CODE", "ORDER_TYPE_DESC"]
+
+# LOAD ORDER (parents before children). DELETE uses the reverse of this list.
+TABLES = [
+    # ---- Level 1: no foreign keys -------------------------------------------------
+    ("SEC_GROUPS",   ["GROUP_ID", "GROUP_DESC"]),
+    ("LOCATIONS",    ["LOCATION_ID", "CC", "CC_DESC", "LOCATION"]),
+    ("ORDER_TYPES",  ORDER_TYPES_COLS),
+    ("VEH_TYPES",    ["TYPE_ID", "TYPE_DESC"]),
+    ("WO_MODES",     ["MODE_ID", "MODE_DESC"]),
+    ("JOB_TYPES",    ["JOB_TYPE", "JOB_TYPE_STATIC"]),
+    ("JOBS",         ["JOB_ID", "CODE_ID", "JOB_TITLE", "JOB_TYPE", "VEHICLE_TYPE", "DELIVER_TO",
+                      "DWG", "JOB_MODE", "REMARKS", "DATE_RVSD"]),
+    ("WORKORDERS",   WORKORDERS_COLS),
+    # ---- Level 2 ------------------------------------------------------------------
+    ("USERS",        ["USER_ID", "PASSWORD", "F_VALID", "SEC_GROUP_ID"]),                      # -> SEC_GROUPS
+    ("JOB_MATERIALS", ["JOB_ID", "ITEM_ID", "MATERIAL", "UNITS", "STOCK_ID"]),                 # -> JOBS
+    ("JOB_OPS",      ["JOB_ID", "OP_ID", "CC", "OP_DESC", "EST_HOURS", "CC_DETAIL"]),          # -> JOBS
+    ("WO_OPS",       ["WO_ID", "OP_ID", "LOCATION_ID", "OP_DESC", "EST_HOURS", "DATE_ARRIVED",
+                      "DATE_START", "DATE_FINISH", "DATE_PICKUP", "OP_COMMENT", "USER_START",
+                      "USER_FINISH", "F_ARRIVE", "USER_ARRIVE", "QTY_IN", "QTY_OUT"]),         # -> WORKORDERS, LOCATIONS
+    ("WO_MATERIALS", ["WO_ID", "ITEM_ID", "ORDER_LOCATION_ID", "MATERIAL", "QUANTITY", "UNITS",
+                      "STOCK_ID", "ACCOUNT_ID"]),                                              # -> LOCATIONS
+    # ---- Level 3 ------------------------------------------------------------------
+    ("USER_LOCATIONS", ["USER_ID", "LOCATION_ID"]),                                            # -> USERS, LOCATIONS
+    # ---- Backup / archive tables (no foreign keys) --------------------------------
+    ("JOB_TYPES_BACKUP",  ["JOB_TYPE", "JOB_TYPE_STATIC"]),
+    ("LOCATIONS_BACKUP",  ["LOCATION_ID", "CC", "CC_DESC", "LOCATION"]),
+    ("VEH_TYPES_BACKUP",  ["TYPE_ID", "TYPE_DESC"]),
+    ("WO_MODES_BACKUP",   ["MODE_ID", "MODE_DESC"]),
+    ("ORDER_TYPES_BK_1",  ORDER_TYPES_COLS),
+    ("ORDER_TYPES_BK_2",  ORDER_TYPES_COLS),
+    ("ORDER_TYPES_BK_3",  ORDER_TYPES_COLS),
+    ("ORDER_TYPES_BK_4",  ORDER_TYPES_COLS),
+    ("ORDER_TYPES_BK_5",  ORDER_TYPES_COLS),
+    ("ORDER_TYPES_BK_6",  ORDER_TYPES_COLS),
+    ("WORKORDERS_BACK",   WORKORDERS_COLS),
+]
+
+VIEWS = [
+    "V_WO2CLOSE", "V_WORKORDERS", "V_WO_MATERIALS", "V_WO_OPS",
+    "V_WO_OPS_BRWS", "V_WO_OPS_STORES", "V_WO_STORES_D", "V_WORKORDERS_MMS",
+]
+
+# --------------------------------------------------------------------------------------
+# Logging
+# --------------------------------------------------------------------------------------
+LOG_DIR = BASE_DIR / SETTINGS.get("log_directory", "logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_FILE = LOG_DIR / f"pics_refresh_{datetime.now():%Y%m%d_%H%M%S}.log"
+
+logger = logging.getLogger("pics_refresh")
+logger.setLevel(logging.INFO)
+logger.handlers.clear()
+_fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+_fh = logging.FileHandler(LOG_FILE, mode="a", encoding="utf-8")
+_sh = logging.StreamHandler(sys.stdout)
+_fh.setFormatter(_fmt)
+_sh.setFormatter(_fmt)
+logger.addHandler(_fh)
+logger.addHandler(_sh)
+
+
+class TableFailed(Exception):
+    pass
+
+
+# --------------------------------------------------------------------------------------
+# Helpers
+# --------------------------------------------------------------------------------------
+def ora_table(name):
+    return f'"{ORA_OWNER}"."{name}"' if ORA_OWNER else f'"{name}"'
+
+
+def sql_table(name):
+    return f"[{SQL_SCHEMA}].[{name}]"
+
+
+def elapsed(start):
+    return str(datetime.now() - start).split(".")[0]
+
+
+def get_oracle_conn():
+    if ORA_CFG.get("use_thick_mode", False):
+        lib_dir = ORA_CFG.get("thick_client_lib_dir") or None
+        oracledb.init_oracle_client(lib_dir=lib_dir)
+        logger.info("ORACLE MODE | thick | lib_dir=%s", lib_dir)
+    conn = oracledb.connect(user=ORA_CFG["user"], password=ORA_CFG["password"], dsn=ORA_CFG["dsn"])
+    logger.info("ORACLE CONNECTION | dsn=%s | user=%s | version=%s", ORA_CFG["dsn"], ORA_CFG["user"], conn.version)
+    if SETTINGS.get("oracle_consistent_snapshot", True):
+        # Read-only transaction = one consistent snapshot across all tables (FK-consistent data).
+        # Does not change anything in Oracle.
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION READ ONLY")
+        cur.close()
+        logger.info("ORACLE SNAPSHOT | read-only transaction started (consistent view of all tables)")
+    return conn
+
+
+def get_sql_conn():
+    configured = str(SQL_CFG.get("driver", "auto")).strip()
+    installed = pyodbc.drivers()
+    if configured.lower() == "auto":
+        candidates = [d for d in installed if "SQL Server" in d and "Native Client" not in d]
+        if not candidates:
+            raise RuntimeError(f"No Microsoft SQL Server ODBC driver installed. Installed drivers: {installed}")
+        rank = lambda n: int(re.search(r"(\d+)", n).group(1)) if re.search(r"(\d+)", n) else 0
+        driver = sorted(candidates, key=rank, reverse=True)[0]
+        logger.info("SQL ODBC DRIVER | auto-selected=%s", driver)
+    else:
+        driver = configured
+        if driver not in installed:
+            raise RuntimeError(f"ODBC driver '{driver}' not installed. Installed drivers: {installed}")
+
+    parts = [f"DRIVER={{{driver}}}", f"SERVER={SQL_CFG['server']}", f"DATABASE={SQL_CFG['database']}"]
+    if str(SQL_CFG.get("user", "")).strip():
+        parts += [f"UID={SQL_CFG['user']}", f"PWD={SQL_CFG['password']}"]
+        auth = "SQL login"
+    else:
+        parts.append("Trusted_Connection=Yes")
+        auth = "Windows authentication"
+    parts.append("TrustServerCertificate=" + ("Yes" if SQL_CFG.get("trust_server_certificate", True) else "No"))
+    logger.info("SQL CONNECTION | server=%s | database=%s | schema=%s | auth=%s",
+                SQL_CFG["server"], SQL_CFG["database"], SQL_SCHEMA, auth)
+    return pyodbc.connect(";".join(parts) + ";", timeout=60, autocommit=False)
+
+
+def scalar(conn, sql):
+    cur = conn.cursor()
+    try:
+        cur.execute(sql)
+        return int(cur.fetchone()[0])
+    finally:
+        cur.close()
+
+
+def oracle_count(conn, table):
+    return scalar(conn, f"SELECT COUNT(*) FROM {ora_table(table)}")
+
+
+def sql_count(conn, table):
+    return scalar(conn, f"SELECT COUNT(*) FROM {sql_table(table)}")
+
+
+# --------------------------------------------------------------------------------------
+# DELETE
+# --------------------------------------------------------------------------------------
+def delete_all(sql_conn, tables):
+    """Delete target rows, children first (reverse of load order)."""
+    total = len(tables)
+    for i, (name, _cols) in enumerate(reversed(tables), 1):
+        t0 = datetime.now()
+        cur = sql_conn.cursor()
+        try:
+            cur.execute(f"DELETE FROM {sql_table(name)}")
+            logger.info("SQL DELETE | step %s/%s | table=%s | rows_deleted=%s | elapsed=%s",
+                        i, total, name, cur.rowcount, elapsed(t0))
+        finally:
+            cur.close()
+
+
+# --------------------------------------------------------------------------------------
+# INSERT
+# --------------------------------------------------------------------------------------
+def insert_batch(sql_conn, insert_sql, rows, table, batch_no):
+    """Insert one batch. Fast path = executemany; on failure roll back to savepoint, retry row by row."""
+    cur = sql_conn.cursor()
+    try:
+        cur.execute("SAVE TRANSACTION pics_batch")
+        try:
+            cur.fast_executemany = True
+            cur.executemany(insert_sql, rows)
+            return len(rows), 0
+        except Exception as bulk_exc:
+            logger.warning("BULK INSERT FAILED | table=%s | batch=%s | retrying row-by-row | error=%s",
+                           table, batch_no, bulk_exc)
+            cur.execute("ROLLBACK TRANSACTION pics_batch")
+    finally:
+        cur.close()
+
+    ok = bad = 0
+    cur = sql_conn.cursor()
+    try:
+        for idx, row in enumerate(rows, 1):
+            try:
+                cur.execute(insert_sql, row)
+                ok += 1
+            except Exception as exc:
+                bad += 1
+                logger.error("ROW FAILED | table=%s | batch=%s | row_in_batch=%s | error=%s | data=%.500r",
+                             table, batch_no, idx, exc, row)
+    finally:
+        cur.close()
+    return ok, bad
+
+
+def copy_table(ora_conn, sql_conn, seq, total, name, cols):
+    t0 = datetime.now()
+    ora_cnt = oracle_count(ora_conn, name)
+    logger.info("TABLE START | %s/%s | %s | oracle_rows=%s | columns=%s", seq, total, name, ora_cnt, len(cols))
+
+    ora_cols = ", ".join('"' + c + '"' for c in cols)
+    sql_cols = ", ".join("[" + c + "]" for c in cols)
+    placeholders = ", ".join("?" for _ in cols)
+    select_sql = "SELECT " + ora_cols + " FROM " + ora_table(name)
+    insert_sql = "INSERT INTO " + sql_table(name) + " (" + sql_cols + ") VALUES (" + placeholders + ")"
+    logger.info("ORACLE SELECT | %s", select_sql)
+    logger.info("SQL INSERT    | %s", insert_sql)
+
+    ocur = ora_conn.cursor()
+    ocur.arraysize = BATCH_SIZE
+    fetched = inserted = failed = batch_no = 0
+    try:
+        ocur.execute(select_sql)
+        while True:
+            rows = ocur.fetchmany(BATCH_SIZE)
+            if not rows:
+                break
+            batch_no += 1
+            fetched += len(rows)
+            ok, bad = insert_batch(sql_conn, insert_sql, rows, name, batch_no)
+            inserted += ok
+            failed += bad
+            logger.info("INSERT | %s/%s | %s | batch=%s | batch_rows=%s | ok=%s | failed=%s | table_total=%s/%s",
+                        seq, total, name, batch_no, len(rows), ok, bad, inserted, ora_cnt)
+    finally:
+        ocur.close()
+
+    sql_cnt = sql_count(sql_conn, name)   # inside the open transaction
+    status = "OK" if (failed == 0 and fetched == ora_cnt and inserted == ora_cnt and sql_cnt == ora_cnt) else "FAILED"
+    logger.info("TABLE RESULT | %s | oracle=%s | fetched=%s | inserted=%s | failed=%s | sql=%s | status=%s | elapsed=%s",
+                name, ora_cnt, fetched, inserted, failed, sql_cnt, status, elapsed(t0))
+    if status != "OK":
+        raise TableFailed(f"{name}: oracle={ora_cnt} fetched={fetched} inserted={inserted} failed={failed} sql={sql_cnt}")
+    return {"table": name, "oracle": ora_cnt, "inserted": inserted, "sql": sql_cnt, "status": status}
+
+
+# --------------------------------------------------------------------------------------
+# VERIFY
+# --------------------------------------------------------------------------------------
+def verify(ora_conn, sql_conn, tables):
+    logger.info("-" * 100)
+    logger.info("VERIFY | comparing Oracle vs SQL Server row counts")
+    mismatches = 0
+    for name, _cols in tables:
+        o, s = oracle_count(ora_conn, name), sql_count(sql_conn, name)
+        flag = "OK" if o == s else "MISMATCH"
+        mismatches += flag != "OK"
+        logger.log(logging.INFO if flag == "OK" else logging.ERROR,
+                   "VERIFY TABLE | %-20s | oracle=%-8s | sql=%-8s | %s", name, o, s, flag)
+    for v in VIEWS:
+        try:
+            o = scalar(ora_conn, f'SELECT COUNT(*) FROM {ora_table(v)}')
+            s = scalar(sql_conn, f"SELECT COUNT(*) FROM {sql_table(v)}")
+            flag = "OK" if o == s else "MISMATCH"
+            mismatches += flag != "OK"
+            logger.log(logging.INFO if flag == "OK" else logging.ERROR,
+                       "VERIFY VIEW  | %-20s | oracle=%-8s | sql=%-8s | %s", v, o, s, flag)
+        except Exception as exc:
+            mismatches += 1
+            logger.error("VERIFY VIEW  | %-20s | ERROR | %s", v, exc)
+    logger.info("VERIFY | %s", "ALL COUNTS MATCH" if mismatches == 0 else f"{mismatches} MISMATCH(ES) - see above")
+    return mismatches == 0
+
+
+# --------------------------------------------------------------------------------------
+# Main
+# --------------------------------------------------------------------------------------
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mode", default=SETTINGS.get("default_mode", "FULL"),
+                    choices=["FULL", "INSERT", "DELETE", "VERIFY", "full", "insert", "delete", "verify"])
+    ap.add_argument("--tables", default="", help="comma-separated subset; FK order is still applied")
+    args = ap.parse_args()
+    mode = args.mode.upper()
+
+    tables = TABLES
+    if args.tables.strip():
+        wanted = {t.strip().upper() for t in args.tables.split(",") if t.strip()}
+        unknown = wanted - {n for n, _ in TABLES}
+        if unknown:
+            logger.error("UNKNOWN TABLE(S): %s", ", ".join(sorted(unknown)))
+            return 2
+        tables = [(n, c) for n, c in TABLES if n in wanted]
+
+    started = datetime.now()
+    ora_conn = sql_conn = None
+    exit_code = 0
+    logger.info("=" * 100)
+    logger.info("START REFRESH | Oracle=%s | SQL=%s.%s | MODE=%s | log=%s",
+                ORA_CFG["dsn"], SQL_CFG["database"], SQL_SCHEMA, mode, LOG_FILE)
+    logger.info("LOAD ORDER (parents first): %s", " -> ".join(n for n, _ in tables))
+    logger.info("DELETE ORDER (children first): %s", " -> ".join(n for n, _ in reversed(tables)))
+    try:
+        ora_conn = get_oracle_conn()
+        sql_conn = get_sql_conn()
+
+        if mode == "VERIFY":
+            exit_code = 0 if verify(ora_conn, sql_conn, tables) else 1
+            return exit_code
+
+        if mode == "DELETE":
+            delete_all(sql_conn, tables)
+            sql_conn.commit()
+            logger.info("STATUS | DELETE COMMITTED")
+            return 0
+
+        if mode == "INSERT":
+            non_empty = [(n, sql_count(sql_conn, n)) for n, _ in tables if sql_count(sql_conn, n) > 0]
+            if non_empty:
+                logger.error("INSERT MODE ABORTED | target tables not empty: %s | use --mode FULL",
+                             ", ".join(f"{n}({c})" for n, c in non_empty))
+                return 1
+
+        if mode == "FULL":
+            delete_all(sql_conn, tables)
+
+        results = []
+        total = len(tables)
+        for seq, (name, cols) in enumerate(tables, 1):
+            results.append(copy_table(ora_conn, sql_conn, seq, total, name, cols))
+
+        sql_conn.commit()
+        logger.info("STATUS | SUCCESS | ALL %s TABLES LOADED AND COMMITTED", total)
+        logger.info("SUMMARY | %-20s | %-10s | %-10s", "table", "oracle", "sql")
+        for r in results:
+            logger.info("SUMMARY | %-20s | %-10s | %-10s", r["table"], r["oracle"], r["sql"])
+        exit_code = 0 if verify(ora_conn, sql_conn, tables) else 1
+
+    except TableFailed as exc:
+        sql_conn.rollback()
+        logger.error("STATUS | FAILED | TRANSACTION ROLLED BACK (SQL Server unchanged) | %s", exc)
+        exit_code = 1
+    except Exception as exc:
+        if sql_conn is not None:
+            try:
+                sql_conn.rollback()
+            except Exception:
+                pass
+        logger.exception("FATAL ERROR | %s", exc)
+        exit_code = 1
+    finally:
+        for c in (ora_conn, sql_conn):
+            if c is not None:
+                try:
+                    c.close()
+                except Exception:
+                    pass
+        logger.info("END REFRESH | elapsed=%s", elapsed(started))
+        logger.info("=" * 100)
+    return exit_code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
