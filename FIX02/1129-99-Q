@@ -1,0 +1,1707 @@
+ASP.NET core app, I have 2 tabs. One for vehicle estimate and one for MakeVsBuy Estimate.
+Both tabs are very similar, except the first part. They have common Labour DEtails, Stockcoded parts, Non Stock COded parts and rebuilt parts.
+I need to mimic the same for MakeVsBuy very similar like Vehicles 
+Only difference is MakeVsBuy can have more than one vehicle series.
+
+Below is used for vehicle
+
+@{
+    ViewData["Title"] = "Vehicle Cost Summary";
+}
+
+<style>
+    /* ===== PAGE-SPECIFIC STYLES ===== */
+    .report-toolbar {
+        position: absolute;
+        top: 8px;
+        right: 12px;
+        z-index: 1000;
+    }
+
+        .report-toolbar .k-button {
+            background: #2c3e50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+            .report-toolbar .k-button:hover {
+                background: #1a5276;
+            }
+
+    .loading-spinner {
+        text-align: center;
+        padding: 60px;
+        color: #5d6d7e;
+        font-size: 16px;
+    }
+
+    .no-data-message {
+        text-align: center;
+        padding: 50px;
+        background: #fef9e6;
+        border-radius: 8px;
+    }
+
+    .retry-btn {
+        background-color: #2c3e50;
+        color: white;
+        border: none;
+        padding: 8px 20px;
+        border-radius: 4px;
+        margin-top: 15px;
+        cursor: pointer;
+    }
+
+        .retry-btn:hover {
+            background-color: #1a5276;
+        }
+
+    .warning-icon {
+        font-size: 48px;
+        margin-bottom: 10px;
+    }
+
+    .no-print {
+        display: block;
+    }
+
+    /* Report Menu Dropdown */
+    .report-menu-dropdown {
+        display: none;
+        position: fixed;
+        background: white;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        min-width: 340px;
+        max-width: 400px;
+        z-index: 10000;
+        padding: 8px 0;
+        max-height: 80vh;
+        overflow-y: auto;
+    }
+
+        .report-menu-dropdown.show {
+            display: block;
+        }
+
+        .report-menu-dropdown .menu-item {
+            padding: 10px 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #2c3e50;
+            font-size: 14px;
+            transition: background 0.15s;
+        }
+
+            .report-menu-dropdown .menu-item:hover {
+                background: #e8f0fe;
+            }
+
+            .report-menu-dropdown .menu-item .k-icon {
+                font-size: 16px;
+                width: 20px;
+                text-align: center;
+                color: #1a5276;
+            }
+
+        .report-menu-dropdown .menu-separator {
+            height: 1px;
+            background: #dee2e6;
+            margin: 4px 12px;
+        }
+
+        .report-menu-dropdown .menu-header {
+            padding: 6px 18px;
+            font-size: 11px;
+            color: #6c757d;
+            text-transform: uppercase;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .report-menu-dropdown .menu-item .shortcut {
+            margin-left: auto;
+            font-size: 11px;
+            color: #6c757d;
+            font-weight: 400;
+        }
+
+    @@media (max-width: 480px) {
+        .report-menu-dropdown {
+            min-width: 280px;
+            max-width: 90vw;
+            right: 10px !important;
+            left: auto !important;
+        }
+    }
+</style>
+
+<!-- Toolbar Button -->
+<div class="report-toolbar no-print">
+    <button id="reportActions" class="k-button" title="Report actions">
+        <span class="k-icon k-i-more-vertical"></span> Reports ▼
+    </button>
+</div>
+
+<!-- Report Menu Dropdown -->
+<div class="report-menu-dropdown" id="reportMenuDropdown">
+   @*  <div class="menu-header">📄 View Reports</div>
+    <div class="menu-item" data-action="viewFullReport">
+        <span class="k-icon k-i-preview"></span> Full Vehicle Estimate Report
+    </div>
+    <div class="menu-item" data-action="viewVehicleEstimate">
+        <span class="k-icon k-i-preview"></span> Vehicle Estimate Report
+    </div> *@
+    <div class="menu-item" data-action="viewLabourDetails">
+        <span class="k-icon k-i-preview"></span> Labour Details Report
+    </div>
+    <div class="menu-item" data-action="viewMaterialsEstimate">
+        <span class="k-icon k-i-preview"></span> Materials Estimate Report
+    </div>
+
+    <div class="menu-separator"></div>
+    <div class="menu-header">📋 Copy to Clipboard</div>
+    <div class="menu-item" data-action="copyFullReport">
+        <span class="k-icon k-i-copy"></span> Full Vehicle Estimate Report
+    </div>
+  @*   <div class="menu-item" data-action="copyVehicleEstimate">
+        <span class="k-icon k-i-copy"></span> Vehicle Estimate Report
+    </div> *@
+    <div class="menu-item" data-action="copyLabourDetails">
+        <span class="k-icon k-i-copy"></span> Labour Details Report
+    </div>
+    <div class="menu-item" data-action="copyMaterialsEstimate">
+        <span class="k-icon k-i-copy"></span> Materials Estimate Report
+    </div>
+
+    <div class="menu-separator"></div>
+    <div class="menu-header">💾 Save as PDF</div>
+    <div class="menu-item" data-action="saveFullReportPdf">
+        <span class="k-icon k-i-file-pdf"></span> Full Vehicle Estimate Report
+    </div>
+   @*  <div class="menu-item" data-action="saveVehicleEstimatePdf">
+        <span class="k-icon k-i-file-pdf"></span> Vehicle Estimate Report
+    </div> *@
+    <div class="menu-item" data-action="saveLabourDetailsPdf">
+        <span class="k-icon k-i-file-pdf"></span> Labour Details Report
+    </div>
+    <div class="menu-item" data-action="saveMaterialsEstimatePdf">
+        <span class="k-icon k-i-file-pdf"></span> Materials Estimate Report
+    </div>
+</div>
+
+<div class="report-container" id="reportContainer">
+    <!-- HEADER -->
+    <div class="report-header" id="reportHeader">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="text-align: left;">
+                <div class="estimate-number">Vehicle Estimate #: <span id="estimateNumber">@ViewBag.PartNum</span></div>
+            </div>
+            <div style="text-align: center; flex: 1;">
+                <h1 id="reportTitle">VEHICLE COST ESTIMATE REPORT</h1>
+                <div class="subtitle" id="generatedDate">Generated: @DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")</div>
+            </div>
+            <div style="text-align: right; min-width: 120px;">
+                <div class="status-badge">Status: <span class="active">● Active</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loadingIndicator" class="loading-spinner">
+        <span>⏳ Loading cost data...</span>
+    </div>
+
+    <!-- Content -->
+    <div id="costSummaryContent" style="display: none;">
+        <!-- SECTION 1: VEHICLE DETAILS -->
+        <div class="detail-section" id="vehicleDetailsSection">
+            <div class="detail-header">
+                <span>🚗 VEHICLE DETAILS</span>
+            </div>
+            <div class="detail-body">
+                <div class="vehicle-info">
+                    <div class="vehicle-info-item vehicle-description">
+                        <span class="label">Detailed Description</span>
+                        <span class="value" id="vehicleDescription">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Vehicle Series</span>
+                        <span class="value" id="vehicleSeries">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Make</span>
+                        <span class="value" id="vehicleMake">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Model</span>
+                        <span class="value" id="vehicleModel">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Year</span>
+                        <span class="value" id="vehicleYear">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label"># of Vehicles</span>
+                        <span class="value" id="numberOfVehicles">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Engine</span>
+                        <span class="value" id="vehicleEngine">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Transmission</span>
+                        <span class="value" id="vehicleTransmission">-</span>
+                    </div>
+                    <div class="vehicle-info-item">
+                        <span class="label">Differential</span>
+                        <span class="value" id="vehicleDifferential">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 2: MATERIAL COST SUMMARY -->
+        <div class="detail-section" id="materialSummarySection">
+            <div class="detail-header">
+                <span>📦 MATERIAL COST SUMMARY</span>
+                <span class="badge" id="materialCountBadge">0 parts</span>
+            </div>
+            <div class="detail-body">
+                <div class="summary-grid summary-grid-6">
+                    <div class="summary-card">
+                        <span class="value" id="stockPartsCount">0</span>
+                        <span class="label">Stock Parts</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="nonStockPartsCount">0</span>
+                        <span class="label">Non-Stock Parts</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="rebuiltPartsCount">0</span>
+                        <span class="label">Rebuilt Parts</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="stockCost">$0.00</span>
+                        <span class="label">Total Stock Cost</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="totalNonStockCost">$0.00</span>
+                        <span class="label">Total Non-Stock Cost</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="totalRebuiltCost">$0.00</span>
+                        <span class="label">Total Rebuilt Cost</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 3: MATERIAL LINES -->
+        <div class="detail-section" id="materialLinesSection">
+            <div class="detail-header">
+                <span>📋 MATERIAL</span>
+                <span class="badge" id="materialLinesBadge">0 items</span>
+            </div>
+            <div class="detail-body">
+                <div class="material-table-wrap">
+                    <table class="material-table" id="materialLinesTable">
+                        <thead>
+                            <tr>
+                                <th style="width:90px;">Type</th>
+                                <th style="width:120px;">Stock Code</th>
+                                <th style="width:120px;">CC</th>
+                                <th>Desc/Supp Name</th>
+                                <th style="width:70px;text-align:right;">Qty</th>
+                                <th style="width:100px;text-align:right;">Unit Cost</th>
+                                <th style="width:80px;text-align:right;">Usage %</th>
+                                <th style="width:110px;text-align:right;">Total Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody id="materialLinesBody">
+                            <tr><td colspan="8" style="text-align:center; color:#6c757d; padding:20px;">No material items found</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 4: LABOUR HOURS SUMMARY -->
+        <div class="detail-section" id="labourHoursSection">
+            <div class="detail-header">
+                <span>⏱️ LABOUR HOURS SUMMARY</span>
+            </div>
+            <div class="detail-body">
+                <div class="summary-grid summary-grid-3">
+                    <div class="summary-card">
+                        <span class="value" id="totalHours">0.00</span>
+                        <span class="label">Total Hours</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="totalEffectiveHours">0.00</span>
+                        <span class="label">Effective Hours</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="value" id="totalAdjustedHours">0.00</span>
+                        <span class="label">Adjusted Hours</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 5: LABOUR TASK SUMMARY -->
+        <div class="detail-section" id="labourTasksSection">
+            <div class="detail-header">
+                <span>📋 LABOUR TASK SUMMARY</span>
+                <span class="badge" id="taskCountBadge">0 tasks</span>
+            </div>
+            <div class="detail-body">
+                <div class="task-table-wrap">
+                    <table class="task-table" id="taskSummaryTable">
+                        <thead>
+                            <tr>
+                                <th>Task</th>
+                                <th>Labour Definition</th>
+                                <th>CC</th>
+                                <th style="text-align:right;">Hours</th>
+                                <th style="text-align:right;">Effective Hrs</th>
+                                <th style="text-align:right;">Adjusted Hrs</th>
+                                <th style="text-align:right;">Rate/Hr</th>
+                                <th style="text-align:right;">Total Cost</th>
+                                <th style="text-align:center;">Count</th>
+                            </tr>
+                        </thead>
+                        <tbody id="taskSummaryBody">
+                            <tr><td colspan="9" style="text-align:center; color:#6c757d; padding:20px;">No labour tasks found</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SIDE BY SIDE -->
+        <div class="side-by-side" id="costSideBySide">
+            <div class="material-section">
+                <div class="material-header">📦 MATERIAL COST</div>
+                <div class="material-body">
+                    <table class="info-table">
+                        <tr><td class="label-col"><strong>Stock Coded Parts</strong></td><td class="value-col" id="scPartsDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Non-Stock Coded Parts</strong></td><td class="value-col" id="nscPartsDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Rebuilt Parts</strong></td><td class="value-col" id="rbCostDisplay">$0.00</td></tr>
+                        <tr class="total-row"><td class="label-col"><strong>Parts Total (No Tax)</strong></td><td class="value-col" id="partsTotalDisplay">$0.00</td></tr>
+                        <tr class="tax-row"><td class="label-col"><strong>+ Material Tax</strong></td><td class="value-col" id="materialTaxDisplay">$0.00</td></tr>
+                        <tr class="total-row"><td class="label-col"><strong>= Total Material Cost (With Tax)</strong></td><td class="value-col" id="materialWithTaxDisplay">$0.00</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <div class="labour-section">
+                <div class="labour-header">🔧 LABOUR COST</div>
+                <div class="labour-body">
+                    <table class="info-table">
+                        <tr><td class="label-col"><strong>Fringe</strong></td><td class="value-col" id="labourFringeDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Benefits</strong></td><td class="value-col" id="labourBenefitsDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Blended Fringe & Benefits</strong></td><td class="value-col" id="blendedFringeCostDisplay">$0.00</td></tr>
+                        <tr><td class="label-col"><strong>Overhead</strong></td><td class="value-col" id="labourOverheadDisplay">$0.00</td></tr>
+                        <tr class="total-row"><td class="label-col"><strong>= Total Labour Cost</strong></td><td class="value-col" id="totalLabourCostDisplay">$0.00</td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TOTALS ROW -->
+        <div class="totals-row" id="totalsRow">
+            <div class="total-box">
+                <div class="total-box-label">TOTAL MATERIAL COST (With Tax)</div>
+                <div class="total-box-value" id="totalMaterialBoxDisplay">$0.00</div>
+            </div>
+            <div class="total-box">
+                <div class="total-box-label">TOTAL LABOUR COST</div>
+                <div class="total-box-value" id="totalLabourBoxDisplay">$0.00</div>
+            </div>
+        </div>
+
+        <!-- GRAND TOTAL -->
+        <div class="grand-total-section" id="grandTotalSection">
+            <table class="grand-total-table">
+                <tr>
+                    <td class="grand-total-label"><strong>💰 GRAND TOTAL (Material + Labour)</strong></td>
+                    <td class="grand-total-value" id="totalWithTaxDisplay">$0.00</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- AUDIT ROW -->
+        <div class="vehicle-audit-row" id="auditRow">
+            <div class="vehicle-audit-item">
+                <span class="label">Modified By</span>
+                <span class="value" id="modifiedLastBy">-</span>
+            </div>
+            <div class="vehicle-audit-item">
+                <span class="label">Modified Date</span>
+                <span class="value" id="modifiedLastDate">-</span>
+            </div>
+        </div>
+
+        <div class="report-footer" id="reportFooter">
+            Estimate Generated On: @DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+        </div>
+    </div>
+
+    <!-- No data -->
+    <div id="noDataMessage" class="no-data-message" style="display: none;">
+        <div class="warning-icon">⚠️</div>
+        <p style="font-size:16px; margin:10px 0;"><strong>No cost data available</strong></p>
+        <p>No cost data found for Estimate ID: @ViewBag.PartNum</p>
+        <button id="retryButton" class="retry-btn">⟳ Retry Loading</button>
+    </div>
+</div>
+
+<script type="text/javascript">
+    // Configuration
+    var partNum = '@ViewBag.PartNum';
+    var gridType = '@ViewBag.GridType';
+    var totalCostDataUrl = '@Url.Action("GetTotalCostInEstimates", "TotalCost")' +
+                           '?id=' + encodeURIComponent(partNum) +
+                           '&gridType=' + encodeURIComponent(gridType);
+    var viewReportUrl = '@Url.Action("ViewReport", "TotalCost")';
+
+    // Document ready
+    $(document).ready(function() {
+        console.log("TotalCostTab initialized");
+        fetchTotalCostData();
+
+        $("#retryButton").on('click', function() {
+            $("#noDataMessage").hide();
+            $("#loadingIndicator").show();
+            $("#costSummaryContent").hide();
+            fetchTotalCostData();
+        });
+
+        // Initialize menu
+        initializeMenu();
+    });
+
+    // ===== MENU INITIALIZATION =====
+    function initializeMenu() {
+        var dropdown = document.getElementById('reportMenuDropdown');
+        var actionsButton = document.getElementById('reportActions');
+
+        if (!actionsButton || !dropdown) {
+            console.error('Menu elements not found');
+            return;
+        }
+
+        // Toggle dropdown on button click
+        actionsButton.addEventListener('click', function(e) {
+            e.stopPropagation();
+            dropdown.classList.toggle('show');
+
+            // Position the dropdown
+            var rect = actionsButton.getBoundingClientRect();
+            dropdown.style.top = (rect.bottom + 4) + 'px';
+            dropdown.style.right = '20px';
+        });
+
+        // Close on outside click
+        document.addEventListener('click', function(e) {
+            if (!dropdown.contains(e.target) && e.target !== actionsButton) {
+                dropdown.classList.remove('show');
+            }
+        });
+
+        // Handle menu item clicks
+        dropdown.querySelectorAll('.menu-item').forEach(function(item) {
+            item.addEventListener('click', function() {
+                var action = this.dataset.action;
+                dropdown.classList.remove('show');
+                handleMenuAction(action);
+            });
+        });
+    }
+
+    // ===== MENU ACTION HANDLER =====
+    function handleMenuAction(action) {
+        console.log('Menu action:', action);
+
+        switch(action) {
+            // View Actions
+            case 'viewFullReport':
+            case 'viewVehicleEstimate':
+            case 'viewLabourDetails':
+            case 'viewMaterialsEstimate':
+                openReportView(action.replace('view', '').toLowerCase());
+                break;
+
+            // Copy Actions
+            case 'copyFullReport':
+            case 'copyVehicleEstimate':
+            case 'copyLabourDetails':
+            case 'copyMaterialsEstimate':
+                copyReportToClipboard(action.replace('copy', '').toLowerCase());
+                break;
+
+            // PDF Actions
+            case 'saveFullReportPdf':
+            case 'saveVehicleEstimatePdf':
+            case 'saveLabourDetailsPdf':
+            case 'saveMaterialsEstimatePdf':
+                saveReportAsPdf(action.replace('save', '').replace('Pdf', '').toLowerCase());
+                break;
+
+            default:
+                console.warn('Unknown action:', action);
+        }
+    }
+
+    // ===== OPEN REPORT VIEW =====
+    function openReportView(reportType) {
+        var url = viewReportUrl + '?reportType=' + encodeURIComponent(reportType) +
+                  '&id=' + encodeURIComponent(partNum) +
+                  '&gridType=VehicleGrid' ;
+        console.log('Opening URL:', url);
+        window.open(url, '_blank');
+    }
+
+    // ===== SAVE AS PDF =====
+    function saveReportAsPdf(reportType) {
+        var container = document.getElementById('reportContainer');
+        if (!container) {
+            alert('Unable to find the estimate report.');
+            return;
+        }
+
+        if (typeof kendo === 'undefined' || !kendo.drawing) {
+            alert('Kendo UI is not available. Please ensure Kendo UI is loaded.');
+            return;
+        }
+
+        var wrapper = createExportWrapper(container, reportType);
+        if (!wrapper) return;
+
+        kendo.drawing.drawDOM(wrapper, {
+            paperSize: 'Letter',
+            landscape: true,
+            margin: { top: '0.35in', bottom: '0.35in', left: '0.35in', right: '0.35in' },
+            scale: 0.78,
+            multiPage: true
+        }).then(function(group) {
+            return kendo.drawing.exportPDF(group, {
+                paperSize: 'Letter',
+                landscape: true,
+                margin: { top: '0.35in', bottom: '0.35in', left: '0.35in', right: '0.35in' }
+            });
+        }).done(function(dataUri) {
+            if (wrapper.parentNode) document.body.removeChild(wrapper);
+            var fileName = getReportFileName(reportType) + '.pdf';
+            kendo.saveAs({ dataURI: dataUri, fileName: fileName });
+            console.log('PDF saved:', fileName);
+        }).fail(function(err) {
+            if (wrapper.parentNode) document.body.removeChild(wrapper);
+            console.error('PDF export error:', err);
+            alert('Error generating PDF: ' + (err && err.message ? err.message : 'Unknown error.'));
+        });
+    }
+
+    // ===== COPY TO CLIPBOARD =====
+    function copyReportToClipboard(reportType) {
+        var container = document.getElementById('reportContainer');
+        if (!container) {
+            alert('Unable to find the estimate report.');
+            return;
+        }
+
+        if (typeof kendo === 'undefined' || !kendo.drawing) {
+            alert('Kendo UI is not available. Please ensure Kendo UI is loaded.');
+            return;
+        }
+
+        if (!navigator.clipboard) {
+            alert('Clipboard API is not available.');
+            return;
+        }
+
+        var wrapper = createExportWrapper(container, reportType);
+        if (!wrapper) return;
+
+        kendo.drawing.drawDOM(wrapper, {
+            paperSize: 'auto',
+            margin: '1cm',
+            scale: 1
+        }).then(function(group) {
+            return kendo.drawing.exportImage(group);
+        }).done(function(data) {
+            if (wrapper.parentNode) document.body.removeChild(wrapper);
+
+            fetch(data)
+                .then(function(res) { return res.blob(); })
+                .then(function(blob) {
+                    navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                    var typeNames = {
+                        'full': 'Full Vehicle Estimate Report',
+                        'vehicle': 'Vehicle Estimate Report',
+                        'labour': 'Labour Details Report',
+                        'materials': 'Materials Estimate Report'
+                    };
+                    alert((typeNames[reportType] || 'Report') + ' copied to clipboard.');
+                })
+                .catch(function(err) {
+                    console.error('Clipboard error:', err);
+                    alert('Error copying to clipboard: ' + err.message);
+                });
+        }).fail(function(err) {
+            if (wrapper.parentNode) document.body.removeChild(wrapper);
+            console.error('Export image error:', err);
+            alert('Error generating image: ' + (err && err.message ? err.message : 'Unknown error.'));
+        });
+    }
+
+    // ===== HELPER: Create Export Wrapper =====
+    function createExportWrapper(container, reportType) {
+        var wrapper = document.createElement('div');
+        wrapper.id = 'exportWrapper_' + Date.now();
+        wrapper.style.cssText = [
+            'padding: 20px',
+            'background: white',
+            'font-family: "Segoe UI", Arial, sans-serif',
+            'position: absolute',
+            'left: -100000px',
+            'top: 0',
+            'width: 1100px',
+            'z-index: 9999'
+        ].join('; ');
+
+        var clone = container.cloneNode(true);
+
+        // Update title based on report type
+        var titles = {
+            'full': 'FULL VEHICLE ESTIMATE REPORT',
+            'vehicle': 'VEHICLE COST ESTIMATE REPORT',
+            'labour': 'LABOUR DETAILS REPORT',
+            'materials': 'MATERIALS ESTIMATE REPORT'
+        };
+        var titleEl = clone.querySelector('h1');
+        if (titleEl) {
+            titleEl.textContent = titles[reportType] || titles.vehicle;
+        }
+
+        wrapper.appendChild(clone);
+        document.body.appendChild(wrapper);
+
+        // Remove UI elements
+        var noPrintElements = wrapper.querySelectorAll('.no-print, button, .k-button, .report-toolbar, .report-menu-dropdown');
+        noPrintElements.forEach(function(el) {
+            el.style.display = 'none';
+        });
+
+        // Ensure sections are visible
+        var sections = wrapper.querySelectorAll('.detail-section, .side-by-side, .totals-row, .grand-total-section');
+        sections.forEach(function(el) {
+            el.style.display = '';
+            el.style.visibility = 'visible';
+        });
+
+        void wrapper.offsetWidth;
+        void wrapper.offsetHeight;
+
+        return wrapper;
+    }
+
+    // ===== HELPER: Get Report File Name =====
+    function getReportFileName(reportType) {
+        var typeMap = {
+            'full': 'FullVehicleEstimate',
+            'vehicle': 'VehicleEstimate',
+            'labour': 'LabourDetails',
+            'materials': 'MaterialsEstimate'
+        };
+        var typeName = typeMap[reportType] || 'VehicleEstimate';
+        var estimateNum = (document.getElementById('estimateNumber')?.textContent || 'Estimate').trim().replace(/[^a-z0-9_.-]/gi, '_');
+        return typeName + '_' + estimateNum;
+    }
+
+    // ===== DATA FETCHING =====
+    function fetchTotalCostData() {
+        console.log("Fetching data from:", totalCostDataUrl);
+
+        $.ajax({
+            url: totalCostDataUrl,
+            type: 'GET',
+            dataType: 'json',
+            timeout: 30000,
+            success: function(response) {
+                console.log("Response received:", response);
+                if (response && response.Data && response.Data.length > 0) {
+                    var costData = response.Data[0];
+                    console.log("Cost data:", costData);
+                    populateAllSections(costData);
+                    $("#loadingIndicator").hide();
+                    $("#costSummaryContent").show();
+                    $("#noDataMessage").hide();
+                } else {
+                    console.log("No data in response");
+                    showNoDataMessage();
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error("Error fetching cost data:", status, error);
+                showNoDataMessage();
+            }
+        });
+    }
+
+    // ===== HELPER FUNCTIONS =====
+    function getVal(value) {
+        if (value === null || value === undefined) return 0;
+        var num = parseFloat(value);
+        return isNaN(num) ? 0 : num;
+    }
+
+    function formatMoney(val) {
+        return '$' + val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function setText(id, value) {
+        $(id).text(formatMoney(value));
+    }
+
+    function setNumber(id, value) {
+        var num = getVal(value);
+        $(id).text(num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }));
+    }
+
+    function formatIntegerOrDash(value) {
+        if (value === null || value === undefined || value === '') return '-';
+        var num = parseInt(value, 10);
+        return isNaN(num) ? '-' : num.toLocaleString();
+    }
+
+    function formatDateTime(value) {
+        if (value === null || value === undefined || value === '') return '-';
+        var date = new Date(value);
+        if (isNaN(date.getTime())) return String(value);
+        return date.toLocaleString(undefined, {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit'
+        });
+    }
+
+    function setNumberDecimal(id, value) {
+        var num = getVal(value);
+        $(id).text(num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    }
+
+    // ===== POPULATE ALL SECTIONS =====
+    function populateAllSections(costData) {
+        // Vehicle Details
+        $('#vehicleSeries').text(costData.VehicleSeries || costData.Description || '-');
+        $('#vehicleDescription').text(costData.VehicleDescription || costData.Description || '-');
+        $('#vehicleMake').text(costData.Make || '-');
+        $('#vehicleModel').text(costData.Model || '-');
+        $('#vehicleYear').text(formatIntegerOrDash(costData.Year));
+        $('#numberOfVehicles').text(formatIntegerOrDash(costData.NumOfVehicles));
+        $('#vehicleEngine').text(costData.Engine || '-');
+        $('#vehicleTransmission').text(costData.Transmission || '-');
+        $('#vehicleDifferential').text(costData.Differential || '-');
+        $('#modifiedLastBy').text(costData.ModifiedLastBy || '-');
+        $('#modifiedLastDate').text(formatDateTime(costData.ModifiedLastDate));
+
+        // Material Summary
+        var totalParts = (costData.TotalStockPartsCount || 0) + (costData.TotalNonStockPartsCount || 0) + (costData.TotalRebuiltPartsCount || 0);
+        $('#materialCountBadge').text(totalParts + ' parts');
+        setNumber('#stockPartsCount', costData.TotalStockPartsCount);
+        setNumber('#nonStockPartsCount', costData.TotalNonStockPartsCount);
+        setNumber('#rebuiltPartsCount', costData.TotalRebuiltPartsCount);
+        setText('#stockCost', costData.SCPartsMaterialCost);
+        setText('#totalNonStockCost', costData.NSCSCPartsMaterialCost);
+        setText('#totalRebuiltCost', costData.RBPartsMaterialCost);
+
+        // Material Lines
+        populateMaterialLines(costData.MaterialLines || []);
+
+        // Labour Hours
+        setNumberDecimal('#totalHours', costData.TotalLabourHours);
+        setNumberDecimal('#totalEffectiveHours', costData.TotalEffectiveHours);
+        setNumberDecimal('#totalAdjustedHours', costData.TotalAdjustedHours);
+
+        // Labour Tasks
+        populateTaskSummary(costData.LabourTasks || []);
+
+        // Cost Side by Side
+        var scParts = getVal(costData.SCPartsMaterialCost);
+        var nscParts = getVal(costData.NSCSCPartsMaterialCost);
+        var rbParts = getVal(costData.RBPartsMaterialCost);
+        var partsTotalNoTax = getVal(costData.MaterialTotalCostNoTax);
+        var materialTax = getVal(costData.MaterialTotalTaxAmount);
+        var materialWithTax = getVal(costData.MaterialTotalWithTax);
+
+        var labourFringe = getVal(costData.LabourFringe);
+        var labourBenefits = getVal(costData.LabourBenefits);
+        var blendedFringeCost = getVal(costData.BlendedFringeBenefitCost);
+        var labourOverhead = getVal(costData.LabourOverhead);
+        var totalLabour = getVal(costData.FinalLabourCost);
+        var totalWithTax = materialWithTax + totalLabour;
+
+        setText("#scPartsDisplay", scParts);
+        setText("#nscPartsDisplay", nscParts);
+        setText("#rbCostDisplay", rbParts);
+        setText("#partsTotalDisplay", partsTotalNoTax);
+        setText("#materialTaxDisplay", materialTax);
+        setText("#materialWithTaxDisplay", materialWithTax);
+
+        setText("#labourFringeDisplay", labourFringe);
+        setText("#labourBenefitsDisplay", labourBenefits);
+        setText("#blendedFringeCostDisplay", blendedFringeCost);
+        setText("#labourOverheadDisplay", labourOverhead);
+        setText("#totalLabourCostDisplay", totalLabour);
+
+        setText("#totalMaterialBoxDisplay", materialWithTax);
+        setText("#totalLabourBoxDisplay", totalLabour);
+        setText("#totalWithTaxDisplay", totalWithTax);
+    }
+
+    // ===== POPULATE MATERIAL LINES =====
+    function populateMaterialLines(lines) {
+        var tbody = $('#materialLinesBody');
+        var badge = $('#materialLinesBadge');
+        var totalItems = lines.length;
+        badge.text(totalItems + ' items');
+
+        if (totalItems === 0) {
+            tbody.html('<tr><td colspan="8" style="text-align:center; color:#6c757d; padding:20px;">No material items found</td></tr>');
+            return;
+        }
+
+        var html = '';
+        var typeTotals = { Stock: 0, Rebuilt: 0, 'Non-Stock': 0 };
+        var grandTotal = 0;
+
+        lines.forEach(function(item) {
+            var type = item.Type || 'Stock';
+            var typeClass = type.toLowerCase().replace('-', '');
+            var badgeClass = typeClass === 'nonstock' ? 'nonstock' : typeClass;
+            var totalCost = getVal(item.TotalCost);
+
+            if (typeTotals[type] !== undefined) {
+                typeTotals[type] += totalCost;
+            }
+            grandTotal += totalCost;
+
+            html += '<tr class="type-' + typeClass + '">' +
+                '<td><span class="type-badge ' + badgeClass + '">' + type + '</span></td>' +
+                '<td>' + (item.StockCode || '-') + '</td>' +
+                '<td>' + (item.CC || '-') + '</td>' +
+                '<td>' + (item.Description || 'N/A') + '</td>' +
+                '<td style="text-align:right;">' + getVal(item.Quantity).toFixed(2) + '</td>' +
+                '<td style="text-align:right;">' + formatMoney(getVal(item.UnitCost)) + '</td>' +
+                '<td style="text-align:right;">' + getVal(item.PercentUsage).toFixed(1) + '%</td>' +
+                '<td style="text-align:right; font-weight:600;">' + formatMoney(totalCost) + '</td>' +
+                '</tr>';
+        });
+
+        var typeOrder = ['Stock', 'Rebuilt', 'Non-Stock'];
+        typeOrder.forEach(function(type) {
+            if (typeTotals[type] > 0) {
+                html += '<tr class="subtotal-row">' +
+                    '<td colspan="7" style="text-align:right; font-weight:600;">Subtotal - ' + type + '</td>' +
+                    '<td style="text-align:right; font-weight:600;">' + formatMoney(typeTotals[type]) + '</td>' +
+                    '</tr>';
+            }
+        });
+
+        html += '<tr class="total-row">' +
+            '<td colspan="7" style="text-align:right; font-weight:800; font-size:1.05em;">GRAND TOTAL</td>' +
+            '<td style="text-align:right; font-weight:800; font-size:1.05em;">' + formatMoney(grandTotal) + '</td>' +
+            '</tr>';
+
+        tbody.html(html);
+    }
+
+    // ===== POPULATE TASK SUMMARY =====
+    function populateTaskSummary(tasks) {
+        var tbody = $('#taskSummaryBody');
+        var badge = $('#taskCountBadge');
+        badge.text(tasks.length + ' tasks');
+
+        if (tasks.length === 0) {
+            tbody.html('<tr><td colspan="9" style="text-align:center; color:#6c757d; padding:20px;">No labour tasks found</td></tr>');
+            return;
+        }
+
+        var html = '';
+        var totalHours = 0, totalEffective = 0, totalAdjusted = 0, totalCost = 0;
+
+        tasks.forEach(function(task) {
+            var hours = getVal(task.Hours);
+            var effective = getVal(task.EffectiveHours);
+            var adjusted = getVal(task.AdjustedHours);
+            var cost = getVal(task.TotalCost);
+            var count = getVal(task.Count);
+
+            totalHours += hours;
+            totalEffective += effective;
+            totalAdjusted += adjusted;
+            totalCost += cost;
+
+            html += '<tr>' +
+                '<td>' + (task.Task || 'Unnamed') + '</td>' +
+                '<td>' + (task.LabourDefinition || 'N/A') + '</td>' +
+                '<td>' + (task.CC || '-') + '</td>' +
+                '<td style="text-align:right;">' + hours.toFixed(2) + '</td>' +
+                '<td style="text-align:right;">' + effective.toFixed(2) + '</td>' +
+                '<td style="text-align:right;">' + adjusted.toFixed(2) + '</td>' +
+                '<td style="text-align:right;">' + formatMoney(getVal(task.RatePerHour)) + '</td>' +
+                '<td style="text-align:right; font-weight:600;">' + formatMoney(cost) + '</td>' +
+                '<td style="text-align:center;">' + count + '</td>' +
+                '</tr>';
+        });
+
+        html += '<tr class="total-row">' +
+            '<td colspan="3"><strong>TOTAL</strong></td>' +
+            '<td style="text-align:right;"><strong>' + totalHours.toFixed(2) + '</strong></td>' +
+            '<td style="text-align:right;"><strong>' + totalEffective.toFixed(2) + '</strong></td>' +
+            '<td style="text-align:right;"><strong>' + totalAdjusted.toFixed(2) + '</strong></td>' +
+            '<td style="text-align:right;"></td>' +
+            '<td style="text-align:right;"><strong>' + formatMoney(totalCost) + '</strong></td>' +
+            '<td style="text-align:center;"><strong>' + tasks.length + '</strong></td>' +
+            '</tr>';
+
+        tbody.html(html);
+    }
+
+    function showNoDataMessage() {
+        $("#loadingIndicator").hide();
+        $("#costSummaryContent").hide();
+        $("#noDataMessage").show();
+    }
+</script>
+
+Controller
+[HttpGet]
+[AllowAnonymous]
+public async Task<IActionResult> GetTotalCostInEstimates([DataSourceRequest] DataSourceRequest request, [FromQuery] string id, [FromQuery] string gridType)
+{
+    if (string.IsNullOrEmpty(id))
+    {
+        return BadRequest("id is required for gridType :" + gridType);
+    }
+
+    try
+    {
+        if (gridType == "RebuiltGrid")
+        {
+            var rbNscModel = await GetTotalCostInRebuiltPartsEstimatesWithDetails(id, gridType);
+            return Json(rbNscModel.ToDataSourceResult(request));
+        }
+        if (gridType == "VehicleGrid")
+        {
+            var vehNscmodel = await GetTotalCostInVehicleEstimatesWithDetails(id, gridType);
+            return Json(vehNscmodel.ToDataSourceResult(request));
+        }
+        if (gridType == "ArchivedVehicleGrid")
+        {
+            var vehArchNscmodel = await GetTotalCostInArchVehicleEstimates(id, gridType);
+            return Json(vehArchNscmodel.ToDataSourceResult(request));
+        }
+        if (gridType == "MakeVsBuyGrid")
+        {
+            var vehNscmodel = await GetTotalCostInMakeVsBuyEstimatesWithDetails(id, gridType);
+            return Json(vehNscmodel.ToDataSourceResult(request));
+        }
+        if (gridType == "ArchivedMakeVsBuyGrid")
+        {
+            return StatusCode(500, "An error occurred while fetching data. Implement this.");
+        }
+        if (gridType == "ArchivedRebuiltGrid")
+        {
+            return StatusCode(500, "An error occurred while fetching data. Implement this.");
+        }
+        return StatusCode(500, "An error occurred while fetching data.");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error in GetTotalCostInEstimates: {ex.Message}");
+        Console.WriteLine($"Stack Trace: {ex.StackTrace}");
+        return StatusCode(500, new { error = ex.Message, stack = ex.StackTrace });
+    }
+}
+private async Task<IEnumerable<TotalCostInEstimates>> GetTotalCostInVehicleEstimatesWithDetails(string id, string gridType)
+{
+    try
+    {
+        var result = new List<TotalCostInEstimates>();
+        var vehicleId = id;
+
+        // STEP 1: Get Vehicle Details
+        var vehicleDetails = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(
+        @"SELECT 
+            ISNULL(ProjDesc, 'N/A') AS ProjDesc, 
+            ISNULL(VehSeriesCode, 'N/A') AS VehSeriesCode,
+            ISNULL(Make, 'N/A') AS Make,
+            ISNULL(Model, 'N/A') AS Model,
+            ISNULL([Year], 0) AS [Year],
+            ISNULL(NumOfVehicles, 0) AS NumOfVehicles,
+            ISNULL(Engine, 'N/A') AS Engine,
+            ISNULL(Transmission, 'N/A') AS Transmission,
+            ISNULL(Differential, 'N/A') AS Differential,
+            ISNULL(ModifiedLastBy, 'N/A') AS ModifiedLastBy,
+            ISNULL(ModifiedLastDate, GETDATE()) AS ModifiedLastDate,
+            ISNULL(EnteredBy, 'N/A') AS EnteredBy,
+            ISNULL(DateEntered, GETDATE()) AS DateEntered,
+            ISNULL(Sopnumber, 'N/A') AS Sopnumber
+        FROM SBCES.VehicleList WHERE VehicleListId = @Id",
+        new { Id = vehicleId });
+
+        // STEP 2: Get Material Costs - Using CTE to avoid subquery in aggregate
+        var materialCosts = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(
+            @"
+    WITH MaterialCosts AS (
+        SELECT 
+            TRY_CAST(SBCES.FinalCost(CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(SCP.MmsNewCost, 0), 0) AS DECIMAL(18,2)) AS Cost,
+            'SC' AS Type
+        FROM SBCES.ScPartsUsed SUS
+        LEFT JOIN SBCES.StockCodedParts SCP ON SUS.MMSStockCode = SCP.MMSStockCode
+        WHERE SUS.LinkCode = @Id AND SUS.LinkType = 'BUS' AND SUS.RebuiltPart = 'N'
+        UNION ALL
+        SELECT 
+            TRY_CAST(SBCES.FinalCost(CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(SUS.MmsCost, 0), 0) AS DECIMAL(18,2)) AS Cost,
+            'RB' AS Type
+        FROM SBCES.ScPartsUsed SUS
+        LEFT JOIN SBCES.StockCodedParts SCP ON SUS.MMSStockCode = SCP.MMSStockCode
+        WHERE SUS.LinkCode = @Id AND SUS.LinkType = 'BUS' AND SUS.RebuiltPart = 'Y'
+        UNION ALL
+        SELECT 
+            TRY_CAST(SBCES.FinalCost(CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(NSUS.Cost, 0), 0) AS DECIMAL(18,2)) AS Cost,
+            'NSC' AS Type
+        FROM SBCES.NscPartsUsed NSUS 
+        WHERE NSUS.LinkCode = @Id AND NSUS.LinkType = 'BUS'
+    )
+    SELECT 
+        ISNULL((SELECT SUM(Cost) FROM MaterialCosts WHERE Type = 'SC'), 0) AS SCPartsMaterialCost,
+        ISNULL((SELECT SUM(Cost) FROM MaterialCosts WHERE Type = 'RB'), 0) AS RBPartsMaterialCost,
+        ISNULL((SELECT SUM(Cost) FROM MaterialCosts WHERE Type = 'NSC'), 0) AS NSCSCPartsMaterialCost,
+        ISNULL((SELECT SUM(CoreCost) FROM SBCES.SCPartsUsed WHERE LinkCode = @Id AND LinkType = 'BUS'), 0) AS CoreCost",
+            new { Id = vehicleId });
+
+        // STEP 3: Get Labour Costs - Simplified with CTE
+        var labourCosts = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(
+            @"
+    DECLARE @NonProductiveAdj DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'), ',', '.') AS DECIMAL(18,6));
+    DECLARE @Fringe DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'FRINGE'), '0'), ',', '.') AS DECIMAL(18,6));
+    DECLARE @Benefit DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'BENEFIT'), '0'), ',', '.') AS DECIMAL(18,6));
+    DECLARE @Overhead DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'OVERHEAD'), '0'), ',', '.') AS DECIMAL(18,6));
+    DECLARE @TaxRate DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'TAX_RATE'), '0'), ',', '.') AS DECIMAL(18,6));
+
+    -- Get labour data with rate lookup in a CTE
+    WITH LabourData AS (
+        SELECT 
+            (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+             CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) AS DecimalHrs,
+            CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) AS UsagePercent,
+            ISNULL((SELECT TOP 1 ES.RatePerHour FROM CES.SBCES.EmployeeSalaries ES
+                    WHERE ES.WageGroup = (SELECT TOP 1 EC.WageGroup FROM CES.SBCES.EmplClass EC
+                                          WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')), 0) AS RatePerHour,
+            EL.LabourDefn
+        FROM SBCES.EmployeeLabour EL
+        WHERE EL.LinkNumber = @Id AND EL.TypeId = 'BUS'
+    )
+    SELECT 
+        ISNULL(SUM(
+            (DecimalHrs * UsagePercent / 100) / @NonProductiveAdj * RatePerHour
+        ), 0) AS TotalLabourCost,
+        @Fringe AS FringeRate,
+        @Benefit AS BenefitRate,
+        @Overhead AS OverheadRate,
+        @TaxRate AS TaxRate
+    FROM LabourData",
+            new { Id = vehicleId });
+
+        // STEP 4: Get Labour Tasks - Simplified with CTE
+        var labourTasks = await _dbConnection.QueryAsync<LabourTaskSummary>(
+            @"
+    DECLARE @NonProductiveAdj DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'), ',', '.') AS DECIMAL(18,6));
+
+    WITH LabourData AS (
+        SELECT 
+            EL.Task,
+            EL.LabourDefn,
+                EL.CostCentre as CC,
+
+            (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+             CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) AS DecimalHrs,
+            CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) AS UsagePercent,
+            ISNULL((SELECT TOP 1 ES.RatePerHour FROM CES.SBCES.EmployeeSalaries ES
+                    WHERE ES.WageGroup = (SELECT TOP 1 EC.WageGroup FROM CES.SBCES.EmplClass EC
+                                          WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')), 0) AS RatePerHour
+        FROM SBCES.EmployeeLabour EL
+        WHERE EL.LinkNumber = @Id AND EL.TypeId = 'BUS'
+    )
+    SELECT 
+        ISNULL(Task, 'Unnamed Task') AS Task,
+        ISNULL(LabourDefn, 'N/A') AS LabourDefinition,
+         ISNULL(CC, '') AS CC,
+        COUNT(*) AS Count,
+        SUM(DecimalHrs) AS Hours,
+        SUM(DecimalHrs * UsagePercent / 100) AS EffectiveHours,
+        SUM(DecimalHrs / @NonProductiveAdj) AS AdjustedHours,
+        AVG(RatePerHour) AS RatePerHour,
+        SUM((DecimalHrs * UsagePercent / 100) / @NonProductiveAdj * RatePerHour) AS TotalCost
+    FROM LabourData
+    GROUP BY Task, LabourDefn,CC
+    ORDER BY Task",
+            new { Id = vehicleId });
+
+        // STEP 5: Get Stock Parts (Material Lines)
+        var stockParts = await _dbConnection.QueryAsync<dynamic>(
+            @"
+    SELECT 
+        'Stock' AS Type,
+        SUS.MMSStockCode AS StockCode,
+         SUS.CostCentre as CC,
+        ISNULL(SCP.DetailedDesc, 'N/A') AS Description,
+        SUS.QtyReqd AS Quantity,
+        ISNULL(SCP.MmsNewCost, 0) AS UnitCost,
+        SUS.PercentUsage,
+        TRY_CAST(SBCES.FinalCost(CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(SCP.MmsNewCost, 0), 0) AS DECIMAL(18,2)) AS TotalCost,
+        '' AS Supplier
+    FROM SBCES.ScPartsUsed SUS
+    LEFT JOIN SBCES.StockCodedParts SCP ON SUS.MMSStockCode = SCP.MMSStockCode
+    WHERE SUS.LinkCode = @Id AND SUS.LinkType = 'BUS' AND SUS.RebuiltPart = 'N'
+    ORDER BY SUS.MMSStockCode",
+            new { Id = vehicleId });
+
+        // STEP 6: Get Rebuilt Parts (Material Lines)
+        var rebuiltParts = await _dbConnection.QueryAsync<dynamic>(
+            @"
+    SELECT 
+        'Rebuilt' AS Type,
+        SUS.MMSStockCode AS StockCode,
+        SUS.CostCentre as CC,
+        ISNULL(SCP.DetailedDesc, 'N/A') AS Description,
+        SUS.QtyReqd AS Quantity,
+        ISNULL(SUS.MmsCost, 0) AS UnitCost,
+        SUS.PercentUsage,
+        TRY_CAST(SBCES.FinalCost(CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(SUS.MmsCost, 0), 0) AS DECIMAL(18,2)) AS TotalCost,
+        '' AS Supplier
+    FROM SBCES.ScPartsUsed SUS
+    LEFT JOIN SBCES.StockCodedParts SCP ON SUS.MMSStockCode = SCP.MMSStockCode
+    WHERE SUS.LinkCode = @Id AND SUS.LinkType = 'BUS' AND SUS.RebuiltPart = 'Y'
+    ORDER BY SUS.MMSStockCode",
+            new { Id = vehicleId });
+
+        // STEP 7: Get Non-Stock Parts (Material Lines)
+        var nonStockParts = await _dbConnection.QueryAsync<dynamic>(
+            @"
+    SELECT 
+        'Non-Stock' AS Type,
+        NSUS.OrigSuppNum AS StockCode,
+        NSUS.CostCentre as CC,
+
+        ISNULL(NSUS.OrigSupplierName, 'N/A') AS Description,
+        NSUS.QtyReqd AS Quantity,
+        ISNULL(NSUS.Cost, 0) AS UnitCost,
+        NSUS.PercentUsage,
+        TRY_CAST(SBCES.FinalCost(CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(NSUS.Cost, 0), 0) AS DECIMAL(18,2)) AS TotalCost,
+        ISNULL(NSUS.OrigSupplierName, '') AS Supplier
+    FROM SBCES.NscPartsUsed NSUS
+    WHERE NSUS.LinkCode = @Id AND NSUS.LinkType = 'BUS'
+    ORDER BY NSUS.OrigSuppNum",
+            new { Id = vehicleId });
+
+        // STEP 8: Build the result object
+        var totalCost = new TotalCostInEstimates
+        {
+            LinkCode = vehicleId,
+            VehicleDescription = vehicleDetails?.ProjDesc ?? "N/A",
+            VehicleSeries = vehicleDetails?.VehSeriesCode ?? "N/A",
+            Make = vehicleDetails?.Make ?? "N/A",
+            Model = vehicleDetails?.Model ?? "N/A",
+            Year = Convert.ToInt32(vehicleDetails?.Year ?? 0),
+            NumOfVehicles = Convert.ToInt32(vehicleDetails?.NumOfVehicles ?? 0),
+            Engine = vehicleDetails?.Engine ?? "N/A",
+            Transmission = vehicleDetails?.Transmission ?? "N/A",
+            Differential = vehicleDetails?.Differential ?? "N/A",
+            ModifiedLastBy = vehicleDetails?.ModifiedLastBy ?? "N/A",
+            ModifiedLastDate = vehicleDetails?.ModifiedLastDate ?? DateTime.Now,
+            EnteredBy = vehicleDetails?.EnteredBy ?? "N/A",
+            DateEntered = vehicleDetails?.DateEntered ?? DateTime.Now,
+            Sopnumber = vehicleDetails?.Sopnumber ?? "N/A",
+
+            // Material Costs
+            SCPartsMaterialCost = Convert.ToDecimal(materialCosts?.SCPartsMaterialCost ?? 0),
+            NSCSCPartsMaterialCost = Convert.ToDecimal(materialCosts?.NSCSCPartsMaterialCost ?? 0),
+            RBPartsMaterialCost = Convert.ToDecimal(materialCosts?.RBPartsMaterialCost ?? 0),
+            CoreCost = Convert.ToDecimal(materialCosts?.CoreCost ?? 0),
+
+            // Material Summary
+            TotalStockPartsCount = stockParts.Count(),
+            TotalNonStockPartsCount = nonStockParts.Count(),
+            TotalRebuiltPartsCount = rebuiltParts.Count(),
+        };
+
+        // Calculate material totals
+        var scPartsCost = totalCost.SCPartsMaterialCost;
+        var rbPartsCost = totalCost.RBPartsMaterialCost;
+        var nscPartsCost = totalCost.NSCSCPartsMaterialCost;
+        var materialTotalNoTax = scPartsCost + rbPartsCost + nscPartsCost;
+        var taxRate = Convert.ToDecimal(labourCosts?.TaxRate ?? 0);
+        var materialTax = (materialTotalNoTax * taxRate)/100;
+        var materialTotalWithTax = materialTotalNoTax + materialTax;
+
+        totalCost.MaterialTotalCostNoTax = materialTotalNoTax;
+        totalCost.MaterialTotalTaxAmount = materialTax;
+        totalCost.MaterialTotalWithTax = materialTotalWithTax;
+
+        // Calculate averages
+        totalCost.AverageStockPartCost = stockParts.Any() ? Convert.ToDecimal(stockParts.Average(p => (decimal?)p.UnitCost) ?? 0) : 0;
+        totalCost.AverageNonStockPartCost = nonStockParts.Any() ? Convert.ToDecimal(nonStockParts.Average(p => (decimal?)p.UnitCost) ?? 0) : 0;
+        totalCost.AverageRebuiltPartCost = rebuiltParts.Any() ? Convert.ToDecimal(rebuiltParts.Average(p => (decimal?)p.UnitCost) ?? 0) : 0;
+
+        // Labour Costs
+        var totalLabourCost = Convert.ToDecimal(labourCosts?.TotalLabourCost ?? 0);
+        var fringeRate = Convert.ToDecimal(labourCosts?.FringeRate ?? 0);
+        var benefitRate = Convert.ToDecimal(labourCosts?.BenefitRate ?? 0);
+        var overheadRate = Convert.ToDecimal(labourCosts?.OverheadRate ?? 0);
+
+        var labourFringe = totalLabourCost * fringeRate;
+        var labourBenefits = (totalLabourCost + labourFringe) * benefitRate;
+        var blendedFringeBenefitPercent = totalLabourCost > 0 ? ((labourFringe + labourBenefits) / totalLabourCost) * 100 : 0;
+        var blendedFringeBenefitCost = labourFringe + labourBenefits;
+        var labourOverhead = totalLabourCost * overheadRate;
+        var finalLabourCost = totalLabourCost + labourFringe + labourBenefits + labourOverhead;
+
+        totalCost.TotalLabourCost = totalLabourCost;
+        totalCost.LabourFringe = labourFringe;
+        totalCost.LabourBenefits = labourBenefits;
+        totalCost.BlendedFringeBenefitPercent = blendedFringeBenefitPercent;
+        totalCost.BlendedFringeBenefitCost = blendedFringeBenefitCost;
+        totalCost.LabourOverhead = labourOverhead;
+        totalCost.FinalLabourCost = finalLabourCost;
+
+        // Labour Hours Summary
+        totalCost.LabourTasks = labourTasks.ToList();
+        totalCost.TotalLabourHours = labourTasks.Sum(t => t.Hours);
+        totalCost.TotalEffectiveHours = labourTasks.Sum(t => t.EffectiveHours);
+        totalCost.TotalAdjustedHours = labourTasks.Sum(t => t.AdjustedHours);
+
+        // Material Lines
+        var materialLines = new List<MaterialLineItem>();
+        foreach (var p in stockParts)
+        {
+            materialLines.Add(new MaterialLineItem
+            {
+                Type = p.Type,
+                StockCode = p.StockCode,
+                CC = p.CC,
+                Description = p.Description,
+                Quantity = Convert.ToDecimal(p.Quantity ?? 0),
+                UnitCost = Convert.ToDecimal(p.UnitCost ?? 0),
+                PercentUsage = Convert.ToDecimal(p.PercentUsage ?? 0),
+                TotalCost = Convert.ToDecimal(p.TotalCost ?? 0),
+                Supplier = p.Supplier
+            });
+        }
+        foreach (var p in rebuiltParts)
+        {
+            materialLines.Add(new MaterialLineItem
+            {
+                Type = p.Type,
+                StockCode = p.StockCode,
+                CC = p.CC,
+                Description = p.Description,
+                Quantity = Convert.ToDecimal(p.Quantity ?? 0),
+                UnitCost = Convert.ToDecimal(p.UnitCost ?? 0),
+                PercentUsage = Convert.ToDecimal(p.PercentUsage ?? 0),
+                TotalCost = Convert.ToDecimal(p.TotalCost ?? 0),
+                Supplier = p.Supplier
+            });
+        }
+        foreach (var p in nonStockParts)
+        {
+            materialLines.Add(new MaterialLineItem
+            {
+                Type = p.Type,
+                StockCode = p.StockCode,
+                CC = p.CC,
+                Description = p.Description,
+                Quantity = Convert.ToDecimal(p.Quantity ?? 0),
+                UnitCost = Convert.ToDecimal(p.UnitCost ?? 0),
+                PercentUsage = Convert.ToDecimal(p.PercentUsage ?? 0),
+                TotalCost = Convert.ToDecimal(p.TotalCost ?? 0),
+                Supplier = p.Supplier
+            });
+        }
+
+        totalCost.MaterialLines = materialLines
+            .Where(m => m.TotalCost > 0)
+            .OrderBy(m => m.Type)
+            .ThenBy(m => m.StockCode)
+            .ToList();
+
+        // Grand Totals
+        totalCost.TotalWithoutTax = finalLabourCost + materialTotalNoTax;
+        totalCost.TotalWithTax = finalLabourCost + materialTotalWithTax;
+
+        result.Add(totalCost);
+        return result;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error in GetTotalCostInVehicleEstimatesWithDetails: {ex.Message}");
+        Console.WriteLine($"Stack Trace: {ex.StackTrace}");
+        throw;
+    }
+}
+I tried like below.
+Make sure report has vechileseries - one or many
+private async Task<IEnumerable<TotalCostInEstimates>> GetTotalCostInMakeVsBuyEstimatesWithDetails(string id, string gridType)
+{
+    try
+    {
+        var result = new List<TotalCostInEstimates>();
+       
+
+        // STEP 1: Get Vehicle Details
+        var mbDetails = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(
+        @"SELECT 
+            ISNULL(MBNumber, 'N/A') AS MBNumber, 
+            ISNULL(Description, 'N/A') AS Description,
+            ISNULL([NumBusComp], 'N/A') AS NumBusComp,
+            ISNULL(VendorPartNum, 'N/A') AS VendorPartNum,
+            ISNULL(BuyCode, 0) AS BuyCode,
+            ISNULL(NumBusComp, 0) AS NumBusComp,
+            ISNULL([RebuildCode], 'N/A') AS [RebuildCode],
+            ISNULL([AnnualUsage], 'N/A') AS [AnnualUsage],
+            ISNULL([Recommendation], 'N/A') AS [Recommendation],
+            ISNULL([RemanCost], 'N/A') AS [RemanCost],
+            ISNULL([ExternalCost], 'N/A') AS [ExternalCost],
+            ISNULL([BuyNewCost], 'N/A') AS [BuyNewCost],
+			 ISNULL([InternalCost], 'N/A') AS [InternalCost],
+			  ISNULL([SopNumber], 'N/A') AS [SopNumber],	
+            ISNULL([DateOpened], GETDATE()) AS [DateOpened]
+        FROM SBCES.MbList WHERE 
+		MbNumber = @Id",
+        new { Id = id });
+
+        // STEP 2: Get Material Costs - Using CTE to avoid subquery in aggregate
+        var materialCosts = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(
+            @"
+    WITH MaterialCosts AS (
+        SELECT 
+            TRY_CAST(SBCES.FinalCost(CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(SCP.MmsNewCost, 0), 0) AS DECIMAL(18,2)) AS Cost,
+            'SC' AS Type
+        FROM SBCES.ScPartsUsed SUS
+        LEFT JOIN SBCES.StockCodedParts SCP ON SUS.MMSStockCode = SCP.MMSStockCode
+        WHERE SUS.LinkCode = @Id AND SUS.LinkType = 'MB' AND SUS.RebuiltPart = 'N'
+        UNION ALL
+        SELECT 
+            TRY_CAST(SBCES.FinalCost(CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(SUS.MmsCost, 0), 0) AS DECIMAL(18,2)) AS Cost,
+            'RB' AS Type
+        FROM SBCES.ScPartsUsed SUS
+        LEFT JOIN SBCES.StockCodedParts SCP ON SUS.MMSStockCode = SCP.MMSStockCode
+        WHERE SUS.LinkCode = @Id AND SUS.LinkType = 'MB' AND SUS.RebuiltPart = 'Y'
+        UNION ALL
+        SELECT 
+            TRY_CAST(SBCES.FinalCost(CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(NSUS.Cost, 0), 0) AS DECIMAL(18,2)) AS Cost,
+            'NSC' AS Type
+        FROM SBCES.NscPartsUsed NSUS 
+        WHERE NSUS.LinkCode = @Id AND NSUS.LinkType = 'MB'
+    )
+    SELECT 
+        ISNULL((SELECT SUM(Cost) FROM MaterialCosts WHERE Type = 'SC'), 0) AS SCPartsMaterialCost,
+        ISNULL((SELECT SUM(Cost) FROM MaterialCosts WHERE Type = 'RB'), 0) AS RBPartsMaterialCost,
+        ISNULL((SELECT SUM(Cost) FROM MaterialCosts WHERE Type = 'NSC'), 0) AS NSCSCPartsMaterialCost,
+        ISNULL((SELECT SUM(CoreCost) FROM SBCES.SCPartsUsed WHERE LinkCode = @Id AND LinkType = 'MB'), 0) AS CoreCost",
+            new { Id = id });
+
+        // STEP 3: Get Labour Costs - Simplified with CTE
+        var labourCosts = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(
+            @"
+    DECLARE @NonProductiveAdj DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'), ',', '.') AS DECIMAL(18,6));
+    DECLARE @Fringe DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'FRINGE'), '0'), ',', '.') AS DECIMAL(18,6));
+    DECLARE @Benefit DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'BENEFIT'), '0'), ',', '.') AS DECIMAL(18,6));
+    DECLARE @Overhead DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'OVERHEAD'), '0'), ',', '.') AS DECIMAL(18,6));
+    DECLARE @TaxRate DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'TAX_RATE'), '0'), ',', '.') AS DECIMAL(18,6));
+
+    -- Get labour data with rate lookup in a CTE
+    WITH LabourData AS (
+        SELECT 
+            (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+             CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) AS DecimalHrs,
+            CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) AS UsagePercent,
+            ISNULL((SELECT TOP 1 ES.RatePerHour FROM CES.SBCES.EmployeeSalaries ES
+                    WHERE ES.WageGroup = (SELECT TOP 1 EC.WageGroup FROM CES.SBCES.EmplClass EC
+                                          WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')), 0) AS RatePerHour,
+            EL.LabourDefn
+        FROM SBCES.EmployeeLabour EL
+        WHERE EL.LinkNumber = @Id AND EL.TypeId = 'MB'
+    )
+    SELECT 
+        ISNULL(SUM(
+            (DecimalHrs * UsagePercent / 100) / @NonProductiveAdj * RatePerHour
+        ), 0) AS TotalLabourCost,
+        @Fringe AS FringeRate,
+        @Benefit AS BenefitRate,
+        @Overhead AS OverheadRate,
+        @TaxRate AS TaxRate
+    FROM LabourData",
+            new { Id = id });
+
+        // STEP 4: Get Labour Tasks - Simplified with CTE
+        var labourTasks = await _dbConnection.QueryAsync<LabourTaskSummary>(
+            @"
+    DECLARE @NonProductiveAdj DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'), ',', '.') AS DECIMAL(18,6));
+
+    WITH LabourData AS (
+        SELECT 
+            EL.Task,
+            EL.LabourDefn,
+                EL.CostCentre as CC,
+
+            (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) + 
+             CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) AS DecimalHrs,
+            CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) AS UsagePercent,
+            ISNULL((SELECT TOP 1 ES.RatePerHour FROM CES.SBCES.EmployeeSalaries ES
+                    WHERE ES.WageGroup = (SELECT TOP 1 EC.WageGroup FROM CES.SBCES.EmplClass EC
+                                          WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')), 0) AS RatePerHour
+        FROM SBCES.EmployeeLabour EL
+        WHERE EL.LinkNumber = @Id AND EL.TypeId = 'MB'
+    )
+    SELECT 
+        ISNULL(Task, 'Unnamed Task') AS Task,
+        ISNULL(LabourDefn, 'N/A') AS LabourDefinition,
+         ISNULL(CC, '') AS CC,
+        COUNT(*) AS Count,
+        SUM(DecimalHrs) AS Hours,
+        SUM(DecimalHrs * UsagePercent / 100) AS EffectiveHours,
+        SUM(DecimalHrs / @NonProductiveAdj) AS AdjustedHours,
+        AVG(RatePerHour) AS RatePerHour,
+        SUM((DecimalHrs * UsagePercent / 100) / @NonProductiveAdj * RatePerHour) AS TotalCost
+    FROM LabourData
+    GROUP BY Task, LabourDefn,CC
+    ORDER BY Task",
+            new { Id = id });
+
+        // STEP 5: Get Stock Parts (Material Lines)
+        var stockParts = await _dbConnection.QueryAsync<dynamic>(
+            @"
+    SELECT 
+        'Stock' AS Type,
+        SUS.MMSStockCode AS StockCode,
+         SUS.CostCentre as CC,
+        ISNULL(SCP.DetailedDesc, 'N/A') AS Description,
+        SUS.QtyReqd AS Quantity,
+        ISNULL(SCP.MmsNewCost, 0) AS UnitCost,
+        SUS.PercentUsage,
+        TRY_CAST(SBCES.FinalCost(CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(SCP.MmsNewCost, 0), 0) AS DECIMAL(18,2)) AS TotalCost,
+        '' AS Supplier
+    FROM SBCES.ScPartsUsed SUS
+    LEFT JOIN SBCES.StockCodedParts SCP ON SUS.MMSStockCode = SCP.MMSStockCode
+    WHERE SUS.LinkCode = @Id AND SUS.LinkType = 'MB' AND SUS.RebuiltPart = 'N'
+    ORDER BY SUS.MMSStockCode",
+            new { Id = id });
+
+        // STEP 6: Get Rebuilt Parts (Material Lines)
+        var rebuiltParts = await _dbConnection.QueryAsync<dynamic>(
+            @"
+    SELECT 
+        'Rebuilt' AS Type,
+        SUS.MMSStockCode AS StockCode,
+        SUS.CostCentre as CC,
+        ISNULL(SCP.DetailedDesc, 'N/A') AS Description,
+        SUS.QtyReqd AS Quantity,
+        ISNULL(SUS.MmsCost, 0) AS UnitCost,
+        SUS.PercentUsage,
+        TRY_CAST(SBCES.FinalCost(CAST(ISNULL(SUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(SUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(SUS.MmsCost, 0), 0) AS DECIMAL(18,2)) AS TotalCost,
+        '' AS Supplier
+    FROM SBCES.ScPartsUsed SUS
+    LEFT JOIN SBCES.StockCodedParts SCP ON SUS.MMSStockCode = SCP.MMSStockCode
+    WHERE SUS.LinkCode = @Id AND SUS.LinkType = 'MB' AND SUS.RebuiltPart = 'Y'
+    ORDER BY SUS.MMSStockCode",
+            new { Id = id });
+
+        // STEP 7: Get Non-Stock Parts (Material Lines)
+        var nonStockParts = await _dbConnection.QueryAsync<dynamic>(
+            @"
+    SELECT 
+        'Non-Stock' AS Type,
+        NSUS.OrigSuppNum AS StockCode,
+        NSUS.CostCentre as CC,
+
+        ISNULL(NSUS.OrigSupplierName, 'N/A') AS Description,
+        NSUS.QtyReqd AS Quantity,
+        ISNULL(NSUS.Cost, 0) AS UnitCost,
+        NSUS.PercentUsage,
+        TRY_CAST(SBCES.FinalCost(CAST(ISNULL(NSUS.PercentUsage,'0') AS VARCHAR(20)), CAST(ISNULL(NSUS.QtyReqd,'0') AS VARCHAR(20)), ISNULL(NSUS.Cost, 0), 0) AS DECIMAL(18,2)) AS TotalCost,
+        ISNULL(NSUS.OrigSupplierName, '') AS Supplier
+    FROM SBCES.NscPartsUsed NSUS
+    WHERE NSUS.LinkCode = @Id AND NSUS.LinkType = 'MB'
+    ORDER BY NSUS.OrigSuppNum",
+            new { Id = id });
+
+        // STEP 8: Build the result object
+        var totalCost = new TotalCostInEstimates
+        {
+            LinkCode = id,
+
+            Keyword = mbDetails?.Keyword ?? "N/A",
+            Description = mbDetails?.Description ?? "N/A",
+            BusType = mbDetails?.BusType ?? "N/A",
+            NumBusComp = mbDetails?.NumBusComp ?? "N/A",
+            VendorPartNum = mbDetails?.VendorPartNum ?? "N/A",
+            BuyCode = mbDetails?.BuyCode ?? "N/A",
+            RebuildCode = mbDetails?.RebuildCode ?? "N/A",
+            CoreCode = mbDetails?.CoreCode ?? "N/A",
+            AnnualUsage = mbDetails?.AnnualUsage ?? "N/A",
+            BenchNumber = mbDetails?.BenchNumber ?? "N/A",
+            SampleProvided = mbDetails?.SampleProvided ?? "N/A",
+            Recommendation = mbDetails?.Recommendation ?? "N/A",
+            RemanCost = mbDetails?.RemanCost ?? "N/A",
+            ExternalCost = mbDetails?.ExternalCost ?? "N/A",
+            BuyNewCost = mbDetails?.BuyNewCost ?? "N/A",
+            InternalCost = mbDetails?.InternalCost ?? "N/A",
+            SopNumber = mbDetails?.SopNumber ?? "N/A",
+           
+            JobNumber = mbDetails?.JobNumber ?? "N/A",
+            
+            DateOpened = mbDetails?.DateOpened ?? DateTime.Now,
+            Readmanualnewprice = mbDetails?.Readmanualnewprice ?? "N/A",
+            MbPrefix = mbDetails?.MbPrefix ?? "N/A",
+
+            // Material Costs
+            SCPartsMaterialCost = Convert.ToDecimal(materialCosts?.SCPartsMaterialCost ?? 0),
+            NSCSCPartsMaterialCost = Convert.ToDecimal(materialCosts?.NSCSCPartsMaterialCost ?? 0),
+            RBPartsMaterialCost = Convert.ToDecimal(materialCosts?.RBPartsMaterialCost ?? 0),
+          //  CoreCost = Convert.ToDecimal(materialCosts?.CoreCost ?? 0),
+
+            // Material Summary
+            TotalStockPartsCount = stockParts.Count(),
+            TotalNonStockPartsCount = nonStockParts.Count(),
+            TotalRebuiltPartsCount = rebuiltParts.Count(),
+        };
+
+        // Calculate material totals
+        var scPartsCost = totalCost.SCPartsMaterialCost;
+        var rbPartsCost = totalCost.RBPartsMaterialCost;
+        var nscPartsCost = totalCost.NSCSCPartsMaterialCost;
+        var materialTotalNoTax = scPartsCost + rbPartsCost + nscPartsCost;
+        var taxRate = Convert.ToDecimal(labourCosts?.TaxRate ?? 0);
+        var materialTax = (materialTotalNoTax * taxRate) / 100;
+        var materialTotalWithTax = materialTotalNoTax + materialTax;
+
+        totalCost.MaterialTotalCostNoTax = materialTotalNoTax;
+        totalCost.MaterialTotalTaxAmount = materialTax;
+        totalCost.MaterialTotalWithTax = materialTotalWithTax;
+
+        // Calculate averages
+        totalCost.AverageStockPartCost = stockParts.Any() ? Convert.ToDecimal(stockParts.Average(p => (decimal?)p.UnitCost) ?? 0) : 0;
+        totalCost.AverageNonStockPartCost = nonStockParts.Any() ? Convert.ToDecimal(nonStockParts.Average(p => (decimal?)p.UnitCost) ?? 0) : 0;
+        totalCost.AverageRebuiltPartCost = rebuiltParts.Any() ? Convert.ToDecimal(rebuiltParts.Average(p => (decimal?)p.UnitCost) ?? 0) : 0;
+
+        // Labour Costs
+        var totalLabourCost = Convert.ToDecimal(labourCosts?.TotalLabourCost ?? 0);
+        var fringeRate = Convert.ToDecimal(labourCosts?.FringeRate ?? 0);
+        var benefitRate = Convert.ToDecimal(labourCosts?.BenefitRate ?? 0);
+        var overheadRate = Convert.ToDecimal(labourCosts?.OverheadRate ?? 0);
+
+        var labourFringe = totalLabourCost * fringeRate;
+        var labourBenefits = (totalLabourCost + labourFringe) * benefitRate;
+        var blendedFringeBenefitPercent = totalLabourCost > 0 ? ((labourFringe + labourBenefits) / totalLabourCost) * 100 : 0;
+        var blendedFringeBenefitCost = labourFringe + labourBenefits;
+        var labourOverhead = totalLabourCost * overheadRate;
+        var finalLabourCost = totalLabourCost + labourFringe + labourBenefits + labourOverhead;
+
+        totalCost.TotalLabourCost = totalLabourCost;
+        totalCost.LabourFringe = labourFringe;
+        totalCost.LabourBenefits = labourBenefits;
+        totalCost.BlendedFringeBenefitPercent = blendedFringeBenefitPercent;
+        totalCost.BlendedFringeBenefitCost = blendedFringeBenefitCost;
+        totalCost.LabourOverhead = labourOverhead;
+        totalCost.FinalLabourCost = finalLabourCost;
+
+        // Labour Hours Summary
+        totalCost.LabourTasks = labourTasks.ToList();
+        totalCost.TotalLabourHours = labourTasks.Sum(t => t.Hours);
+        totalCost.TotalEffectiveHours = labourTasks.Sum(t => t.EffectiveHours);
+        totalCost.TotalAdjustedHours = labourTasks.Sum(t => t.AdjustedHours);
+
+        // Material Lines
+        var materialLines = new List<MaterialLineItem>();
+        foreach (var p in stockParts)
+        {
+            materialLines.Add(new MaterialLineItem
+            {
+                Type = p.Type,
+                StockCode = p.StockCode,
+                CC = p.CC,
+                Description = p.Description,
+                Quantity = Convert.ToDecimal(p.Quantity ?? 0),
+                UnitCost = Convert.ToDecimal(p.UnitCost ?? 0),
+                PercentUsage = Convert.ToDecimal(p.PercentUsage ?? 0),
+                TotalCost = Convert.ToDecimal(p.TotalCost ?? 0),
+                Supplier = p.Supplier
+            });
+        }
+        foreach (var p in rebuiltParts)
+        {
+            materialLines.Add(new MaterialLineItem
+            {
+                Type = p.Type,
+                StockCode = p.StockCode,
+                CC = p.CC,
+                Description = p.Description,
+                Quantity = Convert.ToDecimal(p.Quantity ?? 0),
+                UnitCost = Convert.ToDecimal(p.UnitCost ?? 0),
+                PercentUsage = Convert.ToDecimal(p.PercentUsage ?? 0),
+                TotalCost = Convert.ToDecimal(p.TotalCost ?? 0),
+                Supplier = p.Supplier
+            });
+        }
+        foreach (var p in nonStockParts)
+        {
+            materialLines.Add(new MaterialLineItem
+            {
+                Type = p.Type,
+                StockCode = p.StockCode,
+                CC = p.CC,
+                Description = p.Description,
+                Quantity = Convert.ToDecimal(p.Quantity ?? 0),
+                UnitCost = Convert.ToDecimal(p.UnitCost ?? 0),
+                PercentUsage = Convert.ToDecimal(p.PercentUsage ?? 0),
+                TotalCost = Convert.ToDecimal(p.TotalCost ?? 0),
+                Supplier = p.Supplier
+            });
+        }
+
+        totalCost.MaterialLines = materialLines
+            .Where(m => m.TotalCost > 0)
+            .OrderBy(m => m.Type)
+            .ThenBy(m => m.StockCode)
+            .ToList();
+
+        // Grand Totals
+        totalCost.TotalWithoutTax = finalLabourCost + materialTotalNoTax;
+        totalCost.TotalWithTax = finalLabourCost + materialTotalWithTax;
+
+        result.Add(totalCost);
+        return result;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error in GetTotalCostInMakeVsBuyEstimatesWithDetails: {ex.Message}");
+        Console.WriteLine($"Stack Trace: {ex.StackTrace}");
+        throw;
+    }
+}
+
+Let me know if you need any additional details
