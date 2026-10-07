@@ -1,0 +1,38 @@
+-- Run in SQL Developer with "Run Script" (F5)
+-- Dumps ALL standalone stored functions of a schema into one text file.
+
+SET ECHO OFF
+SET FEEDBACK OFF
+SET HEADING OFF
+SET VERIFY OFF
+SET PAGESIZE 0
+SET LINESIZE 4000
+SET LONG 1000000
+SET TRIMSPOOL ON
+
+ACCEPT p_owner  CHAR PROMPT 'Schema owner (Enter = current user): '
+ACCEPT p_folder CHAR DEFAULT 'C:\temp' PROMPT 'Output folder on your PC [C:\temp]: '
+
+COLUMN v_owner NEW_VALUE v_owner NOPRINT
+SELECT NVL(UPPER('&p_owner'), USER) AS v_owner FROM dual;
+
+SPOOL &p_folder\all_functions.sql
+
+SELECT src
+FROM (
+    SELECT name, line AS ord,
+           CASE WHEN line = 1 THEN 'CREATE OR REPLACE ' END
+           || RTRIM(text, CHR(10) || CHR(13)) AS src
+    FROM   all_source
+    WHERE  owner = '&v_owner'
+    AND    type  = 'FUNCTION'
+    UNION ALL
+    SELECT name, MAX(line) + 1, '/' || CHR(10)
+    FROM   all_source
+    WHERE  owner = '&v_owner'
+    AND    type  = 'FUNCTION'
+    GROUP  BY name
+)
+ORDER BY name, ord;
+
+SPOOL OFF
