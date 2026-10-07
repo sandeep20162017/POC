@@ -1,37 +1,67 @@
--- Run with "Run Script" (F5). Edit the two DEFINE lines below first.
--- The output folder MUST already exist. Use forward slashes.
+-- Run each SELECT separately with Ctrl+Enter (Run Statement).
+-- Results: right-click grid > Export > Text (untick header/quotes), or Ctrl+A, Ctrl+C.
 
-DEFINE p_owner  = 'MYSCHEMA'
-DEFINE p_folder = 'C:/temp'
+-- ===== STEP 1: What standalone procedures/functions exist, and who owns them? =====
+SELECT owner, object_type, object_name, status
+FROM   all_objects
+WHERE  object_type IN ('PROCEDURE','FUNCTION')
+AND    owner NOT IN ('SYS','SYSTEM','XDB','MDSYS','CTXSYS','ORDSYS','OUTLN','DBSNMP',
+                     'WMSYS','ORDDATA','LBACSYS','APPQOSSYS','GSMADMIN_INTERNAL')
+ORDER  BY owner, object_type, object_name;
 
-SET ECHO OFF
-SET FEEDBACK OFF
-SET HEADING OFF
-SET VERIFY OFF
-SET PAGESIZE 0
-SET LINESIZE 4000
-SET LONG 1000000
-SET TRIMSPOOL ON
-SET SQLBLANKLINES ON
-
-SPOOL &p_folder./all_functions.sql
-
+-- ===== STEP 2A: Procedures AND functions in ONE result (current login user) =====
+-- Uses USER_SOURCE, so no owner name is needed. Save as ces_procs_and_functions.txt
 SELECT src
 FROM (
-    SELECT name, line AS ord,
-           CASE WHEN line = 1 THEN 'CREATE OR REPLACE ' END
-           || RTRIM(text, CHR(10) || CHR(13)) AS src
-    FROM   all_source
-    WHERE  owner = UPPER('&p_owner')
-    AND    type  = 'FUNCTION'
-    UNION ALL
-    SELECT name, MAX(line) + 1, '/' || CHR(10)
-    FROM   all_source
-    WHERE  owner = UPPER('&p_owner')
-    AND    type  = 'FUNCTION'
-    GROUP  BY name
+  SELECT type, name, line AS ord,
+         CASE WHEN line = 1 THEN 'CREATE OR REPLACE ' END
+         || RTRIM(text, CHR(10) || CHR(13)) AS src
+  FROM   user_source
+  WHERE  type IN ('PROCEDURE','FUNCTION')
+  UNION ALL
+  SELECT type, name, MAX(line) + 1, '-----------'
+  FROM   user_source
+  WHERE  type IN ('PROCEDURE','FUNCTION')
+  GROUP  BY type, name
+)
+ORDER BY type, name, ord;
+
+-- ===== STEP 2B: Same, but for a specific owner found in Step 1 (change MYOWNER) =====
+SELECT src
+FROM (
+  SELECT type, name, line AS ord,
+         CASE WHEN line = 1 THEN 'CREATE OR REPLACE ' END
+         || RTRIM(text, CHR(10) || CHR(13)) AS src
+  FROM   all_source
+  WHERE  owner = 'MYOWNER' AND type IN ('PROCEDURE','FUNCTION')
+  UNION ALL
+  SELECT type, name, MAX(line) + 1, '-----------'
+  FROM   all_source
+  WHERE  owner = 'MYOWNER' AND type IN ('PROCEDURE','FUNCTION')
+  GROUP  BY type, name
+)
+ORDER BY type, name, ord;
+
+-- ===== STEP 3 (optional): Procedures/functions that live INSIDE packages (names only) =====
+SELECT object_name AS package_name, procedure_name, subprogram_id
+FROM   all_procedures
+WHERE  owner = 'CES'
+AND    object_type = 'PACKAGE'
+AND    procedure_name IS NOT NULL
+ORDER  BY object_name, subprogram_id;
+
+-- ===== STEP 4 (optional): Package SPECIFICATIONS, with separator =====
+SELECT src
+FROM (
+  SELECT name, line AS ord,
+         CASE WHEN line = 1 THEN 'CREATE OR REPLACE ' END
+         || RTRIM(text, CHR(10) || CHR(13)) AS src
+  FROM   all_source
+  WHERE  owner = 'CES' AND type = 'PACKAGE'
+  UNION ALL
+  SELECT name, MAX(line) + 1, '-----------'
+  FROM   all_source
+  WHERE  owner = 'CES' AND type = 'PACKAGE'
+  GROUP  BY name
 )
 ORDER BY name, ord;
-
-SPOOL OFF
-PROMPT Done: &p_folder./all_functions.sql
