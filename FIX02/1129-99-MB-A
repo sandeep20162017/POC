@@ -1,0 +1,73 @@
+-- ============================================================================
+-- MAKE VS BUY FINAL ESTIMATE: header + buses (vehicle series)
+-- Parameter: @Id = MbNumber
+-- Materials / labour queries are unchanged from the earlier method (LinkType = 'MB').
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- QUERY 1: MB header (exactly one row, no GROUP BY needed)
+-- ---------------------------------------------------------------------------
+SELECT
+    mb.MbPrefix,
+    mb.MbNumber,
+    mb.Keyword,
+    mb.Description,
+    mb.BusType,
+    mb.NumBusComp,
+    mb.VendorPartNum,
+    mb.BuyCode,
+    mb.RebuildCode,
+    mb.CoreCode,
+    mb.AnnualUsage,
+    mb.BenchNumber,
+    mb.SampleProvided,
+    mb.Recommendation,
+    mb.RemanCost,
+    mb.ExternalCost,
+    mb.BuyNewCost,
+    mb.InternalCost,
+    mb.CoreCost,
+    mb.SopNumber,
+    mb.JobNumber,
+    mb.DateOpened,
+    mb.Readmanualnewprice
+FROM SBCES.MbList mb
+WHERE mb.MbNumber = @Id;
+
+
+-- ---------------------------------------------------------------------------
+-- QUERY 2: Buses / vehicle series for this MB (zero, one or many rows)
+-- ---------------------------------------------------------------------------
+SELECT
+    lb.ListId,
+    lb.Description AS VehicleSeries
+FROM SBCES.MbListOfBuses mblb
+INNER JOIN SBCES.ListOfBuses lb ON lb.ListId = mblb.ListId
+WHERE mblb.MbNumber = @Id
+ORDER BY lb.Description;
+
+
+-- ---------------------------------------------------------------------------
+-- OPTIONAL: single-row version (comma-joined) if you prefer one query
+-- ---------------------------------------------------------------------------
+-- SELECT STRING_AGG(CAST(lb.Description AS NVARCHAR(MAX)), ', ')
+--        WITHIN GROUP (ORDER BY lb.Description) AS VehicleSeries
+-- FROM SBCES.MbListOfBuses mblb
+-- JOIN SBCES.ListOfBuses lb ON lb.ListId = mblb.ListId
+-- WHERE mblb.MbNumber = @Id;
+
+
+-- ============================================================================
+-- C# WIRING (replaces STEP 1 / STEP 1b in the controller method)
+-- ============================================================================
+-- var mb = await _dbConnection.QueryFirstOrDefaultAsync<dynamic>(<QUERY 1>, new { Id = id });
+-- var seriesList = (await _dbConnection.QueryAsync<string>(
+--         @"SELECT lb.Description
+--           FROM SBCES.MbListOfBuses mblb
+--           JOIN SBCES.ListOfBuses lb ON lb.ListId = mblb.ListId
+--           WHERE mblb.MbNumber = @Id AND lb.Description IS NOT NULL
+--           ORDER BY lb.Description", new { Id = id })).ToList();
+-- Then add to the TotalCostInEstimates initializer:
+--   Keyword, BusType, CoreCode, BenchNumber, SampleProvided, JobNumber, MbPrefix,
+--   Readmanualnewprice (all through the S(...) helper), plus
+--   MbCoreCost = S(mb?.CoreCost)   -- named so it doesn't clash with the parts CoreCost
