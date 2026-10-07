@@ -1,37 +1,69 @@
--- Run with "Run Script" (F5). Edit the two DEFINE lines below first.
--- The output folder MUST already exist. Use forward slashes.
+-- OPTION A: no SPOOL needed.
+-- Run each SELECT with Ctrl+Enter (Run Statement), then in the result grid:
+-- right-click > Export > Format: Text (untick header / quotes) > pick a file name.
+-- Or click the grid, Ctrl+A, Ctrl+C, paste into Notepad.
+-- Schema: CES
 
-DEFINE p_owner  = 'MYSCHEMA'
-DEFINE p_folder = 'C:/temp'
-
-SET ECHO OFF
-SET FEEDBACK OFF
-SET HEADING OFF
-SET VERIFY OFF
-SET PAGESIZE 0
-SET LINESIZE 4000
-SET LONG 1000000
-SET TRIMSPOOL ON
-SET SQLBLANKLINES ON
-
-SPOOL &p_folder./all_procedures.sql
-
+-- ===== 1. ALL PACKAGE BODIES -> save as ces_package_bodies.txt =====
 SELECT src
 FROM (
-    SELECT name, line AS ord,
-           CASE WHEN line = 1 THEN 'CREATE OR REPLACE ' END
-           || RTRIM(text, CHR(10) || CHR(13)) AS src
-    FROM   all_source
-    WHERE  owner = UPPER('&p_owner')
-    AND    type  = 'PROCEDURE'
-    UNION ALL
-    SELECT name, MAX(line) + 1, '/' || CHR(10)
-    FROM   all_source
-    WHERE  owner = UPPER('&p_owner')
-    AND    type  = 'PROCEDURE'
-    GROUP  BY name
+  SELECT name, line AS ord,
+         CASE WHEN line = 1 THEN 'CREATE OR REPLACE ' END
+         || RTRIM(text, CHR(10) || CHR(13)) AS src
+  FROM   all_source
+  WHERE  owner = 'CES' AND type = 'PACKAGE BODY'
+  UNION ALL
+  SELECT name, MAX(line) + 1, '-----------'
+  FROM   all_source
+  WHERE  owner = 'CES' AND type = 'PACKAGE BODY'
+  GROUP  BY name
 )
 ORDER BY name, ord;
 
-SPOOL OFF
-PROMPT Done: &p_folder./all_procedures.sql
+-- ===== 2. ALL STANDALONE PROCEDURES -> save as ces_procedures.txt =====
+SELECT src
+FROM (
+  SELECT name, line AS ord,
+         CASE WHEN line = 1 THEN 'CREATE OR REPLACE ' END
+         || RTRIM(text, CHR(10) || CHR(13)) AS src
+  FROM   all_source
+  WHERE  owner = 'CES' AND type = 'PROCEDURE'
+  UNION ALL
+  SELECT name, MAX(line) + 1, '-----------'
+  FROM   all_source
+  WHERE  owner = 'CES' AND type = 'PROCEDURE'
+  GROUP  BY name
+)
+ORDER BY name, ord;
+
+-- ===== 3. ALL STANDALONE FUNCTIONS -> save as ces_functions.txt =====
+SELECT src
+FROM (
+  SELECT name, line AS ord,
+         CASE WHEN line = 1 THEN 'CREATE OR REPLACE ' END
+         || RTRIM(text, CHR(10) || CHR(13)) AS src
+  FROM   all_source
+  WHERE  owner = 'CES' AND type = 'FUNCTION'
+  UNION ALL
+  SELECT name, MAX(line) + 1, '-----------'
+  FROM   all_source
+  WHERE  owner = 'CES' AND type = 'FUNCTION'
+  GROUP  BY name
+)
+ORDER BY name, ord;
+
+-- ===== 4. ONE PACKAGE ONLY (change the name) =====
+SELECT src
+FROM (
+  SELECT line AS ord,
+         CASE WHEN line = 1 THEN 'CREATE OR REPLACE ' END
+         || RTRIM(text, CHR(10) || CHR(13)) AS src
+  FROM   all_source
+  WHERE  owner = 'CES' AND type = 'PACKAGE BODY' AND name = 'CES_ARCHIVE'
+  UNION ALL
+  SELECT MAX(line) + 1, '-----------'
+  FROM   all_source
+  WHERE  owner = 'CES' AND type = 'PACKAGE BODY' AND name = 'CES_ARCHIVE'
+  HAVING COUNT(*) > 0
+)
+ORDER BY ord;
