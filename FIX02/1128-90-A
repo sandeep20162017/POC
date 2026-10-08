@@ -1,0 +1,411 @@
+# ============================
+# ces_round2.py  (fixed version)
+# Oracle (CES) -> SQL Server (CES, schema SBCES) migration, Round 2
+#
+# Fixes vs. previous version:
+#  1. IDENTITY columns (e.g. RbMasterlist.RbMasterlistId): uses an explicit column
+#     list + SET IDENTITY_INSERT ON/OFF  (fixes error 8101 -> "All inserts failed").
+#  2. Empty Oracle tables no longer crash (rows[0] IndexError).
+#  3. Oracle columns are mapped to SQL Server columns BY NAME (RB_MASTERLIST_ID ->
+#     RbMasterlistId), falling back to position only if the column counts match.
+#  4. Fast batch inserts (fast_executemany) with automatic row-by-row fallback so
+#     one bad row never kills the whole table.
+#  5. Child-table filtering uses the ListId column by name, not a hard-coded index.
+#  6. Per-table summary (Oracle rows / inserted / failed) at the end.
+#
+# Credentials can be overridden with environment variables:
+#   ORACLE_PASSWORD, SQL_PASSWORD
+# ============================
+
+import os
+import re
+import sys
+import logging
+import pyodbc
+import oracledb
+
+# ---------------------------------------------------------------------------
+# CONFIG
+# ---------------------------------------------------------------------------
+ORACLE_DSN = "//ocipr-wersc-scan.ttcociclientsub.ttcocivcn.oraclevcn.com:1521/ces_prd_svc.int.ttc.ca"
+ORACLE_USER = "CES"
+ORACLE_PASSWORD = os.environ.get("ORACLE_PASSWORD", "xx")
+
+SQL_PASSWORD = os.environ.get("SQL_PASSWORD", "xx")
+SQL_CONN_STR = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=SQL2022UAT;"
+    "DATABASE=CES;"
+    "UID=cesuser;"
+    f"PWD={SQL_PASSWORD};"
+    "TrustServerCertificate=Yes;"
+)
+
+SQL_SCHEMA = "SBCES"
+BATCH_SIZE = 1000
+
+# SQL Server table -> Oracle table  (MbList and ScPartsUsed removed from Round 2)
+ROUND2_TABLES = {
+    "AllLabourSummary": "ALL_LABOUR_SUMMARY",
+    "ArchMbEmployeeLabour": "ARCH_MB_EMPLOYEE_LABOUR",
+    "MbListOfBuses": "MB_LIST_OF_BUSES",
+    "NonStockCodedParts": "NON_STOCK_CODED_PARTS",
+    "NscPartsUsed": "NSC_PARTS_USED",
+    "RbListOfBuses": "RB_LIST_OF_BUSES",
+    "RbMasterlist": "RB_MASTERLIST",
+    "StockCodedParts": "STOCK_CODED_PARTS",
+    "VehicleList": "VEHICLE_LIST",
+    "VendorPartDesc": "VENDOR_PART_DESC",
+    "ListOfBuses": "LIST_OF_BUSES",
+}
+
+# Children first, parents last
+DELETE_ORDER = [
+    "MbListOfBuses",
+    "RbListOfBuses",
+    "AllLabourSummary",
+    "ArchMbEmployeeLabour",
+    "NscPartsUsed",
+    "NonStockCodedParts",
+    "StockCodedParts",
+    "VendorPartDesc",
+    "RbMasterlist",
+    "VehicleList",
+    "ListOfBuses",
+]
+INSERT_ORDER = list(reversed(DELETE_ORDER))   # parents first
+
+# Tables that must only keep rows whose ListId exists in SBCES.ListOfBuses
+LISTID_CHILD_TABLES = ("MbListOfBuses", "RbListOfBuses")
+
+# Fetch Oracle CLOB/BLOB as str/bytes instead of LOB objects
+oracledb.defaults.fetch_lobs = False
+
+CHAR_TYPES = {"varchar", "char", "nvarchar", "nchar", "text", "ntext"}
+SKIP_TYPES = {"timestamp"}   # rowversion cannot be inserted
+
+
+# ---------------------------------------------------------------------------
+# LOGGING
+# ---------------------------------------------------------------------------
+def setup_logging():
+    logger = logging.getLogger("migration_round2_sBCES")
+    logger.setLevel(logging.INFO)
+    if logger.handlers:
+        return logger
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    fh = logging.FileHandler("migration_round2_sBCES.log", mode="a", encoding="utf-8")
+    ch = logging.StreamHandler(sys.stdout)
+    fh.setFormatter(fmt)
+    ch.setFormatter(fmt)
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+    return logger
+
+
+logger = setup_logging()
+
+
+# ---------------------------------------------------------------------------
+# CONNECTIONS
+# ---------------------------------------------------------------------------
+def get_oracle_conn():
+    return oracledb.connect(user=ORACLE_USER, password=ORACLE_PASSWORD, dsn=ORACLE_DSN)
+
+
+def get_sql_conn():
+    conn = pyodbc.connect(SQL_CONN_STR, timeout=10)
+    conn.autocommit = False
+    cur = conn.cursor()
+    cur.execute("SET ANSI_WARNINGS OFF;")
+    cur.close()
+    return conn
+
+
+# ---------------------------------------------------------------------------
+# SQL SERVER METADATA
+# ---------------------------------------------------------------------------
+def get_sql_columns(sql_conn, table):
+    """Return list of dicts for every insertable column, in column_id order."""
+    cur = sql_conn.cursor()
+    cur.execute(
+        """
+        SELECT c.name, t.name AS type_name, c.max_length, c.is_nullable,
+               c.is_identity, c.is_computed
+        FROM sys.columns c
+        JOIN sys.types t ON c.user_type_id = t.user_type_id
+        WHERE c.object_id = OBJECT_ID(?)
+        ORDER BY c.column_id
+        """,
+        f"{SQL_SCHEMA}.{table}",
+    )
+    cols = []
+    for name, type_name, max_len, nullable, is_identity, is_computed in cur.fetchall():
+        if is_computed or type_name.lower() in SKIP_TYPES:
+            continue
+        type_name = type_name.lower()
+        length = None
+        if type_name in ("varchar", "char") and max_len and max_len > 0:
+            length = max_len
+        elif type_name in ("nvarchar", "nchar") and max_len and max_len > 0:
+            length = max_len // 2
+        cols.append(
+            {
+                "name": name,
+                "type": type_name,
+                "length": length,
+                "nullable": bool(nullable),
+                "identity": bool(is_identity),
+            }
+        )
+    cur.close()
+    if not cols:
+        raise RuntimeError(f"Table {SQL_SCHEMA}.{table} not found in SQL Server")
+    return cols
+
+
+def norm(name):
+    """RB_MASTERLIST_ID / RbMasterlistId -> rbmasterlistid"""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+# ---------------------------------------------------------------------------
+# ORACLE
+# ---------------------------------------------------------------------------
+def fetch_oracle(oracle_conn, oracle_table):
+    cur = oracle_conn.cursor()
+    cur.arraysize = 5000
+    cur.execute(f"SELECT * FROM {oracle_table}")
+    ora_cols = [d[0] for d in cur.description]
+    rows = cur.fetchall()
+    cur.close()
+    return ora_cols, rows
+
+
+# ---------------------------------------------------------------------------
+# MAPPING + ROW CLEANUP
+# ---------------------------------------------------------------------------
+def build_mapping(table, ora_cols, sql_cols):
+    """
+    Returns (ora_indexes, target_sql_cols): for each kept Oracle column index,
+    the SQL column it goes to.
+    """
+    sql_by_norm = {norm(c["name"]): c for c in sql_cols}
+    ora_idx, targets, unmatched = [], [], []
+    for i, oc in enumerate(ora_cols):
+        sc = sql_by_norm.get(norm(oc))
+        if sc is None:
+            unmatched.append(oc)
+        else:
+            ora_idx.append(i)
+            targets.append(sc)
+
+    if ora_idx and not unmatched:
+        return ora_idx, targets
+
+    # Name matching incomplete -> positional fallback if shapes line up
+    non_ident_sql = sql_cols
+    if len(ora_cols) == len(non_ident_sql):
+        logger.warning(
+            f"{table}: column names did not all match (unmatched Oracle cols: {unmatched}); "
+            f"falling back to POSITIONAL mapping"
+        )
+        return list(range(len(ora_cols))), list(non_ident_sql)
+
+    if ora_idx:
+        logger.warning(
+            f"{table}: ignoring Oracle columns with no SQL match: {unmatched}"
+        )
+        return ora_idx, targets
+
+    raise RuntimeError(
+        f"{table}: cannot map Oracle columns {ora_cols} to SQL columns "
+        f"{[c['name'] for c in sql_cols]}"
+    )
+
+
+def clean_value(value, col):
+    if value is None:
+        # NOT NULL text columns: use empty string instead of failing the row
+        if not col["nullable"] and col["type"] in CHAR_TYPES:
+            return ""
+        return None
+    if col["type"] in CHAR_TYPES:
+        if not isinstance(value, str):
+            value = str(value)
+        if col["length"] is not None and len(value) > col["length"]:
+            value = value[: col["length"]]
+    return value
+
+
+def prepare_rows(rows, ora_idx, targets):
+    return [
+        tuple(clean_value(row[i], col) for i, col in zip(ora_idx, targets))
+        for row in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# DELETE / INSERT
+# ---------------------------------------------------------------------------
+def delete_sql_table(sql_conn, table):
+    full = f"{SQL_SCHEMA}.{table}"
+    logger.info(f"Deleting SQL rows: {full}")
+    cur = sql_conn.cursor()
+    cur.execute(f"DELETE FROM {full}")
+    sql_conn.commit()
+    cur.close()
+
+
+def insert_sql_rows(sql_conn, table, targets, rows):
+    """Returns (success, fail)."""
+    full = f"{SQL_SCHEMA}.{table}"
+    if not rows:
+        logger.info(f"{full}: no rows to insert")
+        return 0, 0
+
+    col_list = ", ".join(f"[{c['name']}]" for c in targets)
+    placeholders = ", ".join("?" for _ in targets)
+    sql = f"INSERT INTO {full} ({col_list}) VALUES ({placeholders})"
+    has_identity = any(c["identity"] for c in targets)
+
+    cur = sql_conn.cursor()
+    success = fail = 0
+
+    try:
+        if has_identity:
+            cur.execute(f"SET IDENTITY_INSERT {full} ON")
+
+        for start in range(0, len(rows), BATCH_SIZE):
+            batch = rows[start : start + BATCH_SIZE]
+
+            # --- fast path: whole batch at once
+            try:
+                cur.fast_executemany = True
+                cur.executemany(sql, batch)
+                sql_conn.commit()
+                success += len(batch)
+                continue
+            except Exception as e:
+                sql_conn.rollback()
+                logger.warning(
+                    f"{full}: batch starting at row {start} failed ({str(e)[:200]}); "
+                    f"retrying row by row"
+                )
+
+            # --- slow path: row by row so we can log the exact bad rows
+            cur.fast_executemany = False
+            for offset, row in enumerate(batch):
+                try:
+                    cur.execute(sql, row)
+                    success += 1
+                except Exception as e:
+                    fail += 1
+                    logger.error(
+                        f"Row {start + offset} failed for {full}: {e} | "
+                        f"RowData={repr(row)[:500]}"
+                    )
+            sql_conn.commit()
+    finally:
+        try:
+            if has_identity:
+                cur.execute(f"SET IDENTITY_INSERT {full} OFF")
+                sql_conn.commit()
+        except Exception as e:
+            logger.error(f"Could not turn IDENTITY_INSERT OFF for {full}: {e}")
+        cur.close()
+
+    return success, fail
+
+
+# ---------------------------------------------------------------------------
+# MIGRATION
+# ---------------------------------------------------------------------------
+def load_listofbuses_ids(sql_conn):
+    cur = sql_conn.cursor()
+    cur.execute(f"SELECT ListId FROM {SQL_SCHEMA}.ListOfBuses")
+    ids = {r[0] for r in cur.fetchall()}
+    cur.close()
+    return ids
+
+
+def migrate_table(oracle_conn, sql_conn, table, list_ids=None):
+    oracle_table = ROUND2_TABLES[table]
+    logger.info(f"Migrating {oracle_table} -> {SQL_SCHEMA}.{table}")
+
+    sql_cols = get_sql_columns(sql_conn, table)
+    ora_cols, ora_rows = fetch_oracle(oracle_conn, oracle_table)
+    oracle_count = len(ora_rows)
+    logger.info(f"{oracle_table}: fetched {oracle_count} rows")
+
+    ora_idx, targets = build_mapping(table, ora_cols, sql_cols)
+    rows = prepare_rows(ora_rows, ora_idx, targets)
+
+    skipped_fk = 0
+    if table in LISTID_CHILD_TABLES and list_ids is not None:
+        pos = next(
+            (i for i, c in enumerate(targets) if c["name"].lower() == "listid"), None
+        )
+        if pos is None:
+            raise RuntimeError(f"{table}: ListId column not found for filtering")
+        before = len(rows)
+        rows = [r for r in rows if r[pos] in list_ids]
+        skipped_fk = before - len(rows)
+        if skipped_fk:
+            logger.warning(
+                f"{table}: skipped {skipped_fk} rows whose ListId is not in ListOfBuses"
+            )
+
+    ok, bad = insert_sql_rows(sql_conn, table, targets, rows)
+    logger.info(f"{table}: inserted={ok} failed={bad} skipped_fk={skipped_fk}")
+    return {
+        "table": table,
+        "oracle": oracle_count,
+        "inserted": ok,
+        "failed": bad,
+        "skipped_fk": skipped_fk,
+    }
+
+
+def main():
+    oracle_conn = get_oracle_conn()
+    sql_conn = get_sql_conn()
+    summary = []
+
+    try:
+        for table in DELETE_ORDER:
+            delete_sql_table(sql_conn, table)
+
+        # Parent first
+        summary.append(migrate_table(oracle_conn, sql_conn, "ListOfBuses"))
+        list_ids = load_listofbuses_ids(sql_conn)
+
+        for table in INSERT_ORDER:
+            if table == "ListOfBuses":
+                continue
+            try:
+                summary.append(
+                    migrate_table(oracle_conn, sql_conn, table, list_ids=list_ids)
+                )
+            except Exception as e:
+                sql_conn.rollback()
+                logger.exception(f"{table}: migration FAILED: {e}")
+                summary.append(
+                    {"table": table, "oracle": -1, "inserted": 0, "failed": -1, "skipped_fk": 0}
+                )
+    finally:
+        oracle_conn.close()
+        sql_conn.close()
+
+    logger.info("=" * 70)
+    logger.info(f"{'Table':25} {'Oracle':>10} {'Inserted':>10} {'Failed':>8} {'SkippedFK':>10}")
+    for s in summary:
+        logger.info(
+            f"{s['table']:25} {s['oracle']:>10} {s['inserted']:>10} "
+            f"{s['failed']:>8} {s['skipped_fk']:>10}"
+        )
+    logger.info("=" * 70)
+
+
+if __name__ == "__main__":
+    main()
