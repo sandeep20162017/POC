@@ -75,6 +75,16 @@ DELETE_ORDER = [
 ]
 INSERT_ORDER = list(reversed(DELETE_ORDER))   # parents first
 
+# Oracle column -> SQL Server column when the names differ (None = do not migrate).
+# RbMasterlist: Oracle has no ID (SQL identity generates it), calls the date
+# DATE_MODIFIED, and has DATE_CONVERTED which has no SQL Server column.
+COLUMN_OVERRIDES = {
+    "RbMasterlist": {
+        "DATE_MODIFIED": "DateEntered",
+        "DATE_CONVERTED": None,
+    },
+}
+
 # Tables that must only keep rows whose ListId exists in SBCES.ListOfBuses
 LISTID_CHILD_TABLES = ("MbListOfBuses", "RbListOfBuses")
 
@@ -191,9 +201,18 @@ def build_mapping(table, ora_cols, sql_cols):
     the SQL column it goes to.
     """
     sql_by_norm = {norm(c["name"]): c for c in sql_cols}
+    overrides = {norm(k): v for k, v in COLUMN_OVERRIDES.get(table, {}).items()}
     ora_idx, targets, unmatched = [], [], []
     for i, oc in enumerate(ora_cols):
-        sc = sql_by_norm.get(norm(oc))
+        key = norm(oc)
+        if key in overrides:
+            target_name = overrides[key]
+            if target_name is None:          # explicitly dropped column
+                logger.info(f"{table}: Oracle column {oc} intentionally not migrated")
+                continue
+            sc = sql_by_norm.get(norm(target_name))
+        else:
+            sc = sql_by_norm.get(key)
         if sc is None:
             unmatched.append(oc)
         else:
@@ -203,14 +222,15 @@ def build_mapping(table, ora_cols, sql_cols):
     if ora_idx and not unmatched:
         return ora_idx, targets
 
-    # Name matching incomplete -> positional fallback if shapes line up
-    non_ident_sql = sql_cols
-    if len(ora_cols) == len(non_ident_sql):
+    # Name matching incomplete -> positional fallback ONLY for tables without an
+    # identity column (positional mapping shifted RbMasterlist columns before).
+    has_identity_col = any(c["identity"] for c in sql_cols)
+    if len(ora_cols) == len(sql_cols) and not has_identity_col and not overrides:
         logger.warning(
             f"{table}: column names did not all match (unmatched Oracle cols: {unmatched}); "
             f"falling back to POSITIONAL mapping"
         )
-        return list(range(len(ora_cols))), list(non_ident_sql)
+        return list(range(len(ora_cols))), list(sql_cols)
 
     if ora_idx:
         logger.warning(
@@ -372,15 +392,24 @@ def main():
     sql_conn = get_sql_conn()
     summary = []
 
+    # Optional: re-run only some tables, e.g.  python ces_round2.py RbMasterlist
+    only = sys.argv[1:]
+    unknown = [t for t in only if t not in ROUND2_TABLES]
+    if unknown:
+        raise SystemExit(f"Unknown table(s): {unknown}. Valid: {list(ROUND2_TABLES)}")
+    delete_tables = [t for t in DELETE_ORDER if not only or t in only]
+    insert_tables = [t for t in INSERT_ORDER if not only or t in only]
+
     try:
-        for table in DELETE_ORDER:
+        for table in delete_tables:
             delete_sql_table(sql_conn, table)
 
         # Parent first
-        summary.append(migrate_table(oracle_conn, sql_conn, "ListOfBuses"))
+        if "ListOfBuses" in insert_tables:
+            summary.append(migrate_table(oracle_conn, sql_conn, "ListOfBuses"))
         list_ids = load_listofbuses_ids(sql_conn)
 
-        for table in INSERT_ORDER:
+        for table in insert_tables:
             if table == "ListOfBuses":
                 continue
             try:
