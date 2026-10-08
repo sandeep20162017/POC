@@ -1,0 +1,611 @@
+@{
+    ViewData["Title"] = "Make vs Buy Cost Summary";
+}
+
+<style id="vrStyles">
+    /* ===== Everything is scoped to #reportContainer so it cannot leak into the site layout ===== */
+    #reportContainer { background: #e5e5e5; padding: 8px 0; color: #000; }
+    #reportContainer * { box-sizing: border-box; }
+    #reportContainer table { border-collapse: collapse; width: auto; margin: 0; background: transparent; }
+    #reportContainer th, #reportContainer td { border: 0; background: transparent; }
+
+    #reportContainer .page {
+        position: relative;
+        width: 8.5in;
+        height: 11in;
+        margin: 0 auto 12px auto;
+        padding: 0.2in 0.3in 0.5in 0.3in;
+        background: #fff;
+        overflow: hidden;
+        font-family: "Times New Roman", Times, serif;
+        font-size: 12px;
+        line-height: normal;
+        box-shadow: 0 2px 8px rgba(0,0,0,.35);
+    }
+
+    /* ----- Page header ----- */
+    #reportContainer .hdr { position: relative; height: 0.85in; }
+    #reportContainer .hdr .logo {
+        position: absolute; left: 0; top: 0; width: 1.4in; height: 0.65in;
+        background: #bdbdbd; border: 1px solid #777; box-shadow: 4px 4px 0 #777;
+        display: flex; align-items: center; justify-content: center;
+        font: bold 12px Arial, sans-serif; color: #333; text-align: center;
+    }
+    #reportContainer .hdr .logo img { max-width: 100%; max-height: 100%; }
+    #reportContainer .hdr .title {
+        position: absolute; left: 0; right: 0; top: 4px; text-align: center;
+        font: 24px Arial, Helvetica, sans-serif; letter-spacing: 0.2px;
+    }
+    #reportContainer .hdr .stamp {
+        position: absolute; right: 0; top: 0; text-align: right;
+        font: 14px "Times New Roman", serif; line-height: 1.25;
+    }
+    #reportContainer .modified {
+        position: absolute; left: 0; top: 1.0in;
+        font: 11px "Times New Roman", serif; line-height: 1.25;
+    }
+    #reportContainer .modified b { font-weight: bold; }
+    #reportContainer .hdr-spacer { height: 0.22in; }
+
+    /* ----- Code / Description boxes ----- */
+    #reportContainer .lbl-center { text-align: center; font: bold 13px Arial, sans-serif; margin-top: 2px; }
+    #reportContainer .shadow-box {
+        border: 1px solid #000; border-right: 5px solid #000; border-bottom: 5px solid #000;
+        text-align: center; font: 13px "Times New Roman", serif;
+    }
+    #reportContainer .code-box {
+        width: 2.3in; margin: 0 auto; padding: 1px 0;
+        font: bold 18px "Times New Roman", serif;
+    }
+    #reportContainer .desc-box { min-height: 0.42in; padding-top: 3px; margin-left: 0.7in; margin-right: 0.2in; }
+
+    /* ----- List of vehicles ----- */
+    #reportContainer .veh-box {
+        border: 1px solid #000; border-right: 5px solid #000; border-bottom: 5px solid #000;
+        padding: 4px 8px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px 10px;
+        font: 13px "Times New Roman", serif; min-height: 0.55in;
+    }
+
+    /* ----- MMS buy code / job number ----- */
+    #reportContainer .mbinfo { display: flex; justify-content: space-between; margin: 10px 0.1in 8px 0.05in; }
+    #reportContainer .mbinfo .col { display: flex; flex-direction: column; gap: 3px; }
+    #reportContainer .mbinfo .col.right { margin-right: 2.6in; align-items: flex-end; }
+    #reportContainer .mbinfo .row { display: flex; gap: 22px; align-items: baseline; }
+    #reportContainer .mbinfo .row .k { font: bold 14px Arial, sans-serif; min-width: 1.0in; }
+    #reportContainer .mbinfo .col.right .row .k { min-width: 0; }
+    #reportContainer .mbinfo .row .v { font: 14px "Times New Roman", serif; }
+
+    /* ----- Section box ----- */
+    #reportContainer .box { border: 1px solid #000; }
+    #reportContainer .box-title {
+        text-align: center; font: bold 18px Arial, sans-serif; text-decoration: underline; padding: 1px 0;
+    }
+
+    /* ----- Labour task table ----- */
+    #reportContainer table.lt { width: 100%; font-size: 13px; }
+    #reportContainer table.lt th { font: bold 12px Arial, sans-serif; text-align: left; padding: 3px 4px; vertical-align: bottom; }
+    #reportContainer table.lt th span { text-decoration: underline; }
+    #reportContainer table.lt th.r, #reportContainer table.lt td.r { text-align: right; }
+    #reportContainer table.lt td { padding: 1px 4px; font-family: "Times New Roman", serif; }
+    #reportContainer table.lt tr.tot td { border-top: 1px solid #000; font-weight: bold; }
+    #reportContainer table.lt tr.tot td.r.last { border-bottom: 3px double #000; }
+
+    /* ----- Summary boxes ----- */
+    #reportContainer .two { display: flex; margin-top: 2px; }
+    #reportContainer .two .box { padding-bottom: 6px; }
+    #reportContainer .two .labour-hours { width: 3.55in; }
+    #reportContainer .two .material-cost { flex: 1; margin-left: 4px; }
+    #reportContainer table.sm { margin: 0 auto; font-size: 13px; }
+    #reportContainer table.sm th { font: bold 13px "Times New Roman", serif; text-decoration: underline; padding: 2px 10px; }
+    #reportContainer table.sm td { padding: 0 10px; font-family: "Times New Roman", serif; }
+    #reportContainer table.sm td.r { text-align: right; }
+    #reportContainer table.sm tr.tot td { font-weight: bold; border-top: 1px solid #000; }
+    #reportContainer table.sm tr.tot td.lbl { border-top: 0; text-decoration: underline; }
+
+    /* ----- Totals block ----- */
+    #reportContainer .totals { margin: 14px 0 0 3.6in; width: 4.3in; font-family: Arial, sans-serif; }
+    #reportContainer .totals .line { display: flex; justify-content: space-between; align-items: baseline; padding: 3px 6px; }
+    #reportContainer .totals .line .a { font: bold 17px Arial, sans-serif; }
+    #reportContainer .totals .line .a small { font: bold 12px Arial, sans-serif; }
+    #reportContainer .totals .line .n { font: 14px "Times New Roman", serif; }
+    #reportContainer .totals .big .a { font: bold 22px Arial, sans-serif; }
+    #reportContainer .totals .big .a small { font: bold 13px Arial, sans-serif; }
+    #reportContainer .totals .money-box {
+        border: 1px solid #000; border-right: 5px solid #000; border-bottom: 5px solid #000;
+        width: 1.7in; text-align: right; padding: 2px 8px; font: bold 16px "Times New Roman", serif;
+    }
+
+    /* ----- Material list pages ----- */
+    #reportContainer table.ml { width: 100%; font-size: 12px; }
+    #reportContainer table.ml th {
+        font: bold 12px "Times New Roman", serif; text-decoration: underline; text-align: left;
+        padding: 2px 3px; vertical-align: top;
+    }
+    #reportContainer table.ml th.r, #reportContainer table.ml td.r { text-align: right; }
+    #reportContainer table.ml th.c, #reportContainer table.ml td.c { text-align: center; }
+    #reportContainer table.ml td { padding: 2px 3px; vertical-align: top; font-family: "Times New Roman", serif; }
+    #reportContainer table.ml tr.sub td { border-top: 1px solid #000; font-weight: bold; text-align: right; }
+    #reportContainer table.ml tr.sub td.amt { border-bottom: 3px double #000; }
+    #reportContainer .mat-box { margin-bottom: 4px; }
+    #reportContainer .mat-box .box-title { font: bold 17px "Times New Roman", serif; text-decoration: underline; }
+    #reportContainer .mat-box.empty { min-height: 1.1in; }
+
+    /* ----- Material totals ----- */
+    #reportContainer table.mt { margin-left: 4.55in; width: 3.25in; font-size: 14px; margin-top: 8px; }
+    #reportContainer table.mt td { padding: 1px 4px; font-family: "Times New Roman", serif; }
+    #reportContainer table.mt td.r { text-align: right; font-weight: bold; }
+    #reportContainer table.mt tr.u td.r { border-bottom: 1px solid #000; }
+    #reportContainer table.mt tr.final td { font-size: 17px; font-weight: bold; padding-top: 3px; }
+    #reportContainer table.mt tr.final td.r { border-bottom: 3px double #000; }
+
+    #reportContainer .page-no { position: absolute; right: 0.3in; bottom: 0.2in; font: 12px "Times New Roman", serif; }
+
+    /* ----- Status messages ----- */
+    #loadingIndicator { text-align: center; padding: 40px; font: 16px Arial, sans-serif; }
+    #noDataMessage { text-align: center; padding: 40px; font: 14px Arial, sans-serif; }
+    #noDataMessage .retry-btn { background: #2c3e50; color: #fff; border: 0; border-radius: 4px; padding: 6px 14px; cursor: pointer; }
+
+    /* ----- Toolbar / menu (screen only) ----- */
+    .report-actions-wrapper { position: relative; width: auto; height: auto; }
+    .report-toolbar { position: absolute; top: 8px; right: 12px; z-index: 1000; }
+    .report-toolbar .k-button {
+        background: #2c3e50; color: white; border: none; border-radius: 4px;
+        padding: 6px 10px; cursor: pointer; display: flex; align-items: center; gap: 6px;
+    }
+    .report-toolbar .k-button:hover { background: #1a5276; }
+    #reportMenu {
+        position: absolute; top: 40px; right: 12px; background: white; border: 1px solid #dee2e6;
+        border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 280px;
+        display: none; z-index: 9999; padding: 0; margin: 0; list-style: none;
+    }
+    #reportMenu.show { display: block; }
+    .menu-line { padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; border-bottom: 1px solid #f1f1f1; }
+    .menu-line:last-child { border-bottom: none; }
+    .menu-line:hover { background: #e8f0fe; }
+    .menu-icon { font-size: 18px; }
+
+    /* ----- Print rules (also used inside the print iframe) ----- */
+    @@page { size: 8.5in 11in; margin: 0; }
+    @@media print {
+        #reportContainer { background: #fff; padding: 0; }
+        #reportContainer .page {
+            margin: 0; box-shadow: none; page-break-after: always; break-after: page;
+        }
+        #reportContainer .page:last-child { page-break-after: auto; break-after: auto; }
+        #reportContainer, #reportContainer * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+</style>
+
+<div class="report-actions-wrapper">
+    <div class="report-toolbar no-print">
+        <button id="reportActions" class="k-button" title="Report actions" type="button">
+            <span class="k-icon k-i-more-vertical"></span>
+        </button>
+    </div>
+
+    <ul id="reportMenu">
+        <li class="menu-line" data-action="printReport">
+            <span class="menu-icon k-icon k-i-print"></span>
+            <span class="menu-text">Print / Save as PDF</span>
+        </li>
+        <li class="menu-line" data-action="copyFullReport">
+            <span class="menu-icon k-icon k-i-copy"></span>
+            <span class="menu-text">Copy Estimate to Clipboard</span>
+        </li>
+
+        @* Labour Details / Materials Estimate sub reports - to be added later
+        <li class="menu-line" data-action="viewLabourDetails">
+            <span class="menu-icon k-icon k-i-preview"></span>
+            <span class="menu-text">Labour Details Report</span>
+        </li>
+        <li class="menu-line" data-action="viewMaterialsEstimate">
+            <span class="menu-icon k-icon k-i-preview"></span>
+            <span class="menu-text">Materials Estimate Report</span>
+        </li>
+        *@
+    </ul>
+</div>
+
+<div id="loadingIndicator">⏳ Loading cost data...</div>
+
+<div id="noDataMessage" style="display:none;">
+    <div style="font-size:28px;">⚠️</div>
+    <p style="font-size:16px; margin:10px 0;"><strong>No cost data available</strong></p>
+    <p>No cost data found for Estimate ID: @ViewBag.PartNum</p>
+    <button id="retryButton" class="retry-btn" type="button">⟳ Retry Loading</button>
+</div>
+
+<div class="report-container" id="reportContainer" style="display:none;">
+    <div id="pages"></div>
+</div>
+
+<script type="text/javascript">
+    // ===== Configuration =====
+    var partNum    = '@ViewBag.PartNum';
+    var gridType   = '@(string.IsNullOrEmpty((string)ViewBag.GridType) ? "MakeVsBuyGrid" : (string)ViewBag.GridType)';
+    var reportDate = '@DateTime.Now.ToString("yyyy/MM/dd")';
+    var logoUrl    = '@Url.Content("~/images/ttclogo.png")';
+
+    var totalCostDataUrl = '@Url.Action("GetTotalCostInEstimates", "TotalCost")' +
+                           '?id=' + encodeURIComponent(partNum) +
+                           '&gridType=' + encodeURIComponent(gridType);
+
+    var viewReportUrl = '@Url.Action("ViewReport", "TotalCost")';
+
+    // Rows per page for the material lists (descriptions wrap, so keep conservative)
+    var ROWS_FIRST_PAGE = 8;    // first material page also carries the (empty) Rebuilt box
+    var ROWS_NEXT_PAGE  = 13;
+
+    // ===== Document ready =====
+    $(document).ready(function () {
+        fetchTotalCostData();
+
+        $("#retryButton").on('click', function () {
+            $("#noDataMessage").hide();
+            $("#loadingIndicator").show();
+            $("#reportContainer").hide();
+            fetchTotalCostData();
+        });
+
+        // Menu
+        $("#reportActions").on("click", function (e) {
+            e.stopPropagation();
+            $("#reportMenu").toggleClass("show");
+        });
+        $(document).on("click", function (e) {
+            if (!$(e.target).closest(".report-actions-wrapper").length) {
+                $("#reportMenu").removeClass("show");
+            }
+        });
+        $("#reportMenu").on("click", ".menu-line", function () {
+            $("#reportMenu").removeClass("show");
+            handleMenuAction($(this).data('action'));
+        });
+    });
+
+    // ===== Menu actions =====
+    function handleMenuAction(action) {
+        switch (action) {
+            case 'printReport':            printReport(); break;
+            case 'copyFullReport':         copyReportToClipboard(); break;
+            case 'viewLabourDetails':      openReportView('labour'); break;      // menu item commented out for now
+            case 'viewMaterialsEstimate':  openReportView('materials'); break;   // menu item commented out for now
+            default: console.warn('Unknown action:', action);
+        }
+    }
+
+    function openReportView(reportType) {
+        var url = viewReportUrl + '?reportType=' + encodeURIComponent(reportType) +
+                  '&id=' + encodeURIComponent(partNum) + '&gridType=' + encodeURIComponent(gridType);
+        window.open(url, '_blank');
+    }
+
+    // ===== Print / Save as PDF (isolated in a hidden iframe so the site layout never prints) =====
+    function printReport() {
+        var pagesHtml = document.getElementById('pages').innerHTML;
+        if (!pagesHtml) { alert('Nothing to print.'); return; }
+
+        var css = document.getElementById('vrStyles').textContent;
+        var frame = document.createElement('iframe');
+        frame.style.cssText = 'position:fixed; right:0; bottom:0; width:0; height:0; border:0;';
+        document.body.appendChild(frame);
+
+        // Build the iframe with DOM calls (no literal html/head/body/style tags inside this script,
+        // because some tab loaders cut inline scripts at those tags).
+        var doc = frame.contentWindow.document;
+        doc.title = 'Make vs Buy Cost Estimate ' + partNum;
+        var styleEl = doc.createElement('style');
+        styleEl.textContent = css + ' html,body{margin:0;padding:0;background:#fff;}';
+        doc.head.appendChild(styleEl);
+        var holder = doc.createElement('div');
+        holder.id = 'reportContainer';
+        holder.innerHTML = pagesHtml;
+        doc.body.appendChild(holder);
+
+        var done = false;
+        function go() {
+            if (done) return;
+            done = true;
+            frame.contentWindow.focus();
+            frame.contentWindow.print();
+            setTimeout(function () { if (frame.parentNode) document.body.removeChild(frame); }, 2000);
+        }
+        // give images (logo) a moment to load
+        frame.onload = go;
+        setTimeout(go, 600);
+    }
+
+    // ===== Copy to clipboard (as image, via Kendo) =====
+    function copyReportToClipboard() {
+        var container = document.getElementById('pages');
+        if (!container || !container.innerHTML) { alert('Unable to find the estimate report.'); return; }
+
+        if (typeof kendo === 'undefined' || !kendo.drawing) { alert('Kendo UI is not available.'); return; }
+        if (!navigator.clipboard) { alert('Clipboard API is not available.'); return; }
+
+        kendo.drawing.drawDOM(container, { paperSize: 'auto', margin: '0', scale: 1 })
+            .then(function (group) { return kendo.drawing.exportImage(group); })
+            .done(function (data) {
+                fetch(data)
+                    .then(function (res) { return res.blob(); })
+                    .then(function (blob) {
+                        return navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                    })
+                    .then(function () { alert('Make vs Buy Estimate Report copied to clipboard.'); })
+                    .catch(function (err) { alert('Error copying to clipboard: ' + err.message); });
+            })
+            .fail(function (err) {
+                alert('Error generating image: ' + (err && err.message ? err.message : 'Unknown error.'));
+            });
+    }
+
+    // ===== Data fetching =====
+    function fetchTotalCostData() {
+        $.ajax({
+            url: totalCostDataUrl, type: 'GET', dataType: 'json', timeout: 30000,
+            success: function (response) {
+                if (response && response.Data && response.Data.length > 0) {
+                    render(response.Data[0]);
+                    $("#loadingIndicator").hide();
+                    $("#noDataMessage").hide();
+                    $("#reportContainer").show();
+                } else {
+                    showNoDataMessage();
+                }
+            },
+            error: function (xhr, status, error) {
+                console.error("Error fetching cost data:", status, error);
+                showNoDataMessage();
+            }
+        });
+    }
+
+    function showNoDataMessage() {
+        $("#loadingIndicator").hide();
+        $("#reportContainer").hide();
+        $("#noDataMessage").show();
+    }
+
+    // ===== Helpers =====
+    function esc(s) {
+        if (s === null || s === undefined) return '';
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function num(v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; }
+    function money(v) {
+        return '$' + num(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    // For string fields that may be "N/A" / empty (Make vs Buy cost columns)
+    function moneyOrDash(value) {
+        if (value === null || value === undefined || value === '' || value === 'N/A') return '-';
+        var n = parseFloat(String(value).replace(/[^0-9.\-]/g, ''));
+        return isNaN(n) ? esc(value) : money(n);
+    }
+    function textOrBlank(value) {
+        if (value === null || value === undefined) return '';
+        var s = String(value).trim();
+        return (s === 'N/A') ? '' : s;
+    }
+    function qty(v) { return num(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/\.00$/, ''); }
+    function pct(v) { return num(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' %'; }
+    // decimal hours -> H:MM (e.g. 14.8333 -> 14:50)
+    function hhmm(v) {
+        var m = Math.round(num(v) * 60);
+        var h = Math.floor(m / 60), mm = m % 60;
+        return h + ':' + (mm < 10 ? '0' : '') + mm;
+    }
+    // 6/1/2022 3:18:02PM
+    function legacyDate(v) {
+        if (!v) return '';
+        var d = new Date(v);
+        if (isNaN(d.getTime())) return esc(v);
+        var h = d.getHours(), ap = h >= 12 ? 'PM' : 'AM';
+        h = h % 12; if (h === 0) h = 12;
+        var p = function (x) { return (x < 10 ? '0' : '') + x; };
+        return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear() + ' ' + h + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + ap;
+    }
+    function chunk(arr, first, next) {
+        var out = [], i = 0, size = first;
+        if (arr.length === 0) return [[]];
+        while (i < arr.length) { out.push(arr.slice(i, i + size)); i += size; size = next; }
+        return out;
+    }
+    function sumBy(lines, key) {
+        return lines.reduce(function (a, x) { return a + num(x[key]); }, 0);
+    }
+    function groupByCC(items, valKey) {
+        var map = {}, order = [];
+        items.forEach(function (x) {
+            var cc = x.CC || '-';
+            if (!(cc in map)) { map[cc] = 0; order.push(cc); }
+            map[cc] += num(x[valKey]);
+        });
+        order.sort();
+        return order.map(function (cc) { return { cc: cc, val: map[cc] }; });
+    }
+    function typeOf(x) { return (x.Type || 'Stock').toLowerCase().replace(/[\s_-]/g, ''); }
+
+    // ===== Common page header =====
+    function header(d, code, withVehicles) {
+        var h = '';
+        h += '<div class="hdr">' +
+               '<div class="logo"><img src="' + esc(logoUrl) + '" alt="" onerror="this.style.display=\'none\'; this.parentNode.appendChild(document.createTextNode(\'TTC\'));" /></div>' +
+               '<div class="title">Make vs. Buy Cost Estimate</div>' +
+               '<div class="stamp">' + reportDate + '<br/>' + code + '</div>' +
+             '</div>';
+
+        // Last modified (MbList may not have these - fall back to Date Opened)
+        var mb = textOrBlank(d.ModifiedLastBy), md = d.ModifiedLastDate;
+        var mod = '';
+        if (mb || md) {
+            mod = '<b>LAST MODIFIED BY:</b> ' + esc(mb) + '<br/><b>LAST MODIFIED ON:</b> ' + legacyDate(md);
+        } else if (d.DateOpened) {
+            mod = '<b>DATE OPENED:</b> ' + legacyDate(d.DateOpened);
+        }
+        h += '<div class="modified">' + mod + '</div>';
+
+        h += '<div class="lbl-center">Make vs Buy Code</div>' +
+             '<div class="shadow-box code-box">' + esc(d.MbNumber) + '</div>';
+        h += '<div class="lbl-center">Detailed Description</div>' +
+             '<div class="shadow-box desc-box">' + esc(d.Description) + '</div>';
+
+        if (withVehicles) {
+            var series = d.VehicleSeriesList || [];
+            if (!Array.isArray(series)) series = [series];
+            if (series.length === 0 && d.VehicleSeries) series = [d.VehicleSeries];
+            h += '<div class="lbl-center" style="margin-top:6px;">List Of Vehicles</div>' +
+                 '<div class="veh-box">' + series.map(function (s) { return '<div>' + esc(s) + '</div>'; }).join('') + '</div>';
+        }
+
+        h += '<div class="mbinfo">' +
+               '<div class="col">' +
+                 '<div class="row"><span class="k">MMS Buy Code</span><span class="v">' + esc(d.BuyCode) + '</span></div>' +
+                 '<div class="row"><span class="k">Keyword</span><span class="v">' + esc(d.Keyword) + '</span></div>' +
+               '</div>' +
+               '<div class="col right">' +
+                 '<div class="row"><span class="k">Job Number</span><span class="v">' + esc(d.JobNumber) + '</span></div>' +
+               '</div></div>';
+        return h;
+    }
+
+    // ===== Page 1: summary (CES-009) =====
+    function summaryPage(d) {
+        var tasks = d.LabourTasks || [];
+        var lines = d.MaterialLines || [];
+
+        // Labour task table (Time = Hours, Wrench Time = AdjustedHours)
+        var tr = '', tH = 0, tW = 0;
+        tasks.forEach(function (t) {
+            tH += num(t.Hours); tW += num(t.AdjustedHours);
+            tr += '<tr><td>' + esc(t.Task) + '</td><td>' + esc(t.CC) + '</td><td>' + esc(t.LabourDefinition) + '</td>' +
+                  '<td class="r">' + hhmm(t.Hours) + '</td><td class="r">' + hhmm(t.AdjustedHours) + '</td></tr>';
+        });
+        tr += '<tr class="tot"><td colspan="3"></td><td class="r">' + hhmm(tH) + '</td><td class="r last">' + hhmm(tW) + '</td></tr>';
+
+        // Labour hours by cost centre
+        var lh = groupByCC(tasks, 'Hours'), lhRows = '', lhTotal = 0;
+        lh.forEach(function (x) {
+            lhTotal += x.val;
+            lhRows += '<tr><td style="text-align:center;">' + esc(x.cc) + '</td><td class="r">' + hhmm(x.val) + '</td></tr>';
+        });
+        var totalHrs = (d.TotalLabourHours !== undefined && d.TotalLabourHours !== null) ? num(d.TotalLabourHours) : lhTotal;
+
+        // Material cost by cost centre
+        var mc = groupByCC(lines, 'TotalCost'), mcRows = '';
+        mc.forEach(function (x) {
+            mcRows += '<tr><td style="text-align:center;">' + esc(x.cc) + '</td><td class="r">' + money(x.val) + '</td></tr>';
+        });
+
+        var matNoTax  = num(d.MaterialTotalCostNoTax);
+        var tax       = num(d.MaterialTotalTaxAmount);
+        var matTax    = num(d.MaterialTotalWithTax);
+        var labourAll = num(d.FinalLabourCost);            // includes overhead
+        var overhead  = num(d.LabourOverhead);
+        var labourTotal = labourAll - overhead;
+        var totalExcl = matNoTax + labourAll;
+        var totalWith = matTax + labourAll;
+
+        var h = '';
+        h += '<div class="box">' +
+               '<div class="box-title">LABOUR TASK SUMMARY</div>' +
+               '<table class="lt" style="width:100%;"><thead><tr>' +
+                 '<th style="width:2.6in"><span>Task</span></th>' +
+                 '<th style="width:0.6in"><span>CC</span></th>' +
+                 '<th><span>Labour Definition</span></th>' +
+                 '<th class="r" style="width:0.7in"><span>Time</span></th>' +
+                 '<th class="r" style="width:0.8in"><span>Wrench<br/>Time</span></th>' +
+               '</tr></thead><tbody>' + tr + '</tbody></table></div>';
+
+        h += '<div class="two">' +
+               '<div class="box labour-hours"><div class="box-title">LABOUR HOURS SUMMARY</div>' +
+                 '<table class="sm"><thead><tr><th>Cost Centre</th><th>Total Hours</th></tr></thead><tbody>' + lhRows +
+                 '<tr class="tot"><td class="lbl">Total Labour Hours</td><td class="r">' + hhmm(totalHrs) + '</td></tr></tbody></table></div>' +
+               '<div class="box material-cost"><div class="box-title">MATERIAL COST SUMMARY</div>' +
+                 '<table class="sm"><thead><tr><th>Cost Centre</th><th>Total Cost</th></tr></thead><tbody>' + mcRows +
+                 '<tr class="tot"><td class="lbl">Total Material Cost (Excl Tax)</td><td class="r">' + money(matNoTax) + '</td></tr></tbody></table></div>' +
+             '</div>';
+
+        h += '<div class="totals">' +
+               '<div class="line"><span class="a">Labour Total (Incl. Non Productive Adj.):</span><span class="n">' + money(labourTotal) + '</span></div>' +
+               '<div class="line"><span class="a">Labour Overhead</span><span class="n">' + money(overhead) + '</span></div>' +
+               '<div class="line"><span class="a">Total Material Cost <small>(Excluding tax)</small></span><span class="n">' + money(matNoTax) + '</span></div>' +
+               '<div class="line big" style="padding:14px 0 6px 0;"><span class="a">Total Cost <small>(Excluding tax)</small>:</span><span class="money-box">' + money(totalExcl) + '</span></div>' +
+               '<div class="line"><span class="a" style="font-size:16px;">Total Tax:</span><span class="n">' + money(tax) + '</span></div>' +
+               '<div class="line big" style="padding:6px 0 18px 0;"><span class="a">Total Cost with Tax:</span><span class="money-box">' + money(totalWith) + '</span></div>' +
+               '<div class="line"><span class="a" style="font-size:16px;">Remanufactured Cost <small>(Excluding tax)</small>:</span><span class="n">' + moneyOrDash(d.RemanCost) + '</span></div>' +
+               '<div class="line"><span class="a" style="font-size:16px;">Buy New Cost <small>(Excluding tax)</small>:</span><span class="n">' + moneyOrDash(d.BuyNewCost) + '</span></div>' +
+             '</div>';
+        return { code: 'CES-009', withVehicles: true, html: h };
+    }
+
+    // ===== Material pages (CES-010) =====
+    function listBox(title, thead, rowsHtml, footHtml, extraClass) {
+        return '<div class="box mat-box ' + (extraClass || '') + '">' + (title ? '<div class="box-title">' + title + '</div>' : '') +
+               '<table class="ml"><thead>' + thead + '</thead><tbody>' + rowsHtml + (footHtml || '') + '</tbody></table></div>';
+    }
+
+    function materialRow(x) {
+        return '<tr><td>' + esc(x.StockCode) + '</td><td>' + esc(x.Description) + '</td>' +
+               '<td class="r">' + money(x.UnitCost) + '</td><td>' + esc(x.CC) + '</td>' +
+               '<td class="c">' + qty(x.Quantity) + '</td><td class="r">' + pct(x.PercentUsage) + '</td>' +
+               '<td class="r">' + money(x.TotalCost) + '</td></tr>';
+    }
+
+    function materialPages(d) {
+        var lines    = d.MaterialLines || [];
+        var rebuilt  = lines.filter(function (x) { return typeOf(x) === 'rebuilt'; });
+        var stock    = lines.filter(function (x) { return typeOf(x) === 'stock'; });
+        var nonstock = lines.filter(function (x) { return typeOf(x) === 'nonstock'; });
+        var pages = [];
+
+        var hdrStock = '<tr><th style="width:0.8in">STOCK CODE</th><th>KEYWORD/<br/>DESCRIPTION</th><th class="r">UNIT COST</th><th>CC</th><th class="c">QTY</th><th class="r">USAGE (%)</th><th class="r">TOTAL</th></tr>';
+
+        // --- Rebuilt box (sits on top of the first material page, as in the legacy report) ---
+        var rbRows = rebuilt.map(materialRow).join('');
+        var rbFoot = '<tr class="sub"><td colspan="6">TOTAL REBUILT PART MATERIALS COST</td><td class="amt">' + money(sumBy(rebuilt, 'TotalCost')) + '</td></tr>';
+        var rbBox = listBox('Rebuilt Parts Material List', hdrStock, rbRows, rbFoot, rebuilt.length ? '' : 'empty');
+
+        // --- Stock coded ---
+        var chunks = chunk(stock, ROWS_FIRST_PAGE, ROWS_NEXT_PAGE);
+        chunks.forEach(function (grp, idx, all) {
+            var rows = grp.map(materialRow).join('');
+            var last = (idx === all.length - 1);
+            var foot = last
+                ? '<tr class="sub"><td colspan="6">TOTAL STOCK CODED MATERIALS COST</td><td class="amt">' + money(sumBy(stock, 'TotalCost')) + '</td></tr>' : '';
+            var html = (idx === 0 ? rbBox : '') + listBox(idx === 0 ? 'Stock Coded Material List' : '', hdrStock, rows, foot);
+            pages.push({ code: 'CES-010', withVehicles: false, html: html });
+        });
+
+        // --- Non stock coded + material totals ---
+        var nsHead = '<tr><th style="width:1.3in">SUPPLIER NUMBER/<br/>SUPPLIER NAME</th><th>KEYWORD/<br/>DESCRIPTION</th><th class="r">UNIT COST</th><th>CC</th><th class="c">QTY</th><th class="r">USAGE (%)</th><th class="r">TOTAL</th></tr>';
+        var nsRows = nonstock.map(materialRow).join('');
+        var nsFoot = '<tr class="sub"><td colspan="6">TOTAL NON STOCK CODED MATERIAL COST</td><td class="amt">' + money(sumBy(nonstock, 'TotalCost')) + '</td></tr>';
+
+        var tRb = sumBy(rebuilt, 'TotalCost'), tSt = sumBy(stock, 'TotalCost'), tNs = sumBy(nonstock, 'TotalCost');
+        var tMat = tRb + tSt + tNs;
+        var totHtml = '<table class="mt">' +
+            '<tr><td>Total Rebuilt Material Cost</td><td class="r">' + money(tRb) + '</td></tr>' +
+            '<tr><td>Total Stock Coded Material Cost</td><td class="r">' + money(tSt) + '</td></tr>' +
+            '<tr class="u"><td>Total Non Stock Material Cost</td><td class="r">' + money(tNs) + '</td></tr>' +
+            '<tr class="final"><td>Total Material Cost</td><td class="r">' + money(tMat) + '</td></tr>' +
+            '</table>';
+
+        pages.push({ code: 'CES-010', withVehicles: false,
+                     html: listBox('Non Stock Coded Material List', nsHead, nsRows, nsFoot) + totHtml });
+        return pages;
+    }
+
+    // ===== Main render =====
+    function render(d) {
+        var summary = summaryPage(d);
+        var mats = materialPages(d);
+        var out = pageHtml(d, summary, 1, 1);
+        mats.forEach(function (p, i) { out += pageHtml(d, p, i + 1, mats.length); });
+        $('#pages').html(out);
+    }
+
+    function pageHtml(d, p, n, total) {
+        return '<div class="page">' + header(d, p.code, p.withVehicles) + p.html +
+               '<div class="page-no">Page ' + n + ' of ' + total + '</div></div>';
+    }
+</script>
