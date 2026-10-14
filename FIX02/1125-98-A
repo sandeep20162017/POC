@@ -1,0 +1,34 @@
+1. The .NET 10 SDK isn’t installed on that workstation
+Run this in a terminal:
+
+dotnet --list-sdks
+
+You need a 10.0.x entry. If it’s missing, install the .NET 10 SDK. Visual Studio only supports .NET 10 from VS 2026 (or VS 2022 17.14+ with the right preview/update path), so check that too. Also check for a global.json in the repo or a parent folder that pins an older SDK version, which will cause exactly this failure.
+
+2. NuGet packages were never restored
+Run from the solution folder:
+
+dotnet nuget locals all --clear
+dotnet restore --force
+
+If you’re in Visual Studio, delete the bin and obj folders first, then right-click the solution > Restore NuGet Packages.
+
+3. NuGet package sources are missing or different
+This is the classic “works on one machine, not the other” cause. Check:
+
+dotnet nuget list source
+
+Compare against the working machine. Make sure nuget.org is present and enabled. If you use a private feed (Azure DevOps, company Artifactory, a local folder), it’s configured per machine or per user in %AppData%\NuGet\NuGet.Config, so it won’t travel with the source code unless there’s a nuget.config in the repo. A proxy or credentials issue on that feed will show up as NU1301 or NU1101 errors.
+
+4. Package versions that don’t have a .NET 10 build
+When you changed the target framework, did you also bump the Microsoft.* package versions? Packages like Microsoft.EntityFrameworkCore.*, Microsoft.AspNetCore.*, and Microsoft.Extensions.* should be moved to 10.0.x to match. Leaving them at 8.0.x will often still restore, but mixed versions can produce conflicts (NU1605 downgrade errors, NU1202 incompatibility). Third-party packages may need updating too.
+
+5. Project file details
+Confirm the .csproj has:
+
+xml
+<TargetFramework>net10.0</TargetFramework>
+
+and that you haven’t left an old <Project Sdk="Microsoft.NET.Sdk.Web"> variant or stale RuntimeIdentifier/Include entries behind.
+
+What I’d do first: run dotnet --list-sdks, then dotnet restore -v n in the project folder. The restore output names the exact error codes, and that tells us which of the above it is.
