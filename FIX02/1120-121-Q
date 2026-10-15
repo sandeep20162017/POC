@@ -1,0 +1,67 @@
+public IActionResult UpdateLabourDetail(
+    [DataSourceRequest] DataSourceRequest request,
+    LabourDetailsRebuiltPartsViewModel model,
+    [FromQuery] string id,
+    [FromQuery] string gridType)
+{
+    
+    if (model != null)
+    {
+        try
+        {
+          //  foreach (var model in labourDetails)
+            {
+                model.HrsReqd = $"{model.LabourHrs}:{model.LabourMins:D2}";
+                var enteredBy = ViewBag.UserName?.ToString().ToUpper() ?? "SYSTEM";
+                var dateModified = DateTime.Now;
+
+                string query = @"
+            UPDATE SBCES.EMPLOYEELABOUR 
+            SET 
+                LABOURDEFN = @LabourDefn,
+                COSTCENTRE = @CostCentre,
+                TASK = @Task,
+                USAGE = @Usage,
+                HRSREQD = @HrsReqd,
+                LASTMODIFIEDBY = @LastModifiedBy,
+                [DateRevised] = @DateRevised,
+                REBUILTPARTNUM = @LinkNumber 
+            WHERE [LinkNumber] ='" + id + "' AND Id ='" + model.Id + "'" ;
+
+                var parameters = new
+                {
+                    model.LabourDefn,
+                    model.CostCentre,
+                    model.Task,
+                    model.Usage,
+                    model.HrsReqd,
+                    model.LinkNumber,
+                    DateRevised = DateTime.Now,
+                    LastModifiedBy = ViewBag.UserName,
+                    // model.RebuiltPartNum,
+                    model.Id
+                };
+
+                _dbConnection.Execute(query, parameters);
+                
+            }
+            if (gridType == "VehicleGrid")
+            {
+                //update estimates
+                VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, id);
+            }
+            return Json(new[] { model }.ToDataSourceResult(request));
+           // return Json(labourDetails.ToDataSourceResult(request));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in UpdateLabourDetail: {ex.Message}");
+            ModelState.AddModelError("", "An error occurred while updating data.");
+            //return Json(labourDetails.ToDataSourceResult(request, ModelState));
+            return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+        }
+    }
+
+    // return Json(labourDetails.ToDataSourceResult(request, ModelState));
+    return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+}
