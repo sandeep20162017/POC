@@ -6,12 +6,7 @@ DECLARE @TaxRate DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCE
 
 WITH LabourData AS (
     SELECT
-        -- Wrench time (AdjHrs in H:MM format) converted to decimal hours
-        ISNULL(CASE WHEN CHARINDEX(':', EL.AdjHrs) > 0
-             THEN TRY_CAST(LEFT(EL.AdjHrs, CHARINDEX(':', EL.AdjHrs) - 1) AS DECIMAL(18,6))
-                + TRY_CAST(SUBSTRING(EL.AdjHrs, CHARINDEX(':', EL.AdjHrs) + 1, 10) AS DECIMAL(18,6)) / 60.0
-             ELSE TRY_CAST(REPLACE(EL.AdjHrs, ',', '.') AS DECIMAL(18,6))
-        END, 0) AS WrenchHrs,
+        ISNULL(TRY_CAST(REPLACE(CAST(EL.TimeAddition AS VARCHAR(30)), ',', '.') AS DECIMAL(18,6)), 0) AS CostHrs,
         CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) AS UsagePercent,
         ISNULL((SELECT TOP 1 ES.RatePerHour FROM CES.SBCES.EmployeeSalaries ES
                 WHERE ES.WageGroup = (SELECT TOP 1 EC.WageGroup FROM CES.SBCES.EmplClass EC
@@ -21,7 +16,7 @@ WITH LabourData AS (
     WHERE EL.LinkNumber = @Id AND EL.TypeId = 'MB'
 )
 SELECT
-    ISNULL(SUM(WrenchHrs * UsagePercent / 100 * RatePerHour), 0) AS TotalLabourCost,
+    ISNULL(SUM(CostHrs * UsagePercent / 100 * RatePerHour), 0) AS TotalLabourCost,
     @Fringe AS FringeRate,
     @Benefit AS BenefitRate,
     @Overhead AS OverheadRate,
