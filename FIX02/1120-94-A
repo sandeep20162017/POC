@@ -1,42 +1,23 @@
-DECLARE @NonProductiveAdj DECIMAL(18,6) = TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'), ',', '.') AS DECIMAL(18,6));
-
 WITH LabourData AS (
     SELECT
-        EL.Task,
-        EL.LabourDefn,
-        EL.CostCentre AS CC,
-
-        -- Required hours "H:MM" -> decimal hours
-        (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) +
-         CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) AS DecimalHrs,
-
-        -- Wrench time (AdjHrs "H:MM") -> decimal hours (full precision)
-        CASE WHEN CHARINDEX(':', EL.AdjHrs) > 0
-             THEN CAST(LEFT(EL.AdjHrs, CHARINDEX(':', EL.AdjHrs) - 1) AS DECIMAL(18,6))
-                + CAST(SUBSTRING(EL.AdjHrs, CHARINDEX(':', EL.AdjHrs) + 1, 10) AS DECIMAL(18,6)) / 60.0
-             ELSE ISNULL(TRY_CAST(REPLACE(EL.AdjHrs, ',', '.') AS DECIMAL(18,6)), 0)
-        END AS WrenchHrs,
-
-        -- Adjusted hours (TimeAddition) as decimal hours
-        ISNULL(TRY_CAST(REPLACE(CAST(EL.TimeAddition AS VARCHAR(30)), ',', '.') AS DECIMAL(18,6)), 0) AS AdjHrsValue,
-
+        -- Wrench time (AdjHrs "H:MM") -> decimal hours
+        ISNULL(CASE WHEN CHARINDEX(':', EL.AdjHrs) > 0
+             THEN TRY_CAST(LEFT(EL.AdjHrs, CHARINDEX(':', EL.AdjHrs) - 1) AS DECIMAL(18,6))
+                + TRY_CAST(SUBSTRING(EL.AdjHrs, CHARINDEX(':', EL.AdjHrs) + 1, 10) AS DECIMAL(18,6)) / 60.0
+             ELSE TRY_CAST(REPLACE(EL.AdjHrs, ',', '.') AS DECIMAL(18,6))
+        END, 0) AS WrenchHrs,
         CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) AS UsagePercent,
         ISNULL((SELECT TOP 1 ES.RatePerHour FROM CES.SBCES.EmployeeSalaries ES
                 WHERE ES.WageGroup = (SELECT TOP 1 EC.WageGroup FROM CES.SBCES.EmplClass EC
-                                      WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')), 0) AS RatePerHour
+                                      WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')), 0) AS RatePerHour,
+        EL.LabourDefn
     FROM SBCES.EmployeeLabour EL
-    WHERE EL.LinkNumber = 'MB143' AND EL.TypeId = 'MB'
+    WHERE EL.LinkNumber = @Id AND EL.TypeId = 'MB'
 )
 SELECT
-    ISNULL(Task, 'Unnamed Task') AS Task,
-    ISNULL(LabourDefn, 'N/A') AS LabourDefinition,
-    ISNULL(CC, '') AS CC,
-    COUNT(*) AS Count,
-    SUM(DecimalHrs) AS Hours,
-    SUM(DecimalHrs * UsagePercent / 100) AS EffectiveHours,
-    CAST(ROUND(SUM(WrenchHrs * 60 * UsagePercent / 100), 0) / 60.0 AS DECIMAL(18,6)) AS AdjustedHours,
-    AVG(RatePerHour) AS RatePerHour,
-    SUM((DecimalHrs * UsagePercent / 100) / @NonProductiveAdj * RatePerHour) AS TotalCost
+    ISNULL(SUM(WrenchHrs * UsagePercent / 100 * RatePerHour), 0) AS TotalLabourCost,
+    @Fringe AS FringeRate,
+    @Benefit AS BenefitRate,
+    @Overhead AS OverheadRate,
+    @TaxRate AS TaxRate
 FROM LabourData
-GROUP BY Task, LabourDefn, CC
-ORDER BY Task;
