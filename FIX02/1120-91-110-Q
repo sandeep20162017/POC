@@ -1,0 +1,240 @@
+LabourDetailsController
+model does not pass AdjHrs. It should save it as per the calculations
+        public async Task<IActionResult> CreateLabourDetail(
+    [DataSourceRequest] DataSourceRequest request,
+    LabourDetailsRebuiltPartsViewModel model,
+    [FromQuery] string id, 
+    [FromQuery] string gridType
+            )
+        {
+            if (!ModelState.IsValid)
+            {
+                var errors = ModelState.Values
+                    .SelectMany(v => v.Errors)
+                    .Select(e => e.ErrorMessage);
+                return BadRequest(new { Errors = errors });
+            }
+
+            var linkCode = id?.ToUpper();
+
+            if (gridType == "RebuiltGrid")
+            {
+                linkCode = await _dbConnection.QueryFirstOrDefaultAsync<string>(
+                   "SELECT RebuiltStockNum FROM sbces.RbMasterlist WHERE RbMasterlistId = @Id",
+                   new { Id = id }
+               );
+
+            }
+
+
+            string linkType = ""; // gridType == "RebuiltGrid" ? "RB" : "BUS";
+            if (gridType == "RebuiltGrid")
+            {
+                linkType = "RB";
+
+            }
+            if (gridType == "VehicleGrid")
+            {
+                linkType = "BUS";
+
+            }
+            if (gridType == "MakeVsBuyGrid")
+            {
+                linkType = "MB";
+
+            }
+            //////////////////////
+
+            //if (!ModelState.IsValid)
+            //    return Json(models.ToDataSourceResult(request, ModelState));
+
+            _dbConnection.Open();
+                using (var transaction = _dbConnection.BeginTransaction())
+                {
+                    try
+                    {
+                    string hrsReqd = $"{model.LabourHrs}:{model.LabourMins}";
+
+                    // foreach (var model in models)
+                    {
+                        // model.HrsReqd = $"{model.LabourHrs}:{model.LabourMins:D2}";
+
+                        string query = @"
+                        INSERT INTO SBCES.EMPLOYEELABOUR (
+                            LABOURDEFN, DATEENTERED, LINKNUMBER, TYPEID, 
+                            COSTCENTRE, TASK, LABOURTYPE, USAGE, HRSREQD, 
+                            ADJHRS, DATEREVISED, TIMEADDITION, REBUILTPARTNUM, LASTMODIFIEDBY
+                        ) VALUES (
+                            @LabourDefn, @DateEntered, @LinkNumber, @TypeId,
+                            @CostCentre, @Task, @LabourType, @Usage, @HrsReqd,
+                            @AdjHrs, @DateRevised, @TimeAddition, @RebuiltPartNum, @LastModifiedBy
+                        )";
+
+                            var parameters = new
+                            {
+                                model.LabourDefn,
+                                DateEntered = DateTime.Now,
+                                LinkNumber = linkCode,
+                                TypeId = linkType,
+                                model.CostCentre,
+                                model.Task,
+                                model.LabourType,
+                                model.Usage,
+                                HrsReqd = hrsReqd, 
+                                model.AdjHrs,
+                                DateRevised = DateTime.Now,
+                                model.TimeAddition,
+                                RebuiltPartNum = linkCode,
+                                LastModifiedBy = ViewBag.UserName
+                            };
+                          
+                        await _dbConnection.ExecuteAsync(query, parameters, transaction);
+                        transaction.Commit();
+                        //pass id to model
+                        var maxId = _dbConnection.QueryFirstOrDefault<int>(@"SELECT MAX(id) + 1 FROM SBCES.[EmployeeLabour]");
+                        model.Id = maxId;
+                    }
+                    //update estimates
+                    if (gridType == "VehicleGrid")
+                    {
+                        await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, id);
+                    }
+                    // return Json(models.ToDataSourceResult(request));
+                    return Json(new[] { model }.ToDataSourceResult(request));
+                }
+
+                    catch (Exception ex)
+                    {
+                        transaction.Rollback();
+                        Console.WriteLine($"Error in CreateLabourDetail: {ex.Message}");
+                        ModelState.AddModelError("", "An error occurred while saving data.");
+
+                    //return Json(models.ToDataSourceResult(request, ModelState));
+                    return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+                }
+                    finally { 
+                      //  transaction.Commit(); 
+                      //  _dbConnection.Close();
+                    }
+            }
+        }
+
+      public async Task<IActionResult> CreateLabourDetail(
+[DataSourceRequest] DataSourceRequest request,
+LabourDetailsRebuiltPartsViewModel model,
+[FromQuery] string id, 
+[FromQuery] string gridType
+        )
+    {
+        if (!ModelState.IsValid)
+        {
+            var errors = ModelState.Values
+                .SelectMany(v => v.Errors)
+                .Select(e => e.ErrorMessage);
+            return BadRequest(new { Errors = errors });
+        }
+
+        var linkCode = id?.ToUpper();
+
+        if (gridType == "RebuiltGrid")
+        {
+            linkCode = await _dbConnection.QueryFirstOrDefaultAsync<string>(
+               "SELECT RebuiltStockNum FROM sbces.RbMasterlist WHERE RbMasterlistId = @Id",
+               new { Id = id }
+           );
+
+        }
+
+
+        string linkType = ""; // gridType == "RebuiltGrid" ? "RB" : "BUS";
+        if (gridType == "RebuiltGrid")
+        {
+            linkType = "RB";
+
+        }
+        if (gridType == "VehicleGrid")
+        {
+            linkType = "BUS";
+
+        }
+        if (gridType == "MakeVsBuyGrid")
+        {
+            linkType = "MB";
+
+        }
+        //////////////////////
+
+        //if (!ModelState.IsValid)
+        //    return Json(models.ToDataSourceResult(request, ModelState));
+
+        _dbConnection.Open();
+            using (var transaction = _dbConnection.BeginTransaction())
+            {
+                try
+                {
+                string hrsReqd = $"{model.LabourHrs}:{model.LabourMins}";
+
+                // foreach (var model in models)
+                {
+                    // model.HrsReqd = $"{model.LabourHrs}:{model.LabourMins:D2}";
+
+                    string query = @"
+                    INSERT INTO SBCES.EMPLOYEELABOUR (
+                        LABOURDEFN, DATEENTERED, LINKNUMBER, TYPEID, 
+                        COSTCENTRE, TASK, LABOURTYPE, USAGE, HRSREQD, 
+                        ADJHRS, DATEREVISED, TIMEADDITION, REBUILTPARTNUM, LASTMODIFIEDBY
+                    ) VALUES (
+                        @LabourDefn, @DateEntered, @LinkNumber, @TypeId,
+                        @CostCentre, @Task, @LabourType, @Usage, @HrsReqd,
+                        @AdjHrs, @DateRevised, @TimeAddition, @RebuiltPartNum, @LastModifiedBy
+                    )";
+
+                        var parameters = new
+                        {
+                            model.LabourDefn,
+                            DateEntered = DateTime.Now,
+                            LinkNumber = linkCode,
+                            TypeId = linkType,
+                            model.CostCentre,
+                            model.Task,
+                            model.LabourType,
+                            model.Usage,
+                            HrsReqd = hrsReqd, 
+                            model.AdjHrs,
+                            DateRevised = DateTime.Now,
+                            model.TimeAddition,
+                            RebuiltPartNum = linkCode,
+                            LastModifiedBy = ViewBag.UserName
+                        };
+                      
+                    await _dbConnection.ExecuteAsync(query, parameters, transaction);
+                    transaction.Commit();
+                    //pass id to model
+                    var maxId = _dbConnection.QueryFirstOrDefault<int>(@"SELECT MAX(id) + 1 FROM SBCES.[EmployeeLabour]");
+                    model.Id = maxId;
+                }
+                //update estimates
+                if (gridType == "VehicleGrid")
+                {
+                    await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, id);
+                }
+                // return Json(models.ToDataSourceResult(request));
+                return Json(new[] { model }.ToDataSourceResult(request));
+            }
+
+                catch (Exception ex)
+                {
+                    transaction.Rollback();
+                    Console.WriteLine($"Error in CreateLabourDetail: {ex.Message}");
+                    ModelState.AddModelError("", "An error occurred while saving data.");
+
+                //return Json(models.ToDataSourceResult(request, ModelState));
+                return Json(new[] { model }.ToDataSourceResult(request, ModelState));
+            }
+                finally { 
+                  //  transaction.Commit(); 
+                  //  _dbConnection.Close();
+                }
+        }
+    }
+
