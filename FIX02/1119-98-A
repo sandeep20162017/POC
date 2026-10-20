@@ -1,0 +1,61 @@
+CreateEngine
+csharp
+public async Task<IActionResult> CreateEngine([DataSourceRequest] DataSourceRequest request, [FromForm] EnginesModel enginesModel)
+{
+    if (!ModelState.IsValid)
+    {
+        return BadRequest(ModelState);
+    }
+
+    try
+    {
+        const string insertQuery = "INSERT INTO SBCES.Engines (NAME) VALUES (@Name)";
+
+        await _dbConnection.ExecuteAsync(insertQuery, new { enginesModel.Name });
+        return Json(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        // _logger.LogError(ex, "Error creating engine {Name}", enginesModel.Name);
+        return StatusCode(500, "An error occurred while updating the engine. Duplicate record found. ");
+    }
+}
+CreateBus
+csharp
+public async Task<IActionResult> CreateBus([DataSourceRequest] DataSourceRequest request, [FromForm] BusModel busModel)
+{
+    if (!ModelState.IsValid)
+    {
+        return BadRequest(ModelState);
+    }
+
+    try
+    {
+        // Avoid duplicates
+        const string listQuery = @"
+            SELECT COUNT(*)
+            FROM SBCES.ListOfBuses
+            WHERE Description = @Description";
+
+        var existingCount = await _dbConnection.QuerySingleOrDefaultAsync<int>(
+            listQuery,
+            new { busModel.Description });
+
+        if (existingCount > 0)
+        {
+            return StatusCode(500, "An error occurred while updating the Vehicle. Vehicle exists or you are trying to add the same vehicle in batch mode. ");
+        }
+
+        const string insertQuery = @"
+            INSERT INTO SBCES.ListOfBuses (ListID, Description)
+            VALUES ((SELECT ISNULL(MAX(ListID), 0) + 1 FROM SBCES.ListOfBuses), @Description);";
+
+        await _dbConnection.ExecuteAsync(insertQuery, new { busModel.Description });
+        return Ok();
+    }
+    catch (Exception ex)
+    {
+        // _logger.LogError(ex, "Error creating bus {Description}", busModel.Description);
+        return StatusCode(500, "An error occurred while updating the Vehicle. Vehicle exists or you are trying to add the same vehicle in batch mode.  ");
+    }
+}
