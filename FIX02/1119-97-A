@@ -1,0 +1,48 @@
+
+// STEP 4: Labour tasks
+var labourTasks = await _dbConnection.QueryAsync<LabourTaskSummary>(
+    @"
+DECLARE @NonProductiveAdj DECIMAL(18,6) = ISNULL(NULLIF(TRY_CAST(REPLACE(ISNULL((SELECT Value FROM SBCES.CESSETTINGS WHERE Parameter = 'NON_PRODUCTIVE_ADJUSTMENT'), '1'), ',', '.') AS DECIMAL(18,6)), 0), 1);
+ 
+WITH LabourData AS (
+    SELECT
+        EL.Task,
+        EL.LabourDefn,
+        EL.CostCentre AS CC,
+ 
+        -- Required hours (H:MM) converted to decimal hours
+        (CAST(ISNULL(LEFT(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) - 1), 0) AS DECIMAL(18,2)) +
+         CAST(ISNULL(SUBSTRING(EL.HrsReqd, CHARINDEX(':', EL.HrsReqd) + 1, LEN(EL.HrsReqd)), 0) AS DECIMAL(18,2)) / 60) AS DecimalHrs,
+ 
+        -- Hours used for cost: TimeAddition, same as Oracle
+        ISNULL(TRY_CAST(REPLACE(CAST(EL.TimeAddition AS VARCHAR(30)), ',', '.') AS DECIMAL(18,6)), 0) AS CostHrs,
+ 
+        CAST(NULLIF(EL.Usage, '') AS DECIMAL(18,2)) AS UsagePercent,
+        ISNULL((SELECT TOP 1 ES.RatePerHour FROM CES.SBCES.EmployeeSalaries ES
+                WHERE ES.WageGroup = (SELECT TOP 1 EC.WageGroup FROM CES.SBCES.EmplClass EC
+                                      WHERE EC.LabourDefn LIKE '%' + EL.LabourDefn + '%')), 0) AS RatePerHour
+    FROM SBCES.EmployeeLabour EL
+    WHERE EL.LinkNumber = @Id AND EL.TypeId = 'BUS'
+),
+Calc AS (
+    SELECT *,
+        -- Wrench time = required hours / non-productive adjustment, rounded to whole minutes (decimal hours)
+        ROUND(DecimalHrs * 60 / @NonProductiveAdj, 0) / 60.0 AS WrenchHrs
+    FROM LabourData
+)
+SELECT
+    ISNULL(Task, 'Unnamed Task') AS Task,
+    ISNULL(LabourDefn, 'N/A') AS LabourDefinition,
+    ISNULL(CC, '') AS CC,
+    COUNT(*) AS Count,
+    SUM(DecimalHrs) AS Hours,
+    SUM(DecimalHrs * UsagePercent / 100) AS EffectiveHours,
+    -- Wrench hours x Usage%, rounded to whole minutes, returned as decimal hours (numeric)
+    CAST(ROUND(SUM(WrenchHrs * 60 * UsagePercent / 100), 0) / 60.0 AS DECIMAL(18,6)) AS AdjustedHours,
+    AVG(RatePerHour) AS RatePerHour,
+    SUM(CostHrs * UsagePercent / 100 * RatePerHour) AS TotalCost
+FROM Calc
+GROUP BY Task, LabourDefn, CC
+ORDER BY Task
+",
+    new { Id = id });
