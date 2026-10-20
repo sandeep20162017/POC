@@ -1,0 +1,60 @@
+Use parameterized query for blow and give me full function
+ public async Task<IActionResult> CreateEngine([DataSourceRequest] DataSourceRequest request, [FromForm] EnginesModel enginesModel)
+ {
+
+     try
+     {
+         var insertQuery = "INSERT INTO SBCES.Engines (NAME) VALUES ('" + enginesModel.Name + "')";
+         await _dbConnection.ExecuteAsync(insertQuery, enginesModel);
+         return Json(new { success = true });
+     }
+     catch (Exception ex)
+     {
+         return StatusCode(500, "An error occurred while updating the engine. Duplicate record found. ");
+     }
+
+ }
+
+and
+   public async Task<IActionResult> CreateBus([DataSourceRequest] DataSourceRequest request, [FromForm] BusModel busModel)
+   {
+       if (!ModelState.IsValid)
+       {
+           return BadRequest(ModelState);
+       }
+       try
+       {
+           //Avoid duplicate
+           //check if ListId Exits in database
+           var listQuery = @"
+                                   SELECT count(*)
+                                   FROM SBCES.ListOfBuses
+                                   where Description = '" + busModel.Description + "'";
+           var fetchedVehicle = await _dbConnection.QuerySingleOrDefaultAsync<int>(listQuery, new { listId = busModel.Description });
+           if (fetchedVehicle > 0)
+           {                    
+               // Handle or log the exception
+
+               throw new Exception("An error occurred while updating the Vehicle. Vehicle exists or you are trying to add the same vehicle in batch mode. ");
+              
+           }
+           var insertQuery = String.Format(@" 
+           INSERT INTO SBCES.ListOfBuses (ListID, Description)
+           VALUES ((select MAX(ListID) + 1 from SBCES.ListOfBuses) , '{0}'); ",
+
+               busModel.Description
+               );
+
+           //INSERT INTO SBCES.LabourTaskDescriptions (TaskID, TaskDescription)
+           // VALUES((select MAX(TaskID) + 1 from SBCES.LabourTaskDescriptions) , '01 A') 
+
+           var tt = insertQuery;
+           await _dbConnection.ExecuteAsync(insertQuery, busModel);
+           return Ok();
+       }
+       catch (Exception ex)
+       {
+           return StatusCode(500, "An error occurred while updating the Vehicle. Vehicle exists or you are trying to add the same vehicle in batch mode.  ");
+       }
+
+   }
