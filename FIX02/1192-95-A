@@ -1,0 +1,84 @@
+WITH AssetHierarchy AS
+(
+    -- Selected asset and everything below it
+    SELECT a.assetid, a.assetnum, a.parent, a.siteid
+    FROM dbo.asset a
+    WHERE a.siteid = 'CONSS'
+      AND a.assetnum = '11765'          -- or 'T1-5002A'
+
+    UNION ALL
+
+    SELECT c.assetid, c.assetnum, c.parent, c.siteid
+    FROM dbo.asset c
+    INNER JOIN AssetHierarchy h
+        ON c.parent = h.assetnum
+       AND c.siteid = h.siteid
+),
+SelectedModel AS
+(
+    -- Model of the selected asset, falling back to its top-level ancestor
+    SELECT COALESCE(a.plusamodelid, anc.plusamodelid) AS modelid
+    FROM dbo.asset a
+    LEFT JOIN dbo.asset anc
+        ON anc.assetnum = a.ancestor
+       AND anc.siteid   = a.siteid
+    WHERE a.assetnum = '11765'          -- or 'T1-5002A'
+      AND a.siteid   = 'CONSS'
+),
+CurrentInstall AS
+(
+    -- Active installs, restricted to the selected hierarchy
+    SELECT p.assetid, p.lcn, p.instwonum, p.remwonum, p.ontime, p.offtime
+    FROM dbo.plusasaonoff p
+    WHERE p.offtime IS NULL
+      AND EXISTS (SELECT 1 FROM AssetHierarchy h WHERE h.assetid = p.assetid)
+)
+SELECT
+    b.indenture,
+    b.lcn,
+    b.position,
+    bi.plusacmbuilditemid,
+    bi.name AS build_position,
+
+    a.itemnum AS cm_item,
+    a.assetnum,
+    a.description AS asset_desc,
+    a.serialnum,
+    a.status,
+    a.plustcomp AS component,
+    pm.model,
+    pm.description AS model_desc,
+    a.parent,
+    a2.description AS parent_desc,
+    a2.serialnum   AS parent_serialnum,
+    a.ancestor     AS top_asset,
+    ta.description AS topasset_desc,
+    ta.serialnum   AS topasset_serialnum,
+    a.siteid,
+    a.orgid,
+
+    ci.instwonum,
+    ci.remwonum,
+    ci.ontime,
+    ci.offtime,
+    DATEDIFF(DAY, ci.ontime, GETDATE()) AS days_in_position
+FROM SelectedModel sm
+INNER JOIN dbo.plusacmbuild b
+    ON b.modelid = sm.modelid
+INNER JOIN dbo.plusacmbuilditem bi
+    ON bi.plusacmbuilditemid = b.builditemid
+
+-- INNER JOIN: only positions that have an installed asset in this hierarchy
+INNER JOIN CurrentInstall ci
+    ON ci.lcn = b.lcn
+INNER JOIN dbo.asset a
+    ON a.assetid = ci.assetid
+
+LEFT JOIN dbo.asset a2
+    ON a2.assetnum = a.parent   AND a2.siteid = a.siteid
+LEFT JOIN dbo.asset ta
+    ON ta.assetnum = a.ancestor AND ta.siteid = a.siteid
+LEFT JOIN dbo.plusacmmodel pm
+    ON pm.plusacmmodelid = COALESCE(a.plusamodelid, ta.plusamodelid)
+ORDER BY b.lcn
+OPTION (MAXRECURSION 0);
