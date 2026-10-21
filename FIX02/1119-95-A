@@ -1,0 +1,55 @@
+I think this is a race between two loads of the same form, not a Telerik timing problem. I couldn’t run it, and I haven’t seen the GetMakeVsBuyById partial (the dump is the page shell), so this is from reading the script on the page.
+
+What happens on every open
+
+win.open() fires the window’s open handler, which calls loadMakeVsBuyForm() → $.get('/MakeVsBuy/GetMakeVsBuyById').
+Right after, openEstimatePopup() fires a second request to the same URL with $("#makevsbuyTabContent").load(...).
+
+Both requests replace the same container, and either can finish first. The callback of the open-handler load (the $.get one) sets every field readonly, with only Description editable:
+
+js
+setPopupReadonly([... all fields ...]);
+setPopupEditable(["Description"]);
+Out-of-order case: if the .load response arrives first and the $.get response second, the $.get callback runs on the final DOM and makes every field readonly.
+Why it sticks on New: the Add branch of initMakeVsBuyPopupForm() only re-enables MbPrefix. Nothing makes the other fields editable again, so they stay readonly.
+Why Edit usually recovers: the Edit branch makes the whole list editable 400 ms later.
+Why reopening works: the first open is cold and slower, so the responses are more likely to arrive out of order. Reopening is warm and the order is usually right, so the second load’s fresh DOM wins.
+
+getKendoWidget is not the cause. It finds the widgets, and setPopupEditable works when it runs after them.
+
+Fix: three small edits, nothing else changes
+
+In openEstimatePopup, delete the second load. Everything inside it is already done by loadMakeVsBuyForm (init, wire, tab enabling), and setComboBoxValues() does nothing because modelData is null:
+js
+// DELETE this whole block in window.openEstimatePopup:
+$("#makevsbuyTabContent").load('/MakeVsBuy/GetMakeVsBuyById', { id: mbNumber }, function () { ... });
+In loadMakeVsBuyForm, ignore a stale response:
+js
+window.loadMakeVsBuyForm = function (mbNumber, callback) {
+    window.currentMbNumber = mbNumber;
+    var seq = window._mbLoadSeq = (window._mbLoadSeq || 0) + 1;
+
+    $.get('/MakeVsBuy/GetMakeVsBuyById', { id: mbNumber }, function (html) {
+        if (seq !== window._mbLoadSeq) return;   // a newer load exists, drop this one
+        // ... rest unchanged
+In the Add branch of initMakeVsBuyPopupForm, make the form editable before locking the two auto fields. This matters because deleting the second load (edit 1) means nothing else will recover a readonly Add form:
+js
+if (mode === "Add") {
+    if (ddl) { ddl.enable(true); ddl.value("MBD"); $("#MbPrefixHidden").val("MBD"); }
+
+    setPopupEditable(["MbPrefix", "Keyword", "Description",
+        "BusType", "NumBusComp", "VendorPartNum",
+        "BuyCode", "RebuildCode", "CoreCode", "AnnualUsage",
+        "BenchNumber", "SampleProvided", "Recommendation",
+        "BuyNewCost", "InternalCost", "SopNumber",
+        "CoreCost", "JobNumber"]);
+    setPopupReadonly(["DateOpened", "MbNumber"]);
+}
+
+The final state no longer depends on which response arrives last.
+
+Optional hardening: in setPopupEditable, also call widget.readonly(false) after widget.enable(true) when the widget has it.
+
+To confirm before changing production: open DevTools → Network, filter on GetMakeVsBuyById, and click Add New. You should see two requests per open. When the form comes up readonly, the .load request will have finished before the $.get one.
+
+The edit/save flow, which calls loadMakeVsBuyForm and then initMakeVsBuyPopupForm, is unaffected.
