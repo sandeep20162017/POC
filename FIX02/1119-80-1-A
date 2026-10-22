@@ -9,13 +9,13 @@ CREATE TABLE #h (assetid bigint NOT NULL PRIMARY KEY, assetnum varchar(30) NOT N
 WITH AssetHierarchy AS
 (
     SELECT a.assetid, a.assetnum, a.siteid
-    FROM maximo.asset a
+    FROM dbo.asset a
     WHERE a.siteid = @site AND a.assetnum = @assetnum
 
     UNION ALL
 
     SELECT c.assetid, c.assetnum, c.siteid
-    FROM maximo.asset c
+    FROM dbo.asset c
     INNER JOIN AssetHierarchy h
         ON c.parent = h.assetnum AND c.siteid = h.siteid
 )
@@ -27,14 +27,14 @@ OPTION (MAXRECURSION 0);
 DECLARE @modelid bigint, @sel_lcn varchar(100), @sel_indenture int;
 
 SELECT @modelid = COALESCE(a.plusamodelid, anc.plusamodelid)
-FROM maximo.asset a
-LEFT JOIN maximo.asset anc ON anc.assetnum = a.ancestor AND anc.siteid = a.siteid
+FROM dbo.asset a
+LEFT JOIN dbo.asset anc ON anc.assetnum = a.ancestor AND anc.siteid = a.siteid
 WHERE a.assetnum = @assetnum AND a.siteid = @site;
 
 SELECT TOP (1) @sel_lcn = p.lcn, @sel_indenture = b.indenture
-FROM maximo.asset a
-INNER JOIN maximo.plusasaonoff p ON p.assetid = a.assetid AND p.offtime IS NULL
-INNER JOIN maximo.plusacmbuild b ON b.lcn = p.lcn
+FROM dbo.asset a
+INNER JOIN dbo.plusasaonoff p ON p.assetid = a.assetid AND p.offtime IS NULL
+INNER JOIN dbo.plusacmbuild b ON b.lcn = p.lcn
 WHERE a.assetnum = @assetnum AND a.siteid = @site
 ORDER BY b.indenture;
 
@@ -45,7 +45,7 @@ INTO #ci
 FROM (
     SELECT p.assetid, p.lcn, p.instwonum, p.remwonum, p.ontime, p.offtime,
            ROW_NUMBER() OVER (PARTITION BY p.lcn ORDER BY p.ontime DESC) AS rn
-    FROM maximo.plusasaonoff p
+    FROM dbo.plusasaonoff p
     INNER JOIN #h h ON h.assetid = p.assetid
     WHERE p.offtime IS NULL
 ) x
@@ -55,11 +55,11 @@ CREATE CLUSTERED INDEX ix_ci_lcn ON #ci (lcn);
 IF OBJECT_ID('tempdb..#vl') IS NOT NULL DROP TABLE #vl;
 SELECT lcn INTO #vl
 FROM (
-    SELECT p.lcn FROM maximo.plusasaonoff p
+    SELECT p.lcn FROM dbo.plusasaonoff p
     INNER JOIN #h h ON h.assetid = p.assetid
     WHERE p.offtime IS NULL
-    UNION                                   -- UNION removes duplicates, replacing DISTINCT
-    SELECT p.lcn FROM maximo.plusasaonoff p
+    UNION
+    SELECT p.lcn FROM dbo.plusasaonoff p
     INNER JOIN #h h ON h.assetid = p.parentassetid
     WHERE p.offtime IS NULL
 ) v;
@@ -78,15 +78,15 @@ SELECT
     a.siteid, a.orgid,
     ci.instwonum, ci.remwonum, ci.ontime, ci.offtime,
     CASE WHEN ci.ontime IS NOT NULL THEN DATEDIFF(DAY, ci.ontime, GETDATE()) END AS days_in_position
-FROM maximo.plusacmbuild b
+FROM dbo.plusacmbuild b
 INNER JOIN #vl vl                     ON vl.lcn = b.lcn
-INNER JOIN maximo.plusacmbuilditem bi ON bi.plusacmbuilditemid = b.builditemid
+INNER JOIN dbo.plusacmbuilditem bi    ON bi.plusacmbuilditemid = b.builditemid
 LEFT  JOIN #ci ci                     ON ci.lcn = b.lcn
-LEFT  JOIN maximo.asset a             ON a.assetid = ci.assetid
-LEFT  JOIN maximo.asset a2            ON a2.assetnum = a.parent   AND a2.siteid = a.siteid
-LEFT  JOIN maximo.asset ta            ON ta.assetnum = a.ancestor AND ta.siteid = a.siteid
-LEFT  JOIN maximo.plusacmmodel pm     ON pm.plusacmmodelid  = COALESCE(a.plusamodelid,  ta.plusamodelid)
-LEFT  JOIN maximo.plusacmconfig pc    ON pc.plusacmconfigid = COALESCE(a.plusaconfigid, ta.plusaconfigid)
+LEFT  JOIN dbo.asset a                ON a.assetid = ci.assetid
+LEFT  JOIN dbo.asset a2               ON a2.assetnum = a.parent   AND a2.siteid = a.siteid
+LEFT  JOIN dbo.asset ta               ON ta.assetnum = a.ancestor AND ta.siteid = a.siteid
+LEFT  JOIN dbo.plusacmmodel pm        ON pm.plusacmmodelid  = COALESCE(a.plusamodelid,  ta.plusamodelid)
+LEFT  JOIN dbo.plusacmconfig pc       ON pc.plusacmconfigid = COALESCE(a.plusaconfigid, ta.plusaconfigid)
 WHERE b.modelid = @modelid
   AND (@sel_indenture = 1 OR b.lcn = @sel_lcn)
 ORDER BY b.lcn;
