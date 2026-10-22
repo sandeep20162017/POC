@@ -1,0 +1,90 @@
+WITH AssetHierarchy AS
+(
+    -- Selected asset (level 0) and everything below it
+    SELECT
+        a.assetid, a.assetnum, a.parent, a.siteid,
+        0 AS lvl,
+        CAST(a.assetnum AS VARCHAR(4000)) AS sortpath
+    FROM dbo.asset a
+    WHERE a.siteid = 'CONSS'
+      AND a.assetnum = 'T1-5002A'          -- or '11765'
+
+    UNION ALL
+
+    SELECT
+        c.assetid, c.assetnum, c.parent, c.siteid,
+        h.lvl + 1,
+        CAST(h.sortpath + '/' + c.assetnum AS VARCHAR(4000))
+    FROM dbo.asset c
+    INNER JOIN AssetHierarchy h
+        ON c.parent = h.assetnum
+       AND c.siteid = h.siteid
+),
+SelectedModel AS
+(
+    SELECT COALESCE(a.plusamodelid, anc.plusamodelid) AS modelid
+    FROM dbo.asset a
+    LEFT JOIN dbo.asset anc
+        ON anc.assetnum = a.ancestor
+       AND anc.siteid   = a.siteid
+    WHERE a.assetnum = 'T1-5002A'          -- or '11765'
+      AND a.siteid   = 'CONSS'
+)
+SELECT
+    h.lvl                              AS hierarchy_level,
+    REPLICATE('    ', h.lvl) + a.assetnum AS indented_assetnum,
+
+    b.indenture,
+    b.lcn,
+    b.position,
+    bi.name                            AS build_position,
+
+    a.itemnum                          AS cm_item,
+    a.assetnum,
+    a.description                      AS asset_desc,
+    a.serialnum,
+    a.status,
+    a.plustcomp                        AS component,
+    pm.model,
+    pm.description                     AS model_desc,
+    a.parent,
+    a2.description                     AS parent_desc,
+    a2.serialnum                       AS parent_serialnum,
+    a.ancestor                         AS top_asset,
+    ta.description                     AS topasset_desc,
+    ta.serialnum                       AS topasset_serialnum,
+    a.siteid,
+    a.orgid,
+
+    ci.instwonum,
+    ci.remwonum,
+    ci.ontime,
+    ci.offtime,
+    CASE WHEN ci.ontime IS NOT NULL
+         THEN DATEDIFF(DAY, ci.ontime, GETDATE()) END AS days_in_position
+FROM AssetHierarchy h
+CROSS JOIN SelectedModel sm
+INNER JOIN dbo.asset a
+    ON a.assetid = h.assetid
+
+-- Active install record (may not exist, e.g. top-level asset)
+LEFT JOIN dbo.plusasaonoff ci
+    ON ci.assetid = h.assetid
+   AND ci.offtime IS NULL
+
+-- Model position: by LCN for children, top-level build row for the root
+LEFT JOIN dbo.plusacmbuild b
+    ON b.modelid = sm.modelid
+   AND ( (h.lvl = 0 AND b.indenture = 1)
+      OR (h.lvl > 0 AND b.lcn = ci.lcn) )
+LEFT JOIN dbo.plusacmbuilditem bi
+    ON bi.plusacmbuilditemid = b.builditemid
+
+LEFT JOIN dbo.asset a2
+    ON a2.assetnum = a.parent   AND a2.siteid = a.siteid
+LEFT JOIN dbo.asset ta
+    ON ta.assetnum = a.ancestor AND ta.siteid = a.siteid
+LEFT JOIN dbo.plusacmmodel pm
+    ON pm.plusacmmodelid = COALESCE(a.plusamodelid, ta.plusamodelid)
+ORDER BY h.sortpath
+OPTION (MAXRECURSION 0);
