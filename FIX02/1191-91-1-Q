@@ -1,0 +1,204 @@
+-- WORKS GREAT just takes too long
+ 
+-- Build the Asset Hierarchy
+WITH AssetHierarchy AS
+(
+    SELECT
+         a.assetid,
+         a.assetnum,
+         a.parent,
+         a.siteid
+    FROM dbo.asset a
+    WHERE a.siteid = 'CONSS'
+      AND a.assetnum = 'T1-5002A' -- or 11765
+ 
+    UNION ALL
+ 
+    SELECT
+         c.assetid,
+         c.assetnum,
+         c.parent,
+         c.siteid
+    FROM dbo.asset c
+    INNER JOIN AssetHierarchy h
+        ON c.parent = h.assetnum
+       AND c.siteid = h.siteid
+),
+ 
+SelectedModel AS
+(
+    SELECT
+        COALESCE(a.plusamodelid, anc.plusamodelid) AS modelid
+    FROM dbo.asset a
+    LEFT JOIN dbo.asset anc
+        ON anc.assetnum = a.ancestor
+       AND anc.siteid = a.siteid
+    WHERE a.assetnum = 'T1-5002A'
+      AND a.siteid = 'CONSS'
+),
+ 
+SelectedAsset AS
+(
+    SELECT
+        a.assetnum,
+        p.lcn,
+        b.indenture
+    FROM dbo.asset a
+    INNER JOIN dbo.plusasaonoff p
+        ON p.assetid = a.assetid
+       AND p.offtime IS NULL
+    INNER JOIN dbo.plusacmbuild b
+        ON b.lcn = p.lcn
+    WHERE a.assetnum = 'T1-5002A'
+      AND a.siteid = 'CONSS'
+),
+ 
+CurrentInstall AS
+(
+    SELECT
+        assetid,
+        lcn,
+        instwonum,
+        remwonum,
+        ontime,
+        offtime
+    FROM
+    (
+        SELECT
+            p.assetid,
+            p.lcn,
+            p.instwonum,
+            p.remwonum,
+            p.ontime,
+            p.offtime,
+            ROW_NUMBER() OVER
+            (
+                PARTITION BY p.lcn
+                ORDER BY p.ontime DESC
+            ) AS rn
+        FROM dbo.plusasaonoff p
+        WHERE p.offtime IS NULL
+          AND EXISTS
+          (
+              SELECT 1
+              FROM AssetHierarchy h
+              WHERE h.assetid = p.assetid
+          )
+    ) x
+    WHERE rn = 1
+),
+ 
+ValidLCNs AS
+(
+    SELECT DISTINCT
+           p.lcn
+    FROM dbo.plusasaonoff p
+    WHERE p.offtime IS NULL
+      AND
+      (
+          EXISTS
+          (
+              SELECT 1
+              FROM AssetHierarchy h
+              WHERE h.assetid = p.assetid
+          )
+          OR
+          EXISTS
+          (
+              SELECT 1
+              FROM AssetHierarchy h
+              WHERE h.assetid = p.parentassetid
+          )
+      )
+)
+ 
+SELECT DISTINCT
+ 
+    b.indenture,
+    b.lcn,
+    b.position,
+ 
+    bi.plusacmbuilditemid,
+    bi.name AS build_position,
+ 
+    a.itemnum AS cm_item,
+    a.assetnum,
+    a.description AS asset_desc,
+    a.serialnum,
+    a.status,
+    a.plustcomp AS component,
+ 
+    pm.model,
+    pm.description AS model_desc,
+ 
+    pc.plusacmconfigid,
+    pc.variation AS variant,
+    pc.description AS variant_desc,
+ 
+    a.parent,
+    a2.description AS parent_desc,
+    a2.serialnum AS parent_serialnum,
+ 
+    a.ancestor AS top_asset,
+    ta.description AS topasset_desc,
+    ta.serialnum AS topasset_serialnum,
+ 
+    a.siteid,
+    a.orgid,
+ 
+    ci.instwonum,
+    ci.remwonum,
+    ci.ontime,
+    ci.offtime,
+ 
+    CASE
+        WHEN ci.ontime IS NOT NULL
+        THEN DATEDIFF(DAY, ci.ontime, GETDATE())
+    END AS days_in_position
+ 
+FROM dbo.plusacmbuild b
+ 
+INNER JOIN ValidLCNs vl
+    ON vl.lcn = b.lcn
+ 
+INNER JOIN dbo.plusacmbuilditem bi
+    ON bi.plusacmbuilditemid = b.builditemid
+ 
+CROSS JOIN SelectedModel sm
+CROSS JOIN SelectedAsset sa
+ 
+LEFT JOIN CurrentInstall ci
+       ON ci.lcn = b.lcn
+ 
+LEFT JOIN dbo.asset a
+       ON a.assetid = ci.assetid
+ 
+LEFT JOIN dbo.asset a2
+       ON a2.assetnum = a.parent
+      AND a2.siteid = a.siteid
+ 
+LEFT JOIN dbo.asset ta
+       ON ta.assetnum = a.ancestor
+      AND ta.siteid = a.siteid
+ 
+LEFT JOIN dbo.asset anc
+       ON anc.assetnum = a.ancestor
+      AND anc.siteid = a.siteid
+ 
+LEFT JOIN dbo.plusacmmodel pm
+       ON pm.plusacmmodelid =
+          COALESCE(a.plusamodelid, anc.plusamodelid)
+ 
+LEFT JOIN dbo.plusacmconfig pc
+       ON pc.plusacmconfigid =
+          COALESCE(a.plusaconfigid, anc.plusaconfigid)
+ 
+WHERE b.modelid = sm.modelid
+  AND (
+        sa.indenture = 1
+        OR b.lcn = sa.lcn
+      )
+ 
+ORDER BY b.lcn
+ 
+OPTION (MAXRECURSION 0);
