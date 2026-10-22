@@ -1,92 +1,271 @@
--- Parameters
-DECLARE @site     varchar(30) = 'CONSS';
-DECLARE @assetnum varchar(30) = 'T1-5002A';   -- or '11765'
+/* =====================================================================
+   LOGBOOK REPORT - ASSET HIERARCHY (RCS-VEH-RP04)
 
--- 1) Build the hierarchy ONCE
-IF OBJECT_ID('tempdb..#h') IS NOT NULL DROP TABLE #h;
-CREATE TABLE #h (assetid bigint NOT NULL PRIMARY KEY, assetnum varchar(30) NOT NULL, siteid varchar(8) NOT NULL);
+   What this script does:
+   Shows the configuration (model positions) of a selected asset and
+   everything installed below it, with what is installed in each position
+   today, since when, and under which work order.
+
+   How to use:
+   Change @site and @assetnum in Step 0, then run the whole script.
+   ===================================================================== */
+
+
+/* ---------------------------------------------------------------------
+   STEP 0 - INPUTS
+   Which asset do we want the logbook for?
+   --------------------------------------------------------------------- */
+DECLARE @site     varchar(30) = 'CONSS';      -- Site the asset belongs to
+DECLARE @assetnum varchar(30) = 'T1-5002A';   -- Asset number (e.g. 'T1-5002A' or '11765')
+
+
+/* ---------------------------------------------------------------------
+   STEP 1 - BUILD THE ASSET HIERARCHY (ONCE)
+   Start with the selected asset, then keep adding its children,
+   grandchildren, and so on until there are no more levels.
+   The result is saved in a temporary table (#h) so the later steps
+   can reuse it. Walking the tree only once is what makes this fast.
+   --------------------------------------------------------------------- */
+IF OBJECT_ID('tempdb..#h') IS NOT NULL DROP TABLE #h;   -- remove leftover from an earlier run
+
+CREATE TABLE #h
+(
+    assetid  bigint      NOT NULL PRIMARY KEY,   -- primary key makes lookups fast
+    assetnum varchar(30) NOT NULL,
+    siteid   varchar(8)  NOT NULL
+);
 
 WITH AssetHierarchy AS
 (
+    -- Starting point: the asset the user selected
     SELECT a.assetid, a.assetnum, a.siteid
     FROM dbo.asset a
-    WHERE a.siteid = @site AND a.assetnum = @assetnum
+    WHERE a.siteid = @site
+      AND a.assetnum = @assetnum
 
     UNION ALL
 
+    -- Repeat: find assets whose parent is an asset we already have
     SELECT c.assetid, c.assetnum, c.siteid
     FROM dbo.asset c
     INNER JOIN AssetHierarchy h
-        ON c.parent = h.assetnum AND c.siteid = h.siteid
+        ON c.parent = h.assetnum
+       AND c.siteid = h.siteid
 )
 INSERT INTO #h (assetid, assetnum, siteid)
-SELECT assetid, assetnum, siteid FROM AssetHierarchy
-OPTION (MAXRECURSION 0);
+SELECT assetid, assetnum, siteid
+FROM AssetHierarchy
+OPTION (MAXRECURSION 0);      -- no limit on how many levels deep the tree can go
 
--- 2) Selected asset's model and LCN (one row each)
-DECLARE @modelid bigint, @sel_lcn varchar(100), @sel_indenture int;
 
+/* ---------------------------------------------------------------------
+   STEP 2 - FIND THE MODEL AND POSITION OF THE SELECTED ASSET
+   - @modelid       : the configuration model that defines the positions.
+                      Use the asset's own model; if it has none, use the
+                      model of its top-level (ancestor) asset.
+   - @sel_lcn       : the LCN (position code) the selected asset currently
+                      occupies.
+   - @sel_indenture : how deep that position is in the model
+                      (1 = top of the model).
+   --------------------------------------------------------------------- */
+DECLARE @modelid       bigint,
+        @sel_lcn       varchar(100),
+        @sel_indenture int;
+
+-- Model of the selected asset (or of its top-level asset)
 SELECT @modelid = COALESCE(a.plusamodelid, anc.plusamodelid)
 FROM dbo.asset a
-LEFT JOIN dbo.asset anc ON anc.assetnum = a.ancestor AND anc.siteid = a.siteid
-WHERE a.assetnum = @assetnum AND a.siteid = @site;
+LEFT JOIN dbo.asset anc
+       ON anc.assetnum = a.ancestor
+      AND anc.siteid   = a.siteid
+WHERE a.assetnum = @assetnum
+  AND a.siteid   = @site;
 
-SELECT TOP (1) @sel_lcn = p.lcn, @sel_indenture = b.indenture
+-- Current position (LCN) of the selected asset
+-- "offtime IS NULL" means the asset is still installed there.
+SELECT TOP (1)
+       @sel_lcn       = p.lcn,
+       @sel_indenture = b.indenture
 FROM dbo.asset a
-INNER JOIN dbo.plusasaonoff p ON p.assetid = a.assetid AND p.offtime IS NULL
-INNER JOIN dbo.plusacmbuild b ON b.lcn = p.lcn
-WHERE a.assetnum = @assetnum AND a.siteid = @site
-ORDER BY b.indenture;
+INNER JOIN dbo.plusasaonoff p
+        ON p.assetid = a.assetid
+       AND p.offtime IS NULL
+INNER JOIN dbo.plusacmbuild b
+        ON b.lcn = p.lcn
+WHERE a.assetnum = @assetnum
+  AND a.siteid   = @site
+ORDER BY b.indenture;         -- if several matches, take the highest level
 
--- 3) Active installs for the hierarchy, one row per LCN, plus the LCNs to show
+
+/* ---------------------------------------------------------------------
+   STEP 3A - WHAT IS INSTALLED RIGHT NOW (#ci)
+   For every asset in the hierarchy, get its current installation:
+   which position (LCN), the install and removal work orders, and when
+   it went on.
+   If more than one asset claims the same LCN, keep only the most
+   recently installed one (ROW_NUMBER ... rn = 1).
+   --------------------------------------------------------------------- */
 IF OBJECT_ID('tempdb..#ci') IS NOT NULL DROP TABLE #ci;
+
 SELECT assetid, lcn, instwonum, remwonum, ontime, offtime
 INTO #ci
-FROM (
-    SELECT p.assetid, p.lcn, p.instwonum, p.remwonum, p.ontime, p.offtime,
+FROM
+(
+    SELECT p.assetid,
+           p.lcn,
+           p.instwonum,       -- work order that installed it
+           p.remwonum,        -- work order that removed it (blank if still installed)
+           p.ontime,          -- date/time it was installed
+           p.offtime,         -- date/time it was removed (blank if still installed)
            ROW_NUMBER() OVER (PARTITION BY p.lcn ORDER BY p.ontime DESC) AS rn
+    FROM dbo.plusasaonoff p
+    INNER JOIN #h h ON h.assetid = p.assetid    -- only assets in our hierarchy
+    WHERE p.offtime IS NULL                     -- only current installs
+) x
+WHERE rn = 1;
+
+-- Index on LCN so the final query can match positions quickly
+CREATE CLUSTERED INDEX ix_ci_lcn ON #ci (lcn);
+
+
+/* ---------------------------------------------------------------------
+   STEP 3B - WHICH POSITIONS (LCNs) BELONG IN THE REPORT (#vl)
+   A position is included if:
+     (a) an asset from our hierarchy is currently installed in it, or
+     (b) it is a position whose parent is an asset from our hierarchy
+         (this also picks up positions that are currently empty).
+   UNION combines both lists and removes duplicates.
+   --------------------------------------------------------------------- */
+IF OBJECT_ID('tempdb..#vl') IS NOT NULL DROP TABLE #vl;
+
+SELECT lcn
+INTO #vl
+FROM
+(
+    -- (a) positions occupied by assets in our hierarchy
+    SELECT p.lcn
     FROM dbo.plusasaonoff p
     INNER JOIN #h h ON h.assetid = p.assetid
     WHERE p.offtime IS NULL
-) x
-WHERE rn = 1;
-CREATE CLUSTERED INDEX ix_ci_lcn ON #ci (lcn);
 
-IF OBJECT_ID('tempdb..#vl') IS NOT NULL DROP TABLE #vl;
-SELECT lcn INTO #vl
-FROM (
-    SELECT p.lcn FROM dbo.plusasaonoff p
-    INNER JOIN #h h ON h.assetid = p.assetid
-    WHERE p.offtime IS NULL
     UNION
-    SELECT p.lcn FROM dbo.plusasaonoff p
+
+    -- (b) positions whose parent asset is in our hierarchy
+    SELECT p.lcn
+    FROM dbo.plusasaonoff p
     INNER JOIN #h h ON h.assetid = p.parentassetid
     WHERE p.offtime IS NULL
 ) v;
+
 CREATE CLUSTERED INDEX ix_vl_lcn ON #vl (lcn);
 
--- 4) Final result
+
+/* ---------------------------------------------------------------------
+   STEP 4 - FINAL REPORT OUTPUT
+   Start from the model's positions (plusacmbuild) and attach, for each
+   one: the position name, what is installed there, the installed
+   asset's details, its parent and top-level asset, its model/variant,
+   and the install information.
+   LEFT JOINs are used for the "what is installed" part so a position
+   is still listed even when nothing is installed in it.
+   --------------------------------------------------------------------- */
 SELECT
-    b.indenture, b.lcn, b.position,
-    bi.plusacmbuilditemid, bi.name AS build_position,
-    a.itemnum AS cm_item, a.assetnum, a.description AS asset_desc,
-    a.serialnum, a.status, a.plustcomp AS component,
-    pm.model, pm.description AS model_desc,
-    pc.plusacmconfigid, pc.variation AS variant, pc.description AS variant_desc,
-    a.parent, a2.description AS parent_desc, a2.serialnum AS parent_serialnum,
-    a.ancestor AS top_asset, ta.description AS topasset_desc, ta.serialnum AS topasset_serialnum,
-    a.siteid, a.orgid,
-    ci.instwonum, ci.remwonum, ci.ontime, ci.offtime,
-    CASE WHEN ci.ontime IS NOT NULL THEN DATEDIFF(DAY, ci.ontime, GETDATE()) END AS days_in_position
-FROM dbo.plusacmbuild b
-INNER JOIN #vl vl                     ON vl.lcn = b.lcn
-INNER JOIN dbo.plusacmbuilditem bi    ON bi.plusacmbuilditemid = b.builditemid
-LEFT  JOIN #ci ci                     ON ci.lcn = b.lcn
-LEFT  JOIN dbo.asset a                ON a.assetid = ci.assetid
-LEFT  JOIN dbo.asset a2               ON a2.assetnum = a.parent   AND a2.siteid = a.siteid
-LEFT  JOIN dbo.asset ta               ON ta.assetnum = a.ancestor AND ta.siteid = a.siteid
-LEFT  JOIN dbo.plusacmmodel pm        ON pm.plusacmmodelid  = COALESCE(a.plusamodelid,  ta.plusamodelid)
-LEFT  JOIN dbo.plusacmconfig pc       ON pc.plusacmconfigid = COALESCE(a.plusaconfigid, ta.plusaconfigid)
-WHERE b.modelid = @modelid
-  AND (@sel_indenture = 1 OR b.lcn = @sel_lcn)
-ORDER BY b.lcn;
+    -- Position information from the configuration model
+    b.indenture,                                   -- level of the position in the model
+    b.lcn,                                         -- LCN number (position code)
+    b.position,                                    -- position
+    bi.plusacmbuilditemid,
+    bi.name AS build_position,                     -- position name
+
+    -- Asset currently installed in the position
+    a.itemnum     AS cm_item,                      -- stock code
+    a.assetnum,                                    -- asset ID
+    a.description AS asset_desc,
+    a.serialnum,                                   -- serial number
+    a.status,
+    a.plustcomp   AS component,                    -- component code
+
+    -- Model and variant of the installed asset
+    pm.model,
+    pm.description AS model_desc,
+    pc.plusacmconfigid,
+    pc.variation   AS variant,
+    pc.description AS variant_desc,
+
+    -- Next higher assembly (parent asset)
+    a.parent,
+    a2.description AS parent_desc,
+    a2.serialnum   AS parent_serialnum,
+
+    -- Top-level asset
+    a.ancestor     AS top_asset,
+    ta.description AS topasset_desc,
+    ta.serialnum   AS topasset_serialnum,
+
+    a.siteid,
+    a.orgid,
+
+    -- Installation details
+    ci.instwonum,                                  -- work order for the installation
+    ci.remwonum,
+    ci.ontime,                                     -- date of installation in the position
+    ci.offtime,
+
+    -- Number of days the asset has been in this position (today minus install date)
+    CASE
+        WHEN ci.ontime IS NOT NULL
+        THEN DATEDIFF(DAY, ci.ontime, GETDATE())
+    END AS days_in_position
+
+FROM dbo.plusacmbuild b                            -- all positions defined by the model
+
+-- Keep only the positions that belong to this hierarchy (Step 3B)
+INNER JOIN #vl vl
+        ON vl.lcn = b.lcn
+
+-- Position name/details
+INNER JOIN dbo.plusacmbuilditem bi
+        ON bi.plusacmbuilditemid = b.builditemid
+
+-- What is installed in each position now (Step 3A); may be empty
+LEFT JOIN #ci ci
+       ON ci.lcn = b.lcn
+
+-- Details of the installed asset
+LEFT JOIN dbo.asset a
+       ON a.assetid = ci.assetid
+
+-- Parent (next higher assembly) of the installed asset
+LEFT JOIN dbo.asset a2
+       ON a2.assetnum = a.parent
+      AND a2.siteid   = a.siteid
+
+-- Top-level asset of the installed asset
+LEFT JOIN dbo.asset ta
+       ON ta.assetnum = a.ancestor
+      AND ta.siteid   = a.siteid
+
+-- Model: the asset's own model, otherwise its top-level asset's model
+LEFT JOIN dbo.plusacmmodel pm
+       ON pm.plusacmmodelid = COALESCE(a.plusamodelid, ta.plusamodelid)
+
+-- Variant/configuration: the asset's own, otherwise its top-level asset's
+LEFT JOIN dbo.plusacmconfig pc
+       ON pc.plusacmconfigid = COALESCE(a.plusaconfigid, ta.plusaconfigid)
+
+WHERE b.modelid = @modelid                         -- only positions of the selected asset's model
+  AND (
+        @sel_indenture = 1                         -- selected asset is the top level: show everything
+        OR b.lcn = @sel_lcn                        -- otherwise: show only the selected asset's own position
+      )
+
+ORDER BY b.lcn;                                    -- sort by LCN so the tree reads top to bottom
+
+
+/* ---------------------------------------------------------------------
+   OPTIONAL CLEAN-UP
+   Temporary tables disappear when the session closes, so this is only
+   needed if you re-run the script in the same window and want a clean
+   start (Steps 1, 3A and 3B already drop old copies automatically).
+   --------------------------------------------------------------------- */
+-- DROP TABLE #h, #ci, #vl;
