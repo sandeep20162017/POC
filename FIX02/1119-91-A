@@ -1,0 +1,44 @@
+1. Query Store (best option, SQL Server 2016+)
+If Query Store is enabled on the MAXIMO database, you can see the exact query text and when it ran:
+
+sql
+SELECT TOP 50
+    q.query_id,
+    qt.query_sql_text,
+    rs.last_execution_time,
+    rs.count_executions
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt ON qt.query_text_id = q.query_text_id
+JOIN sys.query_store_plan p        ON p.query_id = q.query_id
+JOIN sys.query_store_runtime_stats rs ON rs.plan_id = p.plan_id
+WHERE qt.query_sql_text LIKE '%plusasaonoff%'
+ORDER BY rs.last_execution_time DESC;
+
+To check whether it’s on: SELECT name, is_query_store_on FROM sys.databases WHERE name = 'MAXIMO';
+
+2. Plan cache DMVs (needs VIEW SERVER STATE)
+Shows recent statements still in cache:
+
+sql
+SELECT TOP 50
+    qs.last_execution_time,
+    qs.execution_count,
+    st.text
+FROM sys.dm_exec_query_stats qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+WHERE st.text LIKE '%plusasaonoff%'
+  AND st.text NOT LIKE '%dm_exec_query_stats%'   -- exclude this query itself
+ORDER BY qs.last_execution_time DESC;
+
+3. Currently running requests (needs VIEW SERVER STATE)
+Useful while the report is running:
+
+sql
+SELECT r.session_id, s.login_name, s.program_name, t.text
+FROM sys.dm_exec_requests r
+JOIN sys.dm_exec_sessions s ON s.session_id = r.session_id
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.session_id <> @@SPID;
+
+4. Extended Events (the modern Profiler replacement)
+In SSMS: Object Explorer, Management, Extended Events, Sessions, New Session. Add the sql_batch_completed and rpc_completed events, filter by your login or application name, and watch live data. This needs ALTER ANY EVENT SESSION, which is less commonly granted than Profiler rights.
