@@ -1,0 +1,221 @@
+USE [CES]
+GO
+/*==========================================================================
+  PART 1 - DATA / OBJECT DIAGNOSTICS (read-only, run these first)
+==========================================================================*/
+
+-- 1. Objects the proc touches that may not exist (PriceNoTax vs PriceNotTax!)
+SELECT t.name AS ExpectedObject,
+       CASE WHEN OBJECT_ID('SBCES.' + t.name) IS NULL THEN 'MISSING' ELSE 'ok' END AS Status
+FROM (VALUES ('StockCodedPartsBackup'),('StockCodedParts'),('PriceNoTax'),('PriceNotTax'),
+             ('LastPriceNoTax'),('MmsCostTemp'),('NonStockCodedParts'),('ScOemkitsTextData'),
+             ('TextData'),('ScPartsUsed'),('KitsMasterlist'),('PartMaster'),('VendorPartDesc')) t(name);
+
+-- 2. NULL part numbers in PartMaster (StockCodedParts.MmsStockCode is NOT NULL)
+SELECT COUNT(*) AS NullPartNumbers FROM SBCES.PartMaster WHERE PartNumber IS NULL OR RTRIM(PartNumber) = '';
+
+-- 3. Duplicate MmsStockCode the populate step would produce (PK violation, Msg 2627)
+;WITH Src AS (
+    SELECT DISTINCT
+        RTRIM(a.PartNumber) AS MmsStockCode,
+        LEFT(a.DescriptionPm,30) AS PartType,
+        SBCES.GetNewCost(ISNULL(a.LevelTotalCostLaPm,0), a.LevelTotalCostWaPm) AS MmsNewCost,
+        b.PartXdescEdLine, ISNULL(RTRIM(b.BusinessName),'') AS BusinessName, ISNULL(b.VendorPartNumber,'') AS VendorPartNumber
+    FROM SBCES.PartMaster a
+    LEFT JOIN (
+        SELECT A.PrintSeq, A.PartNumber, A.BusinessName, A.VendorPartNumber, A.PartXdescEdLine
+        FROM SBCES.VendorPartDesc A
+        INNER JOIN (SELECT PartNumber AS Pn, MAX(PrintSeq) AS Seq
+                    FROM SBCES.VendorPartDesc
+                    WHERE VendorPartNumber <> ' ' AND BusinessName NOT LIKE '%SUPERSEDED%'
+                    GROUP BY PartNumber) B
+          ON RTRIM(A.PartNumber)=RTRIM(B.Pn) AND A.PrintSeq=B.Seq
+    ) b ON RTRIM(a.PartNumber)=RTRIM(b.PartNumber)
+    WHERE a.ProductCodePm NOT LIKE '%PLUM%'
+)
+SELECT MmsStockCode, COUNT(*) AS Dupes FROM Src GROUP BY MmsStockCode HAVING COUNT(*) > 1 ORDER BY Dupes DESC;
+
+-- 4. TextData lines too long for ScOemkitsTextData.TextData varchar(132) (Msg 8152)
+SELECT TextKey, LEN(TextLineTx) AS Len, TextLineTx
+FROM SBCES.TextData WHERE TextType='PM5P' AND LEN(TextLineTx) > 132;
+
+-- 5. Stock codes longer than MmsCostTemp.MmsNewCode varchar(13)
+SELECT MmsStockCode, LEN(MmsStockCode) FROM SBCES.StockCodedParts WHERE LEN(RTRIM(MmsStockCode)) > 13;
+
+-- 6. Size of the NonStockCodedParts insert (it cross-joins distinct supplier numbers)
+SELECT COUNT(DISTINCT RTRIM(OrigSupplierNum)) AS DistinctSuppliersInNSCP FROM SBCES.NonStockCodedParts;
+GO
+
+/*==========================================================================
+  PART 2 - INSTRUMENTED PROCEDURE
+  Changes vs original: step tracking + PRINT/rowcounts, real error info in
+  CATCH, bare THROW (original THROW with ERROR_NUMBER() is invalid below
+  50000 and raises Msg 35100 instead of the real error), wrapped in one
+  transaction so a failure does not leave StockCodedParts empty,
+  PriceNoTax truncate guarded (table is named PriceNotTax in your schema).
+==========================================================================*/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROCEDURE [SBCES].[IfsMmsSync]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @Step NVARCHAR(200) = 'start', @Rows INT, @Msg NVARCHAR(2000);
+
+    SET @Msg = CONVERT(VARCHAR(23), GETDATE(), 121) + ' IfsMmsSync START';
+    RAISERROR('%s', 0, 1, @Msg) WITH NOWAIT;
+
+    BEGIN TRY
+        BEGIN TRAN;
+
+        ---------------------------------------------------------------- 1
+        SET @Step = '1a TRUNCATE StockCodedPartsBackup';
+        TRUNCATE TABLE SBCES.StockCodedPartsBackup;
+        RAISERROR('Step %s done', 0, 1, @Step) WITH NOWAIT;
+
+        SET @Step = '1b INSERT StockCodedPartsBackup';
+        INSERT INTO SBCES.StockCodedPartsBackup
+        (MmsStockCode, CorePartNumber, PartType, JobNumber, DetailedDesc, DateEntered, ItemRefNumber,
+         OverheadType, CoreCharge, PartCost, LastModifiedDate, LastModifiedBy, AddedBy, MmsNewCost,
+         OemPartCost, MmsSyncDate, OrigSupplierNum, OrigSupplierName)
+        SELECT RTRIM(ISNULL(MmsStockCode,'')), ISNULL(CorePartNumber,''), ISNULL(PartType,''),
+               ISNULL(JobNumber,''), ISNULL(DetailedDesc,''), ISNULL(DateEntered,''), ISNULL(ItemRefNumber,''),
+               ISNULL(OverheadType,0), ISNULL(CoreCharge,0), ISNULL(PartCost,0), LastModifiedDate,
+               LastModifiedBy, ISNULL(AddedBy,''), ISNULL(MmsNewCost,0), ISNULL(OemPartCost,0),
+               MmsSyncDate, ISNULL(OrigSupplierNum,''), ISNULL(OrigSupplierName,'')
+        FROM SBCES.StockCodedParts;
+        SET @Rows = @@ROWCOUNT;
+        RAISERROR('Step %s done, rows=%d', 0, 1, @Step, @Rows) WITH NOWAIT;
+
+        ---------------------------------------------------------------- 2
+        SET @Step = '2a TRUNCATE StockCodedParts';
+        TRUNCATE TABLE SBCES.StockCodedParts;
+        RAISERROR('Step %s done', 0, 1, @Step) WITH NOWAIT;
+
+        SET @Step = '2b TRUNCATE PriceNoTax';
+        IF OBJECT_ID('SBCES.PriceNoTax') IS NULL
+            RAISERROR('WARNING: SBCES.PriceNoTax does not exist (schema has SBCES.PriceNotTax) - skipped', 0, 1) WITH NOWAIT;
+        ELSE
+            TRUNCATE TABLE SBCES.PriceNoTax;
+
+        SET @Step = '2c TRUNCATE LastPriceNoTax';
+        TRUNCATE TABLE SBCES.LastPriceNoTax;
+        RAISERROR('Step %s done', 0, 1, @Step) WITH NOWAIT;
+
+        ---------------------------------------------------------------- 3
+        SET @Step = '3 INSERT StockCodedParts from PartMaster/VendorPartDesc';
+        INSERT INTO SBCES.StockCodedParts
+        (MmsStockCode, PartType, MmsNewCost, DetailedDesc, MmsSyncDate, OrigSupplierName, OrigSupplierNum)
+        SELECT DISTINCT
+            RTRIM(a.PartNumber),
+            LEFT(a.DescriptionPm,30),
+            SBCES.GetNewCost(ISNULL(a.LevelTotalCostLaPm,0), a.LevelTotalCostWaPm),
+            b.PartXdescEdLine,
+            GETDATE(),
+            ISNULL(RTRIM(b.BusinessName),''),
+            ISNULL(b.VendorPartNumber,'')
+        FROM SBCES.PartMaster a
+        LEFT JOIN (
+            SELECT A.PrintSeq, A.PartNumber, A.BusinessName, A.VendorPartNumber, A.PartXdescEdLine
+            FROM SBCES.VendorPartDesc A
+            INNER JOIN (SELECT PartNumber AS Pn, MAX(PrintSeq) AS Seq
+                        FROM SBCES.VendorPartDesc
+                        WHERE VendorPartNumber <> ' ' AND BusinessName NOT LIKE '%SUPERSEDED%'
+                        GROUP BY PartNumber) B
+              ON RTRIM(A.PartNumber)=RTRIM(B.Pn) AND A.PrintSeq=B.Seq
+        ) b ON RTRIM(a.PartNumber)=RTRIM(b.PartNumber)
+        WHERE a.ProductCodePm NOT LIKE '%PLUM%';
+        SET @Rows = @@ROWCOUNT;
+        RAISERROR('Step %s done, rows=%d', 0, 1, @Step, @Rows) WITH NOWAIT;
+
+        ---------------------------------------------------------------- 4
+        SET @Step = '4a TRUNCATE MmsCostTemp';
+        TRUNCATE TABLE SBCES.MmsCostTemp;
+
+        SET @Step = '4b INSERT MmsCostTemp (zero-cost parts)';
+        INSERT INTO SBCES.MmsCostTemp (MmsNewCode, MmsNewCost)
+        SELECT MmsStockCode, MmsNewCost FROM SBCES.StockCodedParts WHERE ISNULL(MmsNewCost,0)=0;
+        SET @Rows = @@ROWCOUNT;
+        RAISERROR('Step %s done, rows=%d', 0, 1, @Step, @Rows) WITH NOWAIT;
+
+        SET @Step = '4c UPDATE MmsCostTemp from Backup';
+        UPDATE t SET t.MmsNewCost = b.MmsNewCost
+        FROM SBCES.MmsCostTemp t
+        INNER JOIN SBCES.StockCodedPartsBackup b ON RTRIM(t.MmsNewCode)=RTRIM(b.MmsStockCode);
+        SET @Rows = @@ROWCOUNT;
+        RAISERROR('Step %s done, rows=%d', 0, 1, @Step, @Rows) WITH NOWAIT;
+
+        SET @Step = '4d UPDATE StockCodedParts from MmsCostTemp';
+        UPDATE s SET s.MmsNewCost = t.MmsNewCost
+        FROM SBCES.StockCodedParts s
+        INNER JOIN SBCES.MmsCostTemp t ON RTRIM(s.MmsStockCode)=RTRIM(t.MmsNewCode);
+        SET @Rows = @@ROWCOUNT;
+        RAISERROR('Step %s done, rows=%d', 0, 1, @Step, @Rows) WITH NOWAIT;
+
+        ---------------------------------------------------------------- 5
+        SET @Step = '5 INSERT NonStockCodedParts';
+        INSERT INTO SBCES.NonStockCodedParts (OrigSupplierName, OrigSupplierNum, DetailedDesc, Keyword, DateEntered)
+        SELECT RTRIM(a.BusinessName), a.VendorPartNumber, RTRIM(a.PartXdescEdLine), RTRIM(b.PartType), GETDATE()
+        FROM SBCES.VendorPartDesc a,
+             SBCES.StockCodedParts b,
+             (SELECT DISTINCT RTRIM(OrigSupplierNum) AS OrigSupplierNum FROM SBCES.NonStockCodedParts) c
+        WHERE RTRIM(a.PartNumber)=RTRIM(b.MmsStockCode)
+          AND a.VendorPartNumber <> ''
+          AND RTRIM(a.VendorPartNumber) <> c.OrigSupplierNum;
+        SET @Rows = @@ROWCOUNT;
+        RAISERROR('Step %s done, rows=%d', 0, 1, @Step, @Rows) WITH NOWAIT;
+
+        ---------------------------------------------------------------- 6
+        SET @Step = '6a TRUNCATE ScOemkitsTextData';
+        TRUNCATE TABLE SBCES.ScOemkitsTextData;
+
+        SET @Step = '6b INSERT ScOemkitsTextData';
+        INSERT INTO SBCES.ScOemkitsTextData (MmsNewCode, TextData)
+        SELECT b.MmsStockCode, a.TextLineTx
+        FROM SBCES.TextData a
+        INNER JOIN SBCES.StockCodedParts b ON RTRIM(a.TextKey)=RTRIM(b.MmsStockCode)
+        WHERE a.TextType='PM5P';
+        SET @Rows = @@ROWCOUNT;
+        RAISERROR('Step %s done, rows=%d', 0, 1, @Step, @Rows) WITH NOWAIT;
+
+        ---------------------------------------------------------------- 7
+        SET @Step = '7 UPDATE ScPartsUsed.MmsCost';
+        UPDATE spu SET spu.MmsCost = scp.MmsNewCost
+        FROM SBCES.ScPartsUsed spu
+        INNER JOIN SBCES.StockCodedParts scp ON RTRIM(spu.MmsStockCode)=RTRIM(scp.MmsStockCode)
+        WHERE spu.RebuiltPart='N';
+        SET @Rows = @@ROWCOUNT;
+        RAISERROR('Step %s done, rows=%d', 0, 1, @Step, @Rows) WITH NOWAIT;
+
+        ---------------------------------------------------------------- 8
+        SET @Step = '8 UPDATE KitsMasterlist.EstimatedCost';
+        UPDATE k SET k.EstimatedCost = s.MmsNewCost
+        FROM SBCES.KitsMasterlist k
+        INNER JOIN SBCES.StockCodedParts s ON RTRIM(k.PartNumber)=RTRIM(s.MmsStockCode);
+        SET @Rows = @@ROWCOUNT;
+        RAISERROR('Step %s done, rows=%d', 0, 1, @Step, @Rows) WITH NOWAIT;
+
+        COMMIT TRAN;
+        SET @Msg = CONVERT(VARCHAR(23), GETDATE(), 121) + ' IfsMmsSync SUCCESS';
+        RAISERROR('%s', 0, 1, @Msg) WITH NOWAIT;
+    END TRY
+    BEGIN CATCH
+        DECLARE @eMsg NVARCHAR(4000) = ERROR_MESSAGE(),
+                @eNum INT = ERROR_NUMBER(), @eLine INT = ERROR_LINE(),
+                @eSev INT = ERROR_SEVERITY(), @eState INT = ERROR_STATE();
+
+        IF XACT_STATE() <> 0 ROLLBACK TRAN;
+
+        SET @Msg = '*** IfsMmsSync FAILED at step [' + @Step + '] ErrNo=' + CAST(@eNum AS VARCHAR(20))
+                 + ' Sev=' + CAST(@eSev AS VARCHAR(10)) + ' State=' + CAST(@eState AS VARCHAR(10))
+                 + ' Line=' + CAST(@eLine AS VARCHAR(10)) + ' Msg=' + @eMsg;
+        RAISERROR('%s', 0, 1, @Msg) WITH NOWAIT;
+
+        THROW;   -- re-raises the ORIGINAL error (THROW @num,... fails for numbers < 50000)
+    END CATCH
+END
+GO
