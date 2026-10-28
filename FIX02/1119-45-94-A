@@ -1,0 +1,281 @@
+@using BCES.Models.Admin
+@{
+    ViewData["Title"] = "User Activity Report";
+}
+
+<script>
+    // =====================================================================
+    // User Activity Report - inline JavaScript (no external .js file needed)
+    // =====================================================================
+
+    // Shown when a grid read fails (HTTP error or server-reported error)
+    function onGridError(e) {
+        var msg = "Unknown error";
+        if (e.errors) { msg = (typeof e.errors === "string") ? e.errors : JSON.stringify(e.errors); }
+        else if (e.xhr) { msg = e.xhr.status + " " + e.xhr.statusText; }
+        console.error("User Activity Report - grid error:", e);
+        alert("Could not load report data: " + msg);
+    }
+
+    // ---------- helpers ----------
+    function fmtDate(d) {
+        return d ? kendo.toString(d, "yyyy-MM-dd") : null;
+    }
+
+    function ddValue(id) {
+        var w = $("#" + id).data("kendoDropDownList");
+        return w ? (w.value() || null) : null;
+    }
+
+    function dpValue(id) {
+        var w = $("#" + id).data("kendoDatePicker");
+        return w ? w.value() : null;
+    }
+
+    // A grid in a hidden tab is measured at 0 width; re-measure when its tab is shown.
+    function onTabActivate(e) {
+        kendo.resize($(e.contentElement));
+    }
+
+    // ---------- Login History ----------
+    // Read-data function: called on EVERY read (paging, sorting, refresh), so filters persist.
+    function getLoginFilters() {
+        return {
+            userId: ddValue("loginUserFilter"),
+            fromDate: fmtDate(dpValue("loginFromDate")),
+            toDate: fmtDate(dpValue("loginToDate"))
+        };
+    }
+
+    function refreshLoginGrid() {
+        var grid = $("#loginHistoryGrid").data("kendoGrid");
+        if (!grid) return;
+        if (grid.dataSource.page() !== 1) {
+            grid.dataSource.page(1);   // page change triggers the read
+        } else {
+            grid.dataSource.read();
+        }
+    }
+
+    function onLoginFilterChange() {
+        refreshLoginGrid();
+    }
+
+    // ---------- Page Visit Activity ----------
+    function getActivityFilters() {
+        return {
+            userId: ddValue("activityUserFilter"),
+            fromDate: fmtDate(dpValue("activityFromDate")),
+            toDate: fmtDate(dpValue("activityToDate")),
+            controllerName: ddValue("controllerFilter"),
+            actionName: ddValue("actionFilter")
+        };
+    }
+
+    // The Action drop-down is narrowed to the selected controller.
+    function getActionLookupFilters() {
+        return { controllerName: ddValue("controllerFilter") };
+    }
+
+    function refreshActivityGrid() {
+        var grid = $("#activityLogGrid").data("kendoGrid");
+        if (!grid) return;
+        if (grid.dataSource.page() !== 1) {
+            grid.dataSource.page(1);
+        } else {
+            grid.dataSource.read();
+        }
+    }
+
+    function onActivityFilterChange() {
+        refreshActivityGrid();
+    }
+
+    function onControllerFilterChange() {
+        var actionDd = $("#actionFilter").data("kendoDropDownList");
+        if (actionDd) {
+            actionDd.value("");          // clear the old action selection
+            actionDd.dataSource.read();  // reload actions for the chosen controller
+        }
+        refreshActivityGrid();
+    }
+</script>
+
+<div class="container-fluid mt-3">
+    <h2>User Activity Report</h2>
+
+    <div class="row mb-3">
+        <div class="col-md-12">
+            @(Html.Kendo().TabStrip()
+                .Name("activityTabs")
+                .Events(e => e.Activate("onTabActivate"))
+                .Items(items =>
+                {
+                    // ------------------------- Login History -------------------------
+                    items.Add().Text("Login History")
+                        .Selected(true)
+                        .Content(@<text>
+                            <div class="p-3">
+                                <div class="row mb-3">
+                                    <div class="col-md-3">
+                                        <label>User:</label>
+                                        @(Html.Kendo().DropDownList()
+                                            .Name("loginUserFilter")
+                                            .OptionLabel("All Users")
+                                            .DataTextField("UserName")
+                                            .DataValueField("UserId")
+                                            .DataSource(source => source
+                                                .Read(read => read.Action("GetUsers", "UserActivityReport"))
+                                            )
+                                            .Events(e => e.Change("onLoginFilterChange"))
+                                        )
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label>From Date:</label>
+                                        @(Html.Kendo().DatePicker()
+                                            .Name("loginFromDate")
+                                            .Format("yyyy-MM-dd")
+                                            .Value(DateTime.Today.AddDays(-30))
+                                            .Events(e => e.Change("onLoginFilterChange"))
+                                        )
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label>To Date:</label>
+                                        @(Html.Kendo().DatePicker()
+                                            .Name("loginToDate")
+                                            .Format("yyyy-MM-dd")
+                                            .Value(DateTime.Today)
+                                            .Events(e => e.Change("onLoginFilterChange"))
+                                        )
+                                    </div>
+                                    <div class="col-md-3 d-flex align-items-end">
+                                        <button type="button" class="k-button k-button-md k-rounded-md k-button-solid k-button-solid-primary" onclick="refreshLoginGrid()">
+                                            <span class="k-icon k-i-reload"></span> Refresh
+                                        </button>
+                                    </div>
+                                </div>
+
+                                @(Html.Kendo().Grid<LoginHistoryRowModel>()
+                                    .Name("loginHistoryGrid")
+                                    .Columns(columns =>
+                                    {
+                                        columns.Bound(c => c.UserName).Title("User Name").Width(150);
+                                        columns.Bound(c => c.LoginDateTime).Title("Login Date/Time").Width(180).Format("{0:yyyy-MM-dd HH:mm:ss}");
+                                        columns.Bound(c => c.IPAddress).Title("IP Address").Width(150);
+                                        columns.Bound(c => c.UserAgent).Title("User Agent").Width(300);
+                                    })
+                                    .Pageable(p => p.PageSizes(new[] { 10, 25, 50, 100 }))
+                                    .Sortable()
+                                    .Scrollable()
+                                    .DataSource(dataSource => dataSource
+                                        .Ajax()
+                                        .PageSize(25)
+                                        .ServerOperation(true)
+                                        .Model(m => m.Id(c => c.LoginHistoryId))
+                                        .Sort(sort => sort.Add(c => c.LoginDateTime).Descending())
+                                        .Events(ev => ev.Error("onGridError"))
+                                        .Read(read => read.Action("GetLoginHistory", "UserActivityReport").Data("getLoginFilters"))
+                                    )
+                                )
+                            </div>
+                        </text>);
+
+                    // ------------------------- Page Visit Activity -------------------------
+                    items.Add().Text("Page Visit Activity")
+                        .Content(@<text>
+                            <div class="p-3">
+                                <div class="row mb-3">
+                                    <div class="col-md-2">
+                                        <label>User:</label>
+                                        @(Html.Kendo().DropDownList()
+                                            .Name("activityUserFilter")
+                                            .OptionLabel("All Users")
+                                            .DataTextField("UserName")
+                                            .DataValueField("UserId")
+                                            .DataSource(source => source
+                                                .Read(read => read.Action("GetUsers", "UserActivityReport"))
+                                            )
+                                            .Events(e => e.Change("onActivityFilterChange"))
+                                        )
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label>From Date:</label>
+                                        @(Html.Kendo().DatePicker()
+                                            .Name("activityFromDate")
+                                            .Format("yyyy-MM-dd")
+                                            .Value(DateTime.Today.AddDays(-7))
+                                            .Events(e => e.Change("onActivityFilterChange"))
+                                        )
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label>To Date:</label>
+                                        @(Html.Kendo().DatePicker()
+                                            .Name("activityToDate")
+                                            .Format("yyyy-MM-dd")
+                                            .Value(DateTime.Today)
+                                            .Events(e => e.Change("onActivityFilterChange"))
+                                        )
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label>Controller:</label>
+                                        @(Html.Kendo().DropDownList()
+                                            .Name("controllerFilter")
+                                            .OptionLabel("All Controllers")
+                                            .DataTextField("ControllerName")
+                                            .DataValueField("ControllerName")
+                                            .DataSource(source => source
+                                                .Read(read => read.Action("GetControllers", "UserActivityReport"))
+                                            )
+                                            .Events(e => e.Change("onControllerFilterChange"))
+                                        )
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label>Action:</label>
+                                        @(Html.Kendo().DropDownList()
+                                            .Name("actionFilter")
+                                            .OptionLabel("All Actions")
+                                            .DataTextField("ActionName")
+                                            .DataValueField("ActionName")
+                                            .DataSource(source => source
+                                                .Read(read => read.Action("GetActions", "UserActivityReport").Data("getActionLookupFilters"))
+                                            )
+                                            .Events(e => e.Change("onActivityFilterChange"))
+                                        )
+                                    </div>
+                                    <div class="col-md-2 d-flex align-items-end">
+                                        <button type="button" class="k-button k-button-md k-rounded-md k-button-solid k-button-solid-primary" onclick="refreshActivityGrid()">
+                                            <span class="k-icon k-i-reload"></span> Refresh
+                                        </button>
+                                    </div>
+                                </div>
+
+                                @(Html.Kendo().Grid<ActivityLogRowModel>()
+                                    .Name("activityLogGrid")
+                                    .Columns(columns =>
+                                    {
+                                        columns.Bound(c => c.UserName).Title("User Name").Width(140);
+                                        columns.Bound(c => c.VisitDateTime).Title("Visit Date/Time").Width(170).Format("{0:yyyy-MM-dd HH:mm:ss}");
+                                        columns.Bound(c => c.RequestUrl).Title("Request URL");
+                                        columns.Bound(c => c.ControllerName).Title("Controller").Width(150);
+                                        columns.Bound(c => c.ActionName).Title("Action").Width(150);
+                                    })
+                                    .Pageable(p => p.PageSizes(new[] { 10, 25, 50, 100 }))
+                                    .Sortable()
+                                    .Scrollable()
+                                    .DataSource(dataSource => dataSource
+                                        .Ajax()
+                                        .PageSize(25)
+                                        .ServerOperation(true)
+                                        .Model(m => m.Id(c => c.ActivityLogId))
+                                        .Sort(sort => sort.Add(c => c.VisitDateTime).Descending())
+                                        .Events(ev => ev.Error("onGridError"))
+                                        .Read(read => read.Action("GetActivityLog", "UserActivityReport").Data("getActivityFilters"))
+                                    )
+                                )
+                            </div>
+                        </text>);
+                })
+            )
+        </div>
+    </div>
+</div>
