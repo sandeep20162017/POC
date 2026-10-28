@@ -1,0 +1,66 @@
+1. Main data query (Q_1)
+
+The Oracle (+) outer join becomes a LEFT JOIN, and the :P_ bind variables become @P_ variables.
+
+sql
+DECLARE @P_REPORT_TYPE NVARCHAR(30) = N'Open Workorders';  -- or N'Open SIO Workorders'
+DECLARE @P_LOCATION_ID NVARCHAR(2)  = NULL;                -- NULL = all locations
+
+SELECT w.WO_ID, w.JOB_ID, w.JOB_TYPE, w.WO_MODE, w.JOB_TITLE, w.VEHICLE_ID,
+       w.QUANTITY_REQ, w.QUANTITY,
+       RTRIM(o.ORDER_TYPE_DESC) AS ORDER_TYPE_DESC,
+       w.ORDER_ID, w.CODE_ID, w.VEHICLE_TYPE, w.DATE_ISSUE, w.WO_COMMENT, w.PRIORITY,
+       p.DATE_START, p.LOCATION_ID, l.CC, l.CC_DESC
+FROM   PICS.WORKORDERS w
+JOIN   PICS.WO_OPS     p ON p.WO_ID       = w.WO_ID
+JOIN   PICS.LOCATIONS  l ON l.LOCATION_ID = p.LOCATION_ID
+LEFT JOIN PICS.ORDER_TYPES o ON o.ORDER_TYPE = w.ORDER_TYPE
+WHERE  p.F_ARRIVE = N'Y'
+  AND  w.DATE_DONE IS NULL
+  AND (   (@P_REPORT_TYPE = N'Open SIO Workorders'
+           AND CHARINDEX(CAST(w.ORDER_TYPE AS NVARCHAR(10)), N'24') > 0)
+       OR  @P_REPORT_TYPE = N'Open Workorders')
+  AND (   p.LOCATION_ID = @P_LOCATION_ID OR @P_LOCATION_ID IS NULL)
+ORDER BY p.WO_ID ASC, w.ORDER_TYPE ASC
+OPTION (RECOMPILE);   -- avoids a bad cached plan for the optional-parameter pattern
+Order-type filter: INSTR('24', w.ORDER_TYPE) is a substring test. CHARINDEX keeps the same behaviour, so it matches order types 2, 4 and 24. If you only want types 2 and 4, use w.ORDER_TYPE IN (2, 4) instead.
+RTRIM: ORDER_TYPE_DESC is nchar(25), so SQL Server pads it with trailing spaces. RTRIM removes them.
+Age in days: the old CF_2 formula (SYSDATE - DATE_ISSUE) can be computed in the query by adding this column:
+sql
+  CAST(DATEDIFF(SECOND, w.DATE_ISSUE, SYSDATETIME()) / 86400.0 AS DECIMAL(10,2)) AS AGE_DAYS
+2. Location list of values (P_LOCATION_ID)
+sql
+SELECT LOCATION_ID,
+       CONCAT(CC, N' ', CC_DESC) AS LOCATION_DISPLAY
+FROM   PICS.LOCATIONS
+ORDER BY CC;
+
+The original had no ORDER BY. I added one so the list is stable. CONCAT treats NULLs as empty strings, as Oracle’s || does.
+
+3. Routing / cost-centre query (CF_CC formula)
+
+The Oracle cursor loop that joined each work order’s cost centres with spaces becomes one STRING_AGG (SQL Server 2017 or later).
+
+Per work order (replaces the :b1 cursor):
+
+sql
+DECLARE @WO_ID BIGINT = 12345;
+
+SELECT STRING_AGG(CAST(l.CC AS NVARCHAR(MAX)), N' ')
+         WITHIN GROUP (ORDER BY p.OP_ID) AS ROUTING
+FROM   PICS.WO_OPS    p
+JOIN   PICS.LOCATIONS l ON l.LOCATION_ID = p.LOCATION_ID
+WHERE  p.WO_ID = @WO_ID;
+
+Folded into the main query, so the report needs no per-row lookup:
+
+sql
+OUTER APPLY (
+    SELECT STRING_AGG(CAST(l2.CC AS NVARCHAR(MAX)), N' ')
+             WITHIN GROUP (ORDER BY p2.OP_ID) AS ROUTING
+    FROM   PICS.WO_OPS    p2
+    JOIN   PICS.LOCATIONS l2 ON l2.LOCATION_ID = p2.LOCATION_ID
+    WHERE  p2.WO_ID = w.WO_ID
+) r
+
+Put it after the LEFT JOIN in query 1 and add r.ROUTING to the select list.
