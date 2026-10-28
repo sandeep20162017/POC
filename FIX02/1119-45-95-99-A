@@ -1,0 +1,255 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using BCES.Controllers.Base;
+using BCES.Models.Admin;
+using Dapper;
+using Kendo.Mvc.UI;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+
+// BaseController lives in BCES.Controllers.Base
+namespace BCES.Controllers.Admin
+{
+    /// <summary>
+    /// Admin report: login history + page visit activity.
+    /// The view lives in Views\Admin\UserActivityReport.cshtml.
+    /// </summary>
+    public class UserActivityReportController : BaseController
+    {
+        // NOTE: match the constructor signature of your other controllers that derive from BaseController.
+        // This assumes BaseController exposes protected _dbConnection (Dapper) and _httpContextAccessor,
+        // as used in the existing BaseController.OnActionExecutionAsync.
+        public UserActivityReportController(IDbConnection dbConnection, IHttpContextAccessor httpContextAccessor)
+            : base(dbConnection, httpContextAccessor)
+        {
+        }
+
+        // ------------------------------------------------------------------
+        // Page
+        // ------------------------------------------------------------------
+        [HttpGet]
+        public IActionResult Index()
+        {
+            if (!IsReportAdmin())
+                return View("~/Views/Shared/Unauthorized.cshtml");
+
+            return View("~/Views/Admin/UserActivityReport.cshtml");
+        }
+
+        // ------------------------------------------------------------------
+        // Lookups
+        // ------------------------------------------------------------------
+        public IActionResult GetUsers()
+        {
+            if (!IsReportAdmin()) return StatusCode(StatusCodes.Status403Forbidden);
+
+            var users = _dbConnection.Query<UserLookupItem>(
+                @"SELECT u.UserID AS UserId, u.UserName
+                  FROM SBCES.Users u
+                  ORDER BY u.UserName").ToList();
+
+            return Json(users);
+        }
+
+        public IActionResult GetControllers()
+        {
+            if (!IsReportAdmin()) return StatusCode(StatusCodes.Status403Forbidden);
+
+            var items = _dbConnection.Query<ControllerLookupItem>(
+                @"SELECT DISTINCT a.ControllerName
+                  FROM SBCES.UserActivityLog a
+                  WHERE a.ControllerName IS NOT NULL
+                  ORDER BY a.ControllerName").ToList();
+
+            return Json(items);
+        }
+
+        /// <summary>Actions list; narrowed to one controller when controllerName is supplied.</summary>
+        public IActionResult GetActions(string controllerName)
+        {
+            if (!IsReportAdmin()) return StatusCode(StatusCodes.Status403Forbidden);
+
+            var items = _dbConnection.Query<ActionLookupItem>(
+                @"SELECT DISTINCT a.ActionName
+                  FROM SBCES.UserActivityLog a
+                  WHERE a.ActionName IS NOT NULL
+                    AND (@ControllerName IS NULL OR a.ControllerName = @ControllerName)
+                  ORDER BY a.ActionName",
+                new { ControllerName = string.IsNullOrWhiteSpace(controllerName) ? null : controllerName }).ToList();
+
+            return Json(items);
+        }
+
+        // ------------------------------------------------------------------
+        // Login History grid
+        // ------------------------------------------------------------------
+        public IActionResult GetLoginHistory([DataSourceRequest] DataSourceRequest request,
+                                             int? userId, DateTime? fromDate, DateTime? toDate)
+        {
+            if (!IsReportAdmin()) return StatusCode(StatusCodes.Status403Forbidden);
+
+            var sortMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["UserName"] = "u.UserName",
+                ["LoginDateTime"] = "h.LoginDateTime",
+                ["IPAddress"] = "h.IPAddress",
+                ["UserAgent"] = "h.UserAgent"
+            };
+            string orderBy = BuildOrderBy(request, sortMap, "h.LoginDateTime DESC", "h.LoginHistoryId DESC");
+            GetPaging(request, out int skip, out int take);
+
+            string where = @"WHERE (@UserId IS NULL OR h.UserID = @UserId)
+                               AND (@FromDate IS NULL OR h.LoginDateTime >= CAST(@FromDate AS date))
+                               AND (@ToDate IS NULL OR h.LoginDateTime < DATEADD(day, 1, CAST(@ToDate AS date)))";
+
+            string sql = $@"
+                SELECT COUNT(1)
+                FROM SBCES.UserLoginHistory h
+                {where};
+
+                SELECT h.LoginHistoryId, h.UserID, u.UserName, h.LoginDateTime, h.IPAddress, h.UserAgent
+                FROM SBCES.UserLoginHistory h
+                INNER JOIN SBCES.Users u ON u.UserID = h.UserID
+                {where}
+                ORDER BY {orderBy}
+                OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;";
+
+            using var multi = _dbConnection.QueryMultiple(sql, new
+            {
+                UserId = userId,
+                FromDate = fromDate,
+                ToDate = toDate,
+                Skip = skip,
+                Take = take
+            });
+
+            int total = multi.ReadSingle<int>();
+            var rows = multi.Read<LoginHistoryRowModel>().ToList();
+
+            return Json(new DataSourceResult { Data = rows, Total = total });
+        }
+
+        // ------------------------------------------------------------------
+        // Page Visit Activity grid
+        // ------------------------------------------------------------------
+        public IActionResult GetActivityLog([DataSourceRequest] DataSourceRequest request,
+                                            int? userId, DateTime? fromDate, DateTime? toDate,
+                                            string controllerName, string actionName)
+        {
+            if (!IsReportAdmin()) return StatusCode(StatusCodes.Status403Forbidden);
+
+            var sortMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["UserName"] = "u.UserName",
+                ["VisitDateTime"] = "a.VisitDateTime",
+                ["ControllerName"] = "a.ControllerName",
+                ["ActionName"] = "a.ActionName",
+                ["HttpMethod"] = "a.HttpMethod",
+                ["RequestUrl"] = "a.RequestUrl",
+                ["IPAddress"] = "a.IPAddress"
+            };
+            string orderBy = BuildOrderBy(request, sortMap, "a.VisitDateTime DESC", "a.ActivityLogId DESC");
+            GetPaging(request, out int skip, out int take);
+
+            string where = @"WHERE (@UserId IS NULL OR a.UserID = @UserId)
+                               AND (@FromDate IS NULL OR a.VisitDateTime >= CAST(@FromDate AS date))
+                               AND (@ToDate IS NULL OR a.VisitDateTime < DATEADD(day, 1, CAST(@ToDate AS date)))
+                               AND (@ControllerName IS NULL OR a.ControllerName = @ControllerName)
+                               AND (@ActionName IS NULL OR a.ActionName = @ActionName)";
+
+            string sql = $@"
+                SELECT COUNT(1)
+                FROM SBCES.UserActivityLog a
+                {where};
+
+                SELECT a.ActivityLogId, a.UserID, u.UserName, a.VisitDateTime, a.ControllerName,
+                       a.ActionName, a.HttpMethod, a.RequestUrl, a.IPAddress
+                FROM SBCES.UserActivityLog a
+                INNER JOIN SBCES.Users u ON u.UserID = a.UserID
+                {where}
+                ORDER BY {orderBy}
+                OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;";
+
+            using var multi = _dbConnection.QueryMultiple(sql, new
+            {
+                UserId = userId,
+                FromDate = fromDate,
+                ToDate = toDate,
+                ControllerName = string.IsNullOrWhiteSpace(controllerName) ? null : controllerName,
+                ActionName = string.IsNullOrWhiteSpace(actionName) ? null : actionName,
+                Skip = skip,
+                Take = take
+            });
+
+            int total = multi.ReadSingle<int>();
+            var rows = multi.Read<ActivityLogRowModel>().ToList();
+
+            return Json(new DataSourceResult { Data = rows, Total = total });
+        }
+
+        // ------------------------------------------------------------------
+        // Helpers
+        // ------------------------------------------------------------------
+
+        /// <summary>Only RoleId 1, 2 and 3 may see the report (same rule as the Administration menu).</summary>
+        private bool IsReportAdmin()
+        {
+            try
+            {
+                string identity = _httpContextAccessor.HttpContext?.User?.Identity?.Name;
+                if (string.IsNullOrEmpty(identity)) return false;
+
+                string userADId = identity.Contains('\\') ? identity.Split('\\')[1] : identity;
+
+                int? roleId = _dbConnection.QueryFirstOrDefault<int?>(
+                    "SELECT u.RoleId FROM SBCES.Users u WHERE u.UserADId = @UserADId",
+                    new { UserADId = userADId });
+
+                return roleId == 1 || roleId == 2 || roleId == 3;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void GetPaging(DataSourceRequest request, out int skip, out int take)
+        {
+            int page = request.Page > 0 ? request.Page : 1;
+            take = request.PageSize > 0 ? request.PageSize : 25;
+            skip = (page - 1) * take;
+        }
+
+        /// <summary>
+        /// Builds a safe ORDER BY from the grid's sort descriptors. Only whitelisted columns are used,
+        /// so nothing from the client is ever concatenated into the SQL.
+        /// </summary>
+        private static string BuildOrderBy(DataSourceRequest request, Dictionary<string, string> sortMap,
+                                           string defaultOrder, string tieBreaker)
+        {
+            var parts = new List<string>();
+
+            if (request.Sorts != null)
+            {
+                foreach (var sort in request.Sorts)
+                {
+                    if (sort?.Member != null && sortMap.TryGetValue(sort.Member, out string column))
+                    {
+                        string dir = sort.SortDirection == ListSortDirection.Descending ? "DESC" : "ASC";
+                        parts.Add($"{column} {dir}");
+                    }
+                }
+            }
+
+            if (parts.Count == 0) parts.Add(defaultOrder);
+            parts.Add(tieBreaker); // stable paging
+
+            return string.Join(", ", parts);
+        }
+    }
+}
