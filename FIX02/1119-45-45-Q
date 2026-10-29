@@ -1,6 +1,7 @@
 User is not able to Add New NonStock coded Part or when cliked on edit unable to edit. pop up is shown for a short while and closes.
 Experiencing the same behaviour on other pages. No JS errors. Is it because on Telerik version?I recently updated  .net core version. Originally itwas in .net 8.0 now it is .net 10.0
 If you need dditional details let me now (broser debug etc). 
+App is running in prod. I need minimal fix pls
 
 
 _Layout.cshtml
@@ -1766,6 +1767,569 @@ namespace BCES
         }
     }
 }
+controller 
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using Telerik.DataSource;
+using Telerik.DataSource.Extensions;
+using BCES.Models.Admin;
+using Kendo.Mvc.UI;
+using Kendo.Mvc.Extensions;
+using DataSourceRequest = Kendo.Mvc.UI.DataSourceRequest;
+using BCES.Data;
+using Telerik.SvgIcons;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using BCES.Controllers.Base;
+using BCES.Models.Parts;
+using BCES.Models.Common;
+using Newtonsoft.Json.Linq;
+using static System.Net.Mime.MediaTypeNames;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
+using Humanizer;
+using BCES.Controllers.Common;
+
+namespace BCES.Controllers.Parts
+{
+
+    //[Route("NscPartsUsed")]
+    public class NscPartsUsedController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+
+        public NscPartsUsedController(DapperContext dapper, IHttpContextAccessor httpContextAccessor) : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+
+            _httpContextAccessor = httpContextAccessor;
+        }
+        // GET: NscPartsUsed/Index
+        [HttpGet("NscPartsUsedIndex")]
+        [AllowAnonymous]
+        public IActionResult NscPartsUsedIndex()
+        {
+          // return View();
+           return View("~/Views/Parts/NonStockCodedParts/Index.cshtml");
+        }
+
+        // POST: NscPartsUsed/GetNscPartsUsedView
+        [HttpGet]
+        [AllowAnonymous]
+        public async Task<ActionResult> GetNscPartsUsedView([DataSourceRequest] DataSourceRequest request)
+        {
+            // Fetch data for the grid
+            var model = await GetNscPartsUsedData();
+           
+            return Json(model.ToDataSourceResult(request));
+        }
+
+        // POST: NscPartsUsed/CreateNscPartsUsed
+       [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> CreateNscPartsUsed(NscPartsUsedViewModel nscPartsUsed)
+        {
+            if (!ModelState.IsValid)
+            {
+                var errors = ModelState.Values
+                    .SelectMany(v => v.Errors)
+                    .Select(e => e.ErrorMessage);
+
+                return BadRequest(new { Errors = errors });
+            }
+
+            try
+            {
+                var getMaxId = @"SELECT MAX(Id) FROM CES.SBCES.NonStockCodedParts";
+                int maxId = _dbConnection.QuerySingle<int>(getMaxId);
+
+                var userName = ViewBag.UserName ?? "System";
+
+                var insertQuery = @"
+            INSERT INTO SBCES.NonStockCodedParts 
+            (OrigSupplierNum, OrigSupplierName, OemPartCost, DetailedDesc, Keyword, 
+             LastModifiedBy, LastModifiedDate, Id)
+            VALUES 
+            (@OrigSupplierNum, @OrigSupplierName, @OemPartCost, @DetailedDesc, @Keyword, 
+             @LastModifiedBy, @LastModifiedDate, @Id);
+        ";
+
+                await ((IDbConnection)_dbConnection).ExecuteAsync(insertQuery, new
+                {
+                    OrigSupplierNum = nscPartsUsed.OrigSuppNum,
+                    OrigSupplierName = nscPartsUsed.OrigSupplierName,
+                    OemPartCost = nscPartsUsed.UnitCost,
+                    DetailedDesc = nscPartsUsed.Description,
+                    Keyword = nscPartsUsed.KeyWord,
+                    LastModifiedBy = userName,
+                    LastModifiedDate = DateTime.Now,
+                    Id = maxId + 1
+                });
+
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "An error occurred while saving the record.",
+                    detail = ex.Message
+                });
+            }
+        }
+
+        //   public async Task<IActionResult> CreateNscPartsUsed([DataSourceRequest] DataSourceRequest request, [FromForm] NscPartsUsedViewModel nscPartsUsed)
+        //public async Task<IActionResult> CreateNscPartsUsed(  NscPartsUsedViewModel nscPartsUsed)
+        //{
+        //    if (!ModelState.IsValid)
+        //    {
+        //        var errors = ModelState.Values
+        //            .SelectMany(v => v.Errors)
+        //            .Select(e => e.ErrorMessage);
+        //        return BadRequest(new { Errors = errors });
+        //    }
+
+
+        //    try
+        //    {
+        //        var getMaxId = @"
+        //                                select MAX(Id)  FROM [CES].[SBCES].[NonStockCodedParts]
+        //                                ";
+        //        int maxId =  _dbConnection.QuerySingle<int>(getMaxId);
+
+        //        var userName = ViewBag.UserName ?? "System";
+
+        //        //var insertQuery = String.Format(@"
+        //        //INSERT INTO SBCES.[NonStockCodedParts] ([OrigSupplierNum], 
+        //        //                 [OrigSupplierName],[OemPartCost], 
+        //        //                 [DetailedDesc], [Keyword], [LastModifiedBy], LastModifiedDate, Id )
+        //        //VALUES ('{0}', '{1}', {2}, '{3}', '{4}', '{5}','{6}', {7} )",
+        //        //    nscPartsUsed.OrigSuppNum,
+        //        //                  nscPartsUsed.OrigSupplierName,
+        //        //                  nscPartsUsed.UnitCost,
+        //        //                  nscPartsUsed.Description,
+        //        //                   nscPartsUsed.KeyWord,
+        //        //                   userName,
+        //        //                   DateTime.Now,
+        //        //                   maxId+1
+
+        //        //     );
+
+        //        var insertQuery = String.Format(@"
+        //        INSERT INTO SBCES.[NonStockCodedParts] ([OrigSupplierNum], 
+        //                         [OrigSupplierName],[OemPartCost], 
+        //                         [DetailedDesc], [Keyword], [LastModifiedBy], LastModifiedDate, Id )
+        //        VALUES ('" + nscPartsUsed.OrigSuppNum + "'," +
+        //                      "'"  +  nscPartsUsed.OrigSupplierName + "'," +
+        //                       "'" + nscPartsUsed.UnitCost + "'," +
+        //                       "'" + nscPartsUsed.Description + "'," +
+        //                       "'" + nscPartsUsed.KeyWord + "'," +
+        //                        "'" + userName + "'," +
+        //                       "'" + DateTime.Now + "'," +
+        //                           maxId + 1
+
+        //             );
+
+
+        //        await _dbConnection.ExecuteAsync(insertQuery, nscPartsUsed);
+        //        return Json(new { success = true });
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        return StatusCode(500, "An error occurred while updating the Non Stock Coded Part.");
+        //    }
+
+        //}
+
+
+        [HttpPost]
+        [AllowAnonymous]
+        public async Task<IActionResult> UpdateNscPartsUsed( NscPartsUsedViewModel nscPartsUsed)
+        {
+            try
+            {
+                ////
+                ///// Validate if OrigSupplierName exists in the database
+                //bool isValid = _dbConnection.NonStockCodedParts
+                //    .Any(p => p.OrigSupplierName == nscPartsUsed.OrigSupplierName);
+
+                //if (!isValid)
+                //{
+                //    ModelState.AddModelError("OrigSupplierName", "Invalid selection.");
+                //    return Json(ModelState.ToDataSourceResult());
+                //}
+                ///
+
+                if (!ModelState.IsValid)
+                {
+                    var errors = ModelState.Values
+                        .SelectMany(v => v.Errors)
+                        .Select(e => e.ErrorMessage);
+                    return BadRequest(new { Errors = errors });
+                }
+
+                string updateQuery = string.Format(@" UPDATE SBCES.[NonStockCodedParts] 
+                   SET   
+                   
+                    [OemPartCost]= {0},
+                    [DetailedDesc]='{1}',
+                    [Keyword] = '{2}',                                 
+                    LastModifiedBy = '{3}',
+                     LastModifiedDate = '{4}'                    
+                 
+                     WHERE
+                    [OrigSupplierNum] = '{5}'  AND
+                    [OrigSupplierName] = '{6}'",
+                             
+                              nscPartsUsed.UnitCost,
+                               nscPartsUsed.Description,
+                               nscPartsUsed.KeyWord,
+                              
+                              ViewBag.UserName,
+                              DateTime.Now,
+                              nscPartsUsed.OrigSuppNum,
+                              nscPartsUsed.OrigSupplierName
+                              );
+                
+               
+
+                await _dbConnection.ExecuteAsync(updateQuery, nscPartsUsed);
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "An error occurred while updating the Non Stock Coded Part.");
+            }
+            
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> DeleteNscPartsUsed(  string Id, string gridType)
+        {
+            try
+            {
+
+
+                string sql = @"DELETE FROM [CES].[SBCES].[NonStockCodedParts]
+                         WHERE id =" + Id;
+                 
+                int affectedRows = await _dbConnection.ExecuteAsync(sql);
+
+                if (gridType == "VehicleGrid")
+                {
+                    await VehicleListEstimatesUpdater.UpdateVehicleCostsAsync(_dbConnection, Id);
+                }
+
+                 return Json(new { success = affectedRows > 0 });
+                
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Delete failed: {ex.Message}");
+            }
+        }
+        //  // DELETE: NscPartsUsed/DeleteNscPartsUsed/{id}
+        ////  [HttpDelete("{id}")]
+        //  [HttpPost]
+        //  [AllowAnonymous]
+        //  public async Task<IActionResult> DeleteNscPartsUsed([DataSourceRequest] DataSourceRequest request, NscPartsUsedViewModel nscPartsUsed)
+        //  {
+        //      try
+        //      {
+        //          var deleteQuery = String.Format(@"
+        //          DELETE FROM SBCES.NscPartsUsed
+        //          WHERE NscPartsUsedId  = {0}", nscPartsUsed.NscPartsUsedId);
+
+
+        //          await _dbConnection.ExecuteAsync(deleteQuery, nscPartsUsed);
+        //          return Json(new { success = true });
+        //      }
+        //      catch (Exception ex)
+        //      {
+        //          return StatusCode(500, "An error occurred while deleting the Non Stock Coded Part.");
+        //      }
+
+        //  }
+
+        private async Task<IEnumerable<NscPartsUsedViewModel>> GetNscPartsUsedData()
+        {
+            try
+            {
+                var query = @"
+                             
+                            SELECT
+                                    NSCP.Id,
+                                    UPPER(NSCP.origSupplierNum) AS [OrigSuppNum],
+                                    UPPER(NSCP.origSupplierName) AS [OrigSupplierName],
+                                   UPPER(NSCP.[Keyword]) AS KeyWord,
+                                    NSCP.oemPartCost AS [UnitCost],
+                                    UPPER(NSCP.[DetailedDesc]) AS Description,
+                                    [LastModifiedBy],
+                                    [LastModifiedDate]
+                                    
+                                                                      
+                                FROM
+                                   
+                                    SBCES.NONSTOCKCODEDPARTS NSCP 
+                                   
+                                    
+                                Order by LastModifiedDate desc
+                                                    
+                                                    
+                             ";
+
+                return await _dbConnection.QueryAsync<NscPartsUsedViewModel>(query);
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+            
+        }
+
+    }
+}
+_NscPartsUsed.cshtml
+ @model IEnumerable<BCES.Models.Parts.NscPartsUsedViewModel>
+
+@{
+    ViewData["Title"] = "Non Stock Coded Parts Details";
+    var nscGridName = $"NScPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}"; /* save gridname in hidden field for JS */
+    var parentId = $"{ ViewBag.PartNum }";
+    bool isArchived = ViewBag.GridType == "ArchivedVehicleGrid"; //ArchiveDisable
+    bool isAdmin = ViewBag.RoleId == 1 || ViewBag.RoleId == 2 || ViewBag.RoleId == 3;
+    bool isReadOnly = ViewBag.RoleId == 4;
+    string gridName = $"NscPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}"; //for JS
+}
+<script>
+    // Store grid name for JavaScript access
+    var nscInEstimateGridName = '@gridName';
+</script>
+<h6>Non Stock Coded Parts Used</h6>
+<input type="hidden" id="nscGridNameField" value="@nscGridName" /> @* save gridname in hidden field for JS *@
+@(
+Html.Kendo().Grid<BCES.Models.Parts.NscPartsUsedViewModel>()    
+                
+                .Name($"NscPartsMaterialDetailsRebuiltPartsGrid_{ViewBag.PartNum}")
+                 .HtmlAttributes(new { data_grid_type = ViewBag.GridType?.ToString() ?? "NscGrid" }) //lockcols
+               
+                .Columns(columns =>
+                {
+                    columns.Bound(c => c.Oid).Title("Oid").Hidden(true);
+                    columns.Bound(c => c.OrigSuppNum).Title("Supplier Number").Filterable(ftb => ftb.Cell(cell => cell.Operator("Contains")))
+                    .EditorTemplateName("NscComboBox")
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                    .Width(140)
+                     .ClientTemplate("<a href='javascript:void(0)' class='non-stock-code-cell'>#= OrigSuppNum #</a>");
+                   @*  columns.Command(command =>
+                   {
+                       command.Custom("Populate Details").Click("refreshNscPartDetails").IconClass("k-i-reload").HtmlAttributes(new { @class = "k-button k-button-icontext" });
+
+                   }).Width(60); *@
+
+                    columns.Bound(c => c.OrigSupplierName)
+                    .Title("Supplier Name")
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell" })
+                    .Filterable(ftb => ftb.Cell(cell => cell.Operator("Contains")
+                    .SuggestionOperator(FilterType.Contains)))
+                    
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:notNew" } //lockcols
+                    })
+                    .EditorTemplateName("NscSupplierComboBox").Width(120);
+
+                   @*  columns.Bound(c => c.Description)
+                    .Title("Description")
+                    .EditorTemplateName("ComboBoxEditor")
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                    })
+                    .Width(140)
+                    ; *@
+                    columns.Bound(c => c.KeyWord)
+                    .Title("KeyWord")
+                    .EditorTemplateName("ComboBoxEditor")
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RebuiltGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                    })
+                    
+                    .Width(100);
+                    //  columns.Bound(c => c.OemPartCost).Title("Unit Cost").Format("{0:N2}").Width(30);
+                  @*   columns.Bound(c => c.CC).Title("Cost Centre")
+                    .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains")
+                    .SuggestionOperator(FilterType.Contains))).EditorTemplateName("ComboBoxEditor").Width(70)
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell" });
+ *@
+                    columns.Bound(c => c.Qty).Title("Qty").Width(70)
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" })
+                    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive" }); 
+
+
+                    columns.Bound(c => c.Percentage).Title("%").HtmlAttributes(new { data_field = "Percentage"}).Width(60)
+                    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters,MustBePositive, MustBePercentage" })
+                     .HeaderHtmlAttributes(new { @class = "required-header" })
+                    .HtmlAttributes(new { @class = "required-cell", required = "required" });
+
+                    columns.Bound(c => c.UnitCost)
+                    .Title("Unit Cost")
+                    .EditorTemplateName("ComboBoxEditor")
+                    .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RebuiltGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                    })
+
+                    .Width(80);
+
+                   @*  columns.Bound(c => c.CoreCost).Title("Core Cost").Width(80)
+                    .HtmlAttributes(new { data_br = "MustBeNumeric,NoSpecialCharacters" })
+                    .EditorTemplateName("ComboBoxEditor"); *@
+
+                    @* columns.Bound(c => c.TotalCost)
+                   .Title("Total Cost")
+                   .Width(90)
+                   .Format("{0:C2}")
+                   .Editable("false")
+                   .EditorTemplateName("ComboBoxEditor")
+                   .EditorViewData(new Dictionary<string, object> {
+                        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+                   })
+                   ; *@
+                    @* columns.Bound(c => c.LastModifiedBy)
+         .Title("Modified By")
+         .EditorTemplateName("ComboBoxEditor")
+         .ClientTemplate("#= LastModifiedBy && LastModifiedBy !== 0 ? LastModifiedBy : '(System Generated)' #")
+         .EditorViewData(new Dictionary<string, object> {
+            { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+         })
+         .Width(160); *@
+
+        @* columns.Bound(c => c.LastModifiedDate)
+        .Title("Modified Date")
+        .Width(160)
+        .EditorTemplateName("ComboBoxEditor")
+        .ClientTemplate("#=  LastModifiedDate !== 0 ? formatToEST(LastModifiedDate) : '(System Generated)' #")
+        .EditorViewData(new Dictionary<string, object> {
+        { "LockMap", "RbGrid:always;MakevsBuy:notNew;VehicleGrid:always" } //lockcols
+         }); *@
+                   
+                    @* columns.Command(command =>
+                    {
+                        command.Custom("Re-Calculate")
+                            .Click("recalculateTotalCost")
+                            .HtmlAttributes(new { @class = "k-grid-recalculate" });
+                    }).HtmlAttributes( new { data_field = "Commands" }).Width(80);*@
+
+                    columns.Bound(c => c.TotalCost).Title("Total Cost").Width(90); 
+                    
+                    // columns.Bound(c => c.DateRevised).Title("Date Revised");
+                    // columns.Command(command => command.Edit()).Title("Actions");
+                    columns.Command(command =>
+        {
+            if (!isArchived && isAdmin) //ArchiveDisable
+            {
+
+                command.Custom("Delete")
+                 .Click("onNscDelete")
+                 .Text("Delete")
+                 .IconClass("k-icon k-i-delete")
+                 .HtmlAttributes(new
+                 {
+                     @class = "scparts-action-btn k-button",
+                     title = "Delete",
+                     data_grid = $"NscPartsMaterialDetailsRebuiltPartsGrid",
+                     data_url = Url.Action("DeleteNscPartsUsedInEstimates", "NscPartsUsedInEstimates"),
+                     data_id_field = "id",
+                     data_parentPartId_field = "parentPartId",
+                     data_grid_type = "NSCPartGrid"
+                 });
+            }
+        }).Width(100);
+                })
+
+                
+     .ToolBar(toolbar =>
+    {
+        if (!isArchived && isAdmin) //ArchiveDisable
+        {
+            toolbar.Create();
+           // toolbar.Save();
+        }
+    })
+    //.Editable(editable => editable.Mode(GridEditMode.InCell))
+    .Editable(editable => editable.Mode(GridEditMode.PopUp)
+        .Window(w => w.Width("600px").Title("Edit Non Stock Coded Part")))
+   .Pageable(p => p
+    .Numeric(true)       // Show numeric page buttons
+    .Input(false)        // Hide input box
+    .PreviousNext(true)  // Show next/prev arrows
+    )
+    .Scrollable(s => s.Height("200px")) //UID
+    .Sortable()
+    .Filterable()
+    .Resizable(r => r.Columns(true))
+    
+    .Events(e => e.Edit("onNscPartsEdit"))
+    .Resizable(r => r.Columns(true))
+   
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .PageSize(5)
+        .ServerOperation(true)
+        .Model(model =>
+        {
+            model.Id(c => c.OrigSuppNum);
+            model.Field(c => c.OrigSupplierName);
+            model.Field(c => c.OrigSuppNum);
+            model.Field(c => c.KeyWord);
+            model.Field(c => c.Description);
+            model.Field(c => c.OemPartCost);
+            model.Field(c => c.Percentage);
+            model.Field(c => c.TotalCost).Editable(false);
+            model.Field(c => c.LastModifiedBy).Editable(false);
+            model.Field(c => c.LastModifiedDate).Editable(false);
+           // model.Field(c => c.TotalCost).Editable(true);
+         
+          //  model.Field("needsRecalculation", typeof(bool)).DefaultValue(false);
+        })
+        .Events(events =>
+        {
+                      
+          //  events.RequestEnd("onNscRequestEnd");
+            events.Error("onNscGridError");
+            events.RequestEnd("onNscPartsRequestEnd");
+
+        })
+
+        .Read(read => read.Url(Url.Action("GetNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Get))
+       
+        .Create(create => create.Url(Url.Action("CreateNscPartsUsedInEstimatess", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateNscPartsUsedInEstimates", "NscPartsUsedInEstimates") + "?id=" + ViewBag.PartNum + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        //.Destroy(delete => delete.Url(Url.Action("DeleteNscPartsUsedInRbtParts", "NscPartsUsedInEstimates") + "?parentId=0000" + "&gridType=" + ViewBag.GridType).Type(HttpVerbs.Post))
+        .Destroy(delete => delete
+            .Url(Url.Action("DeleteNscPartsUsedInEstimates", "NscPartsUsedInEstimates")
+                 + $"?id="+ViewBag.PartNum +"&gridType={ViewBag.GridType}")
+            .Type(HttpVerbs.Post)
+)
+    )
+
+)
+
+
 
 
         
