@@ -1,0 +1,482 @@
+For the below 2 cshtml
+Display shows only page #1, other pages are missing (grid pagination). Looks like issue i with css. It was working before
+@model IEnumerable<BCES.Models.Admin.EnginesModel>
+
+@{
+    ViewData["Title"] = "Engines";
+}
+
+
+    
+
+<h6>Engines</h6>
+    @(
+        Html.Kendo().Grid<BCES.Models.Admin.EnginesModel>()
+            .Name("EngineGrid")
+            .Columns(columns =>
+            {
+                /* logic for required col changes - Added required indicators */
+                columns.Bound(p => p.Name)
+                    .Title("Engines")
+                    .HeaderHtmlAttributes(new { @class = "required-header" })           
+@* .Editable("isNameEditable") *@
+;
+
+                if (@ViewBag.RoleId != 3) //SuperAdmin and Admin can edit, R/W can search
+                {
+                    columns.Command(command =>
+                              {
+                                  command.Edit()
+                                     .Text("Edit")
+                                     .IconClass("k-icon k-i-edit")
+                                     .HtmlAttributes(new { @class = "scparts-action-btn k-button" });
+                                  if (@ViewBag.RoleId == 1) //only superadmin can delete
+                                  {
+                                      command.Custom("Delete")
+                                          .Click("showDeleteConfirmation")
+                                          .Text("Delete")
+                                          .IconClass("k-icon k-i-delete")
+                                          .HtmlAttributes(new
+                                          {
+                                              @class = "scparts-action-btn k-button",
+                                              title = "Delete"
+                                          });
+                                  }
+                              }).Title("Actions");
+                }
+            })
+        .Events(events => events
+                .Edit("onEdit")
+                .DataBound("onDataBound")
+            )
+        .ToolBar(toolbar =>
+        {   
+            if (ViewBag.RoleId != 3) //only superadmin and admin can add
+            {
+                toolbar.ClientTemplate(@"
+                    <button class='k-button scparts-action-btn k-grid-add' onclick='onEngineAddClick()'>
+                        <span class='k-icon k-i-plus'></span> Add
+                    </button>
+                    
+                
+                ");
+            }
+        })
+        .Editable(editable => editable.Mode(GridEditMode.InLine))
+        .Pageable()
+        .Sortable()
+       
+         .Filterable(f => f
+                    .Extra(false)
+                    .Operators(o => o
+                        .ForString(s => s
+                            .Clear()
+                            .Contains("Contains")
+                            .StartsWith("Starts with")
+                        )
+                        .ForNumber(n => n
+                            .Clear()
+                            .IsEqualTo("Equals")
+                        )
+                    )
+                )
+        .DataSource(dataSource => dataSource
+            .Ajax()
+            .Batch(false)
+            .PageSize(7)
+            .Events(events => events
+                .Error("onDataSourceError")
+                .RequestEnd("onRequestEnd")
+                
+            )
+            .Model(model =>
+            {
+                model.Id(u => u.Name);
+                model.Field(c => c.Name).Editable(true);
+            })
+            .Read(read => read.Url(Url.Action("ReadEngine", "Engine")).Type(HttpVerbs.Get))
+            .Create(create => create.Url(Url.Action("CreateEngine", "Engine")).Type(HttpVerbs.Post))
+            .Update(update => update.Url(Url.Action("UpdateEngine", "Engine")).Type(HttpVerbs.Post))
+            .Destroy(delete => delete.Url(Url.Action("DeleteEngine", "Engine")).Type(HttpVerbs.Post))
+        )
+)
+
+<!-- Custom Delete Confirmation Dialog -->
+<div id="deleteConfirmationDialog" style="display: none;">
+    <div class="confirmation-message">
+        <span class="k-icon k-i-warning confirmation-icon"></span>
+        <span>Are you sure you want to delete this item?</span>
+    </div>
+    <div class="confirmation-buttons">
+        <button type="button" class="k-button cancel-btn">Cancel</button>
+        <button type="button" class="k-button confirm-btn">Delete</button>
+    </div>
+</div>
+<div id="notification"></div>
+
+@section Scripts {
+    <script>
+        function getAutoCompleteParams() {
+            var input = $("input[data-role='autocomplete']:focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || ""
+            };
+        }
+    </script>
+
+    <script>
+        // Initialize notification FIRST
+        var notification = $("#notification").kendoNotification({
+            position: {
+                pinned: true,
+                top: 50,
+                right: 30
+            },
+            autoHideAfter: 4000,
+            stacking: "down"
+        }).data("kendoNotification");
+
+        // Error handler
+        function onDataSourceError(e) {
+            let errorMessage = e.xhr.responseText; //"Operation failed. ";
+
+            if (e.errorThrown) {
+                errorMessage += e.errorThrown;
+            } else if (e.xhr && e.xhr.responseText) {
+                errorMessage += e.xhr.responseText;
+            }
+
+            notification.error(errorMessage);
+
+            $("#EngineGrid").data("kendoGrid").dataSource.read(); //force refresh grid
+        }
+
+        // Success handler
+        function onRequestEnd(e) {
+            if (e.type === "create") {
+                notification.success("Record created successfully");
+            } else if (e.type === "update") {
+                notification.success("Record updated successfully");
+            } else if (e.type === "destroy") {
+                notification.success("Record deleted successfully");
+            }
+
+        }
+    </script>
+
+    <script>
+        // Initialize custom confirmation dialog
+        var deleteDialog = $("#deleteConfirmationDialog").kendoWindow({
+            width: "400px",
+            title: "Confirm Delete",
+            modal: true,
+            visible: false,
+            actions: ["Close"]
+        }).data("kendoWindow");
+
+        function showDeleteConfirmation(e) {
+            e.preventDefault();
+            var grid = $("#EngineGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            deleteDialog.dataItem = dataItem;
+            deleteDialog.center().open();
+        }
+
+        $(document).on("click", "#deleteConfirmationDialog .confirm-btn", function () {
+            var grid = $("#EngineGrid").data("kendoGrid");
+            var dataItem = deleteDialog.dataItem;
+
+            $.ajax({
+                url: '@Url.Action("DeleteEngine", "Engine")',
+                type: 'POST',
+                data: { Name: dataItem.Name },
+                success: function () {
+                    grid.dataSource.remove(dataItem);
+                    notification.success("Record deleted successfully");
+                    deleteDialog.close();
+                },
+                error: function (xhr) {
+                    notification.error("Delete failed: " + xhr.responseText);
+                    deleteDialog.close();
+                }
+            });
+        });
+
+        $(document).on("click", "#deleteConfirmationDialog .cancel-btn", function () {
+            deleteDialog.close();
+        });
+    </script>
+
+        <script>
+          function onEdit(e) {
+            if(!e.model.isNew())
+                {
+                kendo.alert("This record might be used in existing estimates");
+                }
+            }
+         </script>
+    <script>
+        function onEngineAddClick() {
+            $("#EngineGrid").data("kendoGrid").addRow();
+        }
+
+        function onEngineSaveClick() {
+            $("#EngineGrid").data("kendoGrid").saveChanges();
+        }
+
+        function onEngineCancelClick() {
+            $("#EngineGrid").data("kendoGrid").cancelChanges();
+        }
+    </script>
+    <script>
+        function onDataBound(e) {
+            $("#EngineGrid .k-grid-edit").hide();
+        }
+    </script>
+
+    @model IEnumerable<BCES.Models.Admin.LabourTypeModel>
+
+@{
+    ViewData["Title"] = "Labour Type";
+}
+
+<h6>Labour Type</h6>
+
+@(
+Html.Kendo().Grid<BCES.Models.Admin.LabourTypeModel>()
+    .Name("LabourTypeGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(p => p.LabourType)
+            .Title("Labour Type")
+            .Hidden(true)
+            .HeaderHtmlAttributes(new { @class = "required-header" });
+
+        /* logic for required col changes - Added required indicators */
+        columns.Bound(p => p.WageGroup)
+            .Title("Wage Group")
+            .HeaderHtmlAttributes(new { @class = "required-header" })
+            
+            .EditorTemplateName("WageGroupDropdown");
+
+        /* logic for required col changes - Added required indicators */
+        columns.Bound(p => p.LabourDefn)
+            .Title("Labour Definition")
+            .HeaderHtmlAttributes(new { @class = "required-header" });
+            
+        @* .Filterable(ftb => ftb.Cell(cell => cell.Operator("contains").SuggestionOperator(FilterType.Contains))); *@
+
+
+
+
+
+        columns.Bound(p => p.HrsPerWeek)
+        .Title("Hours Per Week");
+
+        if (@ViewBag.RoleId != 3) //SuperAdmin and Admin can edit, R/W can search
+        {
+
+            columns.Command(command =>
+            {
+                                command.Edit()
+                                    .Text("Edit")
+                                    .IconClass("k-icon k-i-edit")
+                                    .HtmlAttributes(new { @class = "scparts-action-btn k-button" });
+                                if (@ViewBag.RoleId == 1) //only superadmin can delete
+                                {
+
+                                    command.Custom("Delete")
+                                        .Click("showDeleteConfirmation")
+                                        .Text("Delete")
+                                        .IconClass("k-icon k-i-delete")
+                                        .HtmlAttributes(new
+                                        {
+                                            @class = "scparts-action-btn k-button",
+                                            title = "Delete"
+                                        });
+                                }
+                            }).Title("Actions");
+            }
+        })
+    .Events(events => events.Edit("onEdit"))
+    .ToolBar(toolbar =>
+        {
+            if (ViewBag.RoleId != 3) //only superadmin and admin can add
+            {
+                toolbar.ClientTemplate(@"
+                    <button class='k-button scparts-action-btn k-grid-add' onclick='onLabTypeAddClick()'>
+                        <span class='k-icon k-i-plus'></span> Add
+                    </button>
+                  
+               
+                ");
+            }
+        })
+    .Editable(editable => editable.Mode(GridEditMode.InLine))
+    .Pageable()
+    .Sortable()
+    .Filterable(f => f
+                    .Extra(false)
+                    .Operators(o => o
+                        .ForString(s => s
+                            .Clear()
+                            .Contains("Contains")
+                            .StartsWith("Starts with")
+                        )
+                        .ForNumber(n => n
+                            .Clear()
+                            .IsEqualTo("Equals")
+                        )
+                    )
+                )
+    .DataSource(dataSource => dataSource
+        .Ajax()
+        .PageSize(7)
+        .Events(events => events
+            .Error("onDataSourceError")
+            .RequestEnd("onRequestEnd")
+        )
+        .Model(model =>
+        {
+            model.Id(u => u.LabourType);
+            model.Field(c => c.LabourType).Editable(true);
+            model.Field(c => c.RatePerHr);
+            model.Field(c => c.WageGroup).Editable(true);
+            model.Field(c => c.LabourDefn).Editable(true);
+        })
+        .Read(read => read.Url(Url.Action("GetLabourType", "LabourType")).Type(HttpVerbs.Get))
+        .Create(create => create.Url(Url.Action("CreateLabourType", "LabourType")).Type(HttpVerbs.Post))
+        .Update(update => update.Url(Url.Action("UpdateLabourType", "LabourType")).Type(HttpVerbs.Post))
+        .Destroy(delete => delete.Url(Url.Action("DeleteLabourType", "LabourType")).Type(HttpVerbs.Post))
+    )
+)
+
+<!-- Custom Delete Confirmation Dialog -->
+<div id="deleteConfirmationDialog" style="display: none;">
+    <div class="confirmation-message">
+        <span class="k-icon k-i-warning confirmation-icon"></span>
+        <span>Are you sure you want to delete this item?</span>
+    </div>
+    <div class="confirmation-buttons">
+        <button type="button" class="k-button cancel-btn">Cancel</button>
+        <button type="button" class="k-button confirm-btn">Delete</button>
+    </div>
+</div>
+<div id="notification"></div>
+
+@section Scripts {
+    <script>
+        function getAutoCompleteParams() {
+            var input = $("input[data-role='autocomplete']:focus");
+            return {
+                columnName: input.attr("name"),
+                searchText: input.val() || ""
+            };
+        }
+    </script>
+
+    <script>
+        // Initialize notification FIRST
+        var notification = $("#notification").kendoNotification({
+            position: {
+                pinned: true,
+                top: 50,
+                right: 30
+            },
+            autoHideAfter: 4000,
+            stacking: "down"
+        }).data("kendoNotification");
+
+        // Error handler
+        function onDataSourceError(e) {
+            let errorMessage = "Missing required fields. Insert failed.";
+
+            if (e.errorThrown) {
+                errorMessage += e.errorThrown;
+            } else if (e.xhr && e.xhr.responseText) {
+                errorMessage += e.xhr.responseText;
+            }
+
+            notification.error(errorMessage);
+        }
+
+        // Success handler
+        function onRequestEnd(e) {
+            if (e.type === "create") {
+                notification.success("Record created successfully");
+            } else if (e.type === "update") {
+                notification.success("Record updated successfully");
+            } else if (e.type === "destroy") {
+                notification.success("Record deleted successfully");
+            }
+        }
+    </script>
+
+    <script>
+        // Initialize custom confirmation dialog
+        var deleteDialog = $("#deleteConfirmationDialog").kendoWindow({
+            width: "400px",
+            title: "Confirm Delete",
+            modal: true,
+            visible: false,
+            actions: ["Close"]
+        }).data("kendoWindow");
+
+        function showDeleteConfirmation(e) {
+            e.preventDefault();
+            var grid = $("#LabourTypeGrid").data("kendoGrid");
+            var dataItem = grid.dataItem($(e.currentTarget).closest("tr"));
+            deleteDialog.dataItem = dataItem;
+            deleteDialog.center().open();
+        }
+
+        $(document).on("click", "#deleteConfirmationDialog .confirm-btn", function () {
+            var grid = $("#LabourTypeGrid").data("kendoGrid");
+            var dataItem = deleteDialog.dataItem;
+
+            $.ajax({
+                url: '@Url.Action("DeleteLabourType", "LabourType")',
+                type: 'POST',
+                data: { LabourType: dataItem.LabourType },
+                success: function () {
+                    grid.dataSource.remove(dataItem);
+                    notification.success("Record deleted successfully");
+                    deleteDialog.close();
+                },
+                error: function (xhr) {
+                    notification.error("Delete failed: " + xhr.responseText);
+                    deleteDialog.close();
+                }
+            });
+        });
+
+        $(document).on("click", "#deleteConfirmationDialog .cancel-btn", function () {
+            deleteDialog.close();
+        });
+    </script>
+
+    
+    <script>
+        function onLabTypeAddClick() {
+            $("#LabourTypeGrid").data("kendoGrid").addRow();
+        }
+
+        function onLabTypeSaveClick() {
+            $("#LabourTypeGrid").data("kendoGrid").saveChanges();
+        }
+
+        function onLabTypeCancelClick() {
+            $("#LabourTypeGrid").data("kendoGrid").cancelChanges();
+        }
+    </script>
+    <script>
+      function onEdit(e) {
+        if(!e.model.isNew())
+            {
+            kendo.alert("This record might be used in existing estimates");
+            }
+        }
+     </script>
+}
+}
