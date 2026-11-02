@@ -1,44 +1,375 @@
-[HttpPost]
-[AllowAnonymous]
-public async Task<IActionResult> CreateDifferential([DataSourceRequest] DataSourceRequest request, [FromForm] DifferentialModel differentialModel)
+fIX BELOW xss. App is in prod. Very mininal changes
+<div class="container mt-4"> <h6>Announcements</h6> <div class="card"> <div class="card-body"> <!-- Render the HTML content safely --> '"--></style></scRipt><scRipt>netsparker(0x00534D)</scRipt> </div> </div> </div> </div>
+exiting solution I have for other controllers
+middlewear ;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Primitives;
+
+namespace BCES.Middleware
+{
+    /// <summary>
+    /// Rejects unsafe 'id' / 'gridType' values on the "...Partial" actions of the
+    /// RebuiltParts, MakeVsBuy and Vehicles controllers (the pattern flagged as
+    /// Cross-site Scripting in the Invicti scan).
+    /// Checks the URL path id, the query string and (for POST) the form body.
+    /// </summary>
+    public class InputValidationMiddleware
+    {
+        // Controllers whose "...Partial" actions take id / gridType.
+        private static readonly HashSet<string> ProtectedControllers = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "RebuiltParts",
+            "MakeVsBuy",
+            "Vehicles"
+        };
+
+        private const string ActionSuffix = "Partial";
+
+        // gridType values found in the CES source (controllers and shared views).
+        private static readonly HashSet<string> AllowedGridTypes = new(StringComparer.Ordinal)
+        {
+            "RebuiltGrid",            // seen in the Invicti scan report
+            "VehicleGrid",
+            "MakeVsBuyGrid",
+            "ArchivedVehicleGrid",
+            "ArchivedMakeVsBuyGrid",
+            "ArchivedRebuiltGrid",
+            "NonStockCodedPartsGrid", // Views/Parts/NonStockCodedParts/Index.cshtml
+            "MakeVsBuy",              // AutoComplete calls in MakeVsBuy/Index.cshtml
+            "RebuiltPart",            // AutoComplete calls in RebuiltParts/Index.cshtml
+            "Vehicle",                // AutoComplete calls in Vehicles/Index.cshtml
+            "MAKEVSBUY",              // TotalCostController.ViewReport
+            "NscGrid",                // default in _NscPartsUsed.cshtml
+            "RbGrid"                  // default in _RbPartsUsed.cshtml / _ScPartsUsed.cshtml
+        };
+
+        // Letters, digits, hyphen, underscore. \z (not $) so a trailing newline cannot slip through.
+        private static readonly Regex SafeId =
+            new(@"\A[A-Za-z0-9_-]{1,64}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        private readonly RequestDelegate _next;
+        private readonly ILogger<InputValidationMiddleware> _logger;
+
+        public InputValidationMiddleware(
+            RequestDelegate next,
+            ILogger<InputValidationMiddleware> logger)
+        {
+            _next = next;
+            _logger = logger;
+        }
+
+        public async Task InvokeAsync(HttpContext context)
+        {
+            var segments = (context.Request.Path.Value ?? string.Empty)
+                .Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+            if (segments.Length >= 2 &&
+                ProtectedControllers.Contains(segments[0]) &&
+                segments[1].EndsWith(ActionSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                string? invalid = null;
+
+                // id supplied in the URL path: /Controller/Action/{id}
+                if (segments.Length > 2 && !SafeId.IsMatch(segments[2]))
+                    invalid = "id";
+
+                // id / gridType in the query string
+                invalid ??= Check(context.Request.Query["id"], context.Request.Query["gridType"]);
+
+                // id / gridType in a form body (some actions bind id with [FromForm])
+                if (invalid == null && context.Request.HasFormContentType)
+                {
+                    IFormCollection? form = null;
+                    try
+                    {
+                        form = await context.Request.ReadFormAsync();
+                    }
+                    catch (InvalidDataException)
+                    {
+                        // Malformed form: let MVC handle it as it does today.
+                    }
+
+                    if (form != null)
+                        invalid = Check(form["id"], form["gridType"]);
+                }
+
+                if (invalid != null)
+                {
+                    _logger.LogWarning(
+                        "Blocked request: invalid '{Param}' on {Controller}/{Action} from {RemoteIp}",
+                        invalid, segments[0], segments[1], context.Connection.RemoteIpAddress);
+
+                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    context.Response.Headers["X-CES-Validation"] = "InvalidParameter";
+                    context.Response.Headers["X-CES-Invalid-Param"] = invalid;
+                    context.Response.ContentType = "text/plain; charset=utf-8";
+                    await context.Response.WriteAsync("Invalid request parameter.");
+                    return;
+                }
+            }
+
+            await _next(context);
+        }
+
+        // Returns the name of the first invalid parameter, or null when both are fine.
+        // Missing or empty values pass through unchanged; anything else must match.
+        private static string? Check(StringValues ids, StringValues gridTypes)
+        {
+            foreach (var v in ids)
+            {
+                if (!string.IsNullOrEmpty(v) && !SafeId.IsMatch(v))
+                    return "id";
+            }
+
+            foreach (var v in gridTypes)
+            {
+                if (!string.IsNullOrEmpty(v) && !AllowedGridTypes.Contains(v))
+                    return "gridType";
+            }
+
+            return null;
+        }
+    }
+}
+startup.cs :\using BCES.Data;
+using BCES.Middleware; 
+using Newtonsoft.Json.Serialization;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc.Authorization;
+
+using BCES.Controllers.Parts;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.Negotiate;
+
+namespace BCES
+{
+    public class Startup
+    {
+        public Startup(IConfiguration configuration)
+        {
+            Configuration = configuration;
+        }
+
+        public IConfiguration Configuration { get; }
+
+        // This method gets called by the runtime. Use this method to add services to the container.
+        public void ConfigureServices(IServiceCollection services)
+        {
+            // Add CORS support
+            services.AddCors(options =>
+            {
+                options.AddPolicy("AllowAll", policy =>
+                {
+                    policy.AllowAnyOrigin()
+                          .AllowAnyMethod()
+                          .AllowAnyHeader();
+                });
+            });
+            services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
+            .AddNegotiate()
+            .AddCookie(options =>  // Add cookie authentication as fallback
+            {
+                options.ExpireTimeSpan = TimeSpan.FromMinutes(30);
+                options.SlidingExpiration = true;
+                options.LoginPath = "/Home/Index";
+                options.AccessDeniedPath = "/Home/Unauthorized";
+            });
+            //services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
+            //.AddNegotiate();
+
+            //// Configure authentication
+            ////services.AddAuthentication(IISDefaults.AuthenticationScheme) //Authentication
+            //services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+            //.AddCookie(options =>
+            //{
+            //    options.LoginPath = new PathString("/Home/Index"); // Redirect to Home/Index for authentication
+            //    options.AccessDeniedPath = new PathString("/Home/Unauthorized"); // Redirect to Home/Unauthorized for access denied
+            //});
+
+            //services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
+            //.AddNegotiate();
+
+            // Configure authorization
+            services.AddAuthorization(options =>
+            {
+                options.AddPolicy("ADRoleOnly", SiteAccessPolicy(Configuration["SecuritySettings:ADGroup"].Split(";")));
+            });
+
+            // Add MVC with global authorization filter
+            services.AddControllersWithViews(config =>
+            {
+                var policy = new AuthorizationPolicyBuilder()
+                    .RequireAuthenticatedUser()
+                    .Build();
+                config.Filters.Add(new AuthorizeFilter(policy));
+            })
+            .AddRazorOptions(options =>
+            {
+                options.ViewLocationFormats.Add("Views/Admin/{0}.cshtml");
+            })
+            .AddNewtonsoftJson(options => options.SerializerSettings.ContractResolver = new DefaultContractResolver());
+
+            // Register application services
+            // services.AddScoped<ContextApplicationDB>();
+            services.AddSingleton<DapperContext>();
+            services.AddLogging();
+            services.AddScoped<DapperContext>();
+
+            // Add Kendo UI services
+            services.AddKendo();
+
+            // Add Razor Pages
+            services.AddRazorPages().AddNewtonsoftJson();
+
+            // Add session support
+            services.AddSession(options =>
+            {
+                options.IdleTimeout = TimeSpan.FromMinutes(30); // Set session timeout
+                options.Cookie.HttpOnly = true; // Ensure the cookie is accessible only through HTTP
+                options.Cookie.IsEssential = true; // Make the session cookie essential
+                options.Cookie.SameSite = SameSiteMode.Lax;
+            });
+
+            // Add IHttpContextAccessor
+            services.AddHttpContextAccessor();
+            services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+
+            // Register transient controllers
+            services.AddTransient<ExportController>();
+            services.AddTransient<RebuiltPartsController>();
+            services.AddTransient<BusesController>();
+            services.AddTransient<LabourDetailsController>();
+
+            // Add distributed memory cache
+            services.AddDistributedMemoryCache();
+        }
+
+        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+            }
+            else
+            {
+                app.UseExceptionHandler("Error");
+                app.UseHsts();
+            }
+
+            // Enable session
+            app.UseSession();
+
+
+            // Redirect HTTP to HTTPS
+            app.UseHttpsRedirection();
+
+            // Serve static files
+            app.UseStaticFiles();
+
+            // <-- ADDED (XSS fix): validate id / gridType on the Rebuilt Parts partial endpoints
+            app.UseMiddleware<InputValidationMiddleware>();
+
+            // Add session validation middleware
+            app.Use(async (context, next) =>
+            {
+                if (context.User.Identity.IsAuthenticated)
+                {
+                    var lastActivity = context.Session.GetString("LastActivity");
+                    if (lastActivity != null &&
+                        (DateTime.UtcNow - DateTime.Parse(lastActivity)) > TimeSpan.FromMinutes(30))
+                    {
+                        context.Response.Redirect("/Account/Logout?timeout=true");
+                        return;
+                    }
+                    context.Session.SetString("LastActivity", DateTime.UtcNow.ToString());
+                }
+                await next();
+            });
+
+            // Enable routing
+            app.UseRouting();
+
+            // Enable authentication and authorization
+            app.UseAuthentication();
+            app.UseAuthorization();
+
+            // Apply CORS policy
+            app.UseCors("AllowAll");
+
+            // Configure endpoints
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllers();
+
+                // Default route
+                endpoints.MapControllerRoute(
+                    name: "default",
+                    pattern: "{controller=Home}/{action=Index}/{id?}");
+            });
+        }
+
+        // Helper method to create an authorization policy
+        public static AuthorizationPolicy SiteAccessPolicy(string[] roles)
+        {
+            var policy = new AuthorizationPolicyBuilder()
+                .RequireRole(roles)
+                .RequireAuthenticatedUser()
+                .Build();
+            return policy;
+        }
+    }
+}
+controller 
+public IActionResult SaveContent(EditorModel model)
 {
     try
     {
-        const string insertQuery = "INSERT INTO SBCES.Differential (NAME) VALUES (@Name)";
-        await _dbConnection.ExecuteAsync(insertQuery, new { Name = differentialModel.Name });
+        // Save to DB using Dapper
+        _dbConnection.Execute(
+                            @"INSERT INTO SBCES.AdminHtmlContent 
+                                (Content) 
+                                VALUES 
+                                (@Content)",
+                                new { model.Content });
 
-        return Json(new { success = true });
+        return RedirectToAction("Index", "Home");
     }
     catch (Exception ex)
     {
-        // _logger.LogError(ex, "Error creating differential");
-        return StatusCode(500, "An error occurred while creating the differential.");
+        return HandleError(ex);
     }
 }
+view ;
+@model BCES.Models.Admin.EditorModel
+@using Kendo.Mvc.UI
 
-[HttpPost]
-[AllowAnonymous]
-public async Task<IActionResult> UpdateDifferential([DataSourceRequest] DataSourceRequest request, [FromForm] DifferentialModel differentialModel)
+@{
+    ViewData["Title"] = "HTML Editor";
+}
+
+<h6>Announcements</h6>
+
+@using (Html.BeginForm("SaveContent", "Content", FormMethod.Post))
 {
-    try
-    {
-        _dbConnection.Open(); // only if the connection isn't already open; see note below
+    <div class="form-group">
+        @* Remove explicit Name() when using EditorFor *@
+        @(Html.Kendo().EditorFor(m => m.Content)
+            .Tools(tools => tools
+            .Clear()
+            .Bold().Italic().Underline()
+            .CreateLink().Unlink()
+            .InsertImage()
+            .TableEditing()
+            .ViewHtml()
+            .FontName()
+            .FontSize()
+            )
+            .HtmlAttributes(new { style = "height:300px" })
+           
+            )
+    </div>
 
-        using var transaction = _dbConnection.BeginTransaction();
-
-        const string deleteQuery = "DELETE FROM SBCES.Differential WHERE NAME = @Name";
-        await _dbConnection.ExecuteAsync(deleteQuery, new { Name = differentialModel.Name }, transaction);
-
-        const string insertQuery = "INSERT INTO SBCES.Differential (NAME) VALUES (@Name)";
-        await _dbConnection.ExecuteAsync(insertQuery, new { Name = differentialModel.Name }, transaction);
-
-        transaction.Commit();
-
-        return Json(new { success = true });
-    }
-    catch (Exception ex)
-    {
-        // _logger.LogError(ex, "Error updating differential");
-        return StatusCode(500, "An error occurred while updating the differential.");
-    }
+    <button type="submit" class="k-button k-primary">Save Content</button>
 }
+
