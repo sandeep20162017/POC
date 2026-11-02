@@ -1,0 +1,58 @@
+The fix is to sanitize the HTML with an allow-list sanitizer. Your regex middleware won’t work here because the field is legitimately HTML. Sanitize on save so new data is clean, and on render so rows already in the DB (including the Invicti payload) are neutralized. I haven’t seen your Announcements view, so adjust the names below.
+
+1. Install the package
+
+dotnet add package HtmlSanitizer
+
+2. Startup.cs: one line in ConfigureServices
+
+csharp
+services.AddSingleton<Ganss.Xss.IHtmlSanitizer>(_ =>
+{
+    var s = new Ganss.Xss.HtmlSanitizer();   // default allow-list: b, i, u, a, img, table, font, span, etc.
+    s.AllowedSchemes.Add("mailto");          // http/https are allowed by default
+    // s.AllowedSchemes.Add("data");         // only if the Kendo image tool embeds base64 images
+    return s;
+});
+
+Scripts, event handlers (onerror=), javascript: URLs, and unknown tags are stripped by default.
+
+3. Controller: sanitize on save
+
+csharp
+private readonly Ganss.Xss.IHtmlSanitizer _sanitizer;
+// add to the constructor: IHtmlSanitizer sanitizer → _sanitizer = sanitizer;
+
+public IActionResult SaveContent(EditorModel model)
+{
+    try
+    {
+        var clean = _sanitizer.Sanitize(model.Content ?? string.Empty);
+
+        _dbConnection.Execute(
+            @"INSERT INTO SBCES.AdminHtmlContent (Content) VALUES (@Content)",
+            new { Content = clean });
+
+        return RedirectToAction("Index", "Home");
+    }
+    catch (Exception ex)
+    {
+        return HandleError(ex);
+    }
+}
+
+4. The Announcements view (the page Invicti flagged): sanitize on render
+
+cshtml
+@inject Ganss.Xss.IHtmlSanitizer Sanitizer
+...
+<div class="card-body">
+    @Html.Raw(Sanitizer.Sanitize(Model.Content))
+</div>
+
+If the view currently uses Html.Raw(Model.Content) or @Model.Content with a custom helper, swap in the line above. If it doesn’t use Html.Raw, the payload would appear as text rather than execute. In that case, check whether the content is written out through a script block or innerHTML.
+
+Notes
+
+Output sanitizing is the important part. It protects against already-stored payloads and any other write path into that table (direct DB edits, imports). Save-time sanitizing is defense in depth.
+Cleaning up the existing row: delete or edit the scan payload row in SBCES.AdminHtmlContent. Render-time sanitizing already neutralizes it.
