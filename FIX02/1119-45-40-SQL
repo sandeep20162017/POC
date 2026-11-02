@@ -1,39 +1,44 @@
-Update below, send parametarized SQL query to avoild sql attacks. Give me full fixed functions
-        [HttpPost]
-        [AllowAnonymous]
-        public async Task<IActionResult> CreateDifferential([DataSourceRequest] DataSourceRequest request, [FromForm] DifferentialModel differentialModel)
-        {
-           
-            try
-            {
-                var insertQuery = "INSERT INTO SBCES.Differential (NAME) VALUES ('" + differentialModel.Name + "')";
-                await _dbConnection.ExecuteAsync(insertQuery, differentialModel);
-                return Json(new { success = true });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, "An error occurred while updating the transmission.");
-            }
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> CreateDifferential([DataSourceRequest] DataSourceRequest request, [FromForm] DifferentialModel differentialModel)
+{
+    try
+    {
+        const string insertQuery = "INSERT INTO SBCES.Differential (NAME) VALUES (@Name)";
+        await _dbConnection.ExecuteAsync(insertQuery, new { Name = differentialModel.Name });
 
-        }
+        return Json(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        // _logger.LogError(ex, "Error creating differential");
+        return StatusCode(500, "An error occurred while creating the differential.");
+    }
+}
 
-        [HttpPost]
-        [AllowAnonymous]
-        public async Task<IActionResult> UpdateDifferential([DataSourceRequest] DataSourceRequest request, [FromForm] DifferentialModel differentialModel)
-        {
+[HttpPost]
+[AllowAnonymous]
+public async Task<IActionResult> UpdateDifferential([DataSourceRequest] DataSourceRequest request, [FromForm] DifferentialModel differentialModel)
+{
+    try
+    {
+        _dbConnection.Open(); // only if the connection isn't already open; see note below
 
-            try
-            {
-                var deleteQuery = "DELETE FROM SBCES.Differential WHERE NAME = '" + differentialModel.Name + "'";
-                await _dbConnection.ExecuteAsync(deleteQuery, differentialModel);
+        using var transaction = _dbConnection.BeginTransaction();
 
-                var insertQuery = "INSERT INTO SBCES.Differential (NAME) VALUES ('" + differentialModel.Name + "')";
-                await _dbConnection.ExecuteAsync(insertQuery, differentialModel);
-                return Json(new { success = true });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, "An error occurred while updating the transmission.");
-            }
+        const string deleteQuery = "DELETE FROM SBCES.Differential WHERE NAME = @Name";
+        await _dbConnection.ExecuteAsync(deleteQuery, new { Name = differentialModel.Name }, transaction);
 
-        }
+        const string insertQuery = "INSERT INTO SBCES.Differential (NAME) VALUES (@Name)";
+        await _dbConnection.ExecuteAsync(insertQuery, new { Name = differentialModel.Name }, transaction);
+
+        transaction.Commit();
+
+        return Json(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        // _logger.LogError(ex, "Error updating differential");
+        return StatusCode(500, "An error occurred while updating the differential.");
+    }
+}
