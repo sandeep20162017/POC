@@ -1,0 +1,208 @@
+/* =====================================================================
+   Streetcar maintenance POC - sample extraction queries (SQL Server)
+   Database: MAXIMO     Site: STRCAR
+   All queries are read-only. Run each section and export the result
+   to CSV (SSMS: right-click result > Save Results As...).
+
+   PRIVACY: person-related columns (labor codes/badges, reportedby,
+   owner, supervisor, createby, changeby) are hashed in the queries
+   below. Replace HASHBYTES(...) with the raw column if your rules allow.
+   ===================================================================== */
+USE [MAXIMO];
+GO
+
+/* ---------------------------------------------------------------------
+   PART A - VOCABULARY (small, non-sensitive, MOST IMPORTANT)
+   These tell me what values exist so the synthetic data looks real.
+   --------------------------------------------------------------------- */
+
+-- A1. Volume check: rows per table for the POC scope
+SELECT 'WORKORDER (STRCAR)'  AS tbl, COUNT(*) AS cnt FROM workorder   WHERE siteid='STRCAR'
+UNION ALL SELECT 'ASSET (STRCAR)',         COUNT(*) FROM asset        WHERE siteid='STRCAR'
+UNION ALL SELECT 'PM (STRCAR)',            COUNT(*) FROM pm           WHERE siteid='STRCAR'
+UNION ALL SELECT 'WOSTATUS (STRCAR)',      COUNT(*) FROM wostatus     WHERE siteid='STRCAR'
+UNION ALL SELECT 'WORKLOG (STRCAR)',       COUNT(*) FROM worklog      WHERE siteid='STRCAR'
+UNION ALL SELECT 'LABTRANS (STRCAR)',      COUNT(*) FROM labtrans     WHERE siteid='STRCAR'
+UNION ALL SELECT 'MATUSETRANS (STRCAR)',   COUNT(*) FROM matusetrans  WHERE siteid='STRCAR'
+UNION ALL SELECT 'FAILUREREPORT (STRCAR)', COUNT(*) FROM failurereport WHERE siteid='STRCAR';
+
+-- A2. Date range of work orders
+SELECT MIN(reportdate) AS first_reported, MAX(reportdate) AS last_reported
+FROM workorder WHERE siteid='STRCAR';
+
+-- A3. Work orders by status and work type
+SELECT status, worktype, COUNT(*) AS cnt
+FROM workorder WHERE siteid='STRCAR' AND istask=0
+GROUP BY status, worktype ORDER BY cnt DESC;
+
+-- A4. Priority values
+SELECT wopriority, COUNT(*) AS cnt
+FROM workorder WHERE siteid='STRCAR' AND istask=0
+GROUP BY wopriority ORDER BY wopriority;
+
+-- A5. Work type definitions
+SELECT worktype, wtypedesc, woclass, startstatus, completestatus FROM worktype;
+
+-- A6. Carhouse (eq11) and fleet/family (eq23) values on vehicles
+SELECT eq11 AS carhouse, eq23 AS fleet_family, assettype, status, COUNT(*) AS cnt
+FROM asset WHERE siteid='STRCAR'
+GROUP BY eq11, eq23, assettype, status ORDER BY cnt DESC;
+
+-- A7. Failure code hierarchy (problem / cause / remedy)
+SELECT type, failurelist, failurecode, parent
+FROM failurelist WHERE siteid='STRCAR' OR siteid IS NULL
+ORDER BY type, parent, failurecode;
+
+-- A8. Failure codes actually used (frequency)
+SELECT type, failurecode, COUNT(*) AS cnt
+FROM failurereport WHERE siteid='STRCAR'
+GROUP BY type, failurecode ORDER BY type, cnt DESC;
+
+-- A9. Craft and crew vocabularies
+SELECT craft, description FROM craft;
+SELECT amcrew, amcrewtype, description, status FROM amcrew;
+
+-- A10. PM frequency units and counts
+SELECT frequnit, frequency, worktype, COUNT(*) AS pm_count
+FROM pm WHERE siteid='STRCAR'
+GROUP BY frequnit, frequency, worktype ORDER BY pm_count DESC;
+
+-- A11. Meter names in use on vehicles
+SELECT metername, COUNT(*) AS assets, MAX(lastreadingdate) AS latest_reading
+FROM assetmeter WHERE siteid='STRCAR'
+GROUP BY metername ORDER BY assets DESC;
+
+-- A12. Issue types and storerooms for parts
+SELECT issuetype, storeloc, COUNT(*) AS cnt
+FROM matusetrans WHERE siteid='STRCAR'
+GROUP BY issuetype, storeloc ORDER BY cnt DESC;
+
+
+/* ---------------------------------------------------------------------
+   PART B - ROW SAMPLES (each limited; person fields hashed)
+   --------------------------------------------------------------------- */
+
+-- B1. ASSET - 30 vehicles (vehicle-level: assetnum = location)
+SELECT TOP 30
+    assetnum, description, parent, location, status, installdate,
+    manufacturer, eq11 AS carhouse, eq23 AS fleet_family, eq24,
+    assettype, totalcost, ytdcost, totdowntime, priority, statusdate
+FROM asset
+WHERE siteid='STRCAR' AND assetnum = location
+ORDER BY assetnum;
+
+-- B2. WORKORDER - 200 recent non-task work orders (mixed types)
+SELECT TOP 200
+    wonum, workorderid, parent, istask, status, statusdate, worktype, wopriority,
+    description, assetnum, location, pmnum, jpnum, failurecode, problemcode,
+    reportdate, schedstart, schedfinish, targstartdate, targcompdate,
+    actstart, actfinish, estlabhrs, actlabhrs,
+    estlabcost, actlabcost, estmatcost, actmatcost,
+    crewid, ownergroup, persongroup,
+    CONVERT(VARCHAR(12), HASHBYTES('SHA2_256', ISNULL(reportedby,'')), 2) AS reportedby_hash,
+    CONVERT(VARCHAR(12), HASHBYTES('SHA2_256', ISNULL(owner,'')),      2) AS owner_hash
+FROM workorder
+WHERE siteid='STRCAR' AND istask=0
+ORDER BY reportdate DESC;
+
+-- B3. WOSTATUS - status history for those same work orders
+SELECT TOP 1000 ws.wonum, ws.status, ws.changedate, ws.memo
+FROM wostatus ws
+WHERE ws.siteid='STRCAR'
+  AND ws.wonum IN (SELECT TOP 200 wonum FROM workorder
+                   WHERE siteid='STRCAR' AND istask=0 ORDER BY reportdate DESC)
+ORDER BY ws.wonum, ws.changedate;
+
+-- B4. WORKLOG - technician narrative (the free text the AI will read)
+--     Review for names/phone numbers before sharing.
+SELECT TOP 300 recordkey AS wonum, logtype, description, createdate
+FROM worklog
+WHERE siteid='STRCAR' AND class='WORKORDER'
+ORDER BY createdate DESC;
+
+-- B5. LONGDESCRIPTION - long text on work orders
+SELECT TOP 100 w.wonum, ld.ldtext
+FROM workorder w
+JOIN longdescription ld ON ld.ldkey = w.workorderid AND ld.ldownertable='WORKORDER'
+WHERE w.siteid='STRCAR' AND w.istask=0
+ORDER BY w.reportdate DESC;
+
+-- B6. FAILUREREPORT - problem/cause/remedy for the same work orders
+SELECT TOP 600 fr.wonum, fr.type, fr.failurecode, fr.linenum
+FROM failurereport fr
+WHERE fr.siteid='STRCAR'
+  AND fr.wonum IN (SELECT TOP 200 wonum FROM workorder
+                   WHERE siteid='STRCAR' AND istask=0 ORDER BY reportdate DESC)
+ORDER BY fr.wonum, fr.type;
+
+-- B7. PM - 50 preventive maintenance schedules
+SELECT TOP 50
+    pmnum, description, assetnum, location, jpnum, frequency, frequnit,
+    lastcompdate, nextdate, worktype, priority, status, pmeq1 AS dept, crewid, leadtime
+FROM pm WHERE siteid='STRCAR'
+ORDER BY pmnum;
+
+-- B8. JOBPLAN + JOBTASK - what a PM job actually contains
+SELECT TOP 20 jpnum, description, jpduration, crewid, status
+FROM jobplan WHERE siteid='STRCAR' ORDER BY jpnum;
+
+SELECT TOP 100 jpnum, jptask, description, taskduration, tasksequence
+FROM jobtask WHERE siteid='STRCAR' ORDER BY jpnum, tasksequence;
+
+-- B9. WPLABOR (planned) and LABTRANS (actual) - hashed labor codes
+SELECT TOP 300 wonum,
+    CONVERT(VARCHAR(12), HASHBYTES('SHA2_256', ISNULL(laborcode,'')), 2) AS labor_hash,
+    craft, laborhrs, rate
+FROM wplabor WHERE siteid='STRCAR' ORDER BY wonum;
+
+SELECT TOP 300 refwo AS wonum,
+    CONVERT(VARCHAR(12), HASHBYTES('SHA2_256', ISNULL(laborcode,'')), 2) AS labor_hash,
+    craft, transdate, regularhrs, premiumpayhours, linecost, transtype
+FROM labtrans WHERE siteid='STRCAR' ORDER BY transdate DESC;
+
+-- B10. WPITEM (planned parts) and MATUSETRANS (actual parts)
+SELECT TOP 300 wonum, itemnum, description, itemqty, unitcost, linecost
+FROM wpitem WHERE siteid='STRCAR' ORDER BY wonum;
+
+SELECT TOP 300 refwo AS wonum, itemnum, storeloc, quantity, unitcost, linecost,
+       transdate, issuetype, assetnum
+FROM matusetrans WHERE siteid='STRCAR' ORDER BY transdate DESC;
+
+-- B11. ITEM / INVENTORY / INVBALANCES - parts master and stock
+SELECT TOP 100 i.itemnum, i.description, i.itemtype, i.rotating, i.status,
+       inv.storeloc, inv.minlevel, inv.maxlevel, inv.orderqty, inv.deliverytime,
+       inv.issueytd, inv.issue1yrago, inv.lastissuedate
+FROM item i
+JOIN inventory inv ON inv.itemnum = i.itemnum AND inv.siteid='STRCAR'
+ORDER BY inv.issueytd DESC;
+
+SELECT TOP 100 itemnum, location AS storeloc, binnum, curbal
+FROM invbalances WHERE siteid='STRCAR' ORDER BY itemnum;
+
+-- B12. ASSETMETER + METERREADING - odometer / hours
+SELECT TOP 100 assetnum, metername, lastreading, lastreadingdate, sincelastrepair, sinceinstall
+FROM assetmeter WHERE siteid='STRCAR' ORDER BY assetnum;
+
+SELECT TOP 300 assetnum, metername, reading, delta, readingdate
+FROM meterreading WHERE siteid='STRCAR' ORDER BY readingdate DESC;
+
+
+/* ---------------------------------------------------------------------
+   PART C - ONE VEHICLE END TO END (best single sample for the demo)
+   Change @veh to any vehicle number from B1.
+   --------------------------------------------------------------------- */
+DECLARE @veh VARCHAR(25) = (SELECT TOP 1 assetnum FROM workorder
+                            WHERE siteid='STRCAR' AND assetnum=location
+                            GROUP BY assetnum ORDER BY COUNT(*) DESC);
+SELECT @veh AS vehicle_used;
+
+SELECT wonum, status, worktype, wopriority, description, failurecode, problemcode,
+       reportdate, actstart, actfinish, actlabhrs, actmatcost, pmnum
+FROM workorder WHERE siteid='STRCAR' AND assetnum=@veh AND istask=0
+ORDER BY reportdate;
+
+SELECT wl.recordkey AS wonum, wl.logtype, wl.description, wl.createdate
+FROM worklog wl
+WHERE wl.siteid='STRCAR' AND wl.class='WORKORDER'
+  AND wl.recordkey IN (SELECT wonum FROM workorder WHERE siteid='STRCAR' AND assetnum=@veh)
+ORDER BY wl.createdate;
