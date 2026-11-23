@@ -1,5 +1,5 @@
 /*==============================================================================
-  CES.RptCostVariance2
+  SBCES.RptCostVariance2
   Migrated from Oracle: RPT_COST_VARIANCE_2  (+ INTERNAL_RB_PRICE, RPT_RBP_COST,
   GET_MATERIAL_COST, GET_LABOUR_COST, WRITE_MATERIALS, WRITE_LABOUR, FINAL_COST,
   HHMM_TO_MINUTES) - all folded into ONE stored procedure.
@@ -25,13 +25,13 @@
       CoreCost       = RB_MASTERLIST.CORE_CHARGE text -> number ('$' and ',' cleaned, blank = 0)
 
   ASSUMED MS SQL NAMES (PascalCase of the Oracle snake_case) - please verify:
-    CES.RbMasterlist, CES.StockCodedParts, CES.ScPartsUsed, CES.NscPartsUsed,
-    CES.NonStockCodedParts, CES.CostCentres, CES.EmployeeLabour,
-    CES.EmployeeSalaries, CES.EmplClass, CES.CesSettings
+    SBCES.RbMasterlist, SBCES.StockCodedParts, SBCES.ScPartsUsed, SBCES.NscPartsUsed,
+    SBCES.NonStockCodedParts, SBCES.CostCentres, SBCES.EmployeeLabour,
+    SBCES.EmployeeSalaries, SBCES.EmplClass, SBCES.CesSettings
     one-word Oracle columns: corecost->Corecost, costcentre->Costcentre,
     typeid->Typeid, ID->Id
 ==============================================================================*/
-CREATE OR ALTER PROCEDURE CES.RptCostVariance2
+CREATE OR ALTER PROCEDURE SBCES.RptCostVariance2
     @Debug BIT = 0
 AS
 BEGIN
@@ -81,7 +81,7 @@ BEGIN
                    UPPER(s.MmsRebuiltCode)  AS ChildCode,
                    s.QtyReqd                AS Qty,
                    s.PercentUsage           AS Pct
-            FROM   CES.ScPartsUsed s
+            FROM   SBCES.ScPartsUsed s
             WHERE  s.RebuiltPart = 'Y'
               AND  s.LinkType    = 'RB'
         ),
@@ -98,8 +98,8 @@ BEGIN
             -- same driving set as INTERNAL_RB_PRICE cursor
             -- (note: Oracle "=+" is "= +x", i.e. a plain INNER JOIN)
             SELECT DISTINCT UPPER(m.RebuiltStockNum) AS Code
-            FROM   CES.RbMasterlist    m
-            JOIN   CES.StockCodedParts p ON p.MmsStockCode = m.MmsStockCode
+            FROM   SBCES.RbMasterlist    m
+            JOIN   SBCES.StockCodedParts p ON p.MmsStockCode = m.MmsStockCode
             WHERE  m.RebuiltStockNum IS NOT NULL
         ),
         Tree AS
@@ -131,7 +131,7 @@ BEGIN
                               (SELECT MAX(Lvl) FROM #RbTree));
             RAISERROR(N'%s', 0, 1, @msg) WITH NOWAIT;
             SELECT @n = COUNT(*)
-            FROM   CES.RbMasterlist m JOIN CES.StockCodedParts p ON p.MmsStockCode = m.MmsStockCode
+            FROM   SBCES.RbMasterlist m JOIN SBCES.StockCodedParts p ON p.MmsStockCode = m.MmsStockCode
             WHERE  p.MmsNewCost IS NULL;
             SET @msg = CONCAT(N'[DEBUG] Step 1 RBs with NULL MmsNewCost (ExternalCost -> 0.00): ', @n);
             RAISERROR(N'%s', 0, 1, @msg) WITH NOWAIT;
@@ -142,7 +142,7 @@ BEGIN
         -- Labour overhead rate (Oracle: MAX(to_number(replace(value,',','.'))) WHERE parameter='OVERHEAD')
         SET @OverheadRate =
         (   SELECT MAX(TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), c.Value), N',', N'.')))
-            FROM   CES.CesSettings c
+            FROM   SBCES.CesSettings c
             WHERE  c.Parameter = 'OVERHEAD'   );
 
         /*----------------------------------------------------------------------
@@ -155,7 +155,7 @@ BEGIN
             SELECT s.LinkCode AS Code, s.CostCentre,
                    Cost = CAST( ROUND(n.Pct / 100 * n.Qty * CAST(s.MmsCost  AS DECIMAL(28,10)), 2)
                               - ROUND(n.Pct / 100 * n.Qty * CAST(s.Corecost AS DECIMAL(28,10)), 2) AS DECIMAL(28,10))
-            FROM   CES.ScPartsUsed s
+            FROM   SBCES.ScPartsUsed s
             CROSS APPLY (SELECT
                    Pct = ISNULL(TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), s.PercentUsage), N',', N'.')), 0),
                    Qty =        TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), s.QtyReqd),      N',', N'.'))) n
@@ -168,8 +168,8 @@ BEGIN
             SELECT u.LinkCode, u.CostCentre,
                    Cost = CAST( ROUND(n.Pct / 100 * n.Qty * CAST(p.OemPartCost AS DECIMAL(28,10)), 2)
                               - ROUND(n.Pct / 100 * n.Qty * CAST(u.Corecost    AS DECIMAL(28,10)), 2) AS DECIMAL(28,10))
-            FROM   CES.NscPartsUsed u
-            LEFT JOIN CES.NonStockCodedParts p ON p.Id = u.Id
+            FROM   SBCES.NscPartsUsed u
+            LEFT JOIN SBCES.NonStockCodedParts p ON p.Id = u.Id
             CROSS APPLY (SELECT
                    Pct = ISNULL(TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), u.PercentUsage), N',', N'.')), 0),
                    Qty =        TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), u.QtyReqd),      N',', N'.'))) n
@@ -179,7 +179,7 @@ BEGIN
         (   -- one row per code + cost centre (Oracle GROUP BY cost_centre, name; INNER JOIN cost_centres)
             SELECT p.Code, p.CostCentre, GrpCost = ISNULL(SUM(p.Cost), 0)
             FROM   PartLines p
-            JOIN   CES.CostCentres cc ON cc.CostCentre = p.CostCentre
+            JOIN   SBCES.CostCentres cc ON cc.CostCentre = p.CostCentre
             GROUP  BY p.Code, p.CostCentre, cc.Name
         ),
         Mat AS
@@ -197,9 +197,9 @@ BEGIN
                    Rate  = CAST(es.RatePerHour AS DECIMAL(28,10)),
                    Usage = TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), el.Usage), N',', N'.')),
                    Mins  = m.Mins
-            FROM   CES.EmployeeLabour   el
-            JOIN   CES.EmplClass        ec ON el.LabourDefn = UPPER(ec.LabourDefn)
-            JOIN   CES.EmployeeSalaries es ON es.WageGroup  = ec.WageGroup
+            FROM   SBCES.EmployeeLabour   el
+            JOIN   SBCES.EmplClass        ec ON el.LabourDefn = UPPER(ec.LabourDefn)
+            JOIN   SBCES.EmployeeSalaries es ON es.WageGroup  = ec.WageGroup
             CROSS APPLY (SELECT T = TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), el.TimeAddition), N',', N'.'))) x
             -- inlined HHMM_TO_MINUTES (kept exactly as Oracle, see Behaviour Notes in the Excel)
             CROSS APPLY (SELECT Mins = ROUND((x.T - FLOOR(x.T / 100)) * 60 + FLOOR(x.T / 100) * 60, 0)) m
@@ -251,8 +251,8 @@ BEGIN
                 ExtNum     = CAST(ISNULL(ROUND(p.MmsNewCost, 2), 0) AS DECIMAL(20,2)),
                 m.Active,
                 m.Keyword
-            FROM   CES.RbMasterlist    m
-            JOIN   CES.StockCodedParts p ON p.MmsStockCode = m.MmsStockCode
+            FROM   SBCES.RbMasterlist    m
+            JOIN   SBCES.StockCodedParts p ON p.MmsStockCode = m.MmsStockCode
             LEFT JOIN #RbTotals        t ON t.RootCode     = UPPER(m.RebuiltStockNum)
             -- core cost: Oracle strips '$', swaps ',' for '.', blank/NULL = 0
             CROSS APPLY (SELECT CoreCost = CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(m.CoreCharge, ''))), '') IS NULL THEN 0
