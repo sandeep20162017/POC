@@ -1,0 +1,292 @@
+/*==============================================================================
+  CES.RptCostVariance2
+  Migrated from Oracle: RPT_COST_VARIANCE_2  (+ INTERNAL_RB_PRICE, RPT_RBP_COST,
+  GET_MATERIAL_COST, GET_LABOUR_COST, WRITE_MATERIALS, WRITE_LABOUR, FINAL_COST,
+  HHMM_TO_MINUTES) - all folded into ONE stored procedure.
+
+  Replaces:
+    * Global temp tables TEMP_RBP_COST / TEMP_MATERIALS_LIST / TEMP_LABOUR_LIST
+        -> not needed. Two procedure-scoped #temp tables (#RbTree, #RbTotals) are
+           used only to hold the exploded rebuilt-part tree and the per-RB totals;
+           they are dropped automatically when the proc ends.
+    * Cursor loops + recursive WRITE_MATERIALS / WRITE_LABOUR
+        -> one recursive CTE (rebuilt-part tree) + set-based aggregation.
+    * Scalar functions FINAL_COST / HHMM_TO_MINUTES -> inlined expressions.
+
+  Parameter:
+    @Debug BIT = 0  -> 1 prints progress/row counts (RAISERROR ... WITH NOWAIT)
+                       and returns extra diagnostic result sets BEFORE the
+                       report result set.
+
+  RPT_RBP_COST logic (now complete):
+    TotalCost = ROUND( Materials - CoreCost + Labour + LabourOverhead , 2 )
+      Labour         = sum of labour lines, each rounded to 2 dp (TEMP_LABOUR_LIST.TOTAL_COST is NUMBER(18,2))
+      LabourOverhead = MAX(CES_SETTINGS.VALUE where PARAMETER='OVERHEAD') * Labour
+      CoreCost       = RB_MASTERLIST.CORE_CHARGE text -> number ('$' and ',' cleaned, blank = 0)
+
+  ASSUMED MS SQL NAMES (PascalCase of the Oracle snake_case) - please verify:
+    CES.RbMasterlist, CES.StockCodedParts, CES.ScPartsUsed, CES.NscPartsUsed,
+    CES.NonStockCodedParts, CES.CostCentres, CES.EmployeeLabour,
+    CES.EmployeeSalaries, CES.EmplClass, CES.CesSettings
+    one-word Oracle columns: corecost->Corecost, costcentre->Costcentre,
+    typeid->Typeid, ID->Id
+==============================================================================*/
+CREATE OR ALTER PROCEDURE CES.RptCostVariance2
+    @Debug BIT = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @t0  DATETIME2(3)   = SYSDATETIME(),
+            @msg NVARCHAR(2000),
+            @n   INT,
+            @OverheadRate DECIMAL(28,10);
+
+    BEGIN TRY
+
+        IF @Debug = 1
+        BEGIN
+            SET @msg = CONCAT(N'[DEBUG] RptCostVariance2 started ', CONVERT(NVARCHAR(30), @t0, 121));
+            RAISERROR(N'%s', 0, 1, @msg) WITH NOWAIT;
+        END
+
+        CREATE TABLE #RbTree
+        (
+            NodeId   INT IDENTITY(1,1) PRIMARY KEY,
+            RootCode NVARCHAR(100)  NOT NULL,   -- RB number being costed
+            Lvl      INT            NOT NULL,   -- 0 = the RB itself, 1+ = nested rebuilt parts
+            Code     NVARCHAR(100)  NULL,       -- RB code at this node
+            Factor   DECIMAL(28,10) NOT NULL    -- cumulative (qty * percent/100) multiplier
+        );
+        CREATE INDEX IX_RbTree_Code ON #RbTree (Code) INCLUDE (RootCode, Lvl, Factor);
+
+        CREATE TABLE #RbTotals
+        (
+            RootCode       NVARCHAR(100)  NOT NULL PRIMARY KEY,
+            MaterialsTotal DECIMAL(28,10) NOT NULL,
+            LabourSubtotal DECIMAL(28,10) NOT NULL
+        );
+
+        /*----------------------------------------------------------------------
+          STEP 1  Explode the rebuilt-part tree for every RB in RbMasterlist
+                  (replaces the recursion in WRITE_MATERIALS / WRITE_LABOUR).
+                  Oracle's cursor used DISTINCT over (link_code, qty, %, rebuilt code)
+                  -> kept in the Child CTE.  Comma decimal separators handled
+                  like to_number(replace(x,',','.')).
+        ----------------------------------------------------------------------*/
+        ;WITH Child AS
+        (
+            SELECT DISTINCT
+                   UPPER(s.LinkCode)        AS ParentCode,
+                   UPPER(s.MmsRebuiltCode)  AS ChildCode,
+                   s.QtyReqd                AS Qty,
+                   s.PercentUsage           AS Pct
+            FROM   CES.ScPartsUsed s
+            WHERE  s.RebuiltPart = 'Y'
+              AND  s.LinkType    = 'RB'
+        ),
+        ChildMult AS
+        (
+            SELECT c.ParentCode, c.ChildCode,
+                   Mult = CAST( ISNULL(TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), c.Qty), N',', N'.')), 0)
+                              * ISNULL(TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), c.Pct), N',', N'.')), 0)
+                              / 100 AS DECIMAL(28,10))
+            FROM   Child c
+        ),
+        Roots AS
+        (
+            -- same driving set as INTERNAL_RB_PRICE cursor
+            -- (note: Oracle "=+" is "= +x", i.e. a plain INNER JOIN)
+            SELECT DISTINCT UPPER(m.RebuiltStockNum) AS Code
+            FROM   CES.RbMasterlist    m
+            JOIN   CES.StockCodedParts p ON p.MmsStockCode = m.MmsStockCode
+            WHERE  m.RebuiltStockNum IS NOT NULL
+        ),
+        Tree AS
+        (
+            SELECT CAST(r.Code AS NVARCHAR(100)) AS RootCode,
+                   0                              AS Lvl,
+                   CAST(r.Code AS NVARCHAR(100)) AS Code,
+                   CAST(1 AS DECIMAL(28,10))      AS Factor
+            FROM   Roots r
+            UNION ALL
+            SELECT t.RootCode,
+                   t.Lvl + 1,
+                   CAST(c.ChildCode AS NVARCHAR(100)),
+                   CAST(t.Factor * c.Mult AS DECIMAL(28,10))
+            FROM   Tree t
+            JOIN   ChildMult c ON c.ParentCode = t.Code
+        )
+        INSERT INTO #RbTree (RootCode, Lvl, Code, Factor)
+        SELECT RootCode, Lvl, Code, Factor
+        FROM   Tree
+        OPTION (MAXRECURSION 100);   -- guards against circular RB definitions
+
+        IF @Debug = 1
+        BEGIN
+            SELECT @n = COUNT(*) FROM #RbTree WHERE Lvl = 0;
+            SET @msg = CONCAT(N'[DEBUG] Step 1 RB roots: ', @n); RAISERROR(N'%s', 0, 1, @msg) WITH NOWAIT;
+            SELECT @n = COUNT(*) FROM #RbTree WHERE Lvl > 0;
+            SET @msg = CONCAT(N'[DEBUG] Step 1 nested rebuilt-part nodes: ', @n, N'; max depth: ',
+                              (SELECT MAX(Lvl) FROM #RbTree));
+            RAISERROR(N'%s', 0, 1, @msg) WITH NOWAIT;
+            SELECT @n = COUNT(*)
+            FROM   CES.RbMasterlist m JOIN CES.StockCodedParts p ON p.MmsStockCode = m.MmsStockCode
+            WHERE  p.MmsNewCost IS NULL;
+            SET @msg = CONCAT(N'[DEBUG] Step 1 RBs with NULL MmsNewCost (ExternalCost -> 0.00): ', @n);
+            RAISERROR(N'%s', 0, 1, @msg) WITH NOWAIT;
+            SELECT TOP (50) 'DEBUG: nested rebuilt-part tree sample' AS Info, *
+            FROM   #RbTree WHERE Lvl > 0 ORDER BY Lvl DESC, RootCode;
+        END
+
+        -- Labour overhead rate (Oracle: MAX(to_number(replace(value,',','.'))) WHERE parameter='OVERHEAD')
+        SET @OverheadRate =
+        (   SELECT MAX(TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), c.Value), N',', N'.')))
+            FROM   CES.CesSettings c
+            WHERE  c.Parameter = 'OVERHEAD'   );
+
+        /*----------------------------------------------------------------------
+          STEP 2  Materials + labour totals per RB
+                  (replaces GET_MATERIAL_COST / GET_LABOUR_COST / WRITE_*)
+        ----------------------------------------------------------------------*/
+        ;WITH PartLines AS
+        (
+            -- stock-coded parts (rebuilt_part = 'N')
+            SELECT s.LinkCode AS Code, s.CostCentre,
+                   Cost = CAST( ROUND(n.Pct / 100 * n.Qty * CAST(s.MmsCost  AS DECIMAL(28,10)), 2)
+                              - ROUND(n.Pct / 100 * n.Qty * CAST(s.Corecost AS DECIMAL(28,10)), 2) AS DECIMAL(28,10))
+            FROM   CES.ScPartsUsed s
+            CROSS APPLY (SELECT
+                   Pct = ISNULL(TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), s.PercentUsage), N',', N'.')), 0),
+                   Qty =        TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), s.QtyReqd),      N',', N'.'))) n
+            WHERE  s.RebuiltPart = 'N'
+              AND  s.LinkType    = 'RB'
+
+            UNION ALL
+
+            -- non-stock-coded parts (Oracle: NON_STOCK_CODED_PARTS.ID (+)= NSC_PARTS_USED.ID  => LEFT JOIN)
+            SELECT u.LinkCode, u.CostCentre,
+                   Cost = CAST( ROUND(n.Pct / 100 * n.Qty * CAST(p.OemPartCost AS DECIMAL(28,10)), 2)
+                              - ROUND(n.Pct / 100 * n.Qty * CAST(u.Corecost    AS DECIMAL(28,10)), 2) AS DECIMAL(28,10))
+            FROM   CES.NscPartsUsed u
+            LEFT JOIN CES.NonStockCodedParts p ON p.Id = u.Id
+            CROSS APPLY (SELECT
+                   Pct = ISNULL(TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), u.PercentUsage), N',', N'.')), 0),
+                   Qty =        TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), u.QtyReqd),      N',', N'.'))) n
+            WHERE  u.LinkType = 'RB'
+        ),
+        MatGrp AS
+        (   -- one row per code + cost centre (Oracle GROUP BY cost_centre, name; INNER JOIN cost_centres)
+            SELECT p.Code, p.CostCentre, GrpCost = ISNULL(SUM(p.Cost), 0)
+            FROM   PartLines p
+            JOIN   CES.CostCentres cc ON cc.CostCentre = p.CostCentre
+            GROUP  BY p.Code, p.CostCentre, cc.Name
+        ),
+        Mat AS
+        (   -- level 0: unrounded (GET_MATERIAL_COST); level 1+: round(grp * factor, 2) (WRITE_MATERIALS)
+            SELECT t.RootCode,
+                   Total = SUM(CASE WHEN t.Lvl = 0 THEN g.GrpCost
+                                    ELSE ROUND(g.GrpCost * t.Factor, 2) END)
+            FROM   #RbTree t
+            JOIN   MatGrp  g ON g.Code = t.Code
+            GROUP  BY t.RootCode
+        ),
+        LabLines AS
+        (
+            SELECT el.LinkNumber AS Code,
+                   Rate  = CAST(es.RatePerHour AS DECIMAL(28,10)),
+                   Usage = TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), el.Usage), N',', N'.')),
+                   Mins  = m.Mins
+            FROM   CES.EmployeeLabour   el
+            JOIN   CES.EmplClass        ec ON el.LabourDefn = UPPER(ec.LabourDefn)
+            JOIN   CES.EmployeeSalaries es ON es.WageGroup  = ec.WageGroup
+            CROSS APPLY (SELECT T = TRY_CONVERT(DECIMAL(28,10), REPLACE(CONVERT(NVARCHAR(50), el.TimeAddition), N',', N'.'))) x
+            -- inlined HHMM_TO_MINUTES (kept exactly as Oracle, see Behaviour Notes in the Excel)
+            CROSS APPLY (SELECT Mins = ROUND((x.T - FLOOR(x.T / 100)) * 60 + FLOOR(x.T / 100) * 60, 0)) m
+            WHERE  el.Typeid = 'RB'
+        ),
+        Lab AS
+        (   -- level 0: rate*mins*usage/6000 (GET_LABOUR_COST); level 1+: rate/60 * round(mins*factor) * usage/100 (WRITE_LABOUR)
+            SELECT t.RootCode,
+                   -- each line is stored in TEMP_LABOUR_LIST.TOTAL_COST NUMBER(18,2) => rounded to 2 dp per line
+                   Total = SUM(ROUND(CASE WHEN t.Lvl = 0
+                                          THEN l.Rate * l.Mins * l.Usage / 6000
+                                          ELSE (l.Rate / 60) * ROUND(l.Mins * t.Factor, 0) * (l.Usage / 100) END, 2))
+            FROM   #RbTree  t
+            JOIN   LabLines l ON l.Code = t.Code
+            GROUP  BY t.RootCode
+        )
+        INSERT INTO #RbTotals (RootCode, MaterialsTotal, LabourSubtotal)
+        SELECT r.RootCode, ISNULL(m.Total, 0), ISNULL(l.Total, 0)
+        FROM   (SELECT DISTINCT RootCode FROM #RbTree) r
+        LEFT JOIN Mat m ON m.RootCode = r.RootCode
+        LEFT JOIN Lab l ON l.RootCode = r.RootCode;
+
+        IF @Debug = 1
+        BEGIN
+            SELECT @n = COUNT(*) FROM #RbTotals;
+            SET @msg = CONCAT(N'[DEBUG] Step 2 totals computed for ', @n, N' RBs. Elapsed ms: ',
+                              DATEDIFF(MILLISECOND, @t0, SYSDATETIME()));
+            RAISERROR(N'%s', 0, 1, @msg) WITH NOWAIT;
+            SET @msg = CONCAT(N'[DEBUG] Labour overhead rate (CES_SETTINGS OVERHEAD): ', ISNULL(CONVERT(NVARCHAR(40), @OverheadRate), N'NULL -> 0'));
+            RAISERROR(N'%s', 0, 1, @msg) WITH NOWAIT;
+            SELECT TOP (50) 'DEBUG: per-RB totals' AS Info, * FROM #RbTotals ORDER BY MaterialsTotal + LabourSubtotal DESC;
+        END
+
+        /*----------------------------------------------------------------------
+          STEP 3  Report result set (replaces INTERNAL_RB_PRICE insert loop +
+                  the final SELECT from TEMP_RBP_COST)
+        ----------------------------------------------------------------------*/
+        ;WITH Base AS
+        (
+            SELECT
+                TotalCost  = CAST(ROUND(ISNULL(
+                                 ISNULL(t.MaterialsTotal, 0)
+                               - cc.CoreCost
+                               + ISNULL(t.LabourSubtotal, 0)
+                               + ISNULL(@OverheadRate, 0) * ISNULL(t.LabourSubtotal, 0), 0), 2) AS DECIMAL(20,10)),
+                m.RebuiltStockNum,
+                m.DetailedDesc,
+                -- Oracle: nvl(replace(replace(trim(round(MMS_NEW_COST,2)),',','.'),'$',''),'0.00')
+                ExtNum     = CAST(ISNULL(ROUND(p.MmsNewCost, 2), 0) AS DECIMAL(20,2)),
+                m.Active,
+                m.Keyword
+            FROM   CES.RbMasterlist    m
+            JOIN   CES.StockCodedParts p ON p.MmsStockCode = m.MmsStockCode
+            LEFT JOIN #RbTotals        t ON t.RootCode     = UPPER(m.RebuiltStockNum)
+            -- core cost: Oracle strips '$', swaps ',' for '.', blank/NULL = 0
+            CROSS APPLY (SELECT CoreCost = CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(m.CoreCharge, ''))), '') IS NULL THEN 0
+                                                ELSE ISNULL(TRY_CONVERT(DECIMAL(28,10),
+                                                     REPLACE(REPLACE(m.CoreCharge, ',', '.'), '$', '')), 0) END) cc
+        )
+        SELECT TotalCost,
+               RebuiltStockNum                                   AS RbNumber,
+               DetailedDesc,
+               CONVERT(VARCHAR(25), ExtNum)                      AS ExternalCost,
+               Active,
+               Keyword,
+               CASE WHEN ExtNum = 0 THEN 0
+                    ELSE ISNULL(TotalCost, 0) / ExtNum END       AS CostVariance
+        FROM   Base
+        -- Oracle sorts NULLs first on DESC; T-SQL sorts them last -> emulate Oracle
+        ORDER  BY CASE WHEN Active IS NULL THEN 0 ELSE 1 END, Active DESC, CostVariance DESC, RbNumber;
+
+        IF @Debug = 1
+        BEGIN
+            SET @n = @@ROWCOUNT;
+            SET @msg = CONCAT(N'[DEBUG] Step 3 report rows: ', @n, N'. Total elapsed ms: ',
+                              DATEDIFF(MILLISECOND, @t0, SYSDATETIME()));
+            RAISERROR(N'%s', 0, 1, @msg) WITH NOWAIT;
+        END
+
+    END TRY
+    BEGIN CATCH
+        IF @Debug = 1
+        BEGIN
+            SET @msg = CONCAT(N'[DEBUG] ERROR ', ERROR_NUMBER(), N' at line ', ERROR_LINE(), N': ', ERROR_MESSAGE());
+            RAISERROR(N'%s', 0, 1, @msg) WITH NOWAIT;
+        END
+        THROW;   -- Oracle: raise_application_error(-20001, sqlerrm)
+    END CATCH
+END
+GO
