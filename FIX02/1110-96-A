@@ -1,0 +1,101 @@
+CHANGE 1: Model - Models/Reports/CostVarianceReportRow.cs
+
+OP: NEW_FILE (replaces the previous version)
+CODE:
+<<<
+
+csharp
+using System;
+using System.Globalization;
+
+namespace BCES.Models.Reports
+{
+    // One row of [SBCES].[RptCostVarianceV2]. The Active column is not mapped (not displayed).
+    // Costs arrive as varchar, so the raw values are strings and are parsed for display.
+    public class CostVarianceReportRow
+    {
+        // Mapped by Dapper from the result set
+        public string RbNumber { get; set; }
+        public string Keyword { get; set; }
+        public string DetailedDesc { get; set; }
+        public string TotalCost { get; set; }
+        public string ExternalCost { get; set; }
+
+        // Display values (read-only, not mapped by Dapper)
+        public decimal? Cost => ParseMoney(TotalCost);
+
+        public decimal? ExtCost => ParseMoney(ExternalCost);
+
+        // (TotalCost - ExternalCost) / ExternalCost * 100.
+        // Null when either value is missing/unparseable or ExternalCost is 0.
+        public decimal? VariancePct
+        {
+            get
+            {
+                var total = ParseRaw(TotalCost);
+                var ext = ParseRaw(ExternalCost);
+                if (!total.HasValue || !ext.HasValue || ext.Value == 0m) return null;
+                return Math.Round((total.Value - ext.Value) / ext.Value * 100m, 2, MidpointRounding.AwayFromZero);
+            }
+        }
+
+        private static decimal? ParseRaw(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            return decimal.TryParse(s.Trim(),
+                NumberStyles.Number | NumberStyles.AllowCurrencySymbol,
+                CultureInfo.InvariantCulture, out var d)
+                ? d
+                : (decimal?)null;
+        }
+
+        private static decimal? ParseMoney(string s)
+        {
+            var d = ParseRaw(s);
+            return d.HasValue ? Math.Round(d.Value, 2, MidpointRounding.AwayFromZero) : (decimal?)null;
+        }
+    }
+}
+
+WHY: Costs are varchar. They are parsed once, rounded to 2 digits, and the variance is calculated from the unrounded values.
+
+CHANGE 3: View - Views/Reports/CostVarianceReport.cshtml
+
+OP: NEW_FILE (replaces the previous version)
+CODE:
+<<<
+
+cshtml
+@model IEnumerable<BCES.Models.Reports.CostVarianceReportRow>
+@{
+    ViewData["Title"] = "Cost Variance Report";
+}
+
+<h4>Cost Variance Report</h4>
+
+@(Html.Kendo().Grid<BCES.Models.Reports.CostVarianceReportRow>()
+    .Name("costVarianceGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RbNumber).Title("RBPartNum").Width(120);
+        columns.Bound(c => c.Keyword).Title("Keyword").Width(140);
+        columns.Bound(c => c.DetailedDesc).Title("Description");
+        columns.Bound(c => c.Cost).Title("Cost").Format("{0:N2}").Width(120).Filterable(false);
+        columns.Bound(c => c.ExtCost).Title("External Cost").Format("{0:N2}").Width(140).Filterable(false);
+        columns.Bound(c => c.VariancePct).Title("% Variance").Width(120).Filterable(false)
+               .ClientTemplate("#= VariancePct == null ? 'N/A' : kendo.toString(VariancePct, 'n2') + '%' #");
+    })
+    .Sortable()
+    .Filterable(f => f
+        .Extra(false)
+        .Operators(o => o.ForString(s => s
+            .Clear()
+            .Contains("Contains")
+            .StartsWith("Starts with"))))
+    .Pageable(p => p.PageSizes(new[] { 25, 50, 100 }))
+    .DataSource(ds => ds
+        .Ajax()
+        .PageSize(50)
+        .ServerOperation(false))
+    .BindTo(Model)
+)
