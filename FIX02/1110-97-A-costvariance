@@ -1,0 +1,136 @@
+CHANGE 1: Model - Models/Reports/CostVarianceReportRow.cs
+
+OP: NEW_FILE
+CODE:
+<<<
+
+csharp
+using System;
+
+namespace BCES.Models.Reports
+{
+    // One row of [SBCES].[RptCostVarianceV2]. The Active column is not mapped (not displayed).
+    public class CostVarianceReportRow
+    {
+        // Mapped by Dapper from the result set
+        public string RbNumber { get; set; }
+        public string Keyword { get; set; }
+        public string DetailedDesc { get; set; }
+        public decimal TotalCost { get; set; }
+        public decimal? ExternalCost { get; set; }
+
+        // Display values (read-only, not mapped by Dapper)
+        public decimal Cost => Math.Round(TotalCost, 2, MidpointRounding.AwayFromZero);
+
+        public decimal? ExtCost => ExternalCost.HasValue
+            ? Math.Round(ExternalCost.Value, 2, MidpointRounding.AwayFromZero)
+            : (decimal?)null;
+
+        // (TotalCost - ExternalCost) / ExternalCost * 100, null when ExternalCost is NULL or 0
+        public decimal? VariancePct => (ExternalCost.HasValue && ExternalCost.Value != 0m)
+            ? Math.Round((TotalCost - ExternalCost.Value) / ExternalCost.Value * 100m, 2, MidpointRounding.AwayFromZero)
+            : (decimal?)null;
+    }
+}
+
+WHY: Typed row matching the proc's columns, with rounding and variance calculated in one place.
+
+CHANGE 2: Controller - Controllers/Reports/ReportsController.cs
+
+OP: NEW_FILE
+CODE:
+<<<
+
+csharp
+using BCES.Controllers.Base;
+using BCES.Data;
+using BCES.Models.Reports;
+using Dapper;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace BCES.Controllers.Reports
+{
+    public class ReportsController : BaseController
+    {
+        private readonly DapperContext _db;
+        private readonly IDbConnection _dbConnection;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+        public ReportsController(DapperContext dapper, IHttpContextAccessor httpContextAccessor)
+            : base(dapper, httpContextAccessor)
+        {
+            _db = dapper;
+            _dbConnection = _db.CreateConnection();
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        // GET: /Reports/CostVarianceReport
+        [HttpGet]
+        public async Task<IActionResult> CostVarianceReport()
+        {
+            try
+            {
+                var rows = await GetCostVarianceReportData();
+                return View(rows); // Views/Reports/CostVarianceReport.cshtml
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, "Error loading Cost Variance report: " + ex.Message);
+            }
+        }
+
+        private async Task<List<CostVarianceReportRow>> GetCostVarianceReportData()
+        {
+            var result = await _dbConnection.QueryAsync<CostVarianceReportRow>(
+                "[SBCES].[RptCostVarianceV2]",
+                commandType: CommandType.StoredProcedure,
+                commandTimeout: 120);
+
+            return result.ToList();
+        }
+    }
+}
+
+WHY: Runs the no-argument proc with async Dapper and passes the typed rows to the view.
+
+CHANGE 3: View - Views/Reports/CostVarianceReport.cshtml
+
+OP: NEW_FILE
+CODE:
+<<<
+
+cshtml
+@model IEnumerable<BCES.Models.Reports.CostVarianceReportRow>
+@{
+    ViewData["Title"] = "Cost Variance Report";
+}
+
+<h4>Cost Variance Report</h4>
+
+@(Html.Kendo().Grid<BCES.Models.Reports.CostVarianceReportRow>()
+    .Name("costVarianceGrid")
+    .Columns(columns =>
+    {
+        columns.Bound(c => c.RbNumber).Title("RBNumber").Width(110);
+        columns.Bound(c => c.Keyword).Title("Keyword").Width(140);
+        columns.Bound(c => c.DetailedDesc).Title("DetailedDesc");
+        columns.Bound(c => c.Cost).Title("Cost").Format("{0:N2}").Width(120);
+        columns.Bound(c => c.ExtCost).Title("External Cost").Format("{0:N2}").Width(140);
+        columns.Bound(c => c.VariancePct).Title("% Variance").Width(120)
+               .ClientTemplate("#= VariancePct == null ? 'N/A' : kendo.toString(VariancePct, 'n2') + '%' #");
+    })
+    .Sortable()
+    .Filterable()
+    .Pageable(p => p.PageSizes(new[] { 25, 50, 100 }))
+    .DataSource(ds => ds
+        .Ajax()
+        .PageSize(50)
+        .ServerOperation(false))
+    .BindTo(Model)
+)
