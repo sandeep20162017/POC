@@ -1,0 +1,202 @@
+CHANGE 1: Editor template - Views/Shared/EditorTemplates/NscComboBox.cshtml
+
+OP: MODIFY
+ANCHOR (verbatim, lines 17-19):
+<<<
+//events.Select("onNscChange");
+events.Select("onNscPartsComboBoxSelect");
+events.Change("onSupplierNumChange");
+
+CODE:
+<<<
+//events.Select("onNscChange");
+// Select is intentionally not wired: choosing a Supplier Number must not look up part details
+// (details are looked up when the Supplier Name is selected).
+events.Change("onSupplierNumChange");
+
+WHY: Selecting a number must not run the name-select logic. Only Change validates it and resets the name.
+
+CHANGE 2: JS - Views/Parts/RebuiltParts/Index.cshtml (supplier number change)
+
+OP: MODIFY
+ANCHOR (verbatim, lines 2626-2627, unique because of "fired"):
+<<<
+function onSupplierNumChange(e) {
+console.warn("onSupplierNumChange fired");
+
+CODE:
+<<<
+function resetNscSupplierFields(popup, model, clearSupplierName) {
+var nameCombo = null;
+if (clearSupplierName) {
+nameCombo = popup.find("[data-role='combobox']")
+.filter(function () {
+var n = $(this).attr("name") || "";
+var i = $(this).attr("id") || "";
+return n.indexOf("OrigSupplierName") > -1 || i.indexOf("OrigSupplierName") > -1;
+})
+.data("kendoComboBox");
+if (nameCombo) {
+nameCombo.value("");
+nameCombo.text("");
+nameCombo.dataSource.data([]); // drop names cached for the previous supplier number
+}
+if (model) model.set("OrigSupplierName", "");
+}
+if (model) {
+["KeyWord", "Description", "UnitCost", "Qty", "Percentage", "TotalCost"].forEach(function (f) {
+model.set(f, "");
+});
+model.trigger("change");
+}
+return nameCombo;
+}
+
+function onSupplierNumChange(e) {
+var supplierNumCombo = e.sender;
+var popup = supplierNumCombo.wrapper.closest(".k-window-content");
+var editable = popup.data("kendoEditable");
+var model = (editable && editable.options && editable.options.model)
+? editable.options.model : currentNscPartsModel;
+
+// 1. Supplier Number must be an item of the list; typed text alone is not accepted
+var typed = $.trim(supplierNumCombo.text() || "");
+var item = supplierNumCombo.dataItem();
+if (item && String(item.Text).toLowerCase() !== typed.toLowerCase()) item = null;
+if (!item && typed) {
+    var view = supplierNumCombo.dataSource.view();
+    for (var i = 0; i < view.length; i++) {
+        if (String(view[i].Text).toLowerCase() === typed.toLowerCase()) {
+            supplierNumCombo.select(i);
+            item = view[i];
+            break;
+        }
+    }
+}
+
+// 4. A new Supplier Number clears Supplier Name (selection + cached list) and the dependent fields
+var nameCombo = resetNscSupplierFields(popup, model, true);
+
+if (!item) {
+    supplierNumCombo.value("");
+    supplierNumCombo.text("");
+    if (model) model.set("OrigSuppNum", "");
+    if (typed) kendo.alert("Select a Supplier Number from the list.");
+    return;
+}
+
+if (model && model.get("OrigSuppNum") !== item.Text) model.set("OrigSuppNum", item.Text);
+
+// 2. Re-fetch Supplier Names for the new number (getSupplierNameParams reads the number combo)
+if (nameCombo) nameCombo.dataSource.read();
+
+}
+
+// Previous version, no longer wired. Safe to delete.
+function onSupplierNumChange_old(e) {
+console.warn("onSupplierNumChange fired");
+
+WHY: Validates the number against the list, resets name and dependents, and re-reads the name list.
+
+CHANGE 3: JS - Views/Parts/RebuiltParts/Index.cshtml (supplier name select)
+
+OP: ADD_BEFORE
+ANCHOR (verbatim, lines 1644-1645):
+<<<
+// Update model with supplier name
+if (model && supplierName) {
+
+CODE:
+<<<
+// 5. Selecting a Supplier Name always starts from empty dependent fields
+resetNscSupplierFields(popup, model, false);
+
+WHY: Clears Description, Keyword, Unit Cost, Total, Quantity and % before the new name's details load.
+
+CHANGE 4: JS - Views/Vehicles/Index.cshtml (supplier number change)
+
+OP: MODIFY
+ANCHOR (verbatim, lines 3132-3133):
+<<<
+function onSupplierNumChange(e) {
+console.warn("onSupplierNumChange");
+
+CODE:
+(same code as CHANGE 2, ending with these two lines)
+<<<
+function onSupplierNumChange_old(e) {
+console.warn("onSupplierNumChange");
+
+WHY: Same behaviour as CHANGE 2.
+
+The full CODE for CHANGE 4 is the CODE of CHANGE 2 with the last two lines replaced by the two lines above. In Vehicles the old function also called disableDependentFields(popup, true), which left Keyword, Description, Unit Cost and Total disabled after a number change. The new function does not. Those fields stay read-only through LockMap, so check this one when you test.
+
+CHANGE 5: JS - Views/Vehicles/Index.cshtml (supplier name select)
+
+OP: ADD_BEFORE
+ANCHOR (verbatim, lines 2360-2361):
+<<<
+// Update model with supplier name
+if (model && supplierName) {
+
+CODE:
+<<<
+// 5. Selecting a Supplier Name always starts from empty dependent fields
+resetNscSupplierFields(popup, model, false);
+
+WHY: Same as CHANGE 3.
+
+CHANGE 6: JS - Views/MakeVsBuy/Index.cshtml (supplier number change)
+
+OP: MODIFY
+ANCHOR (verbatim, lines 3354-3355):
+<<<
+function onSupplierNumChange(e) {
+console.warn("onSupplierNumChange");
+
+CODE:
+(same code as CHANGE 2, ending with these two lines)
+<<<
+function onSupplierNumChange_old(e) {
+console.warn("onSupplierNumChange");
+
+WHY: Same behaviour as CHANGE 2.
+
+CHANGE 7: JS - Views/MakeVsBuy/Index.cshtml (supplier name select)
+
+OP: ADD_BEFORE
+ANCHOR (verbatim, lines 2602-2603):
+<<<
+// Update model with supplier name
+if (model && supplierName) {
+
+CODE:
+<<<
+// 5. Selecting a Supplier Name always starts from empty dependent fields
+resetNscSupplierFields(popup, model, false);
+
+WHY: Same as CHANGE 3.
+
+What to copy
+
+CHANGE 1 goes into the template file.
+For each of the three pages, CHANGE "number change" (2, 4, 6) and CHANGE "name select" (3, 5, 7).
+The big block is identical in all three pages. Only the last two lines (the renamed old header) differ.
+The old functions stay in the page as onSupplierNumChange_old, so the anchors are small and verifiable. Delete them once you've tested.
+
+Test steps (same on all three pages)
+
+In a new NSC part, type 25 in Supplier Number and tab away without choosing. You should get "Select a Supplier Number from the list." and the field is cleared.
+Choose 25100. The Supplier Name list should load only names for 25100.
+Choose abc. Keyword, Description and Unit Cost populate as today.
+Change the number to 25101. The name is cleared, the old names (abc, mnq) are gone, and Description, Keyword, Unit Cost, Total, Qty and % are empty. The list reloads for 25101.
+Keep 25101, pick another name. The dependent fields clear first, then repopulate from the new name.
+Check the Edit popup of an existing row. Both combos are read-only there, so nothing should fire.
+
+Risks
+
+I have not run any of this. The Kendo behaviours it relies on are combo.dataItem() returning nothing for typed text, and select(i).
+If a user types a full valid number and tabs away before the list loads, they'll get the warning. They can pick it from the list.
+The staged MakeVsBuy/Index.cshtml still shows height: "540px", but you said you changed it to 560. The folder I can read may be older than your working copy. All anchors are in untouched regions, but check them when you paste.
+The Supplier Name combo isn't validated against its list. You didn't ask for that.
+Anchors verified 7/7, against the files I staged, with CRLF line endings.
